@@ -263,12 +263,14 @@ Real vs scaffolded today:
   determinism layer, pixelmatch, `__diff__/` output and the scenario-sync check. `harness-tt-vs-tt` proves the
   pipeline is deterministic (0 differing pixels, stable over repeated runs). `harness-detects-difference` compares tt's
   main screen with our placeholder and passes only if the diff is large (`expect: 'differ'`).
-- **Scaffolded**: `main-chat-list`, `main-menu`, `chat-with-history` are `ported: false` (our UI does not render them
-  yet). Our app needs nothing special to join the comparison: it already honours `?mockScenario` through the shared
+- **Scaffolded**: `chat-with-history` is `ported: false` (the message list is not ported yet). `main-chat-list` and `main-menu` are ported (chat list slice, 0 px). Our app needs nothing special to join the comparison: it already honours `?mockScenario` through the shared
   `MockClient`; the ported `App` just has to boot into the logged-in state in mocked mode, as tt does
   (`global.auth.state = 'authorizationStateReady'` when `IS_MOCKED_CLIENT`).
 - tt's mock does not implement every request (e.g. folders, language pack: errors in its console, a perpetual sync
   spinner). That is tt's noise, identical on every run; do not "fix" it in the screens, mask it.
+
+Ported screens (chat list slice): `main-chat-list` (`#LeftColumn`) and `main-menu` (the open main menu), threshold 0 (0 px against tt, `docs/reports/slice-chatlist.md`).
+Both apps run the same MockClient patch: tt's copy through `scripts/visual/tt-patches.mjs`, ours in `src/lib/gramjs/client/MockClient.ts` (`start()` calls `onConnected`).
 
 Ported screens (auth slice): `auth-phone-number`, `auth-code`, `auth-password`, `auth-registration`, `auth-qr-code`
 (`authScreen()` in `tests/visual/screens.ts`). Both apps boot logged in under the mock, so each target plays the server:

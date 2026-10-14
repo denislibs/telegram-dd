@@ -400,7 +400,7 @@ Each step ends with `pnpm check` green and a dev run with a clean stricterdom co
    off from UI code).
 4. **Auth**: `src/components/auth/*`, `src/bundles/auth.ts`, the UI primitives they need (`components/ui`, `Transition`
    adapters), and the styles. Done on `port/auth` ([`reports/slice-auth.md`](reports/slice-auth.md)).
-5. **Chat list**: `src/components/left/main/*` (`ChatList` with `<ManualFor orderKey>`, `Chat`), folders, archive.
+5. **Chat list**: `src/components/left/main/*` (`ChatList` with `<ManualFor orderKey>`, `Chat`), folders, archive. Done on `port/chatlist` ([`reports/slice-chatlist.md`](reports/slice-chatlist.md)).
 6. **Message list**: `src/components/middle/MessageList*`, `message/*`, scroll anchoring (`createScrollAnchor`), the
    `useInfiniteScroll` port.
 7. **Composer**: `src/components/middle/composer/*`, `util/tiptap`, controlled inputs (`use:value`), voice recording.

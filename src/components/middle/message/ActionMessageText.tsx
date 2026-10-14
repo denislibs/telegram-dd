@@ -1110,7 +1110,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
 
         let completedItem;
         let incompletedItem;
-        const { todo } = props.replyMessage ? getMessageContent(props.replyMessage) : {};
+        const todo = (props.replyMessage ? getMessageContent(props.replyMessage) : undefined)?.todo;
         if (todo) {
           const todoItems = todo.todo.items;
           completedItem = todoItems.find((item) => completedIds.includes(item.id));
@@ -1202,7 +1202,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
 
       case 'todoAppendTasks': {
         const { items } = currentAction;
-        const { todo } = props.replyMessage ? getMessageContent(props.replyMessage) : {};
+        const todo = (props.replyMessage ? getMessageContent(props.replyMessage) : undefined)?.todo;
 
         const listTitle = todo?.todo.title.text || '';
         const listLink = renderMessageLink(

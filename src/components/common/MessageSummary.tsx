@@ -72,7 +72,7 @@ function MessageSummary(ownProps: OwnProps) {
     const description = getMessageSummaryDescription(lang, props.message, statefulContent());
 
     if (typeof description !== 'string') {
-      const { todo } = props.message.content;
+      const todo = props.message.content.todo;
       const formattedSummaryText = todo?.todo.title;
       const renderedDescription = formattedSummaryText
         ? renderFormattedSummaryText({
