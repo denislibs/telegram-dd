@@ -87,7 +87,9 @@ function detach(owned: AnyLiteral, path: PropertyKey[]): AnyLiteral {
 function sanitize(value: object, path: PropertyKey[]): object {
   const raw = unwrap(value);
   if (ownedCopies.has(raw)) return detach(raw, path);
+  let leaf = false; // an array or an entity: the only values written whole, so the only ones the DEV scan needs
   if (Array.isArray(raw)) {
+    leaf = true;
     const items = raw as unknown[];
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -98,6 +100,7 @@ function sanitize(value: object, path: PropertyKey[]): object {
     }
   } else if (isPlainObject(raw) && Object.hasOwn(raw, 'id') && !(path.length === 2 && path[0] === 'byTabId')) {
     // an entity: one level (its own nested objects are tt's; a container proxy can only be a direct field)
+    leaf = true;
     const entity = raw;
     const keys = Object.keys(entity);
     for (let i = 0; i < keys.length; i++) {
@@ -108,7 +111,9 @@ function sanitize(value: object, path: PropertyKey[]): object {
       }
     }
   }
-  if (devChecks) devScan(raw, path, 0);
+  // Containers are walked level by level anyway (each changed level reaches `sanitize` itself), so scanning them here
+  // re-walked every changed container 4 levels deep per level: 0.65 -> 37.5 ms per message insert in DEV (review N5).
+  if (devChecks && leaf) devScan(raw, path, 0);
   return raw;
 }
 
