@@ -10,12 +10,15 @@ const EMPTY_ORDER_DIFF = {};
 // `shiftDiff`, `getAnimationType`; `onReorderAnimationEnd` is a function). tt computed the diff during render
 // (`useSyncEffect`) from the previous render's values; here memos do (they are lazy: the chat rows read them), the
 // "previous" values are `let`s updated at the end of each run and tt's `forceUpdate` is a version signal bumped by
-// `onReorderAnimationEnd`. tt reset the diff and the shift on the next render of the list, whatever caused it; here
-// they last until the animation ends (a bump of the version re-runs the memos with nothing changed, which resets them).
+// `onReorderAnimationEnd`. tt reset the diff on the next render of the list, whatever caused it (a scroll that slides the
+// window re-renders the list too): `renderKey` stands for "the list was rendered again", the caller passes what changes
+// with such a render (the rendered window of ids). The diff then lasts for the render of the reorder and is reset by the
+// next one or by the end of the animation (a bump of the version re-runs the memos with nothing changed).
 export default function useOrderDiff(
   orderedIds: MaybeAccessor<(string | number)[] | undefined>,
   topOffset: MaybeAccessor<number>,
   key?: MaybeAccessor<string | undefined>,
+  renderKey?: MaybeAccessor<unknown>,
 ) {
   const orderById = createMemo(() => {
     const orderedIds2 = read(orderedIds);
@@ -66,6 +69,7 @@ export default function useOrderDiff(
   // `useSyncEffect`
   const orderDiffById = createMemo(() => {
     version();
+    read(renderKey);
     const key2 = read(key);
     const orderById2 = orderById();
     const prevOrderById2 = prevOrderById;

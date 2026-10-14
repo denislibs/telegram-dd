@@ -305,4 +305,60 @@ test.describe('chat list', () => {
     }, ROW);
     expect(firstTop).toBeLessThan(80);
   });
+
+  test('rows mounted by a later scroll do not replay a reorder that happened above the window', async ({ page }) => {
+    await openApp(page);
+    await addContacts(page, 90);
+    await expect.poll(() => visualOrder(page).then((titles) => titles[0])).toBe('Contact 90');
+
+    // Slide the rendered window down, away from the top of the list
+    await page.mouse.move(150, 400);
+    for (let i = 0; i < 14; i++) {
+      await page.mouse.wheel(0, 600);
+      await page.waitForTimeout(120);
+    }
+    await expect.poll(() => visualOrder(page).then((titles) => titles.includes('Contact 90'))).toBe(false);
+
+    // A chat in the top of the list gets a message: the rows above the window move, none of the mounted ones does
+    await page.evaluate(() => {
+      (window as unknown as TestWindow).getActions().apiUpdate({
+        '@type': 'newMessage',
+        chatId: '1080',
+        id: 7000,
+        message: {
+          id: 7000,
+          chatId: '1080',
+          date: Math.floor(Date.now() / 1000),
+          isOutgoing: false,
+          senderId: '1080',
+          content: { text: { text: 'moved to the top' } },
+        },
+      });
+    });
+    await page.waitForTimeout(600);
+
+    // Scroll back up: the rows that mount now were not part of the reorder animation of tt (its diff lives for one render)
+    await page.evaluate(() => {
+      (window as unknown as { __animated: number }).__animated = 0;
+      new MutationObserver((records) => {
+        for (const record of records) {
+          const target = record.target as HTMLElement;
+          if (target.matches?.('.chat-list .ListItem.Chat') && target.matches('.animate-transform, .animate-opacity')) {
+            (window as unknown as { __animated: number }).__animated++;
+          }
+        }
+      }).observe(document.querySelector('#LeftColumn .chat-list')!, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class'],
+      });
+    });
+    for (let i = 0; i < 20; i++) {
+      await page.mouse.wheel(0, -600);
+      await page.waitForTimeout(120);
+    }
+    await expect.poll(() => visualOrder(page).then((titles) => titles[0])).toBe('Contact 80');
+    await page.waitForTimeout(500);
+    expect(await page.evaluate(() => (window as unknown as { __animated: number }).__animated)).toBe(0);
+  });
 });

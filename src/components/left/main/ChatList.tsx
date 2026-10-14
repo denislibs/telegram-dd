@@ -85,12 +85,19 @@ const ChatList = (props: OwnProps) => {
     shouldDisplayArchive() ? (props.archiveSettings?.isMinimized ? ARCHIVE_MINIMIZED_HEIGHT : CHAT_HEIGHT_PX) : 0,
   );
 
-  const { orderDiffById, shiftDiff, getAnimationType, onReorderAnimationEnd } = useOrderDiff(orderedIds, panesHeight);
-
   const chatListSlice = createMemo(() =>
     props.noVirtualization ? Math.max(CHAT_LIST_SLICE, orderedIds()?.length || 0) : CHAT_LIST_SLICE,
   );
   const [viewportIds, getMore] = useInfiniteScroll(undefined, orderedIds, undefined, chatListSlice);
+
+  // The rendered window is what changes when tt's list re-rendered without a reorder (a scroll): `useOrderDiff` drops the
+  // stale diff then, so that rows mounted by a later scroll do not replay an old reorder.
+  const { orderDiffById, shiftDiff, getAnimationType, onReorderAnimationEnd } = useOrderDiff(
+    orderedIds,
+    panesHeight,
+    undefined,
+    viewportIds,
+  );
 
   // Support <Alt>+<Up/Down> to navigate between chats
   useHotkeys(
