@@ -8,7 +8,6 @@ import type { ApiChatFolder } from '../api/types';
 
 import { INITIAL_GLOBAL_STATE } from '../global/initialState';
 import { cloneDeep } from '../util/iteratees';
-
 import useFolderTabs from './useFolderTabs';
 
 type Counters = Record<number, { chatsCount: number; notificationsCount: number }>;

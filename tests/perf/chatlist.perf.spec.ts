@@ -68,7 +68,18 @@ async function openChatList(page: Page, contacts: number) {
   await page.waitForTimeout(1500);
 }
 
+// The documented defaults of tests/perf/leaks.ts (docs/quality-gates.md): 512 KB over 50 runs. The warm-up is longer than the
+// default 5 runs: the first ~20 cycles of a page still compile hot paths (V8 `InstructionStream` / feedback vectors count in
+// `Runtime.getHeapUsage`: +190-290 KB over the first 30 cycles in a heap snapshot diff) and settle a one-time step of the
+// dependency graph (~0.9k link objects, not growing from 30 to 60 runs).
+const LEAK = { runs: 50, maxGrowthKb: 512, warmupRuns: 25 } as const;
+
+type LeftColumnActions = { openLeftColumnContent: (payload: { contentKey?: number }) => void };
+
 test.describe('chat list: leaks', () => {
+  // 25 warm-up + 50 measured cycles of ~0.8-1.2 s each
+  test.describe.configure({ timeout: 300_000 });
+
   test('switching between folders does not leak', async ({ page }) => {
     await openChatList(page, 60);
 
@@ -79,10 +90,42 @@ test.describe('chat list: leaks', () => {
       await page.waitForTimeout(350);
     };
 
-    const result = await expectNoLeak(page, switchFolders, { runs: 30, maxGrowthKb: 1024, warmupRuns: 5 });
-    test
-      .info()
-      .annotations.push({ type: 'heap', description: `${result.growthKb.toFixed(0)} KB over 30 folder switches` });
+    const result = await expectNoLeak(page, switchFolders, LEAK);
+    test.info().annotations.push({
+      type: 'heap',
+      description: `${result.growthKb.toFixed(0)} KB over ${LEAK.runs} folder switches`,
+    });
+  });
+
+  // The folder lists stay mounted while the user switches folders (the kit's Transition keeps a slide per key), so the cycle
+  // above never disposes a list. This one does: Settings -> Archive -> back mounts a new ChatFolders with its lists and rows
+  // (LeftColumn's Transition drops the main screen after the second step) and disposes the previous ones.
+  test('unmounting and mounting the chat list (Settings -> Archive -> chats) does not leak', async ({ page }) => {
+    await openChatList(page, 60);
+
+    const remount = async () => {
+      const content = (contentKey?: number) =>
+        page.evaluate(
+          (key) =>
+            (window as unknown as { getActions: () => LeftColumnActions })
+              .getActions()
+              .openLeftColumnContent({ contentKey: key }),
+          contentKey,
+        );
+      await content(2); // LeftColumnContent.Settings
+      await page.waitForTimeout(400);
+      await content(4); // LeftColumnContent.Archived
+      await page.waitForTimeout(400);
+      await content(undefined);
+      await page.locator(ROW).first().waitFor();
+      await page.waitForTimeout(400);
+    };
+
+    const result = await expectNoLeak(page, remount, LEAK);
+    test.info().annotations.push({
+      type: 'heap',
+      description: `${result.growthKb.toFixed(0)} KB over ${LEAK.runs} list remounts`,
+    });
   });
 
   test('opening and closing the chat context menu does not leak', async ({ page }) => {
@@ -95,8 +138,11 @@ test.describe('chat list: leaks', () => {
       await page.locator('.ListItem-context-menu').waitFor({ state: 'detached' });
     };
 
-    const result = await expectNoLeak(page, cycle, { runs: 30, maxGrowthKb: 1024, warmupRuns: 5 });
-    test.info().annotations.push({ type: 'heap', description: `${result.growthKb.toFixed(0)} KB over 30 menu cycles` });
+    const result = await expectNoLeak(page, cycle, LEAK);
+    test.info().annotations.push({
+      type: 'heap',
+      description: `${result.growthKb.toFixed(0)} KB over ${LEAK.runs} menu cycles`,
+    });
   });
 });
 
