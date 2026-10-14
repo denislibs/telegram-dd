@@ -38,9 +38,11 @@ test('uncaught page errors are reported', async ({ page, baseURL }) => {
       throw new Error('uncaught!');
     });
   });
+  // The app's handleError (telegram-tt's, imported by the entry) preventDefault()s uncaught errors and logs them with
+  // console.error, so the gate sees them as a console error rather than a `pageerror` event: either way it fails a test.
   await expect
     .poll(async () => (await monitor.problems()).join('\n'))
-    .toContain('uncaught page error: Error: uncaught!');
+    .toMatch(/(uncaught page error|console\.error): Error: uncaught!/);
 });
 
 test('failed requests to the app origin are reported', async ({ page, baseURL }) => {

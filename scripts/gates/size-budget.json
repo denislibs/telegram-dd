@@ -1,15 +1,48 @@
 {
   "headroom": 0.1,
   "chunks": {
+    "assets/buffer.js": {
+      "kind": "entry",
+      "baseline": {
+        "brotli": 762,
+        "gzip": 854
+      },
+      "budget": {
+        "brotli": 839,
+        "gzip": 940
+      }
+    },
+    "assets/decoderWorker.min.js": {
+      "kind": "worker",
+      "baseline": {
+        "brotli": 6051,
+        "gzip": 6708
+      },
+      "budget": {
+        "brotli": 6657,
+        "gzip": 7379
+      }
+    },
     "assets/index.js": {
       "kind": "entry",
       "baseline": {
-        "brotli": 9656,
-        "gzip": 10671
+        "brotli": 103359,
+        "gzip": 121562
       },
       "budget": {
-        "brotli": 10622,
-        "gzip": 11739
+        "brotli": 113695,
+        "gzip": 133719
+      }
+    },
+    "assets/waveWorker.min.js": {
+      "kind": "worker",
+      "baseline": {
+        "brotli": 2078,
+        "gzip": 2316
+      },
+      "budget": {
+        "brotli": 2286,
+        "gzip": 2548
       }
     },
     "compatTest.js": {
@@ -34,6 +67,17 @@
         "gzip": 227
       }
     },
+    "sharedState.worker.js": {
+      "kind": "worker",
+      "baseline": {
+        "brotli": 1135,
+        "gzip": 1241
+      },
+      "budget": {
+        "brotli": 1249,
+        "gzip": 1366
+      }
+    },
     "view-transitions.css": {
       "kind": "entry",
       "baseline": {
@@ -44,17 +88,28 @@
         "brotli": 481,
         "gzip": 581
       }
+    },
+    "worker.js": {
+      "kind": "worker",
+      "baseline": {
+        "brotli": 208099,
+        "gzip": 255760
+      },
+      "budget": {
+        "brotli": 228909,
+        "gzip": 281336
+      }
     }
   },
   "totals": {
     "js": {
       "baseline": {
-        "brotli": 11661,
-        "gzip": 13190
+        "brotli": 422288,
+        "gzip": 510475
       },
       "budget": {
-        "brotli": 12828,
-        "gzip": 14510
+        "brotli": 464517,
+        "gzip": 561523
       }
     },
     "css": {
