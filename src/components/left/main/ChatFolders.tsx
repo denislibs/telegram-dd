@@ -1,4 +1,5 @@
 import { createEffect, createMeasureEffect, createMemo, onMount } from 'frameact';
+import { Show } from 'frameact/dom';
 import { getActions, withGlobal } from '../../../global';
 
 import type { ApiChatFolder, ApiChatlistExportedInvite } from '../../../api/types';
@@ -276,16 +277,21 @@ const ChatFolders = (ownProps: OwnProps) => {
           !shouldRenderFolders() && !isAtBeginning() && 'scrolled',
         )}
       >
-        {shouldRenderFolders() ? (
+        <Show
+          when={shouldRenderFolders()}
+          fallback={
+            <Show when={shouldRenderPlaceholder()}>
+              <div ref={placeholderRef} class="tabs-placeholder" />
+            </Show>
+          }
+        >
           <ChatFolderTabList
             tabs={folderTabs()!}
             activeTab={props.activeChatFolder}
             onSwitchTab={handleSwitchTab}
             onFileHoverOpen={openFolder}
           />
-        ) : shouldRenderPlaceholder() ? (
-          <div ref={placeholderRef} class="tabs-placeholder" />
-        ) : undefined}
+        </Show>
         <Transition
           ref={(el) => {
             transitionRef = el;

@@ -490,7 +490,12 @@ const Chat = (ownProps: OwnProps) => {
   // where tt rendered nothing.
   return (
     <ListItem
-      ref={ref}
+      ref={(el) => {
+        ref(el);
+        // The first `top` is written with the (detached) element, so that the row is laid out where the list
+        // measures it in the same frame (the infinite scroll preloads while the list does not fill the viewport).
+        if (props.offsetTop !== undefined) el.style.top = `${props.offsetTop}px`;
+      }}
       className={chatClassName()}
       href={href()}
       ripple={!isForum() && !isMobile()}

@@ -239,19 +239,23 @@ function mount(extra: Record<string, unknown>, initial: number[]) {
   return { el, items, setItems, loads };
 }
 
+async function frames(count: number) {
+  for (let i = 0; i < count; i++) await frame();
+}
+
 describe('<InfiniteScroll>', () => {
   it('preloads backwards when the list is shorter than preloadBackwards; otherwise when it does not fill the viewport; not when it does', async () => {
     const short = mount({}, ids(0, 5));
-    await frame();
+    await frames(2); // the preload is a measure task booked from the items effect: it runs the next frame
     expect(short.loads).toEqual([{ direction: 'backwards', noScroll: true }]);
     expect(short.el.className).toBe('list');
 
     const notFilling = mount({ preloadBackwards: 0 }, ids(0, 3)); // 120 px < 200 px viewport
-    await frame();
+    await frames(2); // the preload is a measure task booked from the items effect: it runs the next frame
     expect(notFilling.loads).toEqual([{ direction: 'backwards', noScroll: false }]);
 
     const full = mount({}, ids(0, 50));
-    await frame();
+    await frames(2); // the preload is a measure task booked from the items effect: it runs the next frame
     expect(full.loads).toEqual([]);
   });
 
@@ -335,13 +339,13 @@ describe('<InfiniteScroll> switching lists', () => {
       );
     });
     fakeLayout(el);
-    await frame();
+    await frames(2);
     expect(loads.length).toBe(1);
     setWhich('b'); // both arrays are unchanged: shape version 0 each
-    await frame();
+    await frames(2);
     expect(loads.length).toBe(2);
     setWhich('a');
-    await frame();
+    await frames(2);
     expect(loads.length).toBe(3);
   });
 });

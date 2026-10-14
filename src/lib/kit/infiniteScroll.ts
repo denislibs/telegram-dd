@@ -16,7 +16,7 @@
 //     within it of the top. Each direction is `debounce(fn, 1000, true, false)`: one request, then
 //     quiet for a second (or until the next chunk arrives, which re-arms it). The scroll event the
 //     restore itself causes (`consumeRestored`) never asks for anything.
-import { createMeasureEffect, onCleanup } from 'frameact';
+import { createMeasureEffect, onCleanup, requestMeasure } from 'frameact';
 import { insert, spread } from 'frameact/dom';
 import { debounce } from 'frameact/scheduler';
 
@@ -167,7 +167,10 @@ export function InfiniteScroll(props: InfiniteScrollProps): unknown {
     () => {
       if (!listening) listen();
       armLoaders();
-      preload();
+      // The rows of this update are inserted in this frame's mutate phase, after this measure phase: a measure task
+      // booked from here runs in the next frame, when the list's layout is current (a preload that measured here saw the
+      // old rows: a list that grows from a few rows asked for more while it already filled the viewport).
+      requestMeasure(preload);
     },
     { name: 'infiniteScroll.items' },
   );
