@@ -72,4 +72,58 @@ describe('useInfiniteScroll', () => {
       dispose();
     });
   });
+
+  it('getMore forwards slides the window back towards the start', () => {
+    createRoot((dispose) => {
+      const [ids] = createSignal(range(0, 200));
+      const [viewportIds, getMore] = useInfiniteScroll(undefined, ids, false, 30);
+
+      getMore({ direction: LoadMoreDirection.Backwards });
+      getMore({ direction: LoadMoreDirection.Backwards });
+      getMore({ direction: LoadMoreDirection.Backwards });
+      expect(viewportIds()![0]).not.toBe('0');
+      const last = viewportIds()![viewportIds()!.length - 1];
+
+      getMore({ direction: LoadMoreDirection.Forwards });
+      getMore({ direction: LoadMoreDirection.Forwards });
+      getMore({ direction: LoadMoreDirection.Forwards });
+      expect(viewportIds()![0]).toBe('0');
+      expect(viewportIds()![viewportIds()!.length - 1]).not.toBe(last);
+      dispose();
+    });
+  });
+
+  it('keeps the identity of the window array while the slice is unchanged (ManualFor and the kit scroll rely on it)', () => {
+    createRoot((dispose) => {
+      const [ids, setIds] = createSignal(range(0, 100));
+      const [viewportIds] = useInfiniteScroll(undefined, ids, false, 30);
+      const first = viewportIds();
+
+      // a new list array with the same content in the window: the same window array
+      setIds([...range(0, 100)]);
+      expect(viewportIds()).toBe(first);
+
+      // a change inside the window: a new array
+      setIds(['x', ...range(1, 100)]);
+      expect(viewportIds()).not.toBe(first);
+      dispose();
+    });
+  });
+
+  it('a scroll-driven load (noScroll false) anchors the next slice at the requested id', () => {
+    createRoot((dispose) => {
+      const loadMore = vi.fn();
+      const [ids, setIds] = createSignal(range(0, 30));
+      const [viewportIds, getMore] = useInfiniteScroll(loadMore, ids, false, 30);
+
+      // the window ends with the list: more must come from the server, anchored at the last id
+      getMore({ direction: LoadMoreDirection.Backwards, noScroll: false });
+      expect(loadMore).toHaveBeenCalledWith({ offsetId: '29' });
+
+      // the server answered with more chats: the window follows the request (towards the new ids) instead of jumping to the top
+      setIds(range(0, 90));
+      expect(viewportIds()!.includes('59')).toBe(true);
+      dispose();
+    });
+  });
 });
