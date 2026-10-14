@@ -10,6 +10,8 @@
 //  - import-x/no-unresolved            (unsupported by oxlint, tsc covers it); import-x/named, import-x/export
 //                                       (nursery in oxlint); no-undef (nursery, tsc covers it)
 //  - eslint:recommended's no-dupe-args / no-octal (superseded by strict mode)
+//  - no-unassigned-vars is off: frameact's element refs are `let el!: HTMLDivElement` + `<div ref={el}>` (the JSX
+//    compiler assigns them; porting guide §4.3), which the rule cannot see.
 //  - tt has no jsx-a11y / unicorn rules; the `react`, `jsx-a11y` and `unicorn` plugins are therefore off, as is the
 //    `correctness` category (it would add ~17 findings in ported code that tt's rule set does not have).
 //  - tt's `settings` (react version, import-x resolver) are not needed by the kept rules.
@@ -199,6 +201,7 @@
       "files": ["**/*.{js,mjs,cjs,jsx,mjsx,ts,tsx,mtsx}"],
       "rules": {
         "no-null/no-null": "error",
+        "no-unassigned-vars": "off",
         "no-console": "error",
         "no-template-curly-in-string": "error",
         "object-shorthand": "error",

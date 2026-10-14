@@ -1,0 +1,489 @@
+import { describe, expect, it } from 'vitest';
+
+import { transformSource } from './transform.ts';
+
+const FILE = 'src/components/ui/Example.tsx';
+const run = (code: string, only?: string[]) => transformSource(code, { filePath: FILE, only });
+const squash = (code: string) => code.replace(/\s+/g, ' ').trim();
+const expectIncludes = (code: string, snippet: string) => expect(squash(code)).toContain(squash(snippet));
+
+describe('types', () => {
+  it('drops memo(), moves FC<P> onto the parameter, maps TeactNode and ElementRef', () => {
+    const { code, report } = run(
+      `import type { FC, TeactNode, ElementRef } from '../../lib/teact/teact';
+import { memo } from '../../lib/teact/teact';
+type OwnProps = { children?: TeactNode; ref?: ElementRef<HTMLDivElement> };
+const X: FC<OwnProps> = (props) => <div>{props.children}</div>;
+export default memo(X);`,
+      ['types', 'imports'],
+    );
+    expectIncludes(code, 'children?: JSX.Element; ref?: (el: HTMLDivElement) => void');
+    expectIncludes(code, 'const X = (props: OwnProps) =>');
+    expectIncludes(code, 'export default X;');
+    expectIncludes(code, "import type { JSX } from 'frameact/jsx-runtime';");
+    expect(code).not.toContain('lib/teact');
+    expect(report.hits).toMatchObject({ memo: 1, fc: 1, teactNode: 1, elementRefType: 1 });
+    expect(report.todos).toEqual([]);
+  });
+});
+
+describe('props', () => {
+  it('rewrites a destructured parameter to props getters, scope-aware', () => {
+    const { code } = run(
+      `type OwnProps = { a: string; b?: number; onClick?: () => void };
+const X = ({ a, b, onClick }: OwnProps) => {
+  const inner = (a: string) => a.length; // shadowed
+  const handle = () => onClick?.();
+  return <div title={a} data-b={b} onClick={handle}>{inner(a)} {JSON.stringify({ a })}</div>;
+};`,
+      ['props'],
+    );
+    expectIncludes(code, 'const X = (props: OwnProps) => {');
+    expectIncludes(code, 'const inner = (a: string) => a.length;');
+    expectIncludes(code, 'props.onClick?.()');
+    expectIncludes(code, 'title={props.a} data-b={props.b}');
+    expectIncludes(code, 'JSON.stringify({ a: props.a })');
+  });
+
+  it('turns defaults into mergeProps (getters for defaults that read other props) and rest into splitProps', () => {
+    const { code } = run(
+      `type OwnProps = { size?: 'a' | 'b'; color?: string; fast?: boolean; id?: string };
+const X = ({ size = 'a', color = 'red', fast = color === 'blue', ...rest }: OwnProps) => <div id={rest.id} class={size + color} />;
+const Y = ({ size = 'a' }: OwnProps) => {
+  return <div class={size} />;
+};`,
+      ['props'],
+    );
+    expectIncludes(code, 'const Y = (rawProps: OwnProps) => {');
+    expectIncludes(
+      code,
+      "const props = mergeProps({ size: 'a' }, rawProps) as OwnProps & Required<Pick<OwnProps, 'size'>>;",
+    );
+    expectIncludes(code, 'return <div class={props.size} />;');
+    // an expression-bodied component gets a block for the merge line
+    expectIncludes(
+      code,
+      "const X = (rawProps: OwnProps) => { const props = mergeProps({ size: 'a', color: 'red', get fast() { return props.color === 'blue'; } }, rawProps) as OwnProps & Required<Pick<OwnProps, 'size' | 'color' | 'fast'>>; const [, rest] = splitProps(props, ['size', 'color', 'fast']); return <div id={rest.id} class={props.size + props.color} />; };",
+    );
+  });
+
+  it('folds a body-level `const { a } = props` and keeps the author’s parameter name', () => {
+    const { code } = run(
+      `const X = (props: OwnProps) => {
+  const { isOpen, title: heading = 'x' } = props;
+  return <div hidden={!isOpen}>{heading}</div>;
+};`,
+      ['props'],
+    );
+    expectIncludes(code, 'const X = (rawProps: OwnProps) => {');
+    expectIncludes(code, "const props = mergeProps({ title: 'x' }, rawProps)");
+    expectIncludes(code, '<div hidden={!props.isOpen}>{props.title}</div>');
+    expect(code).not.toContain('= props;');
+  });
+});
+
+describe('withGlobal (store contract §12.2)', () => {
+  it('moves the mapper into a body call, keeps the withGlobal import and exports the plain component', () => {
+    const { code, report } = run(
+      `import { memo } from '../../lib/teact/teact';
+import { getActions, withGlobal } from '../../global';
+type OwnProps = { userId: string };
+type StateProps = { userName?: string };
+function X({ userName }: OwnProps & StateProps) {
+  const { openPremiumModal } = getActions();
+  return <div onClick={() => openPremiumModal()}>{userName}</div>;
+}
+export default memo(withGlobal<OwnProps>(
+  (global, { userId }): Complete<StateProps> => {
+    return { userName: selectUser(global, userId)?.firstName };
+  },
+)(X));`,
+    );
+    expectIncludes(code, 'function X(ownProps: OwnProps) {');
+    expectIncludes(
+      code,
+      'const props = withGlobal(ownProps, (global, { userId }): Complete<StateProps> => { return { userName: selectUser(global, userId)?.firstName }; });',
+    );
+    expectIncludes(code, '{props.userName}');
+    expectIncludes(code, 'export default X;');
+    expectIncludes(code, "import { getActions, withGlobal } from '../../global';");
+    expect(code).not.toContain('memo(');
+    expect(report.hits).toMatchObject({ withGlobal: 1, connectedProps: 1 });
+    expect(report.todos).toEqual([]);
+  });
+
+  it('passes the activation function through, merges defaults, and uses {} for a StateProps-only component', () => {
+    const { code } = run(
+      `type StateProps = { n: number };
+const X = ({ n }: StateProps) => <b>{n}</b>;
+export default withGlobal((global): Complete<StateProps> => ({ n: global.n }), activate)(X);
+const Y = ({ size = 1, m }: OwnProps & StateProps) => <i>{size + m}</i>;
+export const YConnected = withGlobal<OwnProps>(mapY)(Y);`,
+      ['props', 'withGlobal'],
+    );
+    expectIncludes(
+      code,
+      'const X = () => { const props = withGlobal({}, (global): Complete<StateProps> => ({ n: global.n }), activate); return <b>{props.n}</b>; };',
+    );
+    expectIncludes(code, 'export default X;');
+    expectIncludes(
+      code,
+      "const props = mergeProps({ size: 1 }, withGlobal(ownProps, mapY)) as OwnProps & StateProps & Required<Pick<OwnProps & StateProps, 'size'>>;",
+    );
+    expectIncludes(code, 'export const YConnected = Y;');
+  });
+
+  it('useSelector keeps its call and returns an accessor; getGlobal() in a memo / JSX is flagged', () => {
+    const { code, report } = run(
+      `const X = (props: { id: string }) => {
+  const chat = useSelector((global) => global.chats[props.id]);
+  const title = useMemo(() => getGlobal().chats[props.id].title, [props.id]);
+  const onClick = () => getGlobal().x;
+  return <div onClick={onClick}>{chat.title} {title} {getGlobal().y}</div>;
+};`,
+    );
+    expectIncludes(code, 'const chat = useSelector((global) => global.chats[props.id]);');
+    expectIncludes(code, '{chat().title} {title()} {getGlobal().y}');
+    expectIncludes(code, 'const onClick = () => getGlobal().x;');
+    expect(report.todos.map((t) => t.kind)).toEqual(['getGlobal-tracked', 'getGlobal-tracked']);
+  });
+});
+
+describe('state, memos, callbacks', () => {
+  it('useState → createSignal (lazy init, no-arg form), reads → x(), setters untouched', () => {
+    const { code } = run(
+      `import { useState } from '../../lib/teact/teact';
+const X = () => {
+  const [n, setN] = useState(0);
+  const [lazy] = useState(() => compute());
+  const [maybe, setMaybe] = useState<string>();
+  const bump = () => setN((v) => v + 1);
+  return <button onClick={bump}>{n} {lazy} {maybe}</button>;
+};`,
+    );
+    expectIncludes(code, 'const [n, setN] = createSignal(0);');
+    expectIncludes(code, 'const [lazy] = createSignal((() => compute())());');
+    expectIncludes(code, 'const [maybe, setMaybe] = createSignal<string | undefined>(undefined);');
+    expectIncludes(code, '{n()} {lazy()} {maybe()}');
+    expectIncludes(code, "import { createSignal } from 'frameact';");
+  });
+
+  it('useMemo → createMemo with reads x(); useMemo(fn, []) → a plain value; callbacks unwrapped', () => {
+    const { code } = run(
+      `const X = (props: { a: number }) => {
+  const doubled = useMemo(() => props.a * 2, [props.a]);
+  const debounced = useMemo(() => debounce(() => {}, 100), []);
+  const handle = useLastCallback((e: MouseEvent) => { debounced(); });
+  const other = useCallback(() => doubled, [doubled]);
+  return <div onClick={handle}>{doubled} {other()}</div>;
+};`,
+      ['state', 'accessorReads'],
+    );
+    expectIncludes(code, 'const doubled = createMemo(() => props.a * 2);');
+    expectIncludes(code, 'const debounced = debounce(() => {}, 100);');
+    expectIncludes(code, 'const handle = (e: MouseEvent) => { debounced(); };');
+    expectIncludes(code, 'const other = () => doubled();');
+    expectIncludes(code, '{doubled()} {other()}');
+  });
+
+  it('keeps parentheses where a bare arrow would not parse', () => {
+    const { code } = run(`const f = useLastCallback((...args: any[]) => run(args)) as T;`, ['state']);
+    expectIncludes(code, 'const f = ((...args: any[]) => run(args)) as T;');
+  });
+});
+
+describe('refs', () => {
+  it('element refs become let el!: T with ref={el}; value refs plain lets; .current dropped', () => {
+    const { code } = run(
+      `const X = () => {
+  const containerRef = useRef<HTMLDivElement>();
+  const timerRef = useRef<number | undefined>();
+  const flagRef = useRef(false);
+  const focus = () => containerRef.current?.focus();
+  const { observe } = useIntersectionObserver({ rootRef: containerRef });
+  return <div ref={containerRef} onClick={() => { timerRef.current = 1; flagRef.current = true; }} />;
+};`,
+      ['refs'],
+    );
+    expectIncludes(code, 'let containerRef!: HTMLDivElement;');
+    expectIncludes(code, 'let timerRef: number | undefined;');
+    expectIncludes(code, 'let flagRef = false;');
+    expectIncludes(code, 'containerRef?.focus()');
+    expectIncludes(code, 'useIntersectionObserver({ rootRef: () => containerRef })');
+    expectIncludes(code, 'timerRef = 1; flagRef = true;');
+    expectIncludes(code, '<div ref={containerRef}');
+  });
+
+  it('a ref passed as a non-ref prop becomes a callback ref; a reassigned ref is reported', () => {
+    const { code, report } = run(
+      `const X = (props: OwnProps) => {
+  let el = useRef<HTMLDivElement>();
+  if (props.ref) el = props.ref;
+  return <Modal dialogRef={el} />;
+};`,
+      ['refs'],
+    );
+    expectIncludes(code, 'dialogRef={(el) => { el = el; }}'.replace('(el) => { el = el; }', '(el) => { el = el; }'));
+    expect(report.todos.map((t) => t.kind)).toContain('ref-reassign');
+  });
+});
+
+describe('effects', () => {
+  it('maps deps to the compute half, [] to onMount, layout reads to measure, layout effects to mutation', () => {
+    const { code, report } = run(
+      `const X = (props: { isOpen: boolean }) => {
+  const [n] = useState(0);
+  useEffect(() => { if (!props.isOpen) return undefined; return subscribe(); }, [props.isOpen]);
+  useEffect(() => { mount(); return () => unmount(); }, []);
+  useEffect(() => { const h = el.offsetHeight; use(h, n); }, [n]);
+  useLayoutEffect(() => { el.classList.add('x'); }, [props.isOpen, n]);
+  useUnmountCleanup(() => stop());
+  useEffectOnce(() => once());
+  return <div />;
+};`,
+    );
+    expectIncludes(
+      code,
+      'createEffect(() => props.isOpen, () => { if (!props.isOpen) return undefined; return subscribe(); });',
+    );
+    expectIncludes(code, 'onMount(() => { mount(); return () => unmount(); });');
+    // an accessor dependency is received as a value by apply
+    expectIncludes(code, 'createMeasureEffect(() => n(), (n) => { const h = el.offsetHeight; use(h, n); });');
+    expectIncludes(code, 'createMutationEffect(() => [props.isOpen, n()], ([, n]) => {');
+    expectIncludes(code, 'onDestroy(() => stop());');
+    expectIncludes(code, 'onMount(() => once());');
+    expect(report.hits).toMatchObject({ onMount: 2, onDestroy: 1, createMeasureEffect: 1, createMutationEffect: 1 });
+    expect(report.todos).toEqual([]);
+  });
+
+  it('turns prev-deps callbacks into apply(value, prev) and keeps a TODO on sync effects', () => {
+    const { code, report } = run(
+      `const X = (props: { a: number }) => {
+  useEffectWithPrevDeps(([prevA]) => { log(prevA, props.a); }, [props.a]);
+  useSyncEffect(() => { sync(props.a); }, [props.a]);
+  return <div />;
+};`,
+      ['effects'],
+    );
+    expectIncludes(
+      code,
+      'createEffect(() => [props.a], (_deps, prev) => { const [prevA] = prev ?? []; log(prevA, props.a); });',
+    );
+    expectIncludes(code, 'createEffect(() => props.a, () => { sync(props.a); });');
+    expect(report.todos.map((t) => t.kind)).toEqual(['sync-effect']);
+  });
+});
+
+describe('derived hooks and the kit', () => {
+  it('maps usePrevious / useCurrentOrPrev / useFrozenProps and useShowTransition', () => {
+    const { code } = run(
+      `const X = (props: OwnProps) => {
+  const prev = usePreviousDeprecated(props.id, true);
+  const shown = useCurrentOrPrev(props.user, true);
+  const { ref, shouldRender, getIsClosing } = useShowTransition<HTMLDivElement>({ isOpen: props.isOpen, withShouldRender: true, noCloseTransition: props.fast, shouldForceOpen: props.force, closeDuration: 100 });
+  return shouldRender ? <div ref={ref}>{prev} {shown?.name} {getIsClosing()}</div> : undefined;
+};`,
+      ['derivedHooks', 'kit', 'accessorReads'],
+    );
+    expectIncludes(code, 'const prev = previous(() => props.id, { skipUndefined: true });');
+    expectIncludes(code, 'const shown = currentOrPrev(() => props.user, { skipUndefined: true });');
+    expectIncludes(
+      code,
+      'const { ref, shouldRender, isClosing: getIsClosing } = createShowTransition({ isOpen: () => props.isOpen, noCloseTransition: () => props.fast, forceOpen: () => props.force, closeDuration: 100 });',
+    );
+    expectIncludes(code, 'shouldRender() ? <div ref={ref}>{prev()} {shown()?.name} {getIsClosing()}</div>');
+  });
+
+  it('reports the class-name based deprecated transition', () => {
+    const { code, report } = run(
+      `const X = (props: { isOpen: boolean }) => {
+  const { transitionClassNames } = useShowTransitionDeprecated(props.isOpen, undefined, true);
+  return <div className={transitionClassNames} />;
+};`,
+      ['kit'],
+    );
+    expectIncludes(code, 'createShowTransition({ isOpen: () => props.isOpen, noMountTransition: true })');
+    expect(report.todos.map((t) => t.kind)).toEqual(['transition-classes']);
+  });
+});
+
+describe('hooks: primitives, TODOs and accessor arguments', () => {
+  it('useHeavyAnimation → watchHeavyAnimation, useForceUpdate → TODO, app hook value args → accessors', () => {
+    const { code, report } = run(
+      `const X = (props: { isOpen: boolean; onClose: () => void }) => {
+  const [isShown, show] = useFlag();
+  useHeavyAnimation(onStart, onEnd);
+  const forceUpdate = useForceUpdate();
+  useHistoryBack({ isActive: props.isOpen, onBack: props.onClose });
+  useHorizontalScroll(isShown, props.isOpen && isShown);
+  return <div onClick={show} />;
+};`,
+      ['hooks', 'accessorReads'],
+    );
+    expectIncludes(code, 'watchHeavyAnimation(onStart, onEnd);');
+    expectIncludes(code, 'useHistoryBack({ isActive: () => props.isOpen, onBack: props.onClose });');
+    expectIncludes(code, 'useHorizontalScroll(() => isShown(), () => props.isOpen && isShown());');
+    expect(report.todos.map((t) => t.kind)).toEqual(['hook:useForceUpdate']);
+  });
+
+  it('a hook body returns its accessors bare and gets one signature TODO', () => {
+    const { code, report } = run(
+      `const useFlag = (initial = false) => {
+  const [value, setValue] = useState(initial);
+  const setTrue = useCallback(() => { setValue(true); }, []);
+  return [value, setTrue];
+};
+export default useFlag;`,
+    );
+    expectIncludes(code, 'const [value, setValue] = createSignal(initial);');
+    expectIncludes(code, 'return [value, setTrue];');
+    expect(report.todos.map((t) => t.kind)).toEqual(['hook-params']);
+  });
+});
+
+describe('derived values and early returns', () => {
+  it('memoises body consts over props/signals, expands reactive destructuring, flags run-once statements', () => {
+    const { code, report } = run(
+      `const X = (props: { notification: N; disabled?: boolean }) => {
+  const { localId, duration = 3000 } = props.notification;
+  const [open] = useState(true);
+  const isOff = props.disabled || !open;
+  const lang = useOldLang();
+  const title = lang('Key');
+  if (isOff) counter++;
+  return <div data-id={localId} data-d={duration} class={isOff && 'off'} title={title} />;
+};`,
+    );
+    expectIncludes(code, 'const localId = () => props.notification.localId;');
+    expectIncludes(code, 'const duration = () => props.notification.duration ?? 3000;');
+    expectIncludes(code, 'const isOff = createMemo(() => props.disabled || !open());');
+    expectIncludes(code, "const title = createMemo(() => lang('Key'));");
+    expectIncludes(code, "data-id={localId()} data-d={duration()} class={isOff() && 'off'} title={title()}");
+    expect(report.todos.map((t) => t.kind)).toEqual(['runs-once']);
+  });
+
+  it('rewrites a trailing early return into <Show>, past render helpers', () => {
+    const { code, report } = run(
+      `const X = (props: { items?: string[]; href?: string }) => {
+  if (!props.items) {
+    return undefined;
+  }
+  if (props.href) return <a href={props.href} />;
+  function renderItem(item: string) { return <li>{item}</li>; }
+  return (
+    <ul>{props.items.map(renderItem)}</ul>
+  );
+};`,
+    );
+    expectIncludes(code, '<Show when={props.items}> <Show when={!props.href} fallback={<a href={props.href} />}> <ul>');
+    expectIncludes(code, '</ul> </Show> </Show>');
+    expectIncludes(code, "import { Show } from 'frameact/dom';");
+    expect(report.todos).toEqual([]);
+  });
+});
+
+describe('jsx', () => {
+  it('className → class on elements only; reactive .map → <For> (keyed when the row had key=)', () => {
+    const { code } = run(
+      `const X = (props: { chats: Chat[] }) => {
+  const [list] = useState<Row[]>([]);
+  return (
+    <div className="root">
+      <Button className="x" />
+      {props.chats.map((chat) => <Chat key={chat.id} className="row" id={chat.id} title={chat.title} />)}
+      {list.map(({ x }) => <i key={x}>{x}</i>)}
+      {STATIC.map((s) => <b>{s}</b>)}
+    </div>
+  );
+};`,
+    );
+    expectIncludes(code, '<div class="root">');
+    expectIncludes(code, '<Button className="x" />');
+    expectIncludes(
+      code,
+      '<For each={props.chats} keyed={(chat) => chat.id}>{(chat) => <Chat className="row" id={chat().id} title={chat().title} />}</For>',
+    );
+    expectIncludes(code, '<For each={list()}>{({ x }) => <i>{x}</i>}</For>');
+    expectIncludes(code, '{STATIC.map((s) => <b>{s}</b>)}');
+  });
+
+  it('teactFastList + teactOrderKey → <ManualFor orderKey>; controlled inputs; key and Transition TODOs', () => {
+    const { code, report } = run(
+      `const X = (props: { ids: string[]; value: string; k: number }) => (
+  <div>
+    <div className="list" teactFastList>
+      {props.ids.map((id) => <Row key={id} teactOrderKey={order(id)} id={id} />)}
+    </div>
+    <input value={props.value} teactExperimentControlled onInput={noop} />
+    <Timer key={props.k} />
+    <Transition activeKey={props.k} name="slide">
+      <div>a</div>
+    </Transition>
+  </div>
+);`,
+    );
+    expectIncludes(
+      code,
+      '<ManualFor each={props.ids} keyed={(id) => id} orderKey={(id) => order(id)}>{(id) => <Row id={id()} />}</ManualFor>',
+    );
+    expectIncludes(code, '<input use:value={() => props.value} onInput={noop} />');
+    expectIncludes(
+      code,
+      '{/* TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show> */}',
+    );
+    expect(report.todos.map((t) => t.kind).sort()).toEqual(['key-remount', 'transition-children']);
+    expectIncludes(code, "import { ManualFor } from 'frameact/dom';");
+  });
+});
+
+describe('async wrappers', () => {
+  it('useModuleLoader → module-level lazy() + <Show>', () => {
+    const { code, report } = run(
+      `import type { OwnProps } from './CalendarModal';
+import { Bundles } from '../../util/moduleLoader';
+import useModuleLoader from '../../hooks/useModuleLoader';
+const CalendarModalAsync = (props: OwnProps) => {
+  const { isOpen } = props;
+  const CalendarModal = useModuleLoader(Bundles.Extra, 'CalendarModal', !isOpen);
+  return CalendarModal ? <CalendarModal {...props} /> : undefined;
+};
+export default CalendarModalAsync;`,
+    );
+    expectIncludes(
+      code,
+      'const CalendarModal = lazy(() => loadBundle(Bundles.Extra).then((m) => ({ default: m.CalendarModal })));',
+    );
+    expectIncludes(code, '<Show when={props.isOpen}> <CalendarModal {...props} /> </Show>');
+    expectIncludes(code, "import { Bundles, loadBundle } from '../../util/moduleLoader';");
+    expect(code).not.toContain('useModuleLoader');
+    expect(report.todos).toEqual([]);
+  });
+});
+
+describe('imports', () => {
+  it('moves fasterdom / teact-dom / stricterdom names, keeps unmapped teact names with a TODO', () => {
+    const { code, report } = run(
+      `import { useRef, beginHeavyAnimation, Fragment } from '../../lib/teact/teact';
+import { addExtraClass } from '../../lib/teact/teact-dom';
+import { requestMutation } from '../../lib/fasterdom/fasterdom';
+import { forceMeasure } from '../../lib/fasterdom/stricterdom';
+import useLastCallback from '../../hooks/useLastCallback';
+const X = () => {
+  const el = useRef<HTMLDivElement>();
+  const go = useLastCallback(() => { beginHeavyAnimation(); requestMutation(() => addExtraClass(el.current!, 'x')); forceMeasure(() => 1); });
+  return <Fragment><div ref={el} onClick={go} /></Fragment>;
+};`,
+    );
+    expectIncludes(code, "import { beginHeavyAnimation, requestMutation } from 'frameact';");
+    expectIncludes(code, "import { addExtraClass } from 'frameact/dom';");
+    expectIncludes(code, "import { forceMeasure } from 'frameact/stricterdom';");
+    expectIncludes(code, "import { Fragment } from '../../lib/teact/teact';");
+    expect(code).not.toContain('useLastCallback');
+    expect(report.todos.map((t) => t.kind)).toEqual(['teact-leftover']);
+  });
+
+  it('is byte-identical on lines it does not touch and leaves a plain module alone', () => {
+    const source = `import buildClassName from '../../util/buildClassName';\n\nexport function helper(a: string) {\n  return buildClassName('x', a);\n}\n`;
+    expect(run(source).code).toBe(source);
+  });
+});
