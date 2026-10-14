@@ -1302,7 +1302,7 @@ it('swipe I1 (probe A, D): a release below the 15 px drag threshold (12 px) stil
   stop();
 });
 
-it.each(['touchcancel', 'pointercancel', 'visibilitychange', 'pagehide'])(
+it.each(['touchcancel', 'visibilitychange', 'pagehide'])(
   'swipe I1 (probe A): %s during a short drag ends the swipe (reverted: the client cancel runs) and the next step is not captured',
   async (type) => {
     nowMs = 0;
@@ -1316,7 +1316,6 @@ it.each(['touchcancel', 'pointercancel', 'visibilitychange', 'pagehide'])(
       document.dispatchEvent(new Event(type));
       delete (document as unknown as { hidden?: boolean }).hidden;
     } else if (type === 'pagehide') window.dispatchEvent(new Event(type));
-    else document.dispatchEvent(new Event(type, { bubbles: true }));
     await advance(0);
     await advance(200);
     await advance(200);
@@ -1538,5 +1537,24 @@ it('swipe (review m3): the scroll lock (selectorToPreventScroll, iOS) is applied
   fireAnimationEnd(...slidesOf(t));
   await frame();
   queries.mockRestore();
+  stop();
+});
+
+it('swipe: a pointercancel does not end a swipe (Chromium sends it when the browser takes the touch for a scroll; the real end is touchend / touchcancel)', async () => {
+  nowMs = 0;
+  const { t, s1, stop } = await swipeSetup();
+  await startSwipe(t, s1);
+  const [, s1b] = slidesOf(t);
+  document.dispatchEvent(new Event('pointercancel', { bubbles: true }));
+  await frame();
+  expect(animationOf(s1b).state).toBe('paused');
+  touch('touchmove', s1b, 212);
+  expect(animationOf(s1b).currentTime).toBeGreaterThan(0);
+  touch('touchend', s1b);
+  await advance(0);
+  await advance(400);
+  await advance(16);
+  fireAnimationEnd(...slidesOf(t));
+  await frame();
   stop();
 });

@@ -51,7 +51,8 @@ export function captureControlledSwipe(
     onRelease = undefined;
   }
 
-  // The page goes away under a finger: no `touchend` / `touchcancel` may arrive.
+  // The page goes away under a finger: no `touchend` / `touchcancel` may arrive. (Not `pointercancel`: Chromium sends it
+  // when the browser takes the touch for a scroll, in the middle of a swipe that is working; `touchcancel` is the end.)
   const abandonSwipe = () => endSwipe(true);
   const abandonIfHidden = () => {
     if (document.hidden) endSwipe(true);
@@ -78,11 +79,9 @@ export function captureControlledSwipe(
 
         if (!removeAbandonListeners) {
           document.addEventListener('visibilitychange', abandonIfHidden);
-          document.addEventListener('pointercancel', abandonSwipe);
           window.addEventListener('pagehide', abandonSwipe);
           removeAbandonListeners = () => {
             document.removeEventListener('visibilitychange', abandonIfHidden);
-            document.removeEventListener('pointercancel', abandonSwipe);
             window.removeEventListener('pagehide', abandonSwipe);
           };
         }
