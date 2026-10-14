@@ -1,6 +1,6 @@
 import { createHeavyAnimationScope, createMutationEffect, createRoot, createSignal, getPhase, provideHeavyAnimationScope, requestMutation } from 'frameact';
 import { createComponent, For,insert } from 'frameact/dom';
-import { $TRACK, createStore, produce, reconcile } from 'frameact/store';
+import { $SHAPE,$TRACK, createStore, produce, reconcile } from 'frameact/store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { container, useDomHarness } from './testing/dom';
@@ -8,7 +8,6 @@ import { fakeLayout, resetLayout } from './testing/layout';
 import { flushMicrotasks } from './testing/micro';
 import { InfiniteScroll } from './infiniteScroll';
 import { createScrollAnchor } from './scrollAnchor';
-import { $SHAPE } from './shape';
 
 const { frame } = useDomHarness();
 

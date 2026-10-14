@@ -14,9 +14,8 @@
 import {
 type Accessor,
   createEffect, createMeasureEffect, createMemo, createMutationEffect, createSignal, frameForcedReflow, requestMeasure, untrack, } from 'frameact';
-import { $TRACK } from 'frameact/store';
+import { $SHAPE,$TRACK } from 'frameact/store';
 
-import { $SHAPE } from './shape';
 
 /**
  * What a list change is detected by: a store array (model B: `produce`/`reconcile` rewrite it in
