@@ -415,7 +415,9 @@ function processTranslation(
     }
 
     const valueAsString = Number.isFinite(value) ? formatters!.number.format(value as number) : String(value);
-    return result.replaceAll(`{${key}}`, valueAsString);
+    // Deviation: hardening. A replacer function inserts the value literally; with a string, `$'`, `$&` and `$$` in a
+    // value (a user name) are replacement patterns.
+    return result.replaceAll(`{${key}}`, () => valueAsString);
   }, string);
 
   if (cacheKey) {

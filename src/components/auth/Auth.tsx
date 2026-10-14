@@ -88,6 +88,9 @@ const Auth = () => {
     <Transition
       activeKey={getActiveKey()}
       name="fade"
+      // Deviation: a slide that was left is dropped after the animation: the 2FA password of PasswordForm must not
+      // stay in the DOM of a hidden slide (appsec review, Low 1). tt keeps the previous slide.
+      shouldCleanup
       className="Auth"
       data-tauri-drag-region={IS_TAURI && IS_MAC_OS ? true : undefined}
     >

@@ -119,7 +119,7 @@ const MenuItem = (rawProps: MenuItemProps) => {
           target={props.target || (props.href!.startsWith(window.location.origin) || IS_TEST ? '_self' : '_blank')}
           rel={props.rel}
           dir={lang.isRtl ? 'rtl' : undefined}
-          onClick={props.onClick}
+          onClick={(e) => props.onClick?.(e)}
           onMouseDown={handleMouseDown}
         >
           {content}
@@ -133,7 +133,7 @@ const MenuItem = (rawProps: MenuItemProps) => {
         onClick={handleClick}
         onKeyDown={handleKeyDown}
         onMouseDown={handleMouseDown}
-        onContextMenu={props.onContextMenu}
+        onContextMenu={(e) => props.onContextMenu?.(e)}
         aria-label={props.ariaLabel}
         title={props.ariaLabel}
         dir={lang.isRtl ? 'rtl' : undefined}

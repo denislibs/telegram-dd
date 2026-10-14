@@ -3,10 +3,10 @@ import {
   createMeasureEffect,
   createMemo,
   createSignal,
-  getIsHeavyAnimating,
+  currentHeavyAnimationScope,
+  type HeavyAnimationScope,
   onDestroy,
   requestMeasure,
-  watchHeavyAnimation,
 } from 'frameact';
 import { Show } from 'frameact/dom';
 
@@ -18,7 +18,9 @@ import { ensureTLottie, getTLottie } from '../../lib/tlottie/TLottie.async';
 import { IS_TAURI } from '../../util/browser/globalEnvironment';
 import buildClassName from '../../util/buildClassName';
 import buildStyle from '../../util/buildStyle';
+import { depsOf } from '../../util/effectDeps';
 import generateUniqueId from '../../util/generateUniqueId';
+import { isHeavyAnimatingInChain, watchHeavyAnimationInChain } from '../../util/heavyAnimationChain';
 
 import useColorFilter from '../../hooks/stickers/useColorFilter';
 import useFlag from '../../hooks/useFlag';
@@ -63,6 +65,8 @@ const AnimatedSticker = (props: OwnProps) => {
   // Deviation: a forwarded ref is a callback prop; the element is kept in a variable and handed on to `props.ref`.
   let containerRef: HTMLDivElement | undefined;
 
+  // The scope chain of this subtree, kept for the applies below (there is no owner there to ask).
+  const heavyScope = currentHeavyAnimationScope();
   const viewId = useUniqueId();
   const rendererId = createMemo(() =>
     props.renderId && props.fitzModifier ? `${props.renderId}_${props.fitzModifier}` : props.renderId,
@@ -85,12 +89,12 @@ const AnimatedSticker = (props: OwnProps) => {
   const shouldForceOnHeavyAnimation = createMemo(() => props.forceAlways || props.forceOnHeavyAnimation);
   // Delay initialization until heavy animation ends
   const [canInitialize, markCanInitialize, unmarkCanInitialize] = useFlag(
-    !getIsHeavyAnimating() || shouldForceOnHeavyAnimation(),
+    !isHeavyAnimatingInChain(heavyScope) || shouldForceOnHeavyAnimation(),
   );
-  // Deviation: `watchHeavyAnimation` has no `isDisabled`; the callbacks are guarded instead.
-  // The transition that starts/ends a heavy animation can do it from its mutate phase; `canInitialize` feeds a measure
+  // Deviation: the whole scope chain is watched (the Transition scope of a slide AND the root: tt's hook was global), and
+  // `isDisabled` is a guard inside the callbacks. The transition that starts/ends a heavy animation can do it from its mutate phase; `canInitialize` feeds a measure
   // effect, so the write is booked into a measure task instead of dirtying that effect from the mutate phase.
-  watchHeavyAnimation(
+  watchHeavyAnimationInChain(
     () => {
       if (!shouldForceOnHeavyAnimation()) requestMeasure(unmarkCanInitialize);
     },
@@ -141,7 +145,7 @@ const AnimatedSticker = (props: OwnProps) => {
       isUnmountedRef ||
       !p.tgsUrl ||
       (p.sharedCanvas && (!p.sharedCanvasCoords || !p.sharedCanvas.offsetWidth || !p.sharedCanvas.offsetHeight)) ||
-      (getIsHeavyAnimating() && !shouldForceOnHeavyAnimation())
+      (isHeavyAnimatingInChain(heavyScope) && !shouldForceOnHeavyAnimation())
     ) {
       return;
     }
@@ -190,7 +194,13 @@ const AnimatedSticker = (props: OwnProps) => {
 
   // Deviation: `init` reads layout (`offsetWidth`), so this is a measure effect; `sharedCanvasCoords` is tracked by its fields.
   createMeasureEffect(
-    () => [props.tgsUrl, props.sharedCanvas, props.sharedCanvasCoords?.x, props.sharedCanvasCoords?.y, canInitialize()],
+    depsOf(() => [
+      props.tgsUrl,
+      props.sharedCanvas,
+      props.sharedCanvasCoords?.x,
+      props.sharedCanvasCoords?.y,
+      canInitialize(),
+    ]),
     () => {
       if (!canInitialize()) return;
       if (getTLottie()) {
@@ -205,14 +215,14 @@ const AnimatedSticker = (props: OwnProps) => {
   useSharedIntersectionObserver(() => props.sharedCanvas, throttledInit);
 
   createEffect(
-    () => [props.color, animation()],
+    depsOf(() => [props.color, animation()]),
     () => {
       animation()?.setColor(colorRef());
     },
   );
 
   createEffect(
-    () => [props.speed, animation()],
+    depsOf(() => [props.speed, animation()]),
     () => {
       const { speed } = live();
       if (typeof speed === 'number') {
@@ -230,7 +240,7 @@ const AnimatedSticker = (props: OwnProps) => {
     if (
       !currentAnimation ||
       !(live().play || live().playSegment) ||
-      isFrozen(live().forceAlways, live().forceOnHeavyAnimation)
+      isFrozen(live().forceAlways, live().forceOnHeavyAnimation, heavyScope)
     ) {
       return;
     }
@@ -257,7 +267,7 @@ const AnimatedSticker = (props: OwnProps) => {
   };
 
   createEffect(
-    () => [props.noLoop, animation()],
+    depsOf(() => [props.noLoop, animation()]),
     (_deps, prev) => {
       const [prevNoLoop] = prev ?? [];
       if (prevNoLoop !== undefined && live().noLoop !== prevNoLoop) {
@@ -268,7 +278,7 @@ const AnimatedSticker = (props: OwnProps) => {
 
   // Deviation: `sharedCanvasCoords` is compared by its fields (the object may be a new one with the same values).
   createEffect(
-    () => [props.sharedCanvasCoords?.x, props.sharedCanvasCoords?.y, viewId, animation()],
+    depsOf(() => [props.sharedCanvasCoords?.x, props.sharedCanvasCoords?.y, viewId, animation()]),
     ([x, y], prev) => {
       const [prevX, prevY] = prev ?? [];
       if (prevX !== undefined && (x !== prevX || y !== prevY)) {
@@ -278,14 +288,14 @@ const AnimatedSticker = (props: OwnProps) => {
   );
 
   createEffect(
-    () => [animation(), playKey(), props.noLoop, props.forceAlways, props.forceOnHeavyAnimation],
+    depsOf(() => [animation(), playKey(), props.noLoop, props.forceAlways, props.forceOnHeavyAnimation]),
     () => {
       if (!animation()) {
         return;
       }
 
       if (playKey()) {
-        if (!isFrozen(live().forceAlways, live().forceOnHeavyAnimation)) {
+        if (!isFrozen(live().forceAlways, live().forceOnHeavyAnimation, heavyScope)) {
           playAnimation(live().noLoop);
         }
       } else {
@@ -295,7 +305,7 @@ const AnimatedSticker = (props: OwnProps) => {
   );
 
   createEffect(
-    () => [animation(), props.tgsUrl, props.fitzModifier],
+    depsOf(() => [animation(), props.tgsUrl, props.fitzModifier]),
     () => {
       const currentAnimation = animation();
       if (currentAnimation) {
@@ -309,8 +319,8 @@ const AnimatedSticker = (props: OwnProps) => {
     },
   );
 
-  // Deviation: `watchHeavyAnimation` has no `isDisabled`; the callbacks are guarded instead.
-  watchHeavyAnimation(
+  // Deviation: see above (scope chain, guarded callbacks).
+  watchHeavyAnimationInChain(
     () => {
       if (playKey() && !shouldForceOnHeavyAnimation()) pauseAnimation();
     },
@@ -348,7 +358,9 @@ const AnimatedSticker = (props: OwnProps) => {
 
 export default AnimatedSticker;
 
-function isFrozen(forceAlways = false, forceOnHeavyAnimation = false) {
+function isFrozen(forceAlways = false, forceOnHeavyAnimation = false, scope?: HeavyAnimationScope) {
   if (forceAlways) return false;
-  return (!forceOnHeavyAnimation && getIsHeavyAnimating()) || isPriorityPlaybackActive() || isBackgroundModeActive();
+  return (
+    (!forceOnHeavyAnimation && isHeavyAnimatingInChain(scope)) || isPriorityPlaybackActive() || isBackgroundModeActive()
+  );
 }

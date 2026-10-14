@@ -160,7 +160,7 @@ and `pnpm test` and are part of the per-slice checklist ([porting guide §7.2](p
 
 Playwright configs: `playwright.config.ts` (e2e + a11y, vite **dev** server on :1240, stricterdom on),
 `playwright.perf.config.ts` (a **production** build served by `vite preview` on :1241, one worker),
-`playwright.visual.config.ts` (our dev server + the tt copy on :1235, one worker). Ports and the build environment are in
+`playwright.visual.config.ts` (our dev server + the tt copy, one worker). Ports — 1240 / 1241 / 1242 in CI, shifted by a stable per-checkout offset locally so parallel git worktrees never reuse each other's servers — and the build environment are in
 `tests/config.ts`. All servers start themselves and are reused when already running (`pnpm dev:mocked` style).
 
 ### The mocked backend (shared by all gates)

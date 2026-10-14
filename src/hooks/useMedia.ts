@@ -5,6 +5,7 @@ import { ApiMediaFormat } from '../api/types';
 import { selectIsSynced } from '../global/selectors';
 import { type MaybeAccessor, read } from '../util/accessors';
 import { IS_PROGRESSIVE_SUPPORTED } from '../util/browser/windowEnvironment';
+import { depsOf } from '../util/effectDeps';
 import * as mediaLoader from '../util/mediaLoader';
 import useSelector from './data/useSelector';
 
@@ -29,16 +30,18 @@ const useMedia = (
   const isSynced = useSelector(selectIsSynced);
 
   createEffect(
-    () =>
-      [
-        read(noLoad),
-        read(mediaHash),
-        mediaData(),
-        read(mediaFormat),
-        read(cacheBuster),
-        read(delay),
-        isSynced(),
-      ] as const,
+    depsOf(
+      () =>
+        [
+          read(noLoad),
+          read(mediaHash),
+          mediaData(),
+          read(mediaFormat),
+          read(cacheBuster),
+          read(delay),
+          isSynced(),
+        ] as const,
+    ),
     ([noLoad2, mediaHash2, mediaData2, mediaFormat2, , delay2]) => {
       if (!noLoad2 && mediaHash2 && !mediaData2) {
         const startedAt = Date.now();

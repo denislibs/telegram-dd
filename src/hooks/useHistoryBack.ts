@@ -313,8 +313,11 @@ export default function useHistoryBack({
   onMount(() => {
     isFirstRender = false;
   });
+  // Deviation: tt's cleanup read the `isActive` of the first render; the live value is already false when the component is
+  // disposed together with it (`<Show when={isOpen}>`), which left the record open. `processBack` only touches an open
+  // record (`index` is set by a push), so a component that never activated does nothing.
   onDestroy(() => {
-    if (!read(isActive) || wasReplaced) return;
+    if (wasReplaced) return;
     processBack();
   });
 

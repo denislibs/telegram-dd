@@ -13,10 +13,12 @@ import { INITIAL_GLOBAL_STATE } from '../../global/initialState';
 import Button from './Button';
 import DropdownMenu from './DropdownMenu';
 import InputText from './InputText';
+import Loading from './Loading';
 import Menu from './Menu';
 import MenuItem from './MenuItem';
 import Modal from './Modal';
 import Portal from './Portal';
+import RoundTimer from './RoundTimer';
 import Transition from './Transition';
 
 beforeAll(() => {
@@ -36,7 +38,7 @@ const portalsHost = () => {
 
 beforeEach(() => {
   violations.length = 0;
-  delegateEvents(['click', 'input', 'mousedown', 'keydown']);
+  delegateEvents(['click', 'input', 'mousedown', 'mouseup', 'contextmenu', 'transitionend', 'keydown']);
   enableStrict();
   setHandler((error) => violations.push(`${error.kind} ${error.detail} [${error.phase}]`));
 });
@@ -310,6 +312,38 @@ it('DropdownMenu: the default trigger opens the menu; a custom trigger is a comp
   dispose();
 });
 
+it('DropdownMenu: onOpen fires when the trigger opens the menu, onClose when it closes it (tt reads the value before the toggle)', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const el = host();
+  const calls: string[] = [];
+  const dispose = render(
+    () => (
+      <DropdownMenu
+        onOpen={() => calls.push('open')}
+        onClose={() => calls.push('close')}
+        trigger={(props) => (
+          <button type="button" class="custom-trigger" onClick={props.onTrigger}>
+            t
+          </button>
+        )}
+      >
+        <MenuItem>One</MenuItem>
+      </DropdownMenu>
+    ),
+    el,
+  );
+  await flushMicrotasks();
+  await frame();
+  const trigger = el.querySelector('.custom-trigger') as HTMLButtonElement;
+  trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  flushSync();
+  expect(calls).toEqual(['open']);
+  trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  flushSync();
+  expect(calls).toEqual(['open', 'close']);
+  dispose();
+});
+
 it('DropdownMenu withPortal: the dynamic position options reach the menu (anchor + element getters)', async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   const portals = portalsHost();
@@ -334,5 +368,92 @@ it('DropdownMenu withPortal: the dynamic position options reach the menu (anchor
   const menu = portals.querySelector('.Menu.in-portal')!;
   expect(menu).not.toBeNull();
   expect(menu.querySelector('.bubble')!.classList.contains('open')).toBe(true);
+  dispose();
+});
+
+it('RoundTimer: one step per second, onEnd once when the time is up (the effect deps are compared by value)', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+  const el = host();
+  const onEnd = vi.fn();
+  const dispose = render(() => <RoundTimer duration={5} onEnd={onEnd} />, el);
+  await flushMicrotasks();
+  flushSync();
+  await frame();
+  const offset = () => Number(el.querySelector('circle')!.getAttribute('stroke-dashoffset'));
+  const start = offset();
+  expect(onEnd).not.toHaveBeenCalled();
+
+  // tt: the first step happens at once (useInterval without noFirst), then one per second
+  vi.advanceTimersByTime(1000);
+  await flushMicrotasks();
+  flushSync();
+  expect(onEnd).not.toHaveBeenCalled();
+  expect(offset()).toBeGreaterThan(start);
+
+  vi.advanceTimersByTime(2000);
+  await flushMicrotasks();
+  flushSync();
+  expect(onEnd).not.toHaveBeenCalled();
+
+  vi.advanceTimersByTime(3000);
+  await flushMicrotasks();
+  flushSync();
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  dispose();
+});
+
+it('handlers that the parent adds after the first render are called (frameact binds a prop handler once)', async () => {
+  const el = host();
+  const [handlers, setHandlers] = createSignal<Record<string, () => void>>({});
+  const dispose = render(
+    () => (
+      <>
+        <Loading onClick={handlers().loading} />
+        <MenuItem onContextMenu={handlers().menuItemContext}>Item</MenuItem>
+        <Button
+          onContextMenu={handlers().buttonContext}
+          onMouseUp={handlers().buttonMouseUp}
+          onTransitionEnd={handlers().buttonTransitionEnd}
+          onFileHoverOpen={handlers().buttonFileHoverOpen}
+        >
+          B
+        </Button>
+      </>
+    ),
+    el,
+  );
+  await flushMicrotasks();
+  await frame();
+  const calls: string[] = [];
+  const named = (name: string) => () => calls.push(name);
+  setHandlers({
+    loading: named('loading'),
+    menuItemContext: named('menuItemContext'),
+    buttonContext: named('buttonContext'),
+    buttonMouseUp: named('buttonMouseUp'),
+    buttonTransitionEnd: named('buttonTransitionEnd'),
+    buttonFileHoverOpen: named('buttonFileHoverOpen'),
+  });
+  flushSync();
+
+  const fire = (target: Element, event: Event) => target.dispatchEvent(event);
+  fire(el.querySelector('.Loading')!, new MouseEvent('click', { bubbles: true }));
+  fire(el.querySelector('.MenuItem')!, new MouseEvent('contextmenu', { bubbles: true }));
+  const button = el.querySelector('button.Button')!;
+  fire(button, new MouseEvent('contextmenu', { bubbles: true }));
+  fire(button, new MouseEvent('mouseup', { bubbles: true }));
+  fire(button, new Event('transitionend', { bubbles: true }));
+  fire(button, new CustomEvent('filehoveropen', { bubbles: true }));
+
+  expect(calls.sort()).toEqual(
+    [
+      'buttonContext',
+      'buttonFileHoverOpen',
+      'buttonMouseUp',
+      'buttonTransitionEnd',
+      'loading',
+      'menuItemContext',
+    ].sort(),
+  );
   dispose();
 });

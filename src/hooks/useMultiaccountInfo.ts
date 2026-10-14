@@ -7,6 +7,7 @@ import { SESSION_ACCOUNT_PREFIX } from '../config';
 import { getChatAvatarHash } from '../global/helpers';
 import { selectIsSynced } from '../global/selectors';
 import { type MaybeAccessor, read } from '../util/accessors';
+import { depsOf } from '../util/effectDeps';
 import { preloadImage } from '../util/files';
 import { resizeImage } from '../util/imageResize';
 import { ACCOUNT_SLOT, getAccountsInfo, storeAccountData } from '../util/multiaccount';
@@ -91,7 +92,7 @@ export default function useMultiaccountInfo(userArg?: MaybeAccessor<ApiUser | un
   };
 
   createEffect(
-    () => [avatarUrl(), isSynced(), isUpdater()] as const,
+    depsOf(() => [avatarUrl(), isSynced(), isUpdater()] as const),
     ([avatarUrl2, isSynced2, isUpdater2]) => {
       if (!avatarUrl2 || !isUpdater2 || !isSynced2) return undefined;
       const controller = new AbortController();

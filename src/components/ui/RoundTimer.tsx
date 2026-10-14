@@ -2,6 +2,7 @@ import { createEffect, createSignal } from 'frameact';
 
 import buildClassName from '../../util/buildClassName';
 import { formatCountdownShort } from '../../util/dates/oldDateFormat';
+import { depsOf } from '../../util/effectDeps';
 
 import useInterval from '../../hooks/schedulers/useInterval';
 import useOldLang from '../../hooks/useOldLang';
@@ -29,7 +30,7 @@ const RoundTimer = (props: OwnProps) => {
   );
 
   createEffect(
-    () => [timeLeft(), props.onEnd] as const,
+    depsOf(() => [timeLeft(), props.onEnd] as const),
     ([currentTimeLeft, onEnd2]) => {
       if (currentTimeLeft <= 0) {
         onEnd2?.();

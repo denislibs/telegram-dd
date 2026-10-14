@@ -47,7 +47,7 @@ const PasswordForm = (rawProps: OwnProps) => {
   const { isMobile } = useAppLayout();
   const [password, setPassword] = createSignal('');
   const [canSubmit, setCanSubmit] = createSignal(false);
-  const focusDelayTimeoutMs = isMobile() ? 550 : 400;
+  const focusDelayTimeoutMs = () => (isMobile() ? 550 : 400);
 
   createEffect(
     () => props.shouldResetValue,
@@ -112,7 +112,12 @@ const PasswordForm = (rawProps: OwnProps) => {
   }
 
   return (
-    <form class={props.className} action="" onSubmit={props.onSubmit ? handleSubmit : stopEvent} autocomplete="off">
+    <form
+      class={props.className}
+      action=""
+      onSubmit={(e) => (props.onSubmit ? handleSubmit(e) : stopEvent(e))}
+      autocomplete="off"
+    >
       <div
         class={buildClassName('input-group password-input', password() && 'touched', props.error && 'error')}
         dir={lang.isRtl ? 'rtl' : undefined}

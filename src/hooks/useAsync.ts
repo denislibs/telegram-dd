@@ -1,6 +1,7 @@
 import { type Accessor, createEffect, createSignal } from 'frameact';
 
 import { type MaybeAccessor, read } from '../util/accessors';
+import { depsOf } from '../util/effectDeps';
 
 function useAsync<T>(
   fn: () => Promise<T>,
@@ -25,7 +26,7 @@ function useAsync<T>(fn: () => Promise<T>, deps: MaybeAccessor<unknown[]>, defau
   const [error, setError] = createSignal<Error | undefined>(undefined);
   const [result, setResult] = createSignal<T | undefined>(defaultValue);
   createEffect(
-    () => [...read(deps)],
+    depsOf(() => [...read(deps)]),
     () => {
       setIsLoading(true);
       setError(undefined);

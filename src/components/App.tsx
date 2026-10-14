@@ -11,6 +11,7 @@ import { selectActionMessageBg, selectTabState, selectTheme, selectThemeValues }
 import { IS_TAURI } from '../util/browser/globalEnvironment';
 import { IS_INSTALL_PROMPT_SUPPORTED, PLATFORM_ENV } from '../util/browser/windowEnvironment';
 import buildClassName from '../util/buildClassName';
+import { depsOf } from '../util/effectDeps';
 import { setupBeforeInstallPrompt } from '../util/installPrompt';
 import { ACCOUNT_SLOT, getAccountSlotUrl, getFirstLoggedInAccountSlot } from '../util/multiaccount';
 import { hasLegacyEncryptedSession } from '../util/passcode';
@@ -234,7 +235,7 @@ const App = () => {
   });
 
   createMutationEffect(
-    () => [props.theme, props.customBackgroundColor] as const,
+    depsOf(() => [props.theme, props.customBackgroundColor] as const),
     ([theme2, customBackgroundColor2]) => {
       // Prefer the chosen wallpaper's base color, so the pre-render base matches the
       // actual wallpaper instead of flashing the built-in default first.
@@ -246,7 +247,7 @@ const App = () => {
   );
 
   createMutationEffect(
-    () => [props.actionMessageBg, props.theme] as const,
+    depsOf(() => [props.actionMessageBg, props.theme] as const),
     ([actionMessageBg2, theme2]) => {
       // Fall back to the theme default when the tint is unset (e.g. a photo wallpaper without a
       // thumbnail), so service chips don't keep the previous wallpaper's tint.

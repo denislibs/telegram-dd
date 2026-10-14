@@ -80,6 +80,7 @@ const KIT = new Set([
 ]);
 const GLOBAL = new Set(['getGlobal', 'getActions', 'useGlobal', 'trackGlobal', 'withGlobal']);
 const MODULE_LOADER = new Set(['loadBundle', 'Bundles']);
+const EFFECT_DEPS = new Set(['depsOf']);
 const TYPES = new Set(['JSX', GLOBAL_STATE_TYPE.name]);
 
 const TEACT_SOURCE = /(?:^|\/)lib\/teact\/teact$|^@teact$/;
@@ -235,6 +236,7 @@ export const importsRule: Rule = {
     const kitPath = relativeTo(ctx.options.filePath, 'src/lib/kit');
     const globalTypesPath = relativeTo(ctx.options.filePath, `src/${GLOBAL_STATE_TYPE.module}`);
     const moduleLoaderPath = relativeTo(ctx.options.filePath, 'src/util/moduleLoader');
+    const effectDepsPath = relativeTo(ctx.options.filePath, 'src/util/effectDeps');
     const globalPath = globalImport ? globalImport.source.value : relativeTo(ctx.options.filePath, 'src/global');
     for (const name of unbound) {
       if (GLOBAL.has(name) && !globalImport) addNeeded(globalPath, name);
@@ -245,6 +247,7 @@ export const importsRule: Rule = {
       else if (name === GLOBAL_STATE_TYPE.name) addNeeded(`type:${globalTypesPath}`, name);
       else if (KIT.has(name)) addNeeded(kitPath, name);
       else if (MODULE_LOADER.has(name)) addNeeded(moduleLoaderPath, name);
+      else if (EFFECT_DEPS.has(name)) addNeeded(effectDepsPath, name);
     }
     void TYPES;
 

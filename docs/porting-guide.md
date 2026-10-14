@@ -291,6 +291,15 @@ takes accessors instead of values, and returns accessors. Keeping the `use*` nam
   inside an effect apply has no owner"). Put every prop an effect uses into its compute half and take it as a value in
   the apply (`createEffect(() => props.error, (error2) => …)`; the codemod does this for `props.x` dependencies), or read
   it through a memo of the component (`AnimatedSticker`'s `live`). Event handlers and timers are not applies.
+- **Dependency arrays compare by value in teact, by `!==` in `createEffect`.** A compute that returns a new array re-applies
+  the effect every time one of its reads re-runs; wrap it in `depsOf(() => [a, b] as const)` (codemod `effectDeps`).
+- **Read after set.** `setX(v); … x()` reads the new value at once (a signal write is visible immediately); teact's `x` was
+  the closure value from before the write. Keep `const was = x()` before the write (`DropdownMenu`, `AuthCode`).
+  `pnpm exec tsx scripts/slice/readAfterSet.ts` lists the pairs.
+- **A handler prop of an element is bound once**: forward it as `(e) => props.x?.(e)` (codemod `forwardedHandlers`).
+- **Heavy animations: ask the chain.** `getIsHeavyAnimating()` is the root scope only and `watchHeavyAnimation` hears only the
+  scope of its subtree; tt's global hook heard everything. `util/heavyAnimationChain.ts` checks and watches the whole chain
+  (until the engine fix).
 - **`onChange` is `onInput`.** teact fires `onChange` of every element except `<select>` on the `input` event;
   frameact's is the native `change`. The codemod renames it on intrinsic elements; check components that forward both.
 - **DOM attribute names**: `autocomplete`, `autoplay`, `playsinline`, `spellcheck`… (codemod `attributes`). A component

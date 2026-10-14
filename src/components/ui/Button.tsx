@@ -226,9 +226,9 @@ const Button = (rawProps: OwnProps) => {
           aria-label={props.ariaLabel}
           aria-controls={props.ariaControls}
           style={props.style}
-          onTransitionEnd={props.onTransitionEnd}
+          onTransitionEnd={() => props.onTransitionEnd?.()}
           data-file-hover-open={props.onFileHoverOpen ? true : undefined}
-          on:filehoveropen={props.onFileHoverOpen ? handleFileHoverOpen : undefined}
+          on:filehoveropen={handleFileHoverOpen}
           target="_blank"
           rel="noreferrer"
         >
@@ -245,21 +245,21 @@ const Button = (rawProps: OwnProps) => {
         onClick={(e) => {
           if (IS_TOUCH_ENV || props.noFastClick) handleClick(e);
         }}
-        onContextMenu={props.onContextMenu}
+        onContextMenu={(e) => props.onContextMenu?.(e)}
         onMouseDown={handleMouseDown}
-        onMouseUp={props.onMouseUp}
+        onMouseUp={(e) => props.onMouseUp?.(e)}
         onMouseEnter={(e) => {
           if (!isNotInteractive()) props.onMouseEnter?.(e);
         }}
         onMouseLeave={() => {
           if (!isNotInteractive()) props.onMouseLeave?.();
         }}
-        onTransitionEnd={props.onTransitionEnd}
+        onTransitionEnd={() => props.onTransitionEnd?.()}
         onFocus={() => {
           if (!isNotInteractive()) props.onFocus?.();
         }}
         data-file-hover-open={props.onFileHoverOpen ? true : undefined}
-        on:filehoveropen={props.onFileHoverOpen ? handleFileHoverOpen : undefined}
+        on:filehoveropen={handleFileHoverOpen}
         disabled={props.disabled && !props.allowDisabledClick}
         autofocus={props.autoFocus}
         aria-label={props.ariaLabel}

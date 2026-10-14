@@ -79,13 +79,13 @@ const InputText = (rawProps: OwnProps) => {
           props.onChange?.(e);
           props.onInput?.(e);
         }}
-        onKeyPress={props.onKeyPress}
-        onKeyDown={props.onKeyDown}
-        onBlur={props.onBlur}
-        onPaste={props.onPaste}
+        onKeyPress={(e) => props.onKeyPress?.(e)}
+        onKeyDown={(e) => props.onKeyDown?.(e)}
+        onBlur={(e) => props.onBlur?.(e)}
+        onPaste={(e) => props.onPaste?.(e)}
         aria-label={labelText()}
         title={props.title}
-        onClick={props.onClick}
+        onClick={(e) => props.onClick?.(e)}
         autofocus={props.autoFocus}
       />
       {labelText() && <label for={props.id}>{labelText()}</label>}

@@ -42,7 +42,7 @@ const StarIcon = (rawProps: OwnProps) => {
 
   return (
     <i
-      onClick={props.onClick}
+      onClick={() => props.onClick?.()}
       class={buildClassName(
         'StarIcon',
         styles.root,

@@ -30,7 +30,7 @@ const GramIcon = (props: OwnProps) => {
           viewBox="0 0 76 64"
           class={buildClassName(styles.root, props.className)}
           style={props.style}
-          onClick={props.onClick}
+          onClick={() => props.onClick?.()}
         >
           <path fill="currentColor" fill-rule="evenodd" d={LOGO_PATH} />
         </svg>
@@ -42,7 +42,7 @@ const GramIcon = (props: OwnProps) => {
         draggable={false}
         class={buildClassName(styles.root, props.isAppIcon && styles.appIcon, props.className)}
         style={props.style}
-        onClick={props.onClick}
+        onClick={() => props.onClick?.()}
       />
     </Show>
   );

@@ -1,6 +1,7 @@
 import { type Accessor, createMeasureEffect } from 'frameact';
 
 import { type MaybeAccessor, read } from '../util/accessors';
+import { depsOf } from '../util/effectDeps';
 import { hasActiveViewTransition } from './animations/useViewTransition';
 
 const BACKDROP_CLASSNAME = 'backdrop';
@@ -15,7 +16,7 @@ export default function useVirtualBackdrop(
   excludedClosestSelector?: MaybeAccessor<string | undefined>,
 ) {
   createMeasureEffect(
-    () => [read(excludedClosestSelector), read(ignoreRightClick), read(isOpen), onClose?.()] as const,
+    depsOf(() => [read(excludedClosestSelector), read(ignoreRightClick), read(isOpen), onClose?.()] as const),
     ([excludedClosestSelector2, ignoreRightClick2, isOpen2, onClose2]) => {
       if (!isOpen2 || !onClose2) {
         return undefined;

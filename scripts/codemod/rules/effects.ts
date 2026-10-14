@@ -39,7 +39,7 @@ function depsText(ctx: Ctx, deps: t.ArrayExpression, keepArray: boolean, asConst
     return ctx.textWithParens(elements[0]);
   }
   // A tuple, so that the destructured parameter of the apply half keeps the type of each dependency (an array literal
-  // of mixed types widens to a union array).
+  // of mixed types widens to a union array). The `effectDeps` rule then makes the array compare by value.
   return asConst && elements.length > 1 ? `${ctx.text(deps)} as const` : ctx.text(deps);
 }
 

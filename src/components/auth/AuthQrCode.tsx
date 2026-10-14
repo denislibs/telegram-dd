@@ -5,6 +5,7 @@ import type { GlobalState } from '../../global/types';
 
 import { createMediaTransition } from '../../lib/kit';
 import { selectSharedSettings } from '../../global/selectors/sharedState';
+import { depsOf } from '../../util/effectDeps';
 import { oldSetLanguage } from '../../util/oldLangProvider';
 import { createStyledQrCode } from '../../util/qrCode/buildStyledQrCode';
 import { LOCAL_TGS_URLS } from '../common/helpers/animatedAssets';
@@ -49,7 +50,7 @@ const AuthCode = () => {
   const [isQrMounted, markQrMounted, unmarkQrMounted] = useFlag();
 
   const accountsInfo = useMultiaccountInfo();
-  const hasActiveAccount = Object.values(accountsInfo).length > 0;
+  const hasActiveAccount = () => Object.values(accountsInfo()).length > 0;
 
   const { result: qrCode } = useAsync(
     () =>
@@ -65,9 +66,11 @@ const AuthCode = () => {
   // Deviation: tt switched stricterdom off around the library (`disableStrict()` + a 50 ms timer); the library draws into
   // the container asynchronously, so the container is marked `data-stricterdom-ignore` instead (a third-party subtree).
   createMutationEffect(
-    () => [isConnected(), authQrCode(), isQrMounted(), qrCode()] as const,
-    ([isConnected2, authQrCode2, isQrMounted2, qrCode2]) => {
-      if (!authQrCode2 || !qrCode2) {
+    // Deviation: the token is the dependency, not the `qrCode` object: the store keeps an id-less container (`{ token,
+    // expires }`) as the same live proxy and merges a refreshed token into it, so the object never changes identity.
+    depsOf(() => [isConnected(), authQrCode()?.token, isQrMounted(), qrCode()] as const),
+    ([isConnected2, token2, isQrMounted2, qrCode2]) => {
+      if (!token2 || !qrCode2) {
         return () => {
           unmarkQrMounted();
         };
@@ -78,7 +81,7 @@ const AuthCode = () => {
       }
 
       const container = qrCodeRef;
-      const data = `${DATA_PREFIX}${authQrCode2.token}`;
+      const data = `${DATA_PREFIX}${token2}`;
 
       qrCode2.update({
         data,
@@ -119,7 +122,7 @@ const AuthCode = () => {
 
   return (
     <div id="auth-qr-form" class="custom-scroll">
-      {hasActiveAccount && (
+      {hasActiveAccount() && (
         <Button
           size="smaller"
           round
