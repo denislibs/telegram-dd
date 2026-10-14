@@ -40,22 +40,20 @@ function setup(extra: Record<string, unknown> = {}, initial = 0): Setup {
   const [key, setKey] = createSignal(initial);
   const log: string[] = [];
   const dispose = createRoot((d) => {
-    insert(
-      root,
-      createComponent(Transition, {
-        get activeKey() { return key(); },
-        name: 'slide',
-        scope,
-        onStart: () => log.push('start'),
-        onStop: () => log.push('stop'),
-        children: (slide: TransitionSlide) => {
-          const b = document.createElement('b');
-          insert(b, () => `${slide.key}:${slide.isActive() ? 'active' : slide.isFrom() ? 'from' : '-'}`);
-          return b;
-        },
-        ...extra,
-      }),
-    );
+    const props: Record<string, unknown> = {
+      get activeKey() { return key(); },
+      name: 'slide',
+      scope,
+      onStart: () => log.push('start'),
+      onStop: () => log.push('stop'),
+      children: (slide: TransitionSlide) => {
+        const b = document.createElement('b');
+        insert(b, () => `${slide.key}:${slide.isActive() ? 'active' : slide.isFrom() ? 'from' : '-'}`);
+        return b;
+      },
+    };
+    Object.defineProperties(props, Object.getOwnPropertyDescriptors(extra)); // keeps getters reactive
+    insert(root, createComponent(Transition, props as never));
     return d;
   });
   return { root, scope, setKey, dispose, log };
@@ -503,4 +501,110 @@ it('backwards reveal settles on the `from` animationend, not through the 1 s fal
   animationEnd(to); // backwards `slide` animates both: `to` is watched
   await frame();
   expect(slide.scope.isAnimating.peek()).toBe(false);
+});
+
+// ---- nextKey: the next slide is rendered ahead of time (tt `nextKey`) --------
+
+function nextKeySetup(extra: Record<string, unknown> = {}, initial = 0, initialNext: number | undefined = 1) {
+  const [nextKey, setNextKey] = createSignal<number | undefined>(initialNext);
+  const rendered: number[] = [];
+  const base = setup(
+    {
+      get nextKey() {
+        return nextKey();
+      },
+      children: (slide: TransitionSlide) => {
+        rendered.push(slide.key);
+        const b = document.createElement('b');
+        insert(b, () => `${slide.key}:${slide.isActive() ? 'active' : '-'}`);
+        return b;
+      },
+      ...extra,
+    },
+    initial,
+  );
+  return { ...base, setNextKey, rendered };
+}
+
+it('nextKey: the slide is created and mounted hidden (inactive) before its key is ever active; no animation, no callbacks', async () => {
+  const { root, scope, rendered, log } = nextKeySetup();
+  const t = root.firstElementChild as HTMLElement;
+  await frame();
+  expect(rendered).toEqual([0, 1]); // 1 was rendered ahead of time
+  expect(slidesOf(t).map(classes)).toEqual([
+    'Transition_slide Transition_slide-active',
+    'Transition_slide Transition_slide-inactive',
+  ]);
+  expect(t.textContent).toBe('0:active1:-');
+  expect(classes(t)).toBe('Transition');
+  expect(scope.isAnimating.peek()).toBe(false);
+  expect(log).toEqual([]);
+});
+
+it('nextKey: switching to the pre-rendered key reuses its slide (no second render) and animates as usual; it is kept by the keep-alive', async () => {
+  const { root, setKey, setNextKey, rendered } = nextKeySetup();
+  const t = root.firstElementChild as HTMLElement;
+  await frame();
+  const [s0, s1] = slidesOf(t);
+  setNextKey(2);
+  setKey(1);
+  await frame();
+  expect(rendered).toEqual([0, 1, 2]); // slide 1 was not rendered again, slide 2 was pre-rendered
+  const [a0, a1, a2] = slidesOf(t);
+  expect([a0, a1]).toEqual([s0, s1]);
+  expect(classes(a0)).toBe('Transition_slide Transition_slide-from');
+  expect(classes(a1)).toBe('Transition_slide Transition_slide-to');
+  expect(classes(a2)).toBe('Transition_slide Transition_slide-inactive'); // the keep-alive of the step keeps {previous, active, next}
+  animationEnd(a1);
+  await frame();
+  expect(slidesOf(t)).toEqual([s0, s1, a2]);
+  expect(classes(s0)).toBe('Transition_slide Transition_slide-inactive');
+  expect(classes(a2)).toBe('Transition_slide Transition_slide-inactive');
+  expect(t.textContent).toBe('0:-1:active2:-');
+});
+
+it('nextKey: a slide that is no longer next is dropped by the next step; the new next one is mounted in key order', async () => {
+  const { root, setKey, setNextKey, rendered } = nextKeySetup();
+  const t = root.firstElementChild as HTMLElement;
+  await frame();
+  setNextKey(3);
+  await frame();
+  expect(slidesOf(t).map((s) => s.textContent)).toEqual(['0:active', '1:-', '3:-']);
+  setKey(3);
+  await frame();
+  // keep-alive after the step: previous 0 and active 3; the stale pre-rendered 1 is gone
+  expect(slidesOf(t).map((s) => s.textContent)).toEqual(['0:-', '3:active']);
+  expect(rendered).toEqual([0, 1, 3]);
+});
+
+it('nextKey: shouldCleanup and renderCount-less cleanup keep the pre-rendered slide; key 0 is not pre-rendered (tt tests the key for truthiness)', async () => {
+  const { root, setKey } = nextKeySetup({ shouldCleanup: true }, 1, 2);
+  const t = root.firstElementChild as HTMLElement;
+  await frame();
+  expect(slidesOf(t).map((s) => s.textContent)).toEqual(['1:active', '2:-']);
+  setKey(2);
+  await frame();
+  const [, s2] = slidesOf(t);
+  animationEnd(s2);
+  await frame();
+  await frame();
+  expect(slidesOf(t).map((s) => s.textContent)).toEqual(['2:active']); // 1 was cleaned up; 2 is active and nothing is next any more
+
+  const zero = nextKeySetup({}, 1, 0);
+  await frame();
+  expect(zero.rendered).toEqual([1]);
+  expect(slidesOf(zero.root.firstElementChild as HTMLElement).length).toBe(1);
+});
+
+it('nextKey: disposal disposes the pre-rendered slide', async () => {
+  const gone: number[] = [];
+  const { dispose } = nextKeySetup({
+    children: (slide: TransitionSlide) => {
+      onCleanup(() => gone.push(slide.key));
+      return document.createElement('b');
+    },
+  });
+  await frame();
+  dispose();
+  expect(new Set(gone)).toEqual(new Set([0, 1]));
 });

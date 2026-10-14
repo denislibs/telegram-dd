@@ -15,8 +15,11 @@
 //     `Transition-${name}Backwards`, previous slide `-from`, new slide `-to`, the rest `-inactive` —
 //     begins a heavy animation on the scope, watches the animated slide's own `animationend` (the `to` slide,
 //     except `reveal` and `slideFadeAndroid` going backwards: their only animation is on `from`, and with no `from`
-//     slide the step ends at once, as in tt), calls `onStart`. Which slides survive a step: `renderCount` / `shouldCleanup` keep every live slide;
-//     otherwise only {previous, active} (keep-alive).
+//     slide the step ends at once, as in tt), calls `onStart`. Which slides survive a step: `renderCount` /
+//     `shouldCleanup` keep every live slide; otherwise only {previous, active, next} (keep-alive).
+//   - `nextKey` (tt: the slide for that key is rendered ahead of time): its slide is created and attached as an
+//     `-inactive` one before it is ever active, and no step or cleanup drops it. Like tt (`if (nextKey)`), key 0 is not
+//     pre-rendered.
 //   - The END arrives through `waitForAnimationEnd` and is applied in a mutation task: the heavy
 //     animation is released first, then (unless the step was superseded or the component disposed)
 //     the classes settle (`-active` / `-inactive`), `shouldCleanup` drops slides, `shouldRestoreHeight`
@@ -55,6 +58,11 @@ export interface TransitionSlide {
 
 export interface TransitionProps {
   activeKey: number;
+  /**
+   * Pre-render the slide of this key (tt `nextKey`): it is created and mounted hidden (`-inactive`) ahead of time and is
+   * not dropped by a step or `shouldCleanup`. Key 0 is not pre-rendered (tt tests the key for truthiness).
+   */
+  nextKey?: number;
   /** CSS animation name: the container gets `Transition-${name}` (`'none'`: switch without animating). */
   name: string;
   direction?: TransitionDirection;
@@ -142,7 +150,7 @@ interface Step {
 
 /** The props the component consumes itself; everything else (`id`, `class`, `ref`, `data-*`, `on*`) is spread onto the container. */
 const OWN_PROPS = new Set([
-  'activeKey', 'name', 'direction', 'renderCount', 'shouldCleanup', 'cleanupExceptionKey', 'cleanupOnlyKey', 'shouldRestoreHeight',
+  'activeKey', 'nextKey', 'name', 'direction', 'renderCount', 'shouldCleanup', 'cleanupExceptionKey', 'cleanupOnlyKey', 'shouldRestoreHeight',
   'restoreHeightKey', 'contentSelector', 'isBlockingAnimation', 'scope', 'disableAnimation', 'slideClass', 'onStart', 'onStop', 'children',
 ]);
 const isOwnProp = (key: string) => OWN_PROPS.has(key);
@@ -198,6 +206,9 @@ export function Transition(props: TransitionProps): unknown {
     for (let i = 0; i < slides.length; i++) if (slides[i].key === key) return slides[i];
     return undefined;
   };
+
+  /** The pre-rendered key (tt: `if (nextKey)`, so 0 is none). */
+  const nextKeyNow = (): number | undefined => untrack(() => props.nextKey) || undefined;
 
   /** Create the slide for `key` (detached): its content under its own root, in the component's context. */
   function createSlide(key: number): SlideRecord {
@@ -263,11 +274,12 @@ export function Transition(props: TransitionProps): unknown {
     }
   }
 
-  /** Dispose and detach every slide `drop` selects (never the active one). */
+  /** Dispose and detach every slide `drop` selects (never the active one nor the pre-rendered next one). */
   function dropSlides(drop: (record: SlideRecord) => boolean): void {
+    const next = nextKeyNow();
     for (let i = slides.length - 1; i >= 0; i--) {
       const record = slides[i];
-      if (record.key === currentKey || !drop(record)) continue;
+      if (record.key === currentKey || record.key === next || !drop(record)) continue;
       slides.splice(i, 1);
       // A step still waiting on the removed slide would hold its heavy animation until the fallback.
       for (let j = inFlight.length - 1; j >= 0; j--) if (inFlight[j].to === record) interrupt(inFlight[j]);
@@ -353,7 +365,7 @@ export function Transition(props: TransitionProps): unknown {
       return;
     }
     const prev = findSlide(prevKey);
-    // Keep-alive: without renderCount/shouldCleanup only the previous and the new slide live on.
+    // Keep-alive: without renderCount/shouldCleanup only the previous, the new and the pre-rendered next slide live on.
     if (!props.renderCount && !props.shouldCleanup) dropSlides((record) => record !== prev);
     const name = props.name;
     if (name === 'none' || props.disableAnimation) {
@@ -401,6 +413,22 @@ export function Transition(props: TransitionProps): unknown {
       },
       applyStep,
       { name: 'transition.step' },
+    );
+    // tt `nextKey`: the slide of that key is created ahead of time and mounted hidden.
+    createMutationEffect(
+      () => {
+        const key = props.nextKey || undefined;
+        if (key !== undefined && findSlide(key) === undefined) createSlide(key);
+        return key;
+      },
+      (key) => {
+        if (key === undefined) return;
+        const record = findSlide(key);
+        if (record === undefined || natives.parentNode.call(record.el) === container) return;
+        setSlideState(record, INACTIVE_SLIDE_CLASS_NAME);
+        syncChildren();
+      },
+      { name: 'transition.nextKey' },
     );
     let restoreHeightRuns = 0;
     createEffect(
