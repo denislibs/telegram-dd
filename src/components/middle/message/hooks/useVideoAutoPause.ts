@@ -1,6 +1,7 @@
-import { createEffect, getIsHeavyAnimating, requestMeasure, watchHeavyAnimation } from 'frameact';
+import { createEffect, currentHeavyAnimationScope, requestMeasure } from 'frameact';
 
 import { type MaybeAccessor, read } from '../../../../util/accessors';
+import { isHeavyAnimatingInChain, watchHeavyAnimationInChain } from '../../../../util/heavyAnimationChain';
 
 import usePriorityPlaybackCheck, { isPriorityPlaybackActive } from '../../../../hooks/usePriorityPlaybackCheck';
 import useBackgroundMode, { isBackgroundModeActive } from '../../../../hooks/window/useBackgroundMode';
@@ -11,6 +12,8 @@ export default function useVideoAutoPause(
   isPriority?: MaybeAccessor<boolean | undefined>,
 ) {
   const { play, pause } = usePlayPause(playerRef);
+  const scope = currentHeavyAnimationScope();
+  const isFrozen = () => isHeavyAnimatingInChain(scope) || isPriorityPlaybackActive() || isBackgroundModeActive();
 
   const unfreezePlaying = () => {
     if (read(canPlay) && (read(isPriority) || !isFrozen())) {
@@ -25,8 +28,9 @@ export default function useVideoAutoPause(
   const isDisabled = () => !read(canPlay) || read(isPriority);
 
   useBackgroundMode(pause, unfreezePlayingOnRaf, isDisabled);
-  // Deviation: `watchHeavyAnimation` has no disable flag (tt's `useHeavyAnimation(…, isDisabled)`), so the callbacks check it.
-  watchHeavyAnimation(
+  // Deviation: the whole scope chain is watched (util/heavyAnimationChain.ts) and the callbacks check `isDisabled`
+  // (tt's `useHeavyAnimation(…, isDisabled)`)
+  watchHeavyAnimationInChain(
     () => {
       if (!isDisabled()) pause();
     },
@@ -92,8 +96,4 @@ function usePlayPause(mediaRef: MaybeAccessor<HTMLMediaElement | undefined>) {
   };
 
   return { play, pause };
-}
-
-function isFrozen() {
-  return getIsHeavyAnimating() || isPriorityPlaybackActive() || isBackgroundModeActive();
 }

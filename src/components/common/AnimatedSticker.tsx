@@ -3,10 +3,10 @@ import {
   createMeasureEffect,
   createMemo,
   createSignal,
-  getIsHeavyAnimating,
+  currentHeavyAnimationScope,
+  type HeavyAnimationScope,
   onDestroy,
   requestMeasure,
-  watchHeavyAnimation,
 } from 'frameact';
 import { Show } from 'frameact/dom';
 
@@ -19,6 +19,7 @@ import { IS_TAURI } from '../../util/browser/globalEnvironment';
 import buildClassName from '../../util/buildClassName';
 import buildStyle from '../../util/buildStyle';
 import generateUniqueId from '../../util/generateUniqueId';
+import { isHeavyAnimatingInChain, watchHeavyAnimationInChain } from '../../util/heavyAnimationChain';
 
 import useColorFilter from '../../hooks/stickers/useColorFilter';
 import useFlag from '../../hooks/useFlag';
@@ -63,6 +64,8 @@ const AnimatedSticker = (props: OwnProps) => {
   // Deviation: a forwarded ref is a callback prop; the element is kept in a variable and handed on to `props.ref`.
   let containerRef: HTMLDivElement | undefined;
 
+  // The scope chain of this subtree, kept for the applies below (there is no owner there to ask).
+  const heavyScope = currentHeavyAnimationScope();
   const viewId = useUniqueId();
   const rendererId = createMemo(() =>
     props.renderId && props.fitzModifier ? `${props.renderId}_${props.fitzModifier}` : props.renderId,
@@ -85,12 +88,12 @@ const AnimatedSticker = (props: OwnProps) => {
   const shouldForceOnHeavyAnimation = createMemo(() => props.forceAlways || props.forceOnHeavyAnimation);
   // Delay initialization until heavy animation ends
   const [canInitialize, markCanInitialize, unmarkCanInitialize] = useFlag(
-    !getIsHeavyAnimating() || shouldForceOnHeavyAnimation(),
+    !isHeavyAnimatingInChain(heavyScope) || shouldForceOnHeavyAnimation(),
   );
-  // Deviation: `watchHeavyAnimation` has no `isDisabled`; the callbacks are guarded instead.
-  // The transition that starts/ends a heavy animation can do it from its mutate phase; `canInitialize` feeds a measure
+  // Deviation: the whole scope chain is watched (the Transition scope of a slide AND the root: tt's hook was global), and
+  // `isDisabled` is a guard inside the callbacks. The transition that starts/ends a heavy animation can do it from its mutate phase; `canInitialize` feeds a measure
   // effect, so the write is booked into a measure task instead of dirtying that effect from the mutate phase.
-  watchHeavyAnimation(
+  watchHeavyAnimationInChain(
     () => {
       if (!shouldForceOnHeavyAnimation()) requestMeasure(unmarkCanInitialize);
     },
@@ -141,7 +144,7 @@ const AnimatedSticker = (props: OwnProps) => {
       isUnmountedRef ||
       !p.tgsUrl ||
       (p.sharedCanvas && (!p.sharedCanvasCoords || !p.sharedCanvas.offsetWidth || !p.sharedCanvas.offsetHeight)) ||
-      (getIsHeavyAnimating() && !shouldForceOnHeavyAnimation())
+      (isHeavyAnimatingInChain(heavyScope) && !shouldForceOnHeavyAnimation())
     ) {
       return;
     }
@@ -230,7 +233,7 @@ const AnimatedSticker = (props: OwnProps) => {
     if (
       !currentAnimation ||
       !(live().play || live().playSegment) ||
-      isFrozen(live().forceAlways, live().forceOnHeavyAnimation)
+      isFrozen(live().forceAlways, live().forceOnHeavyAnimation, heavyScope)
     ) {
       return;
     }
@@ -285,7 +288,7 @@ const AnimatedSticker = (props: OwnProps) => {
       }
 
       if (playKey()) {
-        if (!isFrozen(live().forceAlways, live().forceOnHeavyAnimation)) {
+        if (!isFrozen(live().forceAlways, live().forceOnHeavyAnimation, heavyScope)) {
           playAnimation(live().noLoop);
         }
       } else {
@@ -309,8 +312,8 @@ const AnimatedSticker = (props: OwnProps) => {
     },
   );
 
-  // Deviation: `watchHeavyAnimation` has no `isDisabled`; the callbacks are guarded instead.
-  watchHeavyAnimation(
+  // Deviation: see above (scope chain, guarded callbacks).
+  watchHeavyAnimationInChain(
     () => {
       if (playKey() && !shouldForceOnHeavyAnimation()) pauseAnimation();
     },
@@ -348,7 +351,9 @@ const AnimatedSticker = (props: OwnProps) => {
 
 export default AnimatedSticker;
 
-function isFrozen(forceAlways = false, forceOnHeavyAnimation = false) {
+function isFrozen(forceAlways = false, forceOnHeavyAnimation = false, scope?: HeavyAnimationScope) {
   if (forceAlways) return false;
-  return (!forceOnHeavyAnimation && getIsHeavyAnimating()) || isPriorityPlaybackActive() || isBackgroundModeActive();
+  return (
+    (!forceOnHeavyAnimation && isHeavyAnimatingInChain(scope)) || isPriorityPlaybackActive() || isBackgroundModeActive()
+  );
 }

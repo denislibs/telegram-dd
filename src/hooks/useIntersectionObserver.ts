@@ -1,9 +1,10 @@
-import { type Accessor, createEffect, createSignal, watchHeavyAnimation } from 'frameact';
+import { type Accessor, createEffect, createSignal } from 'frameact';
 
 import type { Scheduler } from '../util/schedulers';
 
 import { type MaybeAccessor, read } from '../util/accessors';
 import { type CallbackManager, createCallbackManager } from '../util/callbacks';
+import { watchHeavyAnimationInChain } from '../util/heavyAnimationChain';
 import { debounce, throttle, throttleWith } from '../util/schedulers';
 
 type TargetCallback = (entry: IntersectionObserverEntry) => void;
@@ -68,7 +69,8 @@ export function useIntersectionObserver(
     }
   };
 
-  watchHeavyAnimation(freeze, unfreeze);
+  // Deviation: tt froze for every heavy animation; here the whole scope chain is watched (util/heavyAnimationChain.ts).
+  watchHeavyAnimationInChain(freeze, unfreeze);
 
   createEffect(
     () => read(isDisabled),
