@@ -1,0 +1,7 @@
+node_modules
+dist
+*.log
+.DS_Store
+# read-only reference clone of Ajaxy/telegram-tt (see README)
+/reference/
+.env.local

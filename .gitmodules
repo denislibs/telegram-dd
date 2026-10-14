@@ -1,0 +1,3 @@
+[submodule "src/vendor/frameact"]
+	path = src/vendor/frameact
+	url = https://github.com/denislibs/frameact.git
