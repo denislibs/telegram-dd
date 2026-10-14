@@ -30,17 +30,17 @@ const RoundTimer = (props: OwnProps) => {
 
   createEffect(
     () => [timeLeft(), props.onEnd] as const,
-    ([currentTimeLeft]) => {
+    ([currentTimeLeft, onEnd2]) => {
       if (currentTimeLeft <= 0) {
-        props.onEnd?.();
+        onEnd2?.();
       }
     },
   );
 
   createEffect(
     () => props.duration,
-    () => {
-      setTimeLeft(props.duration);
+    (duration2) => {
+      setTimeLeft(duration2);
     },
   );
 

@@ -1,5 +1,5 @@
 import type { ChangeEvent } from 'react';
-import { createEffect, createSignal, requestMutation } from 'frameact';
+import { createEffect, createSignal, requestMeasure } from 'frameact';
 import { mergeProps } from 'frameact/dom';
 
 import { MIN_PASSWORD_LENGTH } from '../../config';
@@ -51,8 +51,8 @@ const PasswordForm = (rawProps: OwnProps) => {
 
   createEffect(
     () => props.shouldResetValue,
-    () => {
-      if (props.shouldResetValue) {
+    (shouldResetValue2) => {
+      if (shouldResetValue2) {
         setPassword('');
         setCanSubmit(false);
       }
@@ -67,9 +67,10 @@ const PasswordForm = (rawProps: OwnProps) => {
 
   createEffect(
     () => props.error,
-    () => {
-      if (props.error) {
-        requestMutation(() => {
+    (error2) => {
+      if (error2) {
+        // Deviation: `focus()`/`select()` are layout reads for stricterdom, so the task is a measure task (tt: requestMutation).
+        requestMeasure(() => {
           inputRef.focus();
           inputRef.select();
         });

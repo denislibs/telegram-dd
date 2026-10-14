@@ -94,8 +94,8 @@ const Menu = (rawProps: OwnProps) => {
   );
 
   createEffect(
-    () => [props.isOpen, props.onClose],
-    () => (props.isOpen ? captureEscKeyListener(props.onClose) : undefined),
+    () => [props.isOpen, props.onClose] as const,
+    ([isOpen2, onClose2]) => (isOpen2 ? captureEscKeyListener(onClose2) : undefined),
   );
 
   useHistoryBack({
@@ -106,9 +106,9 @@ const Menu = (rawProps: OwnProps) => {
 
   createEffect(
     () => [props.isOpen],
-    (_deps, prev) => {
+    ([isOpen2], prev) => {
       const [prevIsOpen] = prev ?? [];
-      if (props.isOpen || (!props.isOpen && prevIsOpen === true)) {
+      if (isOpen2 || (!isOpen2 && prevIsOpen === true)) {
         beginHeavyAnimation(ANIMATION_DURATION);
       }
     },

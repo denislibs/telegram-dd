@@ -198,8 +198,8 @@ const App = () => {
 
   createEffect(
     () => props.inactiveReason,
-    () => {
-      if (props.inactiveReason) {
+    (inactiveReason2) => {
+      if (inactiveReason2) {
         document.title = INACTIVE_PAGE_TITLE;
       } else {
         document.title = ACTIVE_PAGE_TITLE;
@@ -234,23 +234,23 @@ const App = () => {
   });
 
   createMutationEffect(
-    () => [props.theme, props.customBackgroundColor],
-    () => {
+    () => [props.theme, props.customBackgroundColor] as const,
+    ([theme2, customBackgroundColor2]) => {
       // Prefer the chosen wallpaper's base color, so the pre-render base matches the
       // actual wallpaper instead of flashing the built-in default first.
       document.body.style.setProperty(
         '--theme-background-color',
-        props.customBackgroundColor || (props.theme === 'dark' ? DARK_THEME_BG_COLOR : LIGHT_THEME_BG_COLOR),
+        customBackgroundColor2 || (theme2 === 'dark' ? DARK_THEME_BG_COLOR : LIGHT_THEME_BG_COLOR),
       );
     },
   );
 
   createMutationEffect(
-    () => [props.actionMessageBg, props.theme],
-    () => {
+    () => [props.actionMessageBg, props.theme] as const,
+    ([actionMessageBg2, theme2]) => {
       // Fall back to the theme default when the tint is unset (e.g. a photo wallpaper without a
       // thumbnail), so service chips don't keep the previous wallpaper's tint.
-      document.body.style.setProperty('--action-message-bg', props.actionMessageBg || getActionMessageBg(props.theme)!);
+      document.body.style.setProperty('--action-message-bg', actionMessageBg2 || getActionMessageBg(theme2)!);
     },
   );
 

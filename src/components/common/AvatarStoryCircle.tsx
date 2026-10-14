@@ -85,21 +85,22 @@ function AvatarStoryCircle(ownProps: OwnProps) {
   });
 
   createMutationEffect(
-    () => [
-      canvas(),
-      props.appTheme,
-      isCloseFriend(),
-      adaptedSize(),
-      values().read,
-      values().total,
-      props.withExtraGap,
-      props.extraGapPercent,
-      dpr(),
-      props.colors,
-      props.size,
-      strokeWidth(),
-    ],
-    () => {
+    () =>
+      [
+        canvas(),
+        props.appTheme,
+        isCloseFriend(),
+        adaptedSize(),
+        values().read,
+        values().total,
+        props.withExtraGap,
+        props.extraGapPercent,
+        dpr(),
+        props.colors,
+        props.size,
+        strokeWidth(),
+      ] as const,
+    ([, appTheme2, , , , , withExtraGap2, extraGapPercent2, , colors2]) => {
       const canvasEl = canvas();
       if (!canvasEl) {
         return;
@@ -110,11 +111,11 @@ function AvatarStoryCircle(ownProps: OwnProps) {
         size: adaptedSize(),
         strokeWidth: strokeWidth(),
         segmentsCount: values().total,
-        colorStops: props.colors || (isCloseFriend() ? GREEN : BLUE),
+        colorStops: colors2 || (isCloseFriend() ? GREEN : BLUE),
         readSegmentsCount: values().read,
-        withExtraGap: props.withExtraGap,
-        extraGapPercent: props.extraGapPercent,
-        readSegmentColor: props.appTheme === 'dark' ? DARK_GRAY : GRAY,
+        withExtraGap: withExtraGap2,
+        extraGapPercent: extraGapPercent2,
+        readSegmentColor: appTheme2 === 'dark' ? DARK_GRAY : GRAY,
         dpr: dpr(),
       });
     },

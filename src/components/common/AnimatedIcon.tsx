@@ -1,4 +1,4 @@
-import { createSignal } from 'frameact';
+import { createMemo, createSignal } from 'frameact';
 import { mergeProps, splitProps } from 'frameact/dom';
 
 import type { OwnProps as AnimatedStickerProps } from './AnimatedSticker';
@@ -38,6 +38,10 @@ function AnimatedIcon(rawProps: OwnProps) {
 
   const [playKey, setPlayKey] = createSignal(String(Math.random()));
 
+  // A conditional prop expression compiles to a memo created inside the prop getter, which AnimatedSticker reads in
+  // effect applies (no owner there): the choice lives in a memo of its own.
+  const play = createMemo(() => (props.play === true ? playKey() : props.play));
+
   const handleClick = () => {
     if (props.play === true) {
       setPlayKey(String(Math.random()));
@@ -54,7 +58,7 @@ function AnimatedIcon(rawProps: OwnProps) {
       }}
       className={props.className}
       size={props.size}
-      play={props.play === true ? playKey() : props.play}
+      play={play()}
       noLoop={props.noLoop}
       onClick={!props.nonInteractive ? handleClick : undefined}
       onLoad={handleLoad}

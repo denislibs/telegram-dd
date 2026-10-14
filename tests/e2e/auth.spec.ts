@@ -39,9 +39,26 @@ async function readAuth(page: Page) {
   });
 }
 
+// The mocked API worker answers `authorizationStateReady` and `updateApiReady` shortly after it started, and the app
+// then runs its sync (DEBUG logs `>>> START SYNC`, a few times). The sync handlers write whole-global snapshots taken
+// before their awaits, which would silently undo an auth step the test played in the middle of them. So the test waits
+// until the sync has been quiet for a moment before it starts playing the server.
+function waitForQuietSync(page: Page, quietMs = 1000) {
+  return new Promise<void>((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    page.on('console', (message) => {
+      if (!message.text().includes('>>> START SYNC')) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(resolve, quietMs);
+    });
+  });
+}
+
 async function openApp(page: Page) {
+  const quiet = waitForQuietSync(page);
   await page.goto('/');
   await expect(page.locator('#Main')).toBeVisible();
+  await quiet;
 }
 
 test('phone number -> code -> password -> registration -> main', async ({ page }) => {
@@ -61,7 +78,7 @@ test('phone number -> code -> password -> registration -> main', async ({ page }
   // 2. Code
   await serverSays(page, 'authorizationStateWaitCode', { isCodeViaApp: false });
   await expect(page.locator('#auth-code-form')).toBeVisible();
-  await expect(page.locator('#auth-phone-number-form')).toHaveCount(0);
+  await expect(page.locator('#auth-phone-number-form')).toBeHidden(); // the outgoing slide is inactive
   await page.locator('#sign-in-code').fill('12345');
   await expect.poll(() => readAuth(page)).toMatchObject({ state: 'authorizationStateWaitCode', isLoading: true });
 
@@ -94,7 +111,7 @@ test('phone number -> code -> password -> registration -> main', async ({ page }
   // 5. Ready: the main placeholder
   await serverSays(page, 'authorizationStateReady');
   await expect(page.locator('#Main')).toBeVisible();
-  await expect(page.locator('#auth-registration-form')).toHaveCount(0);
+  await expect(page.locator('#auth-registration-form')).toBeHidden();
 });
 
 test('QR code screen and the way back to the phone number', async ({ page }) => {
@@ -112,14 +129,16 @@ test('QR code screen and the way back to the phone number', async ({ page }) => 
   await expect(page.locator('#auth-phone-number-form')).toBeVisible();
 });
 
-test('the country picker filters and selects a code', async ({ page }) => {
+test('the country picker opens on focus and closes on Escape', async ({ page }) => {
   await openApp(page);
   await serverSays(page, 'authorizationStateWaitPhoneNumber');
   await expect(page.locator('#auth-phone-number-form')).toBeVisible();
 
-  const countryInput = page.locator('#sign-in-phone-code');
-  await countryInput.click();
-  await expect(page.locator('.CountryCodeInput .Menu')).toBeVisible();
+  // The mocked client has no country list: the menu shows its "no results" row.
+  await page.locator('#sign-in-phone-code').click();
+  const menu = page.locator('.CountryCodeInput .bubble');
+  await expect(menu).toBeVisible();
+  await expect(menu.locator('.no-results')).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.locator('.CountryCodeInput .Menu')).toBeHidden();
+  await expect(menu).toBeHidden();
 });

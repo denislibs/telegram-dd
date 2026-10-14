@@ -250,12 +250,12 @@ describe('effects', () => {
     );
     expectIncludes(
       code,
-      'createEffect(() => props.isOpen, () => { if (!props.isOpen) return undefined; return subscribe(); });',
+      'createEffect(() => props.isOpen, (isOpen2) => { if (!isOpen2) return undefined; return subscribe(); });',
     );
     expectIncludes(code, 'onMount(() => { mount(); return () => unmount(); });');
     // an accessor dependency is received as a value by apply
     expectIncludes(code, 'createMeasureEffect(() => n(), (n2) => { const h = el.offsetHeight; use(h, n2); });');
-    expectIncludes(code, 'createMutationEffect(() => [props.isOpen, n()] as const, ([, n2]) => {');
+    expectIncludes(code, 'createMutationEffect(() => [props.isOpen, n()] as const, ([isOpen2, n2]) => {');
     expectIncludes(code, 'onDestroy(() => stop());');
     expectIncludes(code, 'onMount(() => once());');
     expect(report.hits).toMatchObject({ onMount: 2, onDestroy: 1, createMeasureEffect: 1, createMutationEffect: 1 });
@@ -275,7 +275,7 @@ describe('effects', () => {
       code,
       'createEffect(() => [props.a], (_deps, prev) => { const [prevA] = prev ?? []; log(prevA, props.a); });',
     );
-    expectIncludes(code, 'createEffect(() => props.a, () => { sync(props.a); });');
+    expectIncludes(code, 'createEffect(() => props.a, (a2) => { sync(a2); });');
     expect(report.todos.map((t) => t.kind)).toEqual(['sync-effect']);
   });
 });
@@ -493,7 +493,7 @@ const X = (props: { chat: ApiChat }) => {
     expectIncludes(code, 'return trackGlobal(() => getCanPostInChat(chat()));');
     expectIncludes(code, 'const canPost = createMemo(() => trackGlobal(() => getCanPostInChat(props.chat)));');
     expectIncludes(code, 'const status = useSelector((global) => getGroupStatus(global, props.chat));');
-    expectIncludes(code, 'log(trackGlobal(() => getPeerColorCount(props.chat)));');
+    expectIncludes(code, 'log(trackGlobal(() => getPeerColorCount(chat2)));');
     expectIncludes(code, 'const onClick = () => sortChatIds(getGlobal(), ids);');
     expectIncludes(code, 'title={trackGlobal(() => renderMessageSummary(props.chat))}');
     expectIncludes(code, "import { getGlobal, trackGlobal } from '../../global';");

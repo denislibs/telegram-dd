@@ -5,6 +5,10 @@ import type { Page } from '@playwright/test';
 export const DEFAULT_IGNORED_CONSOLE = [
   /GL Driver Message/, // headless Chromium software WebGL ("GPU stall due to ReadPixels")
   /\[vite\]/, // HMR client chatter
+  // frameact's DEV timing hints ("Slow effect run: 9 ms", "Slow measure drain", "Slow store update") are wall-clock
+  // measurements: they fire on a cold dev server whenever the parallel workers compete for the CPU. Real jank is the
+  // job of the long-task gate (tests/perf/longTasks.ts), which runs on a production build.
+  /^\[frameact(?:\/store)?\] Slow /,
 ];
 
 // Requests to the app origin that are expected to fail. The app boots the in-repo MockClient (APP_MOCKED_CLIENT=1) on

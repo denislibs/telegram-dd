@@ -136,8 +136,8 @@ const Modal = (props: OwnProps) => {
 
   createEffect(
     () => props.isOpen,
-    () => {
-      if (!props.isOpen) {
+    (isOpen2) => {
+      if (!isOpen2) {
         return undefined;
       }
 
@@ -158,8 +158,9 @@ const Modal = (props: OwnProps) => {
   };
 
   createEffect(
-    () => [props.isOpen, props.onClose, handleEnter],
-    () => (props.isOpen ? captureKeyboardListeners({ onEsc: props.onClose, onEnter: handleEnter }) : undefined),
+    () => [props.isOpen, props.onClose, handleEnter] as const,
+    ([isOpen2, onClose2]) =>
+      isOpen2 ? captureKeyboardListeners({ onEsc: onClose2, onEnter: handleEnter }) : undefined,
   );
   createEffect(
     () => [props.isOpen, modalElement()] as const,
@@ -168,8 +169,8 @@ const Modal = (props: OwnProps) => {
 
   createMutationEffect(
     () => [props.isNativeDialog, shouldRender(), modalElement()] as const,
-    ([, isRendered, element]) => {
-      if (!props.isNativeDialog || !isRendered) {
+    ([isNativeDialog2, isRendered, element]) => {
+      if (!isNativeDialog2 || !isRendered) {
         return undefined;
       }
 
@@ -192,8 +193,8 @@ const Modal = (props: OwnProps) => {
 
   createEffect(
     () => [props.isNativeDialog, props.isOpen, props.onClose, shouldRender(), modalElement()] as const,
-    ([, , , isRendered, element]) => {
-      if (!props.isNativeDialog || !isRendered) {
+    ([isNativeDialog2, , , isRendered, element]) => {
+      if (!isNativeDialog2 || !isRendered) {
         return undefined;
       }
 

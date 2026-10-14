@@ -1,10 +1,8 @@
 import { createMemo, createMutationEffect } from 'frameact';
-import { disableStrict, enableStrict } from 'frameact/stricterdom';
 import { getActions, withGlobal } from '../../global';
 
 import type { GlobalState } from '../../global/types';
 
-import { STRICTERDOM_ENABLED } from '../../config';
 import { createMediaTransition } from '../../lib/kit';
 import { selectSharedSettings } from '../../global/selectors/sharedState';
 import { oldSetLanguage } from '../../util/oldLangProvider';
@@ -33,7 +31,6 @@ const DATA_PREFIX = 'tg://login?token=';
 const QR_SIZE = 280;
 const QR_PLANE_SIZE = 54;
 const QR_IMAGE_SIZE_RATIO = 0.4;
-const QR_CODE_MUTATION_DURATION = 50; // The library is asynchronous and we need to wait for its mutation code
 
 const AuthCode = () => {
   const props = withGlobal({}, mapStateToProps);
@@ -65,6 +62,8 @@ const AuthCode = () => {
 
   const { ref: qrInnerRef } = createMediaTransition({ hasMediaData: () => Boolean(isQrMounted()) });
 
+  // Deviation: tt switched stricterdom off around the library (`disableStrict()` + a 50 ms timer); the library draws into
+  // the container asynchronously, so the container is marked `data-stricterdom-ignore` instead (a third-party subtree).
   createMutationEffect(
     () => [isConnected(), authQrCode(), isQrMounted(), qrCode()] as const,
     ([isConnected2, authQrCode2, isQrMounted2, qrCode2]) => {
@@ -81,10 +80,6 @@ const AuthCode = () => {
       const container = qrCodeRef;
       const data = `${DATA_PREFIX}${authQrCode2.token}`;
 
-      if (STRICTERDOM_ENABLED) {
-        disableStrict();
-      }
-
       qrCode2.update({
         data,
       });
@@ -92,12 +87,6 @@ const AuthCode = () => {
       if (!isQrMounted2) {
         qrCode2.append(container);
         markQrMounted();
-      }
-
-      if (STRICTERDOM_ENABLED) {
-        window.setTimeout(() => {
-          enableStrict();
-        }, QR_CODE_MUTATION_DURATION);
       }
 
       return undefined;
@@ -143,7 +132,12 @@ const AuthCode = () => {
       <div class="auth-form qr">
         <div class="qr-outer">
           <div ref={qrInnerRef} class="qr-inner">
-            <div class="qr-container" ref={qrCodeRef} style={`width: ${QR_SIZE}px; height: ${QR_SIZE}px`} />
+            <div
+              class="qr-container"
+              ref={qrCodeRef}
+              data-stricterdom-ignore
+              style={`width: ${QR_SIZE}px; height: ${QR_SIZE}px`}
+            />
             <AnimatedIcon
               tgsUrl={LOCAL_TGS_URLS.QrPlane}
               size={QR_PLANE_SIZE}

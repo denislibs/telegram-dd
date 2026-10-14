@@ -16,7 +16,7 @@ test.describe('boot does not depend on the lazy actions chunk', () => {
     await page.route(/\/global\/actions\/all(\.ts)?(\?.*)?$/, (route) => route.abort('failed'));
     await page.goto('/');
 
-    await expect(page.getByRole('heading', { name: 'Telegram on frameact' })).toBeVisible();
+    await expect(page.locator('#Main')).toBeVisible();
     await expect
       .poll(() =>
         page.evaluate(() =>

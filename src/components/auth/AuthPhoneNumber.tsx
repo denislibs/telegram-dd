@@ -117,18 +117,18 @@ const AuthPhoneNumber = () => {
 
   createEffect(
     () => [isConnected(), props.language] as const,
-    ([isConnected2]) => {
+    ([isConnected2, language2]) => {
       if (isConnected2) {
-        loadCountryList({ langCode: props.language });
+        loadCountryList({ langCode: language2 });
       }
     },
   );
 
   createEffect(
     () => [country(), nearestCountry(), isTouched(), props.phoneCodeList] as const,
-    ([country2, nearestCountry2, isTouched2]) => {
-      if (nearestCountry2 && props.phoneCodeList && !country2 && !isTouched2) {
-        setCountry(getCountryCodeByIso(props.phoneCodeList, nearestCountry2));
+    ([country2, nearestCountry2, isTouched2, phoneCodeList2]) => {
+      if (nearestCountry2 && phoneCodeList2 && !country2 && !isTouched2) {
+        setCountry(getCountryCodeByIso(phoneCodeList2, nearestCountry2));
       }
     },
   );

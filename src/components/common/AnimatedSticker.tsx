@@ -88,12 +88,14 @@ const AnimatedSticker = (props: OwnProps) => {
     !getIsHeavyAnimating() || shouldForceOnHeavyAnimation(),
   );
   // Deviation: `watchHeavyAnimation` has no `isDisabled`; the callbacks are guarded instead.
+  // The transition that starts/ends a heavy animation can do it from its mutate phase; `canInitialize` feeds a measure
+  // effect, so the write is booked into a measure task instead of dirtying that effect from the mutate phase.
   watchHeavyAnimation(
     () => {
-      if (!shouldForceOnHeavyAnimation()) unmarkCanInitialize();
+      if (!shouldForceOnHeavyAnimation()) requestMeasure(unmarkCanInitialize);
     },
     () => {
-      if (!shouldForceOnHeavyAnimation()) markCanInitialize();
+      if (!shouldForceOnHeavyAnimation()) requestMeasure(markCanInitialize);
     },
   );
   createEffect(
@@ -108,19 +110,43 @@ const AnimatedSticker = (props: OwnProps) => {
     isUnmountedRef = true;
   });
 
+  // Deviation: `init`, `playAnimation` and the effect bodies run in effect applies, where a prop whose value is a
+  // conditional expression (the compiler wraps it in a memo inside the getter) cannot be read: no owner (frameact DEV
+  // error). The props they need are read in one memo of this component.
+  const live = createMemo(() => ({
+    tgsUrl: props.tgsUrl,
+    sharedCanvas: props.sharedCanvas,
+    sharedCanvasCoords: props.sharedCanvasCoords,
+    size: props.size,
+    noLoop: props.noLoop,
+    quality: props.quality,
+    isLowPriority: props.isLowPriority,
+    fitzModifier: props.fitzModifier,
+    speed: props.speed,
+    seekToEnd: props.seekToEnd,
+    onLoad: props.onLoad,
+    onEnded: props.onEnded,
+    onLoop: props.onLoop,
+    onFrame: props.onFrame,
+    play: props.play,
+    playSegment: props.playSegment,
+    forceAlways: props.forceAlways,
+    forceOnHeavyAnimation: props.forceOnHeavyAnimation,
+  }));
+
   const init = () => {
+    const p = live();
     if (
       animationRef ||
       isUnmountedRef ||
-      !props.tgsUrl ||
-      (props.sharedCanvas &&
-        (!props.sharedCanvasCoords || !props.sharedCanvas.offsetWidth || !props.sharedCanvas.offsetHeight)) ||
+      !p.tgsUrl ||
+      (p.sharedCanvas && (!p.sharedCanvasCoords || !p.sharedCanvas.offsetWidth || !p.sharedCanvas.offsetHeight)) ||
       (getIsHeavyAnimating() && !shouldForceOnHeavyAnimation())
     ) {
       return;
     }
 
-    const container = containerRef || props.sharedCanvas;
+    const container = containerRef || p.sharedCanvas;
     if (!container) {
       return;
     }
@@ -131,30 +157,30 @@ const AnimatedSticker = (props: OwnProps) => {
     }
 
     const newAnimation = TLottie.init(
-      props.tgsUrl,
+      p.tgsUrl,
       container,
       rendererId() || generateUniqueId(),
       {
-        size: props.size,
-        noLoop: props.noLoop,
-        quality: props.quality,
-        isLowPriority: props.isLowPriority,
-        coords: props.sharedCanvasCoords,
-        fitzModifier: props.fitzModifier,
+        size: p.size,
+        noLoop: p.noLoop,
+        quality: p.quality,
+        isLowPriority: p.isLowPriority,
+        coords: p.sharedCanvasCoords,
+        fitzModifier: p.fitzModifier,
       },
       viewId,
       colorRef(),
-      props.onLoad,
-      props.onEnded,
-      props.onLoop,
-      props.onFrame,
+      p.onLoad,
+      p.onEnded,
+      p.onLoop,
+      p.onFrame,
     );
 
-    if (props.speed) {
-      newAnimation.setSpeed(props.speed);
+    if (p.speed) {
+      newAnimation.setSpeed(p.speed);
     }
 
-    if (props.seekToEnd) {
+    if (p.seekToEnd) {
       newAnimation.seekToEnd();
     }
 
@@ -188,8 +214,9 @@ const AnimatedSticker = (props: OwnProps) => {
   createEffect(
     () => [props.speed, animation()],
     () => {
-      if (typeof props.speed === 'number') {
-        animation()?.setSpeed(props.speed);
+      const { speed } = live();
+      if (typeof speed === 'number') {
+        animation()?.setSpeed(speed);
       }
     },
   );
@@ -202,15 +229,16 @@ const AnimatedSticker = (props: OwnProps) => {
     const currentAnimation = animation();
     if (
       !currentAnimation ||
-      !(props.play || props.playSegment) ||
-      isFrozen(props.forceAlways, props.forceOnHeavyAnimation)
+      !(live().play || live().playSegment) ||
+      isFrozen(live().forceAlways, live().forceOnHeavyAnimation)
     ) {
       return;
     }
 
-    if (props.playSegment) {
-      currentAnimation.playSegment(props.playSegment, shouldRestart, viewId);
-    } else if (props.seekToEnd) {
+    const { playSegment } = live();
+    if (playSegment) {
+      currentAnimation.playSegment(playSegment, shouldRestart, viewId);
+    } else if (live().seekToEnd) {
       currentAnimation.seekToEnd();
     } else {
       currentAnimation.play(shouldRestart, viewId);
@@ -232,8 +260,8 @@ const AnimatedSticker = (props: OwnProps) => {
     () => [props.noLoop, animation()],
     (_deps, prev) => {
       const [prevNoLoop] = prev ?? [];
-      if (prevNoLoop !== undefined && props.noLoop !== prevNoLoop) {
-        animation()?.setNoLoop(props.noLoop);
+      if (prevNoLoop !== undefined && live().noLoop !== prevNoLoop) {
+        animation()?.setNoLoop(live().noLoop);
       }
     },
   );
@@ -244,7 +272,7 @@ const AnimatedSticker = (props: OwnProps) => {
     ([x, y], prev) => {
       const [prevX, prevY] = prev ?? [];
       if (prevX !== undefined && (x !== prevX || y !== prevY)) {
-        animation()?.setSharedCanvasCoords(viewId, props.sharedCanvasCoords);
+        animation()?.setSharedCanvasCoords(viewId, live().sharedCanvasCoords);
       }
     },
   );
@@ -257,8 +285,8 @@ const AnimatedSticker = (props: OwnProps) => {
       }
 
       if (playKey()) {
-        if (!isFrozen(props.forceAlways, props.forceOnHeavyAnimation)) {
-          playAnimation(props.noLoop);
+        if (!isFrozen(live().forceAlways, live().forceOnHeavyAnimation)) {
+          playAnimation(live().noLoop);
         }
       } else {
         pauseAnimation();
@@ -273,8 +301,8 @@ const AnimatedSticker = (props: OwnProps) => {
       if (currentAnimation) {
         if (isFirstRenderRef) {
           isFirstRenderRef = false;
-        } else if (props.tgsUrl) {
-          currentAnimation.changeData(props.tgsUrl, props.fitzModifier);
+        } else if (live().tgsUrl) {
+          currentAnimation.changeData(live().tgsUrl!, live().fitzModifier);
           playAnimation();
         }
       }

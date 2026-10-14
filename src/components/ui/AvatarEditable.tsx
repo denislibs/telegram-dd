@@ -26,8 +26,8 @@ const AvatarEditable = (props: OwnProps) => {
 
   createEffect(
     () => props.currentAvatarBlobUrl,
-    () => {
-      setCroppedBlobUrl(props.currentAvatarBlobUrl);
+    (currentAvatarBlobUrl2) => {
+      setCroppedBlobUrl(currentAvatarBlobUrl2);
     },
   );
 

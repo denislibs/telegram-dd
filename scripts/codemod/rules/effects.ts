@@ -49,11 +49,24 @@ function depsText(ctx: Ctx, deps: t.ArrayExpression, keepArray: boolean, asConst
  * value it was written for (teact's closure semantics) and TypeScript narrows it.
  */
 function shadowedDeps(deps: t.ArrayExpression, kinds: Kinds | undefined): string[] | undefined {
-  if (!kinds) return undefined;
   const names: string[] = [];
   let any = false;
   for (const element of deps.elements) {
-    if (element?.type === 'Identifier' && !names.includes(element.name)) {
+    // `props.error`: a prop read in the apply half would evaluate the prop getter there, and a getter that the compiler
+    // wrapped in a memo (a conditional / logical expression at the call site) cannot be read in an apply (no owner).
+    if (
+      element?.type === 'MemberExpression' &&
+      !element.computed &&
+      element.object.type === 'Identifier' &&
+      element.object.name === 'props' &&
+      element.property.type === 'Identifier' &&
+      !names.includes(`props.${element.property.name}`)
+    ) {
+      names.push(`props.${element.property.name}`);
+      any = true;
+      continue;
+    }
+    if (kinds && element?.type === 'Identifier' && !names.includes(element.name)) {
       const kind = kinds.byName.get(element.name);
       if (kind === 'accessor' || kind === 'reactive' || kind === 'thunk') {
         names.push(element.name);
@@ -67,6 +80,9 @@ function shadowedDeps(deps: t.ArrayExpression, kinds: Kinds | undefined): string
   while (names.length && names[names.length - 1] === '') names.pop();
   return names;
 }
+
+/** `props.error` → `error2`, `isOpen` → `isOpen2` (tt's `no-shadow` is on: the parameter cannot reuse the name). */
+const paramName = (dep: string) => `${dep.startsWith('props.') ? dep.slice(6) : dep}2`;
 
 export const effectsRule: Rule = {
   name: 'effects',
@@ -189,18 +205,32 @@ export const effectsRule: Rule = {
           const arrow = fnNode as t.ArrowFunctionExpression | t.FunctionExpression;
           // The parameter is `name2`, not `name`: tt's `no-shadow` is on. The reads of the accessor inside the callback
           // become reads of the parameter (the value the compute half returned), so TypeScript still narrows them.
-          const renamed = shadowed.map((dep) => (dep ? `${dep}2` : dep));
+          const renamed = shadowed.map((dep) => (dep ? paramName(dep) : dep));
           const pattern = keepArray ? `[${renamed.join(', ')}]` : renamed[0];
           if (arrow.params.length === 0) {
             const open = ctx.code.indexOf('(', arrow.start!);
             if (open !== -1 && open < arrow.body.start!) {
               ctx.insertAfter(open + 1, pattern);
+              const insideCallback = (node: t.Node) => node.start! >= arrow.start! && node.end! <= arrow.end!;
               for (const dep of shadowed.filter(Boolean)) {
+                if (dep.startsWith('props.')) {
+                  const prop = dep.slice(6);
+                  path.traverse({
+                    MemberExpression(member) {
+                      const node = member.node;
+                      if (!insideCallback(node) || node.computed) return;
+                      if (node.object.type !== 'Identifier' || node.object.name !== 'props') return;
+                      if (node.property.type !== 'Identifier' || node.property.name !== prop) return;
+                      // an assignment target (`props.x = …`) is not a read
+                      if (member.parentPath.isAssignmentExpression({ left: node })) return;
+                      ctx.overwrite(node, paramName(dep));
+                    },
+                  });
+                  continue;
+                }
                 const binding = path.scope.getBinding(dep);
                 if (!binding) continue;
-                rewriteReads(ctx, binding, `${dep}2`, {
-                  filter: (ref) => ref.node.start! >= arrow.start! && ref.node.end! <= arrow.end!,
-                });
+                rewriteReads(ctx, binding, paramName(dep), { filter: (ref) => insideCallback(ref.node) });
               }
             }
           }
