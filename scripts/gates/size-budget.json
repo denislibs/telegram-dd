@@ -1,6 +1,17 @@
 {
   "headroom": 0.1,
   "chunks": {
+    "assets/all.js": {
+      "kind": "chunk",
+      "baseline": {
+        "brotli": 92861,
+        "gzip": 111940
+      },
+      "budget": {
+        "brotli": 102148,
+        "gzip": 123135
+      }
+    },
     "assets/buffer.js": {
       "kind": "entry",
       "baseline": {
@@ -26,12 +37,12 @@
     "assets/index.js": {
       "kind": "entry",
       "baseline": {
-        "brotli": 103359,
-        "gzip": 121562
+        "brotli": 103460,
+        "gzip": 121560
       },
       "budget": {
-        "brotli": 113695,
-        "gzip": 133719
+        "brotli": 113807,
+        "gzip": 133716
       }
     },
     "assets/waveWorker.min.js": {
@@ -104,11 +115,11 @@
   "totals": {
     "js": {
       "baseline": {
-        "brotli": 422288,
+        "brotli": 422479,
         "gzip": 510475
       },
       "budget": {
-        "brotli": 464517,
+        "brotli": 464727,
         "gzip": 561523
       }
     },

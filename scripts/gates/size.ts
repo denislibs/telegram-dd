@@ -6,8 +6,8 @@
 //   pnpm gates:size --update --headroom 0.05
 //
 // Budgeted: every entry chunk (scripts and stylesheets referenced from dist/index.html) and every worker chunk,
-// each by brotli and gzip size, plus the total of all JS and the total of all CSS. Other (lazy) chunks are only
-// reported and counted in the totals. Chunk names are matched without their content hash (`index-Ab12Cd34.js` is
+// each by brotli and gzip size, plus the total of all JS and the total of all CSS. Lazy chunks are only reported and
+// counted in the totals, except those listed in BUDGETED_LAZY (the chunk that carries the actions grows with the port). Chunk names are matched without their content hash (`index-Ab12Cd34.js` is
 // `assets/index.js`).
 import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -25,6 +25,10 @@ type Budget = {
   totals: { js: Budgeted; css: Budgeted };
 };
 type Measured = Size & { name: string; kind: Kind; ext: 'js' | 'css'; raw: number };
+
+// Lazy chunks that get their own budget (assets/all.js carries the actions that tt loads with its Main bundle).
+const BUDGETED_LAZY = new Set(['assets/all.js']);
+const isBudgeted = (m: { kind: Kind; name: string }) => m.kind !== 'chunk' || BUDGETED_LAZY.has(m.name);
 
 const args = parseArgs(process.argv.slice(2), ['dist', 'headroom']);
 const dist = join(ROOT, args.values.get('dist') ?? 'dist');
@@ -101,9 +105,7 @@ if (args.flags.has('update')) {
   const old = readJson<Budget | undefined>(budgetPath, undefined);
   const next: Budget = {
     headroom,
-    chunks: Object.fromEntries(
-      measured.filter((m) => m.kind !== 'chunk').map((m) => [m.name, { kind: m.kind, ...withHeadroom(m) }]),
-    ),
+    chunks: Object.fromEntries(measured.filter(isBudgeted).map((m) => [m.name, { kind: m.kind, ...withHeadroom(m) }])),
     totals: { js: withHeadroom(sum('js')), css: withHeadroom(sum('css')) },
   };
   writeFileSync(budgetPath, `${JSON.stringify(next, undefined, 2)}\n`);
@@ -168,7 +170,7 @@ function addRow(label: string, kind: string, raw: number | undefined, actual: Si
 }
 
 for (const m of measured) {
-  if (m.kind === 'chunk') {
+  if (!isBudgeted(m)) {
     continue;
   }
   const entry = budget.chunks[m.name];
@@ -178,8 +180,8 @@ for (const m of measured) {
   addRow(m.name, m.kind, m.raw, m, entry);
 }
 for (const name of Object.keys(budget.chunks)) {
-  if (!measured.some((m) => m.name === name && m.kind !== 'chunk')) {
-    warnings.push(`${name} is budgeted but is no longer an entry/worker chunk: drop it with --update`);
+  if (!measured.some((m) => m.name === name && isBudgeted(m))) {
+    warnings.push(`${name} is budgeted but is no longer an entry/worker/budgeted-lazy chunk: drop it with --update`);
   }
 }
 const jsFiles = measured.filter((m) => m.ext === 'js').length;
@@ -192,7 +194,7 @@ console.log(
     c.dim(`  ${relative(ROOT, dist)}/, brotli q11 and gzip -9; "vs base" is the change against the budget baseline`),
 );
 console.log(table(rows, ['l', 'l', 'r', 'r', 'r', 'r', 'r', 'r', 'r', 'l']));
-const lazy = measured.filter((m) => m.kind === 'chunk');
+const lazy = measured.filter((m) => !isBudgeted(m));
 if (lazy.length) {
   heading(`Other chunks (${lazy.length}, counted in the totals only)`);
   for (const m of [...lazy].sort((x, y) => y.brotli - x.brotli).slice(0, 10)) {

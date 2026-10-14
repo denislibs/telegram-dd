@@ -89,7 +89,7 @@ Measured on the production build (`pnpm build`, output `dist/`): brotli (quality
   contains `worker`), matched by name without the content hash (`index-Ab12Cd34.js` -> `assets/index.js`);
 - the **total** of all JS and the total of all CSS.
 
-Other (lazy) chunks are listed and counted in the totals only. `scripts/gates/size-budget.json` holds, per item, the
+Other (lazy) chunks are listed and counted in the totals only, except `assets/all.js` (the actions that tt loads with its Main bundle), which has its own budget (`BUDGETED_LAZY` in `size.ts`). `scripts/gates/size-budget.json` holds, per item, the
 `baseline` (size when the budget was written) and the `budget` (baseline + 10%). The report prints the size, the budget
 and the delta against the baseline. A new entry/worker chunk without a budget fails: budgets change deliberately.
 
