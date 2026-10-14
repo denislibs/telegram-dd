@@ -1,24 +1,27 @@
-import { previous } from 'frameact';
+import { createEffect, createSignal } from 'frameact';
 
-import useForceUpdate from '../../../../hooks/useForceUpdate';
+import { type MaybeAccessor, read } from '../../../../util/accessors';
 
-// TODO(codemod): useLeftHeaderButtonRtlForumTransition: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function useLeftHeaderButtonRtlForumTransition(shouldHideSearch?: boolean) {
-  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
-  const forceUpdate = useForceUpdate();
-  let shouldDisableDropdownMenuTransitionRef = shouldHideSearch;
-  const prevShouldHideSearch = previous(() => shouldHideSearch);
+// Deviation: a hook runs once, so `shouldHideSearch` is a `MaybeAccessor` and the ref object (+ `forceUpdate`) is a
+// signal: the result is `shouldDisableDropdownMenuTransition` (an accessor, tt's `shouldDisableDropdownMenuTransitionRef.current`).
+export default function useLeftHeaderButtonRtlForumTransition(shouldHideSearch?: MaybeAccessor<boolean | undefined>) {
+  const [shouldDisableDropdownMenuTransition, setShouldDisableDropdownMenuTransition] = createSignal(
+    read(shouldHideSearch),
+  );
 
   function handleDropdownMenuTransitionEnd() {
-    shouldDisableDropdownMenuTransitionRef = Boolean(shouldHideSearch);
-    forceUpdate();
+    setShouldDisableDropdownMenuTransition(Boolean(read(shouldHideSearch)));
   }
 
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (shouldHideSearch === false && prevShouldHideSearch() !== shouldHideSearch) {
-    shouldDisableDropdownMenuTransitionRef = false;
-  }
+  // tt did this during render when `shouldHideSearch` turned from something else to `false`
+  createEffect(
+    () => read(shouldHideSearch),
+    (value) => {
+      if (value === false) {
+        setShouldDisableDropdownMenuTransition(false);
+      }
+    },
+  );
 
-  // TODO(codemod): "shouldDisableDropdownMenuTransitionRef" was a ref object passed as a value: pass an accessor (() => shouldDisableDropdownMenuTransitionRef) or a callback ref
-  return { shouldDisableDropdownMenuTransitionRef, handleDropdownMenuTransitionEnd };
+  return { shouldDisableDropdownMenuTransition, handleDropdownMenuTransitionEnd };
 }

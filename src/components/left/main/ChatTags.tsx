@@ -22,8 +22,8 @@ type OwnProps = {
 };
 
 const ChatTags = (props: OwnProps) => {
-  const visibleFolderIds = createMemo(() => props.orderedFolderIds.slice(0, MAX_VISIBLE_TAGS));
-  const remainingCount = createMemo(() => props.orderedFolderIds.length - visibleFolderIds().length);
+  const visibleFolderIds = createMemo(() => props.orderedFolderIds?.slice(0, MAX_VISIBLE_TAGS) ?? []);
+  const remainingCount = createMemo(() => (props.orderedFolderIds?.length ?? 0) - visibleFolderIds().length);
 
   function getFolderTitle(folder: ApiChatFolder) {
     let text = folder.title.text;
@@ -57,22 +57,23 @@ const ChatTags = (props: OwnProps) => {
     <Show when={props.orderedFolderIds}>
       <div class={styles.wrapper}>
         <For each={visibleFolderIds()}>
-          {(folderId) => {
-            const folder = props.chatFoldersById?.[folderId];
-            return (
-              folder && (
+          {(folderId) => (
+            // Deviation: `chatFoldersById` is a store container (its identity does not change with a folder), so the
+            // folder is read through a `Show` and follows edits of the folder.
+            <Show when={props.chatFoldersById?.[folderId]}>
+              {(folder) => (
                 <div
                   class={buildClassName(
                     styles.tag,
-                    folder.color !== undefined && folder.color !== -1 && getPeerColorClass(folder.color),
+                    folder().color !== undefined && folder().color !== -1 && getPeerColorClass(folder().color!),
                     props.itemClassName,
                   )}
                 >
-                  {getFolderTitle(folder)}
+                  {getFolderTitle(folder())}
                 </div>
-              )
-            );
-          }}
+              )}
+            </Show>
+          )}
         </For>
         {remainingCount() > 0 && (
           <div class={buildClassName(styles.tag, styles.tagColorMore, props.itemClassName)}>+{remainingCount()}</div>

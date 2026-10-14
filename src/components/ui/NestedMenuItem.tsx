@@ -71,9 +71,9 @@ const NestedMenuItem = (props: OwnProps) => {
   };
 
   createEffect(
-    depsOf(() => [isSubmenuOpen(), lang.isRtl, updateAnchor, isResizing] as const),
-    ([isSubmenuOpen2]) => {
-      if (isSubmenuOpen2 && !isResizing) {
+    depsOf(() => [isSubmenuOpen(), lang.isRtl, updateAnchor, isResizing()] as const),
+    ([isSubmenuOpen2, , , isResizing2]) => {
+      if (isSubmenuOpen2 && !isResizing2) {
         updateAnchor();
       }
     },

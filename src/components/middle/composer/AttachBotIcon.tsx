@@ -29,10 +29,11 @@ const AttachBotIcon = (props: OwnProps) => {
   const mediaData = useMedia(() => getDocumentMediaHash(props.icon, 'full'), false, ApiMediaFormat.Text);
 
   const iconSvg = createMemo(() => {
-    if (!mediaData) return '';
+    const mediaDataValue = mediaData();
+    if (!mediaDataValue) return '';
     const color = props.theme === 'dark' ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
 
-    const mediaDataWithReplacedColors = mediaData.replace(COLOR_REPLACE_PATTERN, color);
+    const mediaDataWithReplacedColors = mediaDataValue.replace(COLOR_REPLACE_PATTERN, color);
     const doc = new DOMParser().parseFromString(mediaDataWithReplacedColors, 'image/svg+xml');
     doc.querySelectorAll('path').forEach((path) => {
       path.style.stroke = color;
@@ -43,11 +44,11 @@ const AttachBotIcon = (props: OwnProps) => {
   });
 
   return (
-    <i class={buildClassName(styles.root, 'icon', !isTouchScreen && styles.compact)}>
+    <i class={buildClassName(styles.root, 'icon', !isTouchScreen() && styles.compact)}>
       <img
         src={iconSvg()}
         alt=""
-        class={buildClassName(styles.image, !isTouchScreen && styles.compact)}
+        class={buildClassName(styles.image, !isTouchScreen() && styles.compact)}
         draggable={false}
       />
     </i>

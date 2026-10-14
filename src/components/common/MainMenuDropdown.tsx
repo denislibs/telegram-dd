@@ -1,4 +1,4 @@
-import { createMemo } from 'frameact';
+import type { JSX } from 'frameact/jsx-runtime';
 import { APP_REVISION } from 'virtual:git-info';
 import { getActions, getGlobal } from '../../global';
 
@@ -18,7 +18,7 @@ import LeftSideMenuItems from '../left/main/LeftSideMenuItems';
 import DropdownMenu from '../ui/DropdownMenu';
 
 type OwnProps = {
-  trigger?: FC<{ onTrigger: () => void; isOpen?: boolean }>;
+  trigger?: (props: { onTrigger: () => void; isOpen?: boolean }) => JSX.Element;
   shouldHideSearch?: boolean;
   className?: string;
 };
@@ -35,13 +35,8 @@ const LeftSideMenuDropdown = (props: OwnProps) => {
   const versionString = IS_BETA ? `${APP_VERSION} Beta (${APP_REVISION})` : DEBUG ? APP_REVISION : APP_VERSION;
 
   // Disable dropdown menu RTL animation for resize
-  const leftHeaderButtonRtlForumTransitionResult = createMemo(() =>
-    useLeftHeaderButtonRtlForumTransition(() => props.shouldHideSearch),
-  );
-  const shouldDisableDropdownMenuTransitionRef = () =>
-    leftHeaderButtonRtlForumTransitionResult().shouldDisableDropdownMenuTransitionRef;
-  const handleDropdownMenuTransitionEnd = () =>
-    leftHeaderButtonRtlForumTransitionResult().handleDropdownMenuTransitionEnd;
+  const { shouldDisableDropdownMenuTransition, handleDropdownMenuTransitionEnd } =
+    useLeftHeaderButtonRtlForumTransition(() => props.shouldHideSearch);
 
   const handleSelectSettings = () => {
     openSettingsScreen({ screen: SettingsScreens.Main });
@@ -121,7 +116,7 @@ const LeftSideMenuDropdown = (props: OwnProps) => {
         'main-menu',
         lang.isRtl && 'rtl',
         props.shouldHideSearch && lang.isRtl && 'right-aligned',
-        shouldDisableDropdownMenuTransitionRef().current && lang.isRtl && 'disable-transition',
+        shouldDisableDropdownMenuTransition() && lang.isRtl && 'disable-transition',
         props.className,
       )}
       forceOpen={isBotMenuOpen() || isSwitchingAccount()}
@@ -130,7 +125,7 @@ const LeftSideMenuDropdown = (props: OwnProps) => {
       transformOriginY={100}
       withPortal
       onHide={handleMenuHide}
-      onTransitionEnd={lang.isRtl ? handleDropdownMenuTransitionEnd() : undefined}
+      onTransitionEnd={lang.isRtl ? handleDropdownMenuTransitionEnd : undefined}
     >
       <LeftSideMenuItems
         onSelectArchived={handleSelectArchived}

@@ -1,14 +1,12 @@
 import type { Event } from '@tauri-apps/api/event';
 import { createEffect } from 'frameact';
-import { depsOf } from '../../util/effectDeps';
 
 import { IS_TAURI } from '../../util/browser/globalEnvironment';
 
-// TODO(codemod): useTauriEvent: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useTauriEvent<T>(name: string, callback: (event: Event<T>) => void) {
   return createEffect(
-    depsOf(() => [name, callback]),
-    () => {
+    () => name,
+    (name2) => {
       if (!IS_TAURI) {
         return undefined;
       }
@@ -17,7 +15,7 @@ export default function useTauriEvent<T>(name: string, callback: (event: Event<T
 
       const setUpListener = async () => {
         const { listen } = await import('@tauri-apps/api/event');
-        removeListener = await listen<T>(name, (event) => {
+        removeListener = await listen<T>(name2, (event) => {
           callback(event);
         });
       };

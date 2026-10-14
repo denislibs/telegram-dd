@@ -1,31 +1,33 @@
-import { createSignal, onMount } from 'frameact';
+import { type Accessor, createSignal, onMount } from 'frameact';
+
+import { type MaybeAccessor, read } from '../../util/accessors';
 
 import { IS_TAURI } from '../../util/browser/globalEnvironment';
 import { IS_IOS } from '../../util/browser/windowEnvironment';
 
-type ReturnType = [boolean, () => void, () => void] | [false];
+type ReturnType = [Accessor<boolean>, () => void, () => void] | [false];
 type CallbackType = (isPlayed: boolean) => void;
 
 const prop = getBrowserFullscreenElementProp();
 
-// TODO(codemod): useFullscreen: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useFullscreen<T extends HTMLElement>(
-  elRef: (el: T) => void,
+  elRef: MaybeAccessor<T | undefined>,
   exitCallback?: CallbackType,
   enterCallback?: CallbackType,
 ): ReturnType {
   const [isFullscreen, setIsFullscreen] = createSignal(Boolean(prop && document[prop]));
 
   const setFullscreen = () => {
-    if (!elRef.current || !(prop || IS_IOS) || isFullscreen()) {
+    const el = read(elRef);
+    if (!el || !(prop || IS_IOS) || isFullscreen()) {
       return;
     }
-    safeRequestFullscreen(elRef.current);
+    safeRequestFullscreen(el);
     setIsFullscreen(true);
   };
 
   const exitFullscreen = () => {
-    if (!elRef.current) {
+    if (!read(elRef)) {
       return;
     }
     safeExitFullscreen();
@@ -33,7 +35,7 @@ export default function useFullscreen<T extends HTMLElement>(
   };
 
   onMount(() => {
-    const element = elRef.current;
+    const element = read(elRef);
     const listener = () => {
       const isEnabled = Boolean(prop && document[prop]);
       setIsFullscreen(isEnabled);

@@ -1,3 +1,5 @@
+import type { ConnectionStatus } from '../../hooks/useConnectionStatus';
+
 import useOldLang from '../../hooks/useOldLang';
 
 import Button from '../ui/Button';
@@ -16,12 +18,15 @@ const ConnectionStatusOverlay = (props: OwnProps) => {
   const lang = useOldLang();
 
   return (
-    <div id="ConnectionStatusOverlay" dir={lang.isRtl ? 'rtl' : undefined} onClick={(e) => props.onClick?.(e)}>
+    <div id="ConnectionStatusOverlay" dir={lang.isRtl ? 'rtl' : undefined} onClick={() => props.onClick?.()}>
       <Spinner color="black" />
       <div class="state-text">
-        {/* TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6) */}
         <Transition activeKey={props.connectionStatus} name="slideFade">
-          {props.connectionStatusText}
+          {(slide) => {
+            // Deviation: each slide owns the text of its own key (the outgoing slide keeps its text while it slides out)
+            const slideText = props.connectionStatusText;
+            return <>{slide.isActive() ? props.connectionStatusText : slideText}</>;
+          }}
         </Transition>
       </div>
       <Button round size="tiny" color="translucent-black" iconName="close" />

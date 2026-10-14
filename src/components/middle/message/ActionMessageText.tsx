@@ -1,6 +1,6 @@
 import { createMemo } from 'frameact';
 import type { JSX } from 'frameact/jsx-runtime';
-import { getActions, getGlobal, withGlobal } from '../../../global';
+import { getActions, useGlobal, withGlobal } from '../../../global';
 import type { GlobalState } from '../../../global/types';
 
 import type { ApiChat, ApiMessage, ApiPeer } from '../../../api/types';
@@ -91,6 +91,8 @@ const ActionMessageText = (ownProps: OwnProps) => {
   const chatId = () => source().chatId;
   const isOutgoing = () => source().isOutgoing;
   const action = createMemo(() => props.message.content.action!);
+  // Tracked view of the global for the selectors by id below (chats/peers/users): a renamed peer re-renders the text
+  const global = useGlobal();
 
   const lang = useLang();
   const oldLang = useOldLang();
@@ -101,7 +103,8 @@ const ActionMessageText = (ownProps: OwnProps) => {
   }
 
   const renderActionText = () => {
-    const global = getGlobal();
+    // The one read of the action: `switch (currentAction.type)` narrows the union (a memo call does not)
+    const currentAction = action();
 
     const isServiceNotificationsChat = chatId() === SERVICE_NOTIFICATIONS_USER_ID;
     const isSavedMessages = chatId() === props.currentUserId;
@@ -117,7 +120,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
     const senderLink = renderPeerLink(props.sender?.id, senderTitle || userFallbackText, props.asPreview);
     const chatLink = renderPeerLink(props.chat?.id, chatTitle || chatFallbackText, props.asPreview);
 
-    switch (action().type) {
+    switch (currentAction.type) {
       case 'pinMessage': {
         if (props.replyMessage) {
           const formattedText = getMessageTextWithFallback(lang, props.replyMessage);
@@ -146,7 +149,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'gameScore': {
-        const { score } = action();
+        const { score } = currentAction;
 
         const gameTitle = props.replyMessage?.content.game?.title;
         const gameLink = gameTitle && renderMessageLink(props.replyMessage, renderText(gameTitle), props.asPreview);
@@ -171,9 +174,9 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'chatJoinedViaCommunity': {
-        const community = selectChat(global, action().communityId);
+        const community = selectChat(global, currentAction.communityId);
         const communityLink = renderPeerLink(
-          action().communityId,
+          currentAction.communityId,
           community ? getPeerTitle(lang, community)! : chatFallbackText,
           props.asPreview,
         );
@@ -187,7 +190,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
         return translateWithYou(lang, 'ActionJoinedByRequest', isOutgoing(), { from: senderLink });
 
       case 'channelJoined': {
-        const { isViaRequest, inviterId } = action();
+        const { isViaRequest, inviterId } = currentAction;
         const inviter = inviterId ? selectPeer(global, inviterId) : undefined;
         if (inviter && inviterId !== props.currentUserId) {
           const inviterLink = renderPeerLink(
@@ -202,7 +205,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'chatEditTitle': {
-        const { title } = action();
+        const { title } = currentAction;
         if (isChannel) return lang('ActionChangedTitleChannel', { title });
         return translateWithYou(lang, 'ActionChangedTitle', isOutgoing(), { title, from: senderLink });
       }
@@ -218,32 +221,32 @@ const ActionMessageText = (ownProps: OwnProps) => {
           : translateWithYou(lang, 'ActionChangedPhoto', isOutgoing(), { from: senderLink });
 
       case 'chatCreate': {
-        const { title } = action();
+        const { title } = currentAction;
         return lang('ActionCreatedChat', { title, from: senderLink }, { withNodes: true });
       }
 
       case 'channelCreate': {
-        const { title } = action();
+        const { title } = currentAction;
         return isChannel
           ? lang('ActionCreatedChannel')
           : translateWithYou(lang, 'ActionCreatedChat', isOutgoing(), { title, from: senderLink });
       }
 
       case 'chatMigrateTo': {
-        const { channelId } = action();
+        const { channelId } = currentAction;
         const channel = selectChat(global, channelId)!;
         const channelLink = renderPeerLink(channelId, getPeerTitle(lang, channel)!, props.asPreview);
         return lang('ActionMigratedTo', { chat: channelLink }, { withNodes: true });
       }
 
       case 'channelMigrateFrom': {
-        const { chatId: originalChatId, title } = action();
+        const { chatId: originalChatId, title } = currentAction;
         const originalChatLink = renderPeerLink(originalChatId, title || chatFallbackText, props.asPreview);
         return lang('ActionMigratedFrom', { chat: originalChatLink }, { withNodes: true });
       }
 
       case 'changeCommunity': {
-        const { communityId } = action();
+        const { communityId } = currentAction;
         if (!communityId) {
           return lang('ActionRemovedFromCommunity', { from: senderLink }, { withNodes: true });
         }
@@ -258,7 +261,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'topicCreate': {
-        const { title, iconColor, iconEmojiId } = action();
+        const { title, iconColor, iconEmojiId } = currentAction;
 
         const topicId = selectThreadIdFromMessage(global, props.message);
 
@@ -278,7 +281,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'topicEdit': {
-        const { iconEmojiId, isClosed, isHidden, title } = action();
+        const { iconEmojiId, isClosed, isHidden, title } = currentAction;
 
         const topicId = selectThreadIdFromMessage(global, props.message);
         const currentTopic = selectTopic(global, chatId(), topicId);
@@ -369,12 +372,12 @@ const ActionMessageText = (ownProps: OwnProps) => {
           lang,
           'ActionBoostApply',
           isOutgoing(),
-          { from: senderLink, count: action().boosts },
-          { pluralValue: action().boosts },
+          { from: senderLink, count: currentAction.boosts },
+          { pluralValue: currentAction.boosts },
         );
 
       case 'chatAddUser': {
-        const { userIds } = action();
+        const { userIds } = currentAction;
 
         if (props.sender?.id === userIds[0]) {
           return translateWithYou(lang, 'ActionUserJoined', isOutgoing(), { from: senderLink });
@@ -404,7 +407,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'chatDeleteUser': {
-        const { userId } = action();
+        const { userId } = currentAction;
         if (props.sender?.id === userId) {
           return translateWithYou(lang, 'ActionUserLeft', isOutgoing(), { from: senderLink });
         }
@@ -416,7 +419,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'requestedPeer': {
-        const { peerIds } = action();
+        const { peerIds } = currentAction;
         const peerLinks = peerIds.map((peerId) => {
           const peer = selectPeer(global, peerId);
           return renderPeerLink(peerId, (peer && getPeerTitle(lang, peer)) || userFallbackText, props.asPreview);
@@ -432,7 +435,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'botAllowed': {
-        const { app, domain, isAttachMenu, isFromRequest } = action();
+        const { app, domain, isAttachMenu, isFromRequest } = currentAction;
         if (isAttachMenu) return lang('ActionAttachMenuBotAllowed');
         if (isFromRequest) return lang('ActionWebappBotAllowed');
         if (app) {
@@ -455,7 +458,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'giveawayLaunch': {
-        const { stars } = action();
+        const { stars } = currentAction;
 
         if (stars) {
           return lang(
@@ -473,7 +476,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'giveawayResults': {
-        const { winnersCount, isStars, unclaimedCount } = action();
+        const { winnersCount, isStars, unclaimedCount } = currentAction;
         if (!winnersCount) return lang('ActionGiveawayResultsNone');
         if (unclaimedCount) {
           return lang(isStars ? 'ActionGiveawayResultsStarsSome' : 'ActionGiveawayResultsSome');
@@ -490,14 +493,14 @@ const ActionMessageText = (ownProps: OwnProps) => {
         return lang('WalletConnectRequest');
 
       case 'gramTransfer': {
-        const formattedAmount = formatTonFromNanos(action().amount);
+        const formattedAmount = formatTonFromNanos(currentAction.amount);
         const [whole, fraction] = formattedAmount.split('.');
         const groupedAmount = fraction ? `${lang.number(Number(whole))}.${fraction}` : lang.number(Number(whole));
         const amount = renderStrong(
           lang('GramAmountText', { amount: groupedAmount }, { pluralValue: Number(formattedAmount) }),
         );
         const fiat = formatTonInFiat(
-          action().amount,
+          currentAction.amount,
           props.tonUsdRate,
           props.walletCurrency!,
           props.walletCurrencyRate,
@@ -528,7 +531,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       case 'giftStars':
       case 'giftPremium':
       case 'giftTon': {
-        const { amount, currency, cryptoAmount, cryptoCurrency, type } = action();
+        const { amount, currency, cryptoAmount, cryptoCurrency, type } = currentAction;
 
         const price = formatCurrency(lang, amount, currency, { asFontIcon: true });
         const cryptoPrice =
@@ -551,7 +554,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'groupCall': {
-        const { duration } = action();
+        const { duration } = currentAction;
         const durationText = duration ? formatShortDuration(lang, duration) : undefined;
         if (durationText) {
           if (isChannel) {
@@ -569,7 +572,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'groupCallScheduled': {
-        const { scheduleDate } = action();
+        const { scheduleDate } = currentAction;
         const formattedDate = formatDateTimeToString(scheduleDate * 1000, lang.code, true);
 
         if (isChannel) return lang('ActionGroupCallScheduledChannel', { date: formattedDate });
@@ -577,7 +580,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'inviteToGroupCall': {
-        const { userIds } = action();
+        const { userIds } = currentAction;
 
         if (userIds.length === 1) {
           const user = selectPeer(global, userIds[0]);
@@ -606,7 +609,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'paymentSent': {
-        const { currency, totalAmount, isRecurringInit, isRecurringUsed } = action();
+        const { currency, totalAmount, isRecurringInit, isRecurringUsed } = currentAction;
 
         const cost = renderStrong(formatCurrency(lang, totalAmount, currency, { asFontIcon: true }));
         const invoice = props.replyMessage && getMessageInvoice(props.replyMessage);
@@ -648,7 +651,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'paymentRefunded': {
-        const { currency, totalAmount, peerId } = action();
+        const { currency, totalAmount, peerId } = currentAction;
         const peer = selectPeer(global, peerId);
         const peerTitle = (peer && getPeerTitle(lang, peer)) || userFallbackText;
         const peerLink = renderPeerLink(peer?.id, peerTitle, props.asPreview);
@@ -659,7 +662,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
 
       case 'starGift': {
         const { gift, alreadyPaidUpgradeStars, peerId, savedId, fromId, isPrepaidUpgrade, isAuctionAcquired } =
-          action();
+          currentAction;
         const isToChannel = Boolean(peerId && savedId);
 
         const fromPeer = fromId ? selectPeer(global, fromId) : props.sender;
@@ -727,7 +730,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
           transferStars,
           isPrepaidUpgrade,
           isFromOffer,
-        } = action();
+        } = currentAction;
 
         const isToChannel = Boolean(peerId && savedId);
 
@@ -886,10 +889,10 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'webViewDataSent':
-        return lang('ActionWebviewDataDone', { text: action().text });
+        return lang('ActionWebviewDataDone', { text: currentAction.text });
 
       case 'expired': {
-        const { isRoundVideo, isVoice } = action();
+        const { isRoundVideo, isVoice } = currentAction;
         if (isVoice) return lang('ActionExpiredVoice');
         if (isRoundVideo) return lang('ActionExpiredVideo');
 
@@ -900,7 +903,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
         return lang('ActionHistoryCleared');
 
       case 'setMessagesTtl': {
-        const { period, autoSettingFromId } = action();
+        const { period, autoSettingFromId } = currentAction;
 
         if (period === 0) {
           if (isChannel) return lang('ActionTTLChannelDisabled');
@@ -941,10 +944,10 @@ const ActionMessageText = (ownProps: OwnProps) => {
         return lang('ActionUserRegistered', { from: senderLink }, { withNodes: true });
 
       case 'customAction':
-        return action().message;
+        return currentAction.message;
 
       case 'paidMessagesPrice': {
-        const { stars, isAllowedInChannel } = action();
+        const { stars, isAllowedInChannel } = currentAction;
         if (stars === 0) {
           if (isChannel) {
             return lang(
@@ -968,7 +971,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'paidMessagesRefunded': {
-        const { stars } = action();
+        const { stars } = currentAction;
         const user = selectPeer(global, chatId());
         const userTitle = (user && getPeerTitle(lang, user)) || userFallbackText;
 
@@ -987,7 +990,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'suggestedPostSuccess': {
-        const { amount: price } = action();
+        const { amount: price } = currentAction;
         const currency = price?.currency || STARS_CURRENCY_CODE;
         const amount = price?.amount || 0;
 
@@ -1010,7 +1013,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
         );
       }
       case 'suggestedPostRefund': {
-        const { payerInitiated } = action();
+        const { payerInitiated } = currentAction;
 
         const postSender = props.replyMessage ? selectSender(global, props.replyMessage) : props.sender;
         const postSenderTitle = postSender && getPeerTitle(lang, postSender);
@@ -1052,7 +1055,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
         );
       }
       case 'suggestedPostApproval': {
-        const { isRejected, isBalanceTooLow, rejectComment } = action();
+        const { isRejected, isBalanceTooLow, rejectComment } = currentAction;
 
         if (isRejected) {
           return translateWithYou(
@@ -1086,7 +1089,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
         const channelTitle = channel && getPeerTitle(lang, channel);
         const channelLink = renderPeerLink(channel?.id, channelTitle || channelFallbackText, props.asPreview);
 
-        const { scheduleDate } = action();
+        const { scheduleDate } = currentAction;
         if (scheduleDate) {
           const publishDate = formatScheduledDateTime(scheduleDate, lang, oldLang);
           const isPostPublished = scheduleDate <= getServerTime();
@@ -1103,7 +1106,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
         return lang(UNSUPPORTED_LANG_KEY);
       }
       case 'todoCompletions': {
-        const { completedIds, incompletedIds } = action();
+        const { completedIds, incompletedIds } = currentAction;
 
         let completedItem;
         let incompletedItem;
@@ -1198,7 +1201,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'todoAppendTasks': {
-        const { items } = action();
+        const { items } = currentAction;
         const { todo } = props.replyMessage ? getMessageContent(props.replyMessage) : {};
 
         const listTitle = todo?.todo.title.text || '';
@@ -1259,8 +1262,8 @@ const ActionMessageText = (ownProps: OwnProps) => {
         const optionLink = renderMessageLink(
           props.replyMessage,
           renderTextWithEntities({
-            text: action().answer.text.text,
-            entities: action().answer.text.entities,
+            text: currentAction.answer.text.text,
+            entities: currentAction.answer.text.entities,
             asPreview: true,
           }),
           props.asPreview,
@@ -1268,7 +1271,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
 
         return translateWithYou(
           lang,
-          action().type === 'pollAppendAnswer' ? 'MessageActionPollAppendAnswer' : 'MessageActionPollDeleteAnswer',
+          currentAction.type === 'pollAppendAnswer' ? 'MessageActionPollAppendAnswer' : 'MessageActionPollDeleteAnswer',
           isOutgoing(),
           {
             peer: senderLink,
@@ -1278,10 +1281,10 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'phoneCall': // Rendered as a regular message, but considered an action for the summary
-        return lang(getCallMessageKey(action(), isOutgoing()));
+        return lang(getCallMessageKey(currentAction, isOutgoing()));
 
       case 'noForwardsToggle': {
-        const { prevValue, newValue } = action();
+        const { prevValue, newValue } = currentAction;
         if (newValue && newValue === prevValue) {
           return lang('ActionSharingStillDisabled');
         }
@@ -1297,7 +1300,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'newCreatorPending': {
-        const { newCreatorId } = action();
+        const { newCreatorId } = currentAction;
         const newCreator = selectPeer(global, newCreatorId);
         const newCreatorTitle = (newCreator && getPeerTitle(lang, newCreator)) || userFallbackText;
         const newCreatorLink = renderPeerLink(newCreator?.id, newCreatorTitle, props.asPreview);
@@ -1305,7 +1308,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'changeCreator': {
-        const { newCreatorId } = action();
+        const { newCreatorId } = currentAction;
         const newCreator = selectPeer(global, newCreatorId);
         const newCreatorTitle = (newCreator && getPeerTitle(lang, newCreator)) || userFallbackText;
         const newCreatorLink = renderPeerLink(newCreator?.id, newCreatorTitle, props.asPreview);
@@ -1313,7 +1316,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'starGiftPurchaseOffer': {
-        const { gift, price } = action();
+        const { gift, price } = currentAction;
 
         const peer = isOutgoing() ? props.chat : props.sender;
         const peerTitle = (peer && getPeerTitle(lang, peer)) || userFallbackText;
@@ -1337,7 +1340,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
       }
 
       case 'starGiftPurchaseOfferDeclined': {
-        const { gift, price } = action();
+        const { gift, price } = currentAction;
 
         const peer = isOutgoing() ? props.chat : props.sender;
         const peerTitle = (peer && getPeerTitle(lang, peer)) || userFallbackText;
@@ -1365,7 +1368,7 @@ const ActionMessageText = (ownProps: OwnProps) => {
     }
   };
 
-  return renderActionText();
+  return <>{renderActionText()}</>;
 };
 
 const mapStateToProps = (global: GlobalState, { message }: OwnProps): Complete<StateProps> => {

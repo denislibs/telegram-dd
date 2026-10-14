@@ -1,4 +1,5 @@
 
+import type { TeactNode } from '../../lib/frameactNode';
 import type { LangFn } from './types';
 
 const UNIQUE_PLACEHOLDER_PREFIX = '$PLACEHOLDER-';

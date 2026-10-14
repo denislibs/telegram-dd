@@ -6,6 +6,7 @@ import type { GlobalState } from '../../../../global/types';
 import { getCommunityPeerDate, getIsCommunityPeerJoined } from '../../../../global/helpers';
 import { selectChat, selectChatLastMessage, selectIsChatUnread } from '../../../../global/selectors';
 
+import { type MaybeAccessor, read } from '../../../../util/accessors';
 import { useShallowSelector } from '../../../../hooks/data/useSelector';
 
 export type CommunityMember = {
@@ -16,25 +17,26 @@ export type CommunityMember = {
 };
 
 // The previewed chat comes first in the subtitle; the badge counts all unread joined chats
-// TODO(codemod): useCommunityMembers: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function useCommunityMembers(linkedPeers?: ApiCommunityLinkedPeer[]) {
-  const peersSelector = (global: GlobalState) => linkedPeers?.map(({ peerId }) => selectChat(global, peerId));
+// Deviation: `linkedPeers` is a `MaybeAccessor`; the result is an accessor (frameact hooks run once).
+export default function useCommunityMembers(linkedPeers?: MaybeAccessor<ApiCommunityLinkedPeer[] | undefined>) {
+  const peersSelector = (global: GlobalState) => read(linkedPeers)?.map(({ peerId }) => selectChat(global, peerId));
   const peers = useShallowSelector(peersSelector);
 
   const lastMessagesSelector = (global: GlobalState) =>
-    linkedPeers?.map(({ peerId }) => selectChatLastMessage(global, peerId));
+    read(linkedPeers)?.map(({ peerId }) => selectChatLastMessage(global, peerId));
   const lastMessages = useShallowSelector(lastMessagesSelector);
 
   const unreadFlagsSelector = (global: GlobalState) =>
-    linkedPeers?.map(({ peerId }) => selectIsChatUnread(global, peerId));
+    read(linkedPeers)?.map(({ peerId }) => selectIsChatUnread(global, peerId));
   const unreadFlags = useShallowSelector(unreadFlagsSelector);
 
   return createMemo(() => {
-    if (!linkedPeers) return undefined;
+    const peerIds = read(linkedPeers);
+    if (!peerIds) return undefined;
 
     let latestMessage: ApiMessage | undefined;
     const datedMembers: (CommunityMember & { date: number })[] = [];
-    linkedPeers.forEach(({ peerId }, i) => {
+    peerIds.forEach(({ peerId }, i) => {
       const peer = peers()?.[i];
       const lastMessage = lastMessages()?.[i];
       if (!peer || !getIsCommunityPeerJoined(peer, lastMessage)) return;

@@ -1,40 +1,33 @@
-import { createEffect } from 'frameact';
+import { createEffect, createSignal } from 'frameact';
 
-import useForceUpdate from './useForceUpdate';
-import useLastCallback from './useLastCallback';
-import useSyncEffect from './useSyncEffect';
+import { type MaybeAccessor, read } from '../util/accessors';
 
-// TODO(codemod): useForumPanelRender: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function useForumPanelRender(isForumPanelOpen = false) {
-  let shouldRenderForumPanelRef = isForumPanelOpen;
-  let isAnimationStartedRef = false;
-  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
-  const forceUpdate = useForceUpdate();
+// Deviation: returns accessors (frameact components run once; the refs + `forceUpdate` of tt are signals).
+export default function useForumPanelRender(isForumPanelOpen: MaybeAccessor<boolean> = false) {
+  const [shouldRenderForumPanel, setShouldRenderForumPanel] = createSignal(read(isForumPanelOpen));
+  const [isAnimationStarted, setIsAnimationStarted] = createSignal(false);
 
-  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
   createEffect(
-    () => isForumPanelOpen,
-    () => {
-      if (isForumPanelOpen) {
-        shouldRenderForumPanelRef = true;
+    () => read(isForumPanelOpen),
+    (isForumPanelOpen2) => {
+      if (isForumPanelOpen2) {
+        setShouldRenderForumPanel(true);
       }
     },
   );
 
   const handleForumPanelAnimationEnd = () => {
-    shouldRenderForumPanelRef = false;
-    isAnimationStartedRef = false;
-    forceUpdate();
+    setShouldRenderForumPanel(false);
+    setIsAnimationStarted(false);
   };
 
   const handleForumPanelAnimationStart = () => {
-    isAnimationStartedRef = true;
-    forceUpdate();
+    setIsAnimationStarted(true);
   };
 
   return {
-    shouldRenderForumPanel: shouldRenderForumPanelRef,
-    isAnimationStarted: isAnimationStartedRef,
+    shouldRenderForumPanel,
+    isAnimationStarted,
     handleForumPanelAnimationEnd,
     handleForumPanelAnimationStart,
   };

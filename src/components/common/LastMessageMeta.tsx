@@ -26,7 +26,7 @@ const LastMessageMeta = (props: OwnProps) => {
     <div class={buildClassName('LastMessageMeta', props.className)}>
       {props.outgoingStatus && !shouldUseDraft() && <MessageOutgoingStatus status={props.outgoingStatus} />}
       <span class="time">
-        {formatPastTimeShort(lang, (shouldUseDraft() ? props.draftDate : props.message.date) * 1000)}
+        {formatPastTimeShort(lang, (shouldUseDraft() ? props.draftDate! : props.message.date) * 1000)}
       </span>
     </div>
   );

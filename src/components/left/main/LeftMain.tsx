@@ -3,13 +3,13 @@ import { createEffect, createMemo, createSignal, onMount } from 'frameact';
 import { getActions } from '../../../global';
 import { createShowTransition } from '../../../lib/kit';
 
+import type { FolderEditDispatch } from '../../../hooks/reducers/useFoldersReducer';
 import { LeftColumnContent } from '../../../types';
 
 import { DEBUG } from '../../../config';
 import { selectCommunityPanelId } from '../../../global/selectors';
 import { IS_TAURI } from '../../../util/browser/globalEnvironment';
 import { IS_TOUCH_ENV } from '../../../util/browser/windowEnvironment';
-import buildClassName from '../../../util/buildClassName';
 
 import useSelector from '../../../hooks/data/useSelector';
 import useInterval from '../../../hooks/schedulers/useInterval';
@@ -57,27 +57,27 @@ const LeftMain = (props: OwnProps) => {
   const [tauriUpdate, setTauriUpdate] = createSignal<Update | undefined>(undefined);
   const [isTauriUpdateDownloading, setIsTauriUpdateDownloading] = createSignal(false);
 
-  const forumPanelRenderResult = createMemo(() => useForumPanelRender(() => props.isForumPanelOpen));
-  const shouldRenderForumPanel = () => forumPanelRenderResult().shouldRenderForumPanel;
-  const handleForumPanelAnimationEnd = () => forumPanelRenderResult().handleForumPanelAnimationEnd;
-  const handleForumPanelAnimationStart = () => forumPanelRenderResult().handleForumPanelAnimationStart;
-  const isAnimationStarted = () => forumPanelRenderResult().isAnimationStarted;
+  const { shouldRenderForumPanel, handleForumPanelAnimationEnd, handleForumPanelAnimationStart, isAnimationStarted } =
+    useForumPanelRender(() => Boolean(props.isForumPanelOpen));
   const isForumPanelRendered = createMemo(() => props.isForumPanelOpen && props.content === LeftColumnContent.ChatList);
   const isForumPanelVisible = createMemo(() => isForumPanelRendered() && isAnimationStarted());
 
   const communityPanelId = useSelector((global) => selectCommunityPanelId(global));
   const isCommunityPanelOpen = createMemo(() => Boolean(communityPanelId()));
-  const forumPanelRenderResult2 = createMemo(() => useForumPanelRender(isCommunityPanelOpen()));
-  const shouldRenderCommunityPanel = () => forumPanelRenderResult2().shouldRenderForumPanel;
-  const handleCommunityPanelAnimationEnd = () => forumPanelRenderResult2().handleForumPanelAnimationEnd;
-  const handleCommunityPanelAnimationStart = () => forumPanelRenderResult2().handleForumPanelAnimationStart;
+  const {
+    shouldRenderForumPanel: shouldRenderCommunityPanel,
+    handleForumPanelAnimationEnd: handleCommunityPanelAnimationEnd,
+    handleForumPanelAnimationStart: handleCommunityPanelAnimationStart,
+  } = useForumPanelRender(isCommunityPanelOpen);
   const isCommunityPanelRendered = createMemo(
     () => isCommunityPanelOpen() && props.content === LeftColumnContent.ChatList,
   );
 
-  const { shouldRender: shouldRenderUpdateButton, transitionClassNames: updateButtonClassNames } =
-    // TODO(codemod): useShowTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element (transitionClassNames/hasOpenClass are gone)
-    createShowTransition({ isOpen: () => props.isAppUpdateAvailable || Boolean(tauriUpdate()) });
+  // Deviation: tt's `useShowTransitionDeprecated` returned the class names; the kit's transition writes them itself
+  // through `ref` (`opacity-transition fast shown open`, same tokens).
+  const updateButtonTransition = createShowTransition({
+    isOpen: () => Boolean(props.isAppUpdateAvailable) || Boolean(tauriUpdate()),
+  });
 
   let isMouseInsideRef = false;
 
@@ -109,10 +109,11 @@ const LeftMain = (props: OwnProps) => {
   };
 
   const handleUpdateClick = async () => {
-    if (tauriUpdate()) {
+    const update = tauriUpdate();
+    if (update) {
       try {
         setIsTauriUpdateDownloading(true);
-        await tauriUpdate().downloadAndInstall();
+        await update.downloadAndInstall();
         setIsTauriUpdateDownloading(false);
 
         await window.tauri?.relaunch();
@@ -199,8 +200,8 @@ const LeftMain = (props: OwnProps) => {
         shouldWrap
         wrapExceptionKey={LeftColumnContent.ChatList}
       >
-        {(isActive) => {
-          switch (props.content) {
+        {(slide) => {
+          switch (slide.key) {
             case LeftColumnContent.ChatList:
               return (
                 <ChatFolders
@@ -214,22 +215,23 @@ const LeftMain = (props: OwnProps) => {
                 <LeftSearch
                   searchQuery={props.searchQuery}
                   searchDate={props.searchDate}
-                  isActive={isActive}
+                  isActive={slide.isActive()}
                   onReset={props.onReset}
                 />
               );
             case LeftColumnContent.Contacts:
-              return <ContactList filter={props.contactsFilter} isActive={isActive} onReset={props.onReset} />;
+              return <ContactList filter={props.contactsFilter} isActive={slide.isActive()} onReset={props.onReset} />;
             default:
               return undefined;
           }
         }}
       </Transition>
-      {shouldRenderUpdateButton() && (
+      {updateButtonTransition.shouldRender() && (
         <Button
           fluid
           badge
-          className={buildClassName('btn-update', updateButtonClassNames)}
+          ref={updateButtonTransition.ref}
+          className="btn-update"
           onClick={handleUpdateClick}
           isLoading={isTauriUpdateDownloading()}
         >
@@ -240,8 +242,8 @@ const LeftMain = (props: OwnProps) => {
         <CommunityPanel
           isOpen={isCommunityPanelOpen()}
           isHidden={!isCommunityPanelRendered()}
-          onOpenAnimationStart={handleCommunityPanelAnimationStart()}
-          onCloseAnimationEnd={handleCommunityPanelAnimationEnd()}
+          onOpenAnimationStart={handleCommunityPanelAnimationStart}
+          onCloseAnimationEnd={handleCommunityPanelAnimationEnd}
         />
       )}
       {shouldRenderForumPanel() && (
@@ -249,8 +251,8 @@ const LeftMain = (props: OwnProps) => {
           isOpen={props.isForumPanelOpen}
           isHidden={!isForumPanelRendered()}
           onTopicSearch={props.onTopicSearch}
-          onOpenAnimationStart={handleForumPanelAnimationStart()}
-          onCloseAnimationEnd={handleForumPanelAnimationEnd()}
+          onOpenAnimationStart={handleForumPanelAnimationStart}
+          onCloseAnimationEnd={handleForumPanelAnimationEnd}
         />
       )}
       <NewChatButton

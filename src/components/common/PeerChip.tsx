@@ -1,5 +1,4 @@
 import { createMemo } from 'frameact';
-import type { JSX } from 'frameact/jsx-runtime';
 import { withGlobal } from '../../global';
 import type { GlobalState } from '../../global/types';
 
@@ -52,47 +51,63 @@ type StateProps = {
   isSavedMessages?: boolean;
 };
 
-const PeerChip = <T,>(ownProps: OwnProps) => {
+const PeerChip = <T,>(ownProps: OwnProps<T>) => {
   const props = withGlobal(ownProps, mapStateToProps);
   const lang = useLang();
 
   const apiPeer = createMemo(() => props.mockPeer || props.peer);
   const anyPeer = createMemo(() => props.customPeer || apiPeer());
 
-  const peerColorResult = createMemo(() =>
-    usePeerColor({
-      peer: () => anyPeer(),
-      theme: () => props.theme,
-    }),
+  const peerColor = usePeerColor({
+    peer: anyPeer,
+    theme: () => props.theme,
+  });
+  const peerColorClass = () => peerColor().className;
+  const peerColorStyle = () => peerColor().style;
+
+  const chat = createMemo(() => {
+    const peer = apiPeer();
+    return peer && isApiPeerChat(peer) ? peer : undefined;
+  });
+
+  // Deviation: tt built these in an `if` of the render body; the branches are reactive bindings on booleans, so an
+  // edited peer entity updates `Avatar` / `FullNameTitle` in place (they read it through the getter) instead of
+  // recreating them.
+  const hasIconAndTitle = createMemo(() => Boolean(props.icon && props.title));
+  const hasAnyPeer = createMemo(() => Boolean(anyPeer()));
+
+  const iconElement = (
+    <>
+      {hasIconAndTitle() ? (
+        <div class={styles.iconWrapper}>
+          <Icon name={props.icon!} style={styles.icon} />
+        </div>
+      ) : hasAnyPeer() ? (
+        <Avatar className={styles.avatar} peer={anyPeer()} size="small" isSavedMessages={props.isSavedMessages} />
+      ) : undefined}
+    </>
   );
-  const peerColorClass = () => peerColorResult().className;
-  const peerColorStyle = () => peerColorResult().style;
 
-  const chat = createMemo(() => (apiPeer() && isApiPeerChat(apiPeer()) ? apiPeer() : undefined));
+  const titleText = createMemo(() => {
+    const peer = anyPeer();
+    return !hasIconAndTitle() && peer ? getPeerTitle(lang, peer) || props.title : undefined;
+  });
 
-  let iconElement: JSX.Element | undefined;
-  let titleElement: JSX.Element | undefined;
-  let titleText: string | undefined;
-
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (props.icon && props.title) {
-    iconElement = (
-      <div class={styles.iconWrapper}>
-        <Icon name={props.icon} style={styles.icon} />
-      </div>
-    );
-
-    titleElement = props.title;
-  } else if (anyPeer()) {
-    iconElement = (
-      <Avatar className={styles.avatar} peer={anyPeer()} size="small" isSavedMessages={props.isSavedMessages} />
-    );
-
-    titleText = getPeerTitle(lang, anyPeer()) || props.title;
-    titleElement = props.title || (
-      <FullNameTitle peer={anyPeer()} isSavedMessages={props.isSavedMessages} withEmojiStatus={props.withEmojiStatus} />
-    );
-  }
+  const titleElement = (
+    <>
+      {hasIconAndTitle() ? (
+        props.title
+      ) : hasAnyPeer() ? (
+        props.title || (
+          <FullNameTitle
+            peer={anyPeer()!}
+            isSavedMessages={props.isSavedMessages}
+            withEmojiStatus={props.withEmojiStatus}
+          />
+        )
+      ) : undefined}
+    </>
+  );
 
   const fullClassName = createMemo(() =>
     buildClassName(
@@ -119,7 +134,7 @@ const PeerChip = <T,>(ownProps: OwnProps) => {
       class={fullClassName()}
       style={style()}
       onClick={() => props.onClick?.(props.clickArg!)}
-      title={props.isMinimized ? titleText : undefined}
+      title={props.isMinimized ? titleText() : undefined}
       dir={lang.isRtl ? 'rtl' : undefined}
     >
       {iconElement}
@@ -137,7 +152,10 @@ const PeerChip = <T,>(ownProps: OwnProps) => {
   );
 };
 
-const mapStateToProps = (global: GlobalState, { peerId, forceShowSelf }: OwnProps): Complete<StateProps> => {
+const mapStateToProps = (
+  global: GlobalState,
+  { peerId, forceShowSelf }: Pick<OwnProps, 'peerId' | 'forceShowSelf'>,
+): Complete<StateProps> => {
   const theme = selectTheme(global);
   if (!peerId) {
     return {

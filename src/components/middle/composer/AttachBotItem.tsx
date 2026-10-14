@@ -74,10 +74,8 @@ const AttachBotItem = (props: OwnProps) => {
   };
 
   return (
-    // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show>
     <MenuItem
-      key={props.bot.id}
-      customIcon={icon() && <AttachBotIcon icon={icon()} theme={props.theme} />}
+      customIcon={icon() && <AttachBotIcon icon={icon()!} theme={props.theme} />}
       icon={!icon() ? 'bots' : undefined}
       onClick={handleClick}
       onContextMenu={handleContextMenu}
@@ -88,7 +86,7 @@ const AttachBotItem = (props: OwnProps) => {
         <Menu
           isOpen={isMenuOpen()}
           positionX="right"
-          style={`left: ${menuPosition().x}px;top: ${menuPosition().y}px;`}
+          style={`left: ${menuPosition()?.x}px;top: ${menuPosition()?.y}px;`}
           className="bot-attach-context-menu"
           autoClose
           withPortal

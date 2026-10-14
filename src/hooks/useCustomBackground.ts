@@ -1,5 +1,6 @@
-import { createEffect, createSignal } from 'frameact';
+import { createEffect, createMemo, createSignal, untrack } from 'frameact';
 import { getActions } from '../global';
+import { type MaybeAccessor, read } from '../util/accessors';
 import { depsOf } from '../util/effectDeps';
 
 import type { ThemeKey } from '../types';
@@ -15,70 +16,72 @@ type ResolvedBackground = {
   canKeepAsFallback: boolean;
 };
 
-// TODO(codemod): useCustomBackground: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: the params are accessors and the result is an accessor (frameact components run once).
 export default function useCustomBackground(
-  theme: ThemeKey,
-  settingValue?: string,
-  shouldKeepPrevious?: boolean,
-  source?: WallpaperStorageSource,
+  theme: MaybeAccessor<ThemeKey>,
+  settingValue?: MaybeAccessor<string | undefined>,
+  shouldKeepPrevious?: MaybeAccessor<boolean | undefined>,
+  source?: MaybeAccessor<WallpaperStorageSource | undefined>,
 ) {
   const { setThemeSettings } = getActions();
   // An already-prefetched URL is available on the first render
   const [resolved, setResolved] = createSignal<ResolvedBackground | undefined>(
-    (() => {
-      if (!settingValue || settingValue.startsWith('#')) return undefined;
+    untrack(() => {
+      const initialValue = read(settingValue);
+      const initialSource = read(source);
+      if (!initialValue || initialValue.startsWith('#')) return undefined;
 
-      const prefetchedUrl = getResolvedWallpaperUrl(settingValue, source);
+      const prefetchedUrl = getResolvedWallpaperUrl(initialValue, initialSource);
       return prefetchedUrl
         ? {
-            slug: settingValue,
-            source,
+            slug: initialValue,
+            source: initialSource,
             value: `url(${prefetchedUrl})`,
-            canKeepAsFallback: Boolean(shouldKeepPrevious),
+            canKeepAsFallback: Boolean(read(shouldKeepPrevious)),
           }
         : undefined;
-    })(),
+    }),
   );
 
   createEffect(
-    depsOf(() => [settingValue, shouldKeepPrevious, source, theme]),
-    () => {
+    depsOf(() => [read(settingValue), read(shouldKeepPrevious), read(source), read(theme)] as const),
+    ([settingValue2, shouldKeepPrevious2, source2, theme2]) => {
       // Colors are usable synchronously (handled below); only slugs need their cached blob loaded.
-      if (!settingValue || settingValue.startsWith('#')) {
+      if (!settingValue2 || settingValue2.startsWith('#')) {
         setResolved(undefined);
         return undefined;
       }
 
       let isCancelled = false;
 
-      const urlHandle = acquireWallpaperUrl(settingValue, source);
+      const urlHandle = acquireWallpaperUrl(settingValue2, source2);
       urlHandle.promise
         .then((url) => {
           if (isCancelled) return;
           const value = `url(${url})`;
           setResolved((prev) =>
-            prev?.slug === settingValue && prev.source === source && prev.value === value
+            prev?.slug === settingValue2 && prev.source === source2 && prev.value === value
               ? prev
               : {
-                  slug: settingValue,
-                  source,
+                  slug: settingValue2,
+                  source: source2,
                   value,
-                  canKeepAsFallback: Boolean(shouldKeepPrevious),
+                  canKeepAsFallback: Boolean(shouldKeepPrevious2),
                 },
           );
         })
         .catch(() => {
           if (isCancelled) return;
-          if (source === 'lockScreen') {
+          if (source2 === 'lockScreen') {
             setResolved(undefined);
             return;
           }
           // The cached blob is gone (e.g. evicted) — fully reset to the default wallpaper
           setThemeSettings({
-            theme,
+            theme: theme2,
             ...RESET_WALLPAPER_SETTINGS,
             isBlurred: true,
-            patternColor: getDefaultPatternColor(theme),
+            patternColor: getDefaultPatternColor(theme2),
           });
         });
 
@@ -86,18 +89,23 @@ export default function useCustomBackground(
         isCancelled = true;
         urlHandle.release();
         // Pattern masks remain visible while the next mask resolves
-        if (!shouldKeepPrevious) {
-          setResolved((prev) => (prev?.slug === settingValue ? undefined : prev));
+        if (!shouldKeepPrevious2) {
+          setResolved((prev) => (prev?.slug === settingValue2 ? undefined : prev));
         }
       };
     },
   );
 
-  if (!settingValue) return undefined;
-  if (settingValue.startsWith('#')) return settingValue;
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (resolved()?.slug === settingValue && resolved().source === source) return resolved.value;
-  return shouldKeepPrevious && resolved() && resolved().source === source && resolved().canKeepAsFallback
-    ? resolved().value
-    : undefined;
+  return createMemo(() => {
+    const settingValue2 = read(settingValue);
+    const source2 = read(source);
+    const shouldKeepPrevious2 = read(shouldKeepPrevious);
+    if (!settingValue2) return undefined;
+    if (settingValue2.startsWith('#')) return settingValue2;
+    const current = resolved();
+    if (current?.slug === settingValue2 && current.source === source2) return current.value;
+    return shouldKeepPrevious2 && current && current.source === source2 && current.canKeepAsFallback
+      ? current.value
+      : undefined;
+  });
 }

@@ -1,8 +1,12 @@
-import { createEffect, createSignal, previous } from 'frameact';
+import { createEffect, createMemo, createSignal, onMount } from 'frameact';
+import { Show } from 'frameact/dom';
 import { getActions, withGlobal } from '../../global';
 import { depsOf } from '../../util/effectDeps';
 
 import type { GlobalState } from '../../global/types';
+import type { FoldersActions } from '../../hooks/reducers/useFoldersReducer';
+import type { ReducerAction } from '../../hooks/useReducer';
+import type { TransitionSlide } from '../../lib/kit';
 import { type AnimationLevel, LeftColumnContent, SettingsScreens } from '../../types';
 
 import {
@@ -22,7 +26,6 @@ import { isComposerHasSelection } from '../middle/composer/helpers/selection';
 
 import useFoldersReducer from '../../hooks/reducers/useFoldersReducer';
 import { useHotkeys } from '../../hooks/useHotkeys';
-import { useStateRef } from '../../hooks/useStateRef';
 
 import Transition from '../ui/Transition';
 import ArchivedChats from './ArchivedChats.async';
@@ -97,24 +100,22 @@ function LeftColumn(ownProps: OwnProps) {
   // Used to reset child components in background.
   const [lastResetTime, setLastResetTime] = createSignal<number>(0);
 
-  let contentType: ContentType = ContentType.Main;
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  switch (props.contentKey) {
-    case LeftColumnContent.Archived:
-      contentType = ContentType.Archived;
-      break;
-    case LeftColumnContent.Settings:
-      contentType = ContentType.Settings;
-      break;
-    case LeftColumnContent.NewChannelStep1:
-    case LeftColumnContent.NewChannelStep2:
-      contentType = ContentType.NewChannel;
-      break;
-    case LeftColumnContent.NewGroupStep1:
-    case LeftColumnContent.NewGroupStep2:
-      contentType = ContentType.NewGroup;
-      break;
-  }
+  const contentType = createMemo(() => {
+    switch (props.contentKey) {
+      case LeftColumnContent.Archived:
+        return ContentType.Archived;
+      case LeftColumnContent.Settings:
+        return ContentType.Settings;
+      case LeftColumnContent.NewChannelStep1:
+      case LeftColumnContent.NewChannelStep2:
+        return ContentType.NewChannel;
+      case LeftColumnContent.NewGroupStep1:
+      case LeftColumnContent.NewGroupStep2:
+        return ContentType.NewGroup;
+      default:
+        return ContentType.Main;
+    }
+  });
 
   const handleReset = (forceReturnToChatList?: true | Event) => {
     function fullReset() {
@@ -381,16 +382,9 @@ function LeftColumn(ownProps: OwnProps) {
 
   createEffect(
     depsOf(
-      () =>
-        [
-          props.isFirstChatFolderActive,
-          props.contentKey,
-          handleReset,
-          props.isChatOpen,
-          props.isChatListPanelOpen,
-        ] as const,
+      () => [props.isFirstChatFolderActive, props.contentKey, props.isChatOpen, props.isChatListPanelOpen] as const,
     ),
-    ([isFirstChatFolderActive2, contentKey2, , isChatOpen2, isChatListPanelOpen2]) => {
+    ([isFirstChatFolderActive2, contentKey2, isChatOpen2, isChatListPanelOpen2]) => {
       const isArchived = contentKey2 === LeftColumnContent.Archived;
       const isChatList = contentKey2 === LeftColumnContent.ChatList;
       const noChatOrPanelOpen = !isChatOpen2 && !isChatListPanelOpen2;
@@ -458,8 +452,8 @@ function LeftColumn(ownProps: OwnProps) {
   });
 
   createEffect(
-    depsOf(() => [clearTwoFaError, loadPasswordInfo, props.settingsScreen] as const),
-    ([, , settingsScreen2]) => {
+    () => props.settingsScreen,
+    (settingsScreen2) => {
       clearTwoFaError();
 
       if (settingsScreen2 === SettingsScreens.Privacy) {
@@ -468,46 +462,52 @@ function LeftColumn(ownProps: OwnProps) {
     },
   );
 
-  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
+  // Deviation: tt's `useSyncEffect` dispatched during render; an effect dispatches at the end of the tick.
   createEffect(
-    depsOf(() => [foldersDispatch, props.nextFoldersAction] as const),
-    ([, nextFoldersAction2]) => {
+    () => props.nextFoldersAction,
+    (nextFoldersAction2) => {
       if (nextFoldersAction2) {
         foldersDispatch(nextFoldersAction2);
       }
     },
   );
 
-  // TODO(codemod): useStateRef: a handler reads the current value through the accessor; replace ref.current with the accessor call
-  const prevSettingsScreenRef = useStateRef(
-    previous(() => (contentType === ContentType.Settings ? props.settingsScreen : -1)),
-  );
-
+  // The settings screen of the previous change (tt: `usePrevious` in a state ref), kept by an effect so that the swipe's
+  // `onCancel` handler reads it at event time.
+  let prevSettingsScreen: SettingsScreens | -1 | undefined;
+  let lastSettingsScreen: SettingsScreens | -1 | undefined;
   createEffect(
-    depsOf(() => [prevSettingsScreenRef, props.ref] as const),
-    ([, ref2]) => {
-      if (!IS_TOUCH_ENV) {
-        return undefined;
-      }
-
-      return captureControlledSwipe(ref2.current!, {
-        excludedClosestSelector: '.ProfileInfo, .color-picker, .hue-picker, .TabList',
-        selectorToPreventScroll: '#Settings .custom-scroll',
-        onSwipeRightStart: handleReset,
-        onCancel: () => {
-          openLeftColumnContent({ contentKey: LeftColumnContent.Settings });
-          openSettingsScreen({ screen: prevSettingsScreenRef.current! });
-        },
-      });
+    () => (contentType() === ContentType.Settings ? props.settingsScreen : -1),
+    (settingsScreen2) => {
+      prevSettingsScreen = lastSettingsScreen;
+      lastSettingsScreen = settingsScreen2;
     },
   );
 
-  function renderContent(isActive: boolean) {
-    switch (contentType) {
+  let leftColumnEl: HTMLDivElement | undefined;
+  onMount(() => {
+    if (!IS_TOUCH_ENV) {
+      return undefined;
+    }
+
+    return captureControlledSwipe(leftColumnEl!, {
+      excludedClosestSelector: '.ProfileInfo, .color-picker, .hue-picker, .TabList',
+      selectorToPreventScroll: '#Settings .custom-scroll',
+      onSwipeRightStart: handleReset,
+      onCancel: () => {
+        openLeftColumnContent({ contentKey: LeftColumnContent.Settings });
+        openSettingsScreen({ screen: prevSettingsScreen as SettingsScreens });
+      },
+    });
+  });
+
+  function renderContent(slide: TransitionSlide) {
+    const isActive = () => slide.isActive();
+    switch (slide.key as ContentType) {
       case ContentType.Archived:
         return (
           <ArchivedChats
-            isActive={isActive}
+            isActive={isActive()}
             onReset={handleReset}
             onTopicSearch={handleTopicSearch}
             foldersDispatch={foldersDispatch}
@@ -519,9 +519,9 @@ function LeftColumn(ownProps: OwnProps) {
       case ContentType.Settings:
         return (
           <Settings
-            isActive={isActive}
+            isActive={isActive()}
             currentScreen={props.settingsScreen}
-            foldersState={foldersState}
+            foldersState={foldersState()}
             foldersDispatch={foldersDispatch}
             animationLevel={props.animationLevel}
             shouldSkipTransition={props.shouldSkipHistoryAnimations}
@@ -531,26 +531,31 @@ function LeftColumn(ownProps: OwnProps) {
         );
       case ContentType.NewChannel:
         return (
-          // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show>
-          <NewChat
-            key={lastResetTime()}
-            isActive={isActive}
-            isChannel
-            content={props.contentKey}
-            animationLevel={props.animationLevel}
-            onReset={handleReset}
-          />
+          // `key={lastResetTime}` of tt: a new `when` object remounts the screen after every reset.
+          <Show when={{ resetTime: lastResetTime() }} keyed>
+            {() => (
+              <NewChat
+                isActive={isActive()}
+                isChannel
+                content={props.contentKey}
+                animationLevel={props.animationLevel}
+                onReset={handleReset}
+              />
+            )}
+          </Show>
         );
       case ContentType.NewGroup:
         return (
-          // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show>
-          <NewChat
-            key={lastResetTime()}
-            isActive={isActive}
-            content={props.contentKey}
-            animationLevel={props.animationLevel}
-            onReset={handleReset}
-          />
+          <Show when={{ resetTime: lastResetTime() }} keyed>
+            {() => (
+              <NewChat
+                isActive={isActive()}
+                content={props.contentKey}
+                animationLevel={props.animationLevel}
+                onReset={handleReset}
+              />
+            )}
+          </Show>
         );
       default:
         return (
@@ -575,12 +580,14 @@ function LeftColumn(ownProps: OwnProps) {
   }
 
   return (
-    // TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6)
     <Transition
-      ref={props.ref}
+      ref={(el) => {
+        leftColumnEl = el;
+        props.ref(el);
+      }}
       name={resolveTransitionName('layers', props.animationLevel, props.shouldSkipHistoryAnimations)}
       renderCount={RENDER_COUNT}
-      activeKey={contentType}
+      activeKey={contentType()}
       shouldCleanup
       cleanupExceptionKey={ContentType.Main}
       shouldWrap

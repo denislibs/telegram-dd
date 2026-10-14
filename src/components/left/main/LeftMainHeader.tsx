@@ -1,4 +1,5 @@
-import { createEffect, createMemo } from 'frameact';
+import { createEffect, createMemo, frozenWhile } from 'frameact';
+import type { JSX } from 'frameact/jsx-runtime';
 import { getActions, withGlobal } from '../../../global';
 import { depsOf } from '../../../util/effectDeps';
 
@@ -97,19 +98,20 @@ const LeftMainHeader = (ownProps: OwnProps) => {
     return props.searchDate ? formatDateToString(new Date(props.searchDate * 1000)) : undefined;
   });
 
-  const connectionStatusResult = createMemo(() =>
-    useConnectionStatus(
-      lang,
-      () => props.connectionState,
-      () => props.isSyncing || props.isFetchingDifference,
-      () => props.isMessageListOpen,
-      () => props.isConnectionStatusMinimized,
-      () => !props.areChatsLoaded,
-    ),
+  const { connectionStatus, connectionStatusText, connectionStatusPosition } = useConnectionStatus(
+    lang,
+    () => props.connectionState,
+    () => props.isSyncing || props.isFetchingDifference,
+    () => props.isMessageListOpen,
+    () => props.isConnectionStatusMinimized,
+    () => !props.areChatsLoaded,
   );
-  const connectionStatus = () => connectionStatusResult().connectionStatus;
-  const connectionStatusText = () => connectionStatusResult().connectionStatusText;
-  const connectionStatusPosition = () => connectionStatusResult().connectionStatusPosition;
+
+  // Deviation: tt's <ShowTransition> kept the previous children while it closed, so the overlay kept its last status
+  // and text; the children are live here, so both are frozen while the overlay is not shown.
+  const isOverlayHidden = () => connectionStatusPosition() !== 'overlay';
+  const overlayConnectionStatus = frozenWhile(connectionStatus, isOverlayHidden);
+  const overlayConnectionStatusText = frozenWhile(connectionStatusText, isOverlayHidden);
 
   const handleLockScreenHotkey = (e: KeyboardEvent) => {
     e.preventDefault();
@@ -125,45 +127,39 @@ const LeftMainHeader = (ownProps: OwnProps) => {
     closeForumPanel();
   };
 
-  useHotkeys(() =>
-    createMemo(() =>
-      props.canSetPasscode
-        ? {
-            'Ctrl+Shift+L': handleLockScreenHotkey,
-            'Alt+Shift+L': handleLockScreenHotkey,
-            'Meta+Shift+L': handleLockScreenHotkey,
-            ...(IS_APP && { 'Mod+L': handleLockScreenHotkey }),
-          }
-        : undefined,
-    ),
+  const hotkeys = createMemo(() =>
+    props.canSetPasscode
+      ? {
+          'Ctrl+Shift+L': handleLockScreenHotkey,
+          'Alt+Shift+L': handleLockScreenHotkey,
+          'Meta+Shift+L': handleLockScreenHotkey,
+          ...(IS_APP && { 'Mod+L': handleLockScreenHotkey }),
+        }
+      : undefined,
   );
+  useHotkeys(hotkeys);
 
-  const MainButton: FC<{ onTrigger: () => void; isOpen?: boolean }> = createMemo(() => {
-    return ({ onTrigger, isOpen }) => (
-      <Button
-        round
-        ripple={hasMenu() && !isMobile}
-        size="smaller"
-        color="translucent"
-        className={buildClassName(isOpen && 'active')}
-
-        onClick={isSearchButton() ? handleForumSearchClick : hasMenu() ? onTrigger : () => props.onReset()}
-        ariaLabel={hasMenu() ? lang('AriaLabelOpenMenu') : lang('AriaLabelBackChatList')}
-      >
-        {isSearchButton() ? (
-          <Icon name="search" />
-        ) : (
-          <div
-            class={buildClassName(
-              'animated-menu-icon',
-              !hasMenu() && 'state-back',
-              props.shouldSkipTransition && 'no-animation',
-            )}
-          />
-        )}
-      </Button>
-    );
-  });
+  // Deviation: a component over reactive reads instead of tt's memoized FC (which was a new component, i.e. a remount,
+  // whenever one of its dependencies changed): the button and its animated icon persist, only their classes change.
+  const MainButton = (triggerProps: { onTrigger: () => void; isOpen?: boolean }): JSX.Element => (
+    <Button
+      round
+      ripple={hasMenu() && !isMobile()}
+      size="smaller"
+      color="translucent"
+      className={buildClassName(triggerProps.isOpen && 'active')}
+      onClick={() => (isSearchButton() ? handleForumSearchClick() : hasMenu() ? triggerProps.onTrigger() : props.onReset())}
+      ariaLabel={hasMenu() ? lang('AriaLabelOpenMenu') : lang('AriaLabelBackChatList')}
+    >
+      {isSearchButton() ? (
+        <Icon name="search" />
+      ) : (
+        <div
+          class={buildClassName('animated-menu-icon', !hasMenu() && 'state-back', props.shouldSkipTransition && 'no-animation')}
+        />
+      )}
+    </Button>
+  );
 
   const handleSearchFocus = () => {
     if (!props.searchQuery) {
@@ -196,7 +192,7 @@ const LeftMainHeader = (ownProps: OwnProps) => {
   );
 
   const isSearchFocused = createMemo(() =>
-    isMobile ? !props.isMessageListOpen && isSearchRelevant() : isSearchRelevant(),
+    isMobile() ? !props.isMessageListOpen && isSearchRelevant() : isSearchRelevant(),
   );
 
   createEffect(
@@ -212,41 +208,39 @@ const LeftMainHeader = (ownProps: OwnProps) => {
     () => !isSearchFocused() && !selectedSearchDate() && !props.globalSearchChatId && !areContactsVisible(),
   );
 
-  const searchContent = createMemo(() => {
-    return (
-      <>
-        {selectedSearchDate() && (
-          <PeerChip
-            icon="calendar"
-            title={selectedSearchDate()}
-            canClose
-            isMinimized={Boolean(props.globalSearchChatId)}
-            className="left-search-picker-item"
-            onClick={setGlobalSearchDate}
-            isCloseNonDestructive
-            clickArg={CLEAR_DATE_SEARCH_PARAM}
-          />
-        )}
-        {props.globalSearchChatId && (
-          <PeerChip
-            className="left-search-picker-item"
-            peerId={props.globalSearchChatId}
-            onClick={setGlobalSearchChatId}
-            canClose
-            isMinimized
-            clickArg={CLEAR_CHAT_SEARCH_PARAM}
-          />
-        )}
-      </>
-    );
-  });
+  const searchContent = (
+    <>
+      {selectedSearchDate() && (
+        <PeerChip
+          icon="calendar"
+          title={selectedSearchDate()}
+          canClose
+          isMinimized={Boolean(props.globalSearchChatId)}
+          className="left-search-picker-item"
+          onClick={setGlobalSearchDate}
+          isCloseNonDestructive
+          clickArg={CLEAR_DATE_SEARCH_PARAM}
+        />
+      )}
+      {props.globalSearchChatId && (
+        <PeerChip
+          className="left-search-picker-item"
+          peerId={props.globalSearchChatId}
+          onClick={setGlobalSearchChatId}
+          canClose
+          isMinimized
+          clickArg={CLEAR_CHAT_SEARCH_PARAM}
+        />
+      )}
+    </>
+  );
 
   return (
     <div class="LeftMainHeader">
       <div id="LeftMainHeader" class="left-header" data-tauri-drag-region={IS_WITH_WINDOW_BUTTONS ? true : undefined}>
         {lang.isRtl && <div class="DropdownMenuFiller" />}
         <MainMenuDropdown
-          trigger={MainButton()}
+          trigger={MainButton}
           className={buildClassName(
             hasMenu() &&
               props.isFoldersSidebarShown &&
@@ -280,14 +274,14 @@ const LeftMainHeader = (ownProps: OwnProps) => {
           onSpinnerClick={connectionStatusPosition() === 'minimized' ? toggleConnectionStatus : undefined}
           onEnter={handleSearchEnter}
         >
-          {searchContent()}
+          {searchContent}
           <StoryToggler canShow={withStoryToggler()} />
         </SearchInput>
         {props.isCurrentUserPremium && <StatusButton />}
         {props.hasPasscode && (
           <Button
             round
-            ripple={!isMobile}
+            ripple={!isMobile()}
             size="smaller"
             color="translucent"
             ariaLabel={`${oldLang('ShortcutsController.Others.LockByPasscode')} (Ctrl+Shift+L)`}
@@ -298,8 +292,8 @@ const LeftMainHeader = (ownProps: OwnProps) => {
         )}
         <ShowTransition isOpen={connectionStatusPosition() === 'overlay'} isCustom className="connection-state-wrapper">
           <ConnectionStatusOverlay
-            connectionStatus={connectionStatus()}
-            connectionStatusText={connectionStatusText()!}
+            connectionStatus={overlayConnectionStatus()!}
+            connectionStatusText={overlayConnectionStatusText()!}
             onClick={toggleConnectionStatus}
           />
         </ShowTransition>

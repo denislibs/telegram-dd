@@ -20,16 +20,9 @@ type OwnProps = {
 };
 
 const GiftEffectWrapper = (props: OwnProps) => {
-  let containerRef!: HTMLDivElement;
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (props.ref) {
-    // TODO(codemod): "containerRef" was a ref object and is reassigned here (a forwarded ref?): use a callback ref
-    containerRef = props.ref;
-  }
-
   return (
     <div
-      ref={containerRef}
+      ref={(node) => props.ref?.(node)}
       class={buildClassName(styles.root, props.className)}
       style={buildStyle(props.glowColor && `--glow-color: ${props.glowColor}`, props.style)}
       onClick={(e) => props.onClick?.(e)}

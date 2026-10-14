@@ -1,8 +1,8 @@
-import { createEffect, createMemo } from 'frameact';
+import { createMemo } from 'frameact';
 import { Show } from 'frameact/dom';
-import { depsOf } from '../../util/effectDeps';
 
 import type { ApiFormattedText, ApiMessage, ApiMessageEntity, ApiStory } from '../../api/types';
+import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 import type { ThreadId } from '../../types';
 import { ApiMessageEntityTypes } from '../../api/types';
 
@@ -55,18 +55,20 @@ function MessageText(props: OwnProps) {
   const formattedText = createMemo(
     () => props.forcedText || extractMessageText(props.messageOrStory, props.inChatList),
   );
-  const adaptedFormattedText = createMemo(() =>
-    props.isForAnimation && formattedText() ? stripCustomEmoji(formattedText()) : formattedText(),
-  );
-  const source = createMemo(() => adaptedFormattedText() || {});
+  const adaptedFormattedText = createMemo(() => {
+    const current = formattedText();
+    return props.isForAnimation && current ? stripCustomEmoji(current) : current;
+  });
+  const source = createMemo((): Partial<ApiFormattedText> => adaptedFormattedText() || {});
   const text = () => source().text;
   const entities = () => source().entities;
 
   const entitiesWithFocusedQuote = createMemo(() => {
-    if (!text() || !props.focusedQuote) return entities();
+    const currentText = text();
+    if (!currentText || !props.focusedQuote) return entities();
 
-    const offsetIndex = text().indexOf(props.focusedQuote, props.focusedQuoteOffset);
-    const index = offsetIndex >= 0 ? offsetIndex : text().indexOf(props.focusedQuote); // Fallback to first occurrence
+    const offsetIndex = currentText.indexOf(props.focusedQuote, props.focusedQuoteOffset);
+    const index = offsetIndex >= 0 ? offsetIndex : currentText.indexOf(props.focusedQuote); // Fallback to first occurrence
     const lendth = props.focusedQuote.length;
     if (index >= 0) {
       return insertTextEntity(entities() || [], {
@@ -81,13 +83,13 @@ function MessageText(props: OwnProps) {
 
   const containerId = useUniqueId();
 
-  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
-  createEffect(
-    depsOf(() => [text(), entitiesWithFocusedQuote()] as const),
-    ([text2, entitiesWithFocusedQuote2]) => {
-      textCacheBusterRef += 1;
-    },
-  );
+  // tt bumped the counter in `useSyncEffect` during render, before the text was rendered: a memo that the render reads
+  const textCacheBuster = createMemo(() => {
+    text();
+    entitiesWithFocusedQuote();
+    textCacheBusterRef += 1;
+    return textCacheBusterRef;
+  });
 
   const withSharedCanvas = createMemo(() => {
     if (props.shouldAnimateTyping) {
@@ -113,11 +115,10 @@ function MessageText(props: OwnProps) {
       observeIntersectionForLoading: props.observeIntersectionForLoading,
       observeIntersectionForPlaying: props.observeIntersectionForPlaying,
       withTranslucentThumbs: props.withTranslucentThumbs,
-      // TODO(codemod): "sharedCanvasRef" was a ref object passed as a value: pass an accessor (() => sharedCanvasRef) or a callback ref
-      sharedCanvasRef: withSharedCanvas() ? sharedCanvasRef : undefined,
-      // TODO(codemod): "sharedCanvasHqRef" was a ref object passed as a value: pass an accessor (() => sharedCanvasHqRef) or a callback ref
-      sharedCanvasHqRef: withSharedCanvas() ? sharedCanvasHqRef : undefined,
-      cacheBuster: textCacheBusterRef.toString(),
+      // Deviation: tt passed `useRef` objects; the canvas refs are accessors (as `CustomEmoji.sharedCanvasRef`)
+      sharedCanvasRef: withSharedCanvas() ? () => sharedCanvasRef : undefined,
+      sharedCanvasHqRef: withSharedCanvas() ? () => sharedCanvasHqRef : undefined,
+      cacheBuster: textCacheBuster().toString(),
       forcePlayback: props.forcePlayback,
       isInSelectMode: props.isInSelectMode,
       maxTimestamp: props.maxTimestamp,

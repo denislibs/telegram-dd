@@ -1,4 +1,5 @@
 import { createMemo } from 'frameact';
+import { Show } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
 import { withGlobal } from '../../global';
 import type { GlobalState } from '../../global/types';
@@ -58,24 +59,21 @@ const Wallpaper = (ownProps: OwnProps) => {
       ref={props.containerRef}
       id={props.id}
       class={props.className}
-      style={buildStyle(background.rootStyle, props.style) || undefined}
+      style={buildStyle(background.rootStyle(), props.style) || undefined}
       inert={props.inert}
-      onClick={(e) => props.onClick?.(e)}
+      onClick={() => props.onClick?.()}
     >
       <div
-        class={buildClassName(background.backgroundClassNames, props.bgClassName)}
-        style={background.backgroundStyle}
+        class={buildClassName(background.backgroundClassNames(), props.bgClassName)}
+        style={background.backgroundStyle()}
       >
-        {background.hasGradient && (
-          // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show>
-          <canvas
-            // A canvas can hold only one context type, so switching between the animated (WebGL)
-            // and static (2D) renderers must recreate the element
-            key={isStaticGradient() ? 'static' : 'animated'}
-            ref={background.gradientCanvasRef}
-            class={backgroundStyles.gradientCanvas}
-          />
-        )}
+        <Show when={background.hasGradient()}>
+          {/* A canvas can hold only one context type, so switching between the animated (WebGL)
+              and static (2D) renderers must recreate the element (tt: `key`) */}
+          <Show when={isStaticGradient() ? 'static' : 'animated'} keyed>
+            {() => <canvas ref={background.gradientCanvasRef} class={backgroundStyles.gradientCanvas} />}
+          </Show>
+        </Show>
       </div>
       {props.children}
     </div>

@@ -1,5 +1,5 @@
 import { createMemo, requestMeasure } from 'frameact';
-import { For } from 'frameact/dom';
+import { Dynamic, For } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
 
 import type { IconName } from '../../types/icons';
@@ -79,27 +79,21 @@ interface OwnProps {
 
 const ListItem = (props: OwnProps) => {
   let containerRef!: HTMLDivElement;
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (props.ref) {
-    // TODO(codemod): "containerRef" was a ref object and is reassigned here (a forwarded ref?): use a callback ref
-    containerRef = props.ref;
-  }
   let menuRef!: HTMLDivElement;
   const [isTouched, markIsTouched, unmarkIsTouched] = useFlag();
   const handleFileHoverOpen = useFileHoverOpenHandler(props.onFileHoverOpen);
 
-  const contextMenuHandlersResult = createMemo(() =>
-    useContextMenuHandlers(
-      () => containerRef,
-      () => !props.contextActions,
-    ),
+  const {
+    isContextMenuOpen,
+    contextMenuAnchor,
+    handleBeforeContextMenu,
+    handleContextMenu,
+    handleContextMenuClose,
+    handleContextMenuHide,
+  } = useContextMenuHandlers(
+    () => containerRef,
+    () => !props.contextActions,
   );
-  const isContextMenuOpen = () => contextMenuHandlersResult().isContextMenuOpen;
-  const contextMenuAnchor = () => contextMenuHandlersResult().contextMenuAnchor;
-  const handleBeforeContextMenu = () => contextMenuHandlersResult().handleBeforeContextMenu;
-  const handleContextMenu = () => contextMenuHandlersResult().handleContextMenu;
-  const handleContextMenuClose = () => contextMenuHandlersResult().handleContextMenuClose;
-  const handleContextMenuHide = () => contextMenuHandlersResult().handleContextMenuHide;
 
   const getTriggerElement = () => containerRef;
   const getRootElement = () => containerRef!.closest('.custom-scroll');
@@ -139,8 +133,8 @@ const ListItem = (props: OwnProps) => {
     }
   };
 
-  const fastClickResult = createMemo(() =>
-    useFastClick((e: React.MouseEvent<HTMLButtonElement>) => {
+  const { handleClick: handleSecondaryIconClick, handleMouseDown: handleSecondaryIconMouseDown } = useFastClick(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
       if (
         (props.disabled && !props.allowDisabledClick) ||
         e.button !== 0 ||
@@ -153,23 +147,21 @@ const ListItem = (props: OwnProps) => {
       if (props.onSecondaryIconClick) {
         props.onSecondaryIconClick(e);
       } else {
-        handleContextMenu()(e);
+        handleContextMenu(e);
       }
-    }),
+    },
   );
-  const handleSecondaryIconClick = () => fastClickResult().handleClick;
-  const handleSecondaryIconMouseDown = () => fastClickResult().handleMouseDown;
 
   const handleMouseDown = (e: React.MouseEvent<HTMLElement, MouseEvent>) => {
     if (props.inactive || IS_TOUCH_ENV) {
       return;
     }
     if (props.contextActions && (e.button === MouseButton.Secondary || !props.onClick)) {
-      handleBeforeContextMenu()(e);
+      handleBeforeContextMenu(e);
     }
     if (e.button === MouseButton.Main) {
       if (!props.onClick) {
-        handleContextMenu()(e);
+        handleContextMenu(e);
       } else {
         handleClick(e);
       }
@@ -197,8 +189,6 @@ const ListItem = (props: OwnProps) => {
       props.withColorTransition && 'with-color-transition',
     ),
   );
-
-  const ButtonElementTag = createMemo(() => (props.href ? 'a' : 'div'));
 
   return (
     <div

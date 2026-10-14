@@ -9,6 +9,7 @@ import { ARCHIVED_FOLDER_ID, SERVICE_NOTIFICATIONS_USER_ID } from '../config';
 import { getCanDeleteChat, isChatArchived, isChatChannel, isChatCommunity, isChatGroup } from '../global/helpers';
 import { selectChat, selectIsChatPinned } from '../global/selectors';
 import { selectThreadReadState } from '../global/selectors/threads';
+import { type MaybeAccessor, read } from '../util/accessors';
 import { IS_TAURI } from '../util/browser/globalEnvironment';
 import { IS_OPEN_IN_NEW_TAB_SUPPORTED } from '../util/browser/windowEnvironment';
 import { isUserId } from '../util/entities/ids';
@@ -16,45 +17,28 @@ import { buildCollectionByCallback, compact } from '../util/iteratees';
 import useSelector, { useShallowSelector } from './data/useSelector';
 import useLang from './useLang';
 
-// TODO(codemod): useChatContextActions: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-const useChatContextActions = (
-  {
-    chat,
-    user,
-    folderId,
-    isPinned,
-    isMuted,
-    canChangeFolder,
-    isSavedDialog,
-    currentUserId,
-    isPreview,
-    isInCommunityPanel,
-    topicIds,
-    handleDelete,
-    handleMute,
-    handleUnmute,
-    handleChatFolderChange,
-    handleReport,
-  }: {
-    chat: ApiChat | undefined;
-    user: ApiUser | undefined;
-    folderId?: number;
-    isPinned?: boolean;
-    isMuted?: boolean;
-    canChangeFolder?: boolean;
-    isSavedDialog?: boolean;
-    currentUserId?: string;
-    isPreview?: boolean;
-    isInCommunityPanel?: boolean;
-    topicIds?: number[];
-    handleDelete?: NoneToVoidFunction;
-    handleMute?: NoneToVoidFunction;
-    handleUnmute?: NoneToVoidFunction;
-    handleChatFolderChange: NoneToVoidFunction;
-    handleReport?: NoneToVoidFunction;
-  },
-  isInSearch = false,
-) => {
+type Params = {
+  chat: ApiChat | undefined;
+  user: ApiUser | undefined;
+  folderId?: number;
+  isPinned?: boolean;
+  isMuted?: boolean;
+  canChangeFolder?: boolean;
+  isSavedDialog?: boolean;
+  currentUserId?: string;
+  isPreview?: boolean;
+  isInCommunityPanel?: boolean;
+  topicIds?: number[];
+  handleDelete?: NoneToVoidFunction;
+  handleMute?: NoneToVoidFunction;
+  handleUnmute?: NoneToVoidFunction;
+  handleChatFolderChange: NoneToVoidFunction;
+  handleReport?: NoneToVoidFunction;
+};
+
+// Deviation: the params object is a `MaybeAccessor` (a function returning the object, `() => ({ chat: props.chat, … })`,
+// since some fields are functions themselves); the result is an accessor. frameact hooks run once.
+const useChatContextActions = (params: MaybeAccessor<Params>, isInSearch = false) => {
   const {
     toggleChatPinned,
     toggleSavedDialogPinned,
@@ -67,34 +51,37 @@ const useChatContextActions = (
 
   const lang = useLang();
 
-  const { isSelf } = user || {};
-  const isServiceNotifications = user?.id === SERVICE_NOTIFICATIONS_USER_ID;
+  const p = createMemo(() => read(params));
 
   const topicsReadStateSelector = (global: GlobalState) => {
+    const { chat, topicIds } = p();
     if (!chat?.id) return undefined;
     return buildCollectionByCallback(topicIds || [], (tId) => [tId, selectThreadReadState(global, chat?.id, tId)]);
   };
   const topicsReadStates = useShallowSelector(topicsReadStateSelector);
 
   const chatReadStateSelector = (global: GlobalState) => {
+    const { chat } = p();
     if (!chat?.id) return undefined;
     return selectThreadReadState(global, chat.id, MAIN_THREAD_ID);
   };
   const chatReadState = useSelector(chatReadStateSelector);
 
   const isLinkedCommunityCollapsedSelector = (global: GlobalState) => {
-    const communityId = chat?.linkedCommunityId;
+    const communityId = p().chat?.linkedCommunityId;
     return Boolean(communityId && selectChat(global, communityId)?.isCollapsedInDialogs);
   };
   const isLinkedCommunityCollapsed = useSelector(isLinkedCommunityCollapsedSelector);
 
   const isResolvedPinnedSelector = (global: GlobalState) => {
+    const { chat, isPinned, isInCommunityPanel } = p();
     if (isPinned !== undefined || !isInCommunityPanel || !chat) return isPinned;
     return selectIsChatPinned(global, chat.id, isChatArchived(chat) ? ARCHIVED_FOLDER_ID : undefined);
   };
   const isResolvedPinned = useSelector(isResolvedPinnedSelector);
 
   const deleteTitle = createMemo(() => {
+    const { chat, isSavedDialog } = p();
     if (!chat) return undefined;
 
     if (isSavedDialog) {
@@ -117,9 +104,28 @@ const useChatContextActions = (
   });
 
   const preparedActions = createMemo(() => {
+    const {
+      chat,
+      user,
+      folderId,
+      isMuted,
+      canChangeFolder,
+      isSavedDialog,
+      currentUserId,
+      isPreview,
+      isInCommunityPanel,
+      handleDelete,
+      handleMute,
+      handleUnmute,
+      handleChatFolderChange,
+      handleReport,
+    } = p();
     if (!chat || isPreview) {
       return undefined;
     }
+
+    const { isSelf } = user || {};
+    const isServiceNotifications = user?.id === SERVICE_NOTIFICATIONS_USER_ID;
 
     const actionOpenInNewTab =
       IS_OPEN_IN_NEW_TAB_SUPPORTED &&

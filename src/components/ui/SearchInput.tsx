@@ -51,14 +51,12 @@ type OwnProps = {
   onEnter?: NoneToVoidFunction;
 };
 
+// Deviation: both <Transition>s render by `slide.key` (framework guide section 6): the left one has the search icon on
+// key 1 and the back icon / the spinner on key 0; the right one has the spinner on key 1 when `withBackIcon`, else
+// the close button.
 const SearchInput = (rawProps: OwnProps) => {
   const props = mergeProps({ isLoading: false }, rawProps) as OwnProps & Required<Pick<OwnProps, 'isLoading'>>;
   let inputRef!: HTMLInputElement;
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (props.ref) {
-    // TODO(codemod): "inputRef" was a ref object and is reassigned here (a forwarded ref?): use a callback ref
-    inputRef = props.ref;
-  }
 
   const [isInputFocused, markInputFocused, unmarkInputFocused] = useFlag(props.focused);
 
@@ -70,7 +68,7 @@ const SearchInput = (rawProps: OwnProps) => {
 
   createMeasureEffect(
     depsOf(() => [props.focused, props.placeholder] as const),
-    ([focused2, placeholder2]) => {
+    ([focused2]) => {
       if (!inputRef) {
         return;
       }
@@ -139,7 +137,6 @@ const SearchInput = (rawProps: OwnProps) => {
       onClick={(e) => props.onClick?.(e)}
       dir={lang.isRtl ? 'rtl' : undefined}
     >
-      {/* TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6) */}
       <Transition
         name="fade"
         shouldCleanup
@@ -147,27 +144,36 @@ const SearchInput = (rawProps: OwnProps) => {
         className="icon-container-left"
         slideClassName="icon-container-slide"
       >
-        {props.isLoading && !props.withBackIcon ? (
-          <Loading
-            color={props.spinnerColor}
-            backgroundColor={props.spinnerBackgroundColor}
-            onClick={props.onSpinnerClick}
-          />
-        ) : props.withBackIcon ? (
-          <Icon name="arrow-left" className="back-icon" onClick={props.onReset} />
-        ) : (
-          <Icon name="search" className="search-icon" />
-        )}
+        {(slide) =>
+          slide.key === 1 ? (
+            <Icon name="search" className="search-icon" />
+          ) : (
+            <>
+              {props.withBackIcon ? (
+                <Icon name="arrow-left" className="back-icon" onClick={props.onReset} />
+              ) : (
+                <Loading
+                  color={props.spinnerColor}
+                  backgroundColor={props.spinnerBackgroundColor}
+                  onClick={props.onSpinnerClick}
+                />
+              )}
+            </>
+          )
+        }
       </Transition>
       <div>{props.children}</div>
       <input
-        ref={inputRef}
+        ref={(el) => {
+          inputRef = el;
+          props.ref?.(el);
+        }}
         id={props.inputId}
         type="text"
         dir="auto"
         placeholder={props.placeholder || oldLang('Search')}
         class="form-control"
-        use:value={() => props.value}
+        use:value={() => props.value ?? ''}
         disabled={props.disabled}
         autocomplete={props.autoComplete}
         spellcheck={IS_TAURI ? false : undefined}
@@ -198,7 +204,6 @@ const SearchInput = (rawProps: OwnProps) => {
           ariaLabel={lang('AriaSearchNewerResult')}
         />
       )}
-      {/* TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6) */}
       <Transition
         name="fade"
         shouldCleanup
@@ -206,15 +211,19 @@ const SearchInput = (rawProps: OwnProps) => {
         className="icon-container-right"
         slideClassName="icon-container-slide"
       >
-        {props.withBackIcon && props.isLoading ? (
-          <Loading
-            color={props.spinnerColor}
-            backgroundColor={props.spinnerBackgroundColor}
-            onClick={props.onSpinnerClick}
-          />
-        ) : (
-          (props.value || props.canClose) &&
-          props.onReset && <Button round size="tiny" color="translucent" iconName="close" onClick={props.onReset} />
+        {(slide) => (
+          <>
+            {slide.key === 1 && props.withBackIcon ? (
+              <Loading
+                color={props.spinnerColor}
+                backgroundColor={props.spinnerBackgroundColor}
+                onClick={props.onSpinnerClick}
+              />
+            ) : (
+              (props.value || props.canClose) &&
+              props.onReset && <Button round size="tiny" color="translucent" iconName="close" onClick={props.onReset} />
+            )}
+          </>
         )}
       </Transition>
     </div>

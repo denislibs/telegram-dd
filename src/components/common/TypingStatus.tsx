@@ -1,4 +1,5 @@
 import { createMemo } from 'frameact';
+import { Show } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
 
 import type { ApiTypingStatus } from '../../api/types';
@@ -29,10 +30,10 @@ const EYES_ICON_SIZE = 1.25 * REM;
 const TypingStatus = (props: OwnProps) => {
   const lang = useLang();
   const actionFallbackUser = createMemo(() => lang('ActionFallbackUser'));
-  // TODO(codemod): dependency on a container (typingStatusByPeerId) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
+  // `typingStatusByPeerId` is a store container: it keeps its identity while its content changes, so the memos read
+  // the keys and the status fields themselves (the reads are tracked) instead of depending on the object
   const typingPeerIds = createMemo(() => Object.keys(props.typingStatusByPeerId));
 
-  // TODO(codemod): dependency on a container (typingStatusByPeerId) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
   const sortedTypingStatuses = createMemo(() =>
     Object.entries(props.typingStatusByPeerId).sort(([, a], [, b]) => b.timestamp - a.timestamp),
   );
@@ -59,29 +60,28 @@ const TypingStatus = (props: OwnProps) => {
       .map(({ name }) => name),
   );
 
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (!latestTypingStatus()) {
-    return undefined;
-  }
+  const user = latestUserName;
 
-  const user = createMemo(() => latestUserName());
-  let content: string | JSX.Element;
+  // `content` of tt is computed in a function that the JSX binding below tracks
+  const renderContent = (): string | JSX.Element | undefined => {
+    const typingStatus = latestTypingStatus();
+    if (!typingStatus) return undefined;
 
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (shouldRenderGroupedTyping()) {
-    if (sortedTypingStatuses().length === 2) {
-      content = lang(
-        'UserTypingSeveral',
-        {
-          users: lang.conjunction([
-            groupedUserNames()[0] || actionFallbackUser(),
-            groupedUserNames()[1] || actionFallbackUser(),
-          ]),
-        },
-        { withNodes: true },
-      );
-    } else {
-      content = lang(
+    if (shouldRenderGroupedTyping()) {
+      if (sortedTypingStatuses().length === 2) {
+        return lang(
+          'UserTypingSeveral',
+          {
+            users: lang.conjunction([
+              groupedUserNames()[0] || actionFallbackUser(),
+              groupedUserNames()[1] || actionFallbackUser(),
+            ]),
+          },
+          { withNodes: true },
+        );
+      }
+
+      return lang(
         'UserTypingMany',
         {
           user: groupedUserNames()[0] || actionFallbackUser(),
@@ -90,32 +90,37 @@ const TypingStatus = (props: OwnProps) => {
         { withNodes: true, pluralValue: sortedTypingStatuses().length - 1 },
       );
     }
-  } else if (props.isPrivate) {
-    content = getPrivateTypingStatusContent(lang, latestTypingStatus());
-  } else {
-    content = getGroupTypingStatusContent(lang, latestTypingStatus(), user());
-  }
 
-  const shouldRenderTypingStatusIcon = createMemo(
-    () => shouldRenderGroupedTyping() || shouldRenderTypingIcon(latestTypingStatus()),
-  );
+    if (props.isPrivate) {
+      return getPrivateTypingStatusContent(lang, typingStatus);
+    }
+
+    return getGroupTypingStatusContent(lang, typingStatus, user());
+  };
+
+  const shouldRenderTypingStatusIcon = createMemo(() => {
+    const typingStatus = latestTypingStatus();
+    return shouldRenderGroupedTyping() || (typingStatus ? shouldRenderTypingIcon(typingStatus) : false);
+  });
 
   return (
-    <span class={buildClassName(styles.typingStatus, 'typing-status')} dir={lang.isRtl ? 'rtl' : 'auto'}>
-      {shouldRenderTypingStatusIcon() && (
-        <AnimatedIconWithPreview
-          className={styles.typingIcon}
-          tgsUrl={LOCAL_TGS_URLS.Typing}
-          size={ICON_SIZE}
-          play
-          noLoop={false}
-          shouldUseTextColor
-        />
-      )}
-      <span class={styles.content} dir="auto">
-        {content}
+    <Show when={latestTypingStatus()}>
+      <span class={buildClassName(styles.typingStatus, 'typing-status')} dir={lang.isRtl ? 'rtl' : 'auto'}>
+        {shouldRenderTypingStatusIcon() && (
+          <AnimatedIconWithPreview
+            className={styles.typingIcon}
+            tgsUrl={LOCAL_TGS_URLS.Typing}
+            size={ICON_SIZE}
+            play
+            noLoop={false}
+            shouldUseTextColor
+          />
+        )}
+        <span class={styles.content} dir="auto">
+          {renderContent()}
+        </span>
       </span>
-    </span>
+    </Show>
   );
 };
 

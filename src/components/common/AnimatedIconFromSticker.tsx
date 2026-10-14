@@ -30,11 +30,10 @@ function AnimatedIconFromSticker(props: OwnProps) {
 
   return (
     <AnimatedIconWithPreview
-      tgsUrl={tgsUrl}
-      previewUrl={props.fitzModifier ? undefined : previewBlobUrl}
+      tgsUrl={tgsUrl()}
+      previewUrl={props.fitzModifier ? undefined : previewBlobUrl()}
       thumbDataUri={thumbDataUri()}
       fitzModifier={props.fitzModifier}
-
       {...otherProps}
     />
   );

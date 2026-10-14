@@ -1,4 +1,5 @@
 import { createMemo } from 'frameact';
+import { For } from 'frameact/dom';
 import { getActions, withGlobal } from '../../../global';
 
 import type { ApiUser } from '../../../api/types';
@@ -90,13 +91,15 @@ const LeftSideMenuItems = (ownProps: OwnProps) => {
 
   const withOtherVersions = !IS_TAURI && (window.location.hostname === PRODUCTION_HOSTNAME || IS_TEST);
 
-  const archivedUnreadChatsCount = useFolderManagerForUnreadCounters()[ARCHIVED_FOLDER_ID]?.chatsCount || 0;
+  const unreadCounters = useFolderManagerForUnreadCounters();
+  const archivedUnreadChatsCount = () => unreadCounters()[ARCHIVED_FOLDER_ID]?.chatsCount || 0;
 
-  // TODO(codemod): dependency on a container (attachBots) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
-  const bots = createMemo(() =>
-    Object.values(props.attachBots).filter(
-      (bot) => bot.isForSideMenu && !(props.isWalletAvailable && bot.id === props.walletBotId),
-    ),
+  // Deviation: `attachBots` is a container that keeps its identity while its content changes, and a bot entity is a
+  // new object when it changes: the memo reads the fields it needs and keeps the ids, the rows read the bot by id.
+  const botIds = createMemo(() =>
+    Object.values(props.attachBots)
+      .filter((bot) => bot.isForSideMenu && !(props.isWalletAvailable && bot.id === props.walletBotId))
+      .map((bot) => bot.id),
   );
 
   const handleOpenWallet = () => {
@@ -187,7 +190,7 @@ const LeftSideMenuItems = (ownProps: OwnProps) => {
       {props.archiveSettings.isHidden && (
         <MenuItem icon="archive" onClick={props.onSelectArchived}>
           <span class="menu-item-name">{lang('MenuArchivedChats')}</span>
-          {archivedUnreadChatsCount > 0 && <div class="right-badge">{archivedUnreadChatsCount}</div>}
+          {archivedUnreadChatsCount() > 0 && <div class="right-badge">{archivedUnreadChatsCount()}</div>}
         </MenuItem>
       )}
       <MenuItem icon="group" onClick={props.onSelectContacts}>
@@ -198,16 +201,18 @@ const LeftSideMenuItems = (ownProps: OwnProps) => {
           {lang('WalletMenuItem')}
         </MenuItem>
       )}
-      {bots().map((bot) => (
-        <AttachBotItem
-          bot={bot}
-          theme={props.theme}
-          isInSideMenu
-          canShowNew
-          onMenuOpened={props.onBotMenuOpened}
-          onMenuClosed={props.onBotMenuClosed}
-        />
-      ))}
+      <For each={botIds()}>
+        {(botId) => (
+          <AttachBotItem
+            bot={props.attachBots[botId]}
+            theme={props.theme}
+            isInSideMenu
+            canShowNew
+            onMenuOpened={props.onBotMenuOpened}
+            onMenuClosed={props.onBotMenuClosed}
+          />
+        )}
+      </For>
       <MenuItem icon="settings" onClick={props.onSelectSettings}>
         {lang('MenuSettings')}
       </MenuItem>

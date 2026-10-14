@@ -4,6 +4,7 @@ import { getActions } from '../../global';
 
 import type { ApiChat } from '../../api/types';
 import type { GlobalState } from '../../global/types';
+import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 import type { GroupedLastMessageItem } from './ChatGroupedLastMessage';
 
 import { getOrderedTopics } from '../../global/helpers';
@@ -41,13 +42,14 @@ const ChatForumLastMessage = (props: OwnProps) => {
   const topics = useShallowSelector(topicsSelector);
 
   const orderedTopics = createMemo(() => {
-    if (!topics()) {
+    const currentTopics = topics();
+    if (!currentTopics) {
       return undefined;
     }
 
     const topicsThreadInfos = mapTruthyValues(topicsThreads(), (t) => t?.threadInfo);
 
-    return getOrderedTopics(topics(), topicsThreadInfos, undefined, true).slice(0, MAX_TOPICS);
+    return getOrderedTopics(currentTopics, topicsThreadInfos, undefined, true).slice(0, MAX_TOPICS);
   });
 
   const items = createMemo((): GroupedLastMessageItem[] | undefined => {

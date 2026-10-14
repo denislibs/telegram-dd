@@ -1,4 +1,5 @@
 import { createMeasureEffect, createMemo, createSignal, requestMeasure, requestMutation } from 'frameact';
+import { For } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
 import { depsOf } from '../../util/effectDeps';
 
@@ -37,29 +38,30 @@ const ChatGroupedLastMessage = (props: OwnProps) => {
   let lastMessageRef!: HTMLDivElement;
   let mainColumnRef!: HTMLDivElement;
 
-  // TODO(codemod): array destructuring of a reactive value: read the items through accessors
-  const [mainItem, ...otherItems] = props.items || [];
+  const mainItem = createMemo(() => props.items?.[0]);
+  const otherItems = createMemo(() => props.items?.slice(1) ?? []);
+  // Deviation: tt re-ran the measuring effect whenever `renderLastMessage` was a new function (every parent render);
+  // the rendered last message is a memo here so the effect re-measures when the preview re-renders.
+  const lastMessage = createMemo(() => props.renderLastMessage());
 
   const lang = useLang();
 
   const [isReversedCorner, setIsReversedCorner] = createSignal(false);
   const [overwrittenWidth, setOverwrittenWidth] = createSignal<number | undefined>(undefined);
 
-  const fastClickResult = createMemo(() =>
-    useFastClick((e: React.MouseEvent<HTMLDivElement>) => {
+  const { handleClick: handleMainItemClick, handleMouseDown: handleMainItemMouseDown } = useFastClick(
+    (e: React.MouseEvent<HTMLDivElement>) => {
       if (!props.onMainItemClick?.()) return;
 
       e.stopPropagation();
       e.preventDefault();
-    }),
+    },
   );
-  const handleMainItemClick = () => fastClickResult().handleClick;
-  const handleMainItemMouseDown = () => fastClickResult().handleMouseDown;
 
   createMeasureEffect(
-    depsOf(() => [mainItem, props.renderLastMessage, props.hasTags] as const),
-    ([mainItem2, renderLastMessage2, hasTags2]) => {
-      if (hasTags2) return undefined;
+    depsOf(() => [mainItem(), lastMessage(), props.hasTags] as const),
+    ([, , hasTags]) => {
+      if (hasTags) return undefined;
 
       let isCancelled = false;
 
@@ -101,16 +103,16 @@ const ChatGroupedLastMessage = (props: OwnProps) => {
     >
       {!props.hasTags && (
         <>
-          {mainItem && (
+          {mainItem() && (
             <div class={styles.titleRow}>
               <div
-                class={buildClassName(styles.mainColumn, mainItem.isUnread && styles.unread)}
+                class={buildClassName(styles.mainColumn, mainItem()?.isUnread && styles.unread)}
                 ref={mainColumnRef}
-                onClick={handleMainItemClick()}
-                onMouseDown={handleMainItemMouseDown()}
+                onClick={handleMainItemClick}
+                onMouseDown={handleMainItemMouseDown}
               >
-                {Boolean(mainItem.icon) && <span class={ICON_CLASS_NAME}>{mainItem.icon}</span>}
-                <div class={styles.title}>{renderText(mainItem.title)}</div>
+                {Boolean(mainItem()?.icon) && <span class={ICON_CLASS_NAME}>{mainItem()?.icon}</span>}
+                <div class={styles.title}>{renderText(mainItem()?.title ?? '')}</div>
                 {!overwrittenWidth() && isReversedCorner() && (
                   <div class={styles.afterWrapper}>
                     <div class={styles.after} />
@@ -119,12 +121,14 @@ const ChatGroupedLastMessage = (props: OwnProps) => {
               </div>
 
               <div class={styles.otherColumns}>
-                {otherItems.map((item) => (
-                  <div class={buildClassName(styles.otherColumn, item.isUnread && styles.unread)}>
-                    {Boolean(item.icon) && <span class={ICON_CLASS_NAME}>{item.icon}</span>}
-                    <span class={styles.otherColumnTitle}>{renderText(item.title)}</span>
-                  </div>
-                ))}
+                <For each={otherItems()} keyed={(item) => item.key}>
+                  {(item) => (
+                    <div class={buildClassName(styles.otherColumn, item().isUnread && styles.unread)}>
+                      {Boolean(item().icon) && <span class={ICON_CLASS_NAME}>{item().icon}</span>}
+                      <span class={styles.otherColumnTitle}>{renderText(item().title)}</span>
+                    </div>
+                  )}
+                </For>
               </div>
 
               <div class={styles.ellipsis} />
@@ -134,12 +138,12 @@ const ChatGroupedLastMessage = (props: OwnProps) => {
         </>
       )}
       <div
-        class={buildClassName(styles.lastMessage, mainItem?.isUnread && !props.hasTags && styles.unread)}
+        class={buildClassName(styles.lastMessage, mainItem()?.isUnread && !props.hasTags && styles.unread)}
         ref={lastMessageRef}
-        onClick={handleMainItemClick()}
-        onMouseDown={handleMainItemMouseDown()}
+        onClick={handleMainItemClick}
+        onMouseDown={handleMainItemMouseDown}
       >
-        {props.renderLastMessage()}
+        {lastMessage()}
         {!overwrittenWidth() && !isReversedCorner() && (
           <div class={styles.afterWrapper}>
             <div class={styles.after} />

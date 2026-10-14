@@ -1,43 +1,55 @@
-import { createEffect, previous } from 'frameact';
+import { type Accessor, createEffect, createMemo, createSignal } from 'frameact';
 
-import useForceUpdate from './useForceUpdate';
-import usePreviousDeprecated from './usePreviousDeprecated';
-import useSyncEffect from './useSyncEffect';
+import { type MaybeAccessor, read } from '../util/accessors';
+import { depsOf } from '../util/effectDeps';
 
 const SWAP_CLOSE_DURATION = 150;
 
-// TODO(codemod): useShowTransitionSwap: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function useShowTransitionSwap(isOpen: boolean, contentKey?: string): boolean {
-  const prevIsOpen = previous(() => isOpen);
-  const prevContentKey = previous(() => contentKey);
-  let isSwappingRef = false;
-  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
-  const forceUpdate = useForceUpdate();
+// Deviation: arguments are `MaybeAccessor`s and the result is an accessor. teact kept `isSwappingRef` + `usePrevious*` in
+// the render body and forced an update from the timer; here one memo remembers the previous values itself (it runs
+// whenever either input changes, as the render did) and the timer bumps a version signal that the memo reads.
+export default function useShowTransitionSwap(
+  isOpen: MaybeAccessor<boolean>,
+  contentKey?: MaybeAccessor<string | undefined>,
+): Accessor<boolean> {
+  const [version, setVersion] = createSignal(0);
+  let wasOpen = false;
+  let prevContentKey: string | undefined;
+  let isSwapping = false;
 
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (
-    isOpen &&
-    prevIsOpen() &&
-    contentKey !== undefined &&
-    prevContentKey() !== undefined &&
-    prevContentKey() !== contentKey &&
-    !isSwappingRef
-  ) {
-    isSwappingRef = true;
-  }
+  const effectiveIsOpen = createMemo(() => {
+    version();
+    const isOpen2 = read(isOpen);
+    const contentKey2 = read(contentKey);
 
-  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
+    if (
+      isOpen2 &&
+      wasOpen &&
+      contentKey2 !== undefined &&
+      prevContentKey !== undefined &&
+      prevContentKey !== contentKey2 &&
+      !isSwapping
+    ) {
+      isSwapping = true;
+    }
+
+    wasOpen = isOpen2;
+    prevContentKey = contentKey2;
+
+    return isOpen2 && !isSwapping;
+  });
+
   createEffect(
-    () => contentKey,
+    depsOf(() => [read(contentKey), effectiveIsOpen()] as const),
     () => {
-      if (!isSwappingRef) return undefined;
+      if (!isSwapping) return undefined;
       const timer = window.setTimeout(() => {
-        isSwappingRef = false;
-        forceUpdate();
+        isSwapping = false;
+        setVersion((current) => current + 1);
       }, SWAP_CLOSE_DURATION);
       return () => clearTimeout(timer);
     },
   );
 
-  return isOpen && !isSwappingRef;
+  return effectiveIsOpen;
 }

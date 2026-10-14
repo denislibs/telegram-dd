@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onDestroy, requestMutation } from 'frameact';
+import { createEffect, createMemo, createSignal, frameMutation, onDestroy, requestMutation } from 'frameact';
 import type { JSX } from 'frameact/jsx-runtime';
 import { depsOf } from '../../util/effectDeps';
 
@@ -55,7 +55,6 @@ const TypingWrapper = (props: OwnProps) => {
   let animationRef: Animation | undefined;
   let progressRef = props.noInitialAnimation || !fullText() ? 100 : 0;
   let prevRevealedRef = initialRevealedLength();
-  let fullTextRef = '';
 
   const [revealedLength, setRevealedLength] = createSignal(initialRevealedLength());
   let revealedLengthRef = initialRevealedLength();
@@ -63,27 +62,32 @@ const TypingWrapper = (props: OwnProps) => {
   let completedKeyRef: string | undefined;
   let prevFullTextRef = props.noInitialAnimation ? fullText() : '';
 
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  fullTextRef = fullText();
-
   const stopAnimation = () => {
     animationRef?.cancel();
     animationRef = undefined;
   };
 
-  const maybeNotifyCompleted = () => {
-    const currentFullText = fullTextRef;
-    const currentCompletionKey = `${props.completionKey}:${currentFullText}`;
+  // Deviation: the effects get the props they need as values of their compute half (an apply must not read a prop
+  // getter); `notifyCompleted` is the same check for the animation handler, where props are read directly.
+  const maybeNotifyCompleted = (
+    currentFullText: string,
+    completionKey: number,
+    shouldAnimateMask: boolean | undefined,
+    onCompleted: NoneToVoidFunction | undefined,
+  ) => {
+    const currentCompletionKey = `${completionKey}:${currentFullText}`;
     const isFullyRevealed = revealedLengthRef >= currentFullText.length;
-    const isMaskCompleted = !props.shouldAnimateMask || progressRef >= 100;
+    const isMaskCompleted = !shouldAnimateMask || progressRef >= 100;
 
     if (!isFullyRevealed || !isMaskCompleted || completedKeyRef === currentCompletionKey) {
       return;
     }
 
     completedKeyRef = currentCompletionKey;
-    props.onCompleted?.();
+    onCompleted?.();
   };
+  const notifyCompleted = () =>
+    maybeNotifyCompleted(fullText(), props.completionKey, props.shouldAnimateMask, props.onCompleted);
 
   const scheduleChunks = (from: number, to: number) => {
     window.clearTimeout(chunkTimerRef);
@@ -112,60 +116,48 @@ const TypingWrapper = (props: OwnProps) => {
   };
 
   // --- Chunking: spread incoming text over time ---
-  createEffect(
-    depsOf(() => [fullText(), scheduleChunks, stopAnimation] as const),
-    ([fullText2]) => {
-      if (fullText2 === prevFullTextRef) return;
-      prevFullTextRef = fullText2;
+  createEffect(fullText, (currentFullText) => {
+    if (currentFullText === prevFullTextRef) return;
+    prevFullTextRef = currentFullText;
 
-      const fullLen = fullText2.length;
-      const revealed = revealedLengthRef;
+    const fullLen = currentFullText.length;
+    const revealed = revealedLengthRef;
 
-      if (fullLen < revealed) {
-        window.clearTimeout(chunkTimerRef);
-        chunkTimerRef = undefined;
-        stopAnimation();
-        revealedLengthRef = fullLen;
-        prevRevealedRef = fullLen;
-        progressRef = 100;
-        setRevealedLength(fullLen);
+    if (fullLen < revealed) {
+      window.clearTimeout(chunkTimerRef);
+      chunkTimerRef = undefined;
+      stopAnimation();
+      revealedLengthRef = fullLen;
+      prevRevealedRef = fullLen;
+      progressRef = 100;
+      setRevealedLength(fullLen);
 
-        requestMutation(() => {
-          const element = ref;
-          if (!element) return;
+      requestMutation(() => {
+        const element = ref;
+        if (!element) return;
 
-          element.style.setProperty(SPREAD_CSS_PROPERTY, '0%');
-          element.style.setProperty(PROGRESS_CSS_PROPERTY, '100%');
-        });
-        return;
-      }
+        element.style.setProperty(SPREAD_CSS_PROPERTY, '0%');
+        element.style.setProperty(PROGRESS_CSS_PROPERTY, '100%');
+      });
+      return;
+    }
 
-      if (fullLen === revealed) {
-        return;
-      }
+    if (fullLen === revealed) {
+      return;
+    }
 
-      scheduleChunks(revealed, fullLen);
-    },
-  );
-
-  // Completion depends on several refs, so we are calling check after every render to avoid locking the UI
-  // TODO(codemod): useEffect without a dependency array ran after every render: name the tracked reads in the compute half
-  createEffect(
-    () => undefined,
-    () => {
-      maybeNotifyCompleted();
-    },
-  );
+    scheduleChunks(revealed, fullLen);
+  });
 
   // --- Mask animation: smooth reveal of rendered content (layout effect to prevent flash) ---
-  // TODO(codemod): useLayoutEffect without a dependency array ran after every render: name the tracked reads in the compute half
+  // tt: `useLayoutEffect` without a dependency array (after every render): it reads the revealed length, the mask flag
+  // and the text, so those are its compute half; it writes the element, so it applies in the mutation phase.
   createEffect(
-    () => undefined,
-    () => {
+    depsOf(() => [revealedLength(), props.shouldAnimateMask, fullText()] as const),
+    ([revealed, shouldAnimateMask]) => {
       const element = ref;
       if (!element) return;
 
-      const revealed = revealedLength();
       const prevRevealed = prevRevealedRef;
       if (revealed === prevRevealed) {
         if (progressRef === 100) element.style.setProperty(PROGRESS_CSS_PROPERTY, '100%');
@@ -174,7 +166,7 @@ const TypingWrapper = (props: OwnProps) => {
 
       prevRevealedRef = revealed;
 
-      if (!props.shouldAnimateMask) {
+      if (!shouldAnimateMask) {
         stopAnimation();
         progressRef = 100;
         element.style.setProperty(PROGRESS_CSS_PROPERTY, '100%');
@@ -231,7 +223,7 @@ const TypingWrapper = (props: OwnProps) => {
           element.style.setProperty(PROGRESS_CSS_PROPERTY, '100%');
         });
 
-        maybeNotifyCompleted();
+        notifyCompleted();
       };
 
       animation.oncancel = () => {
@@ -239,6 +231,19 @@ const TypingWrapper = (props: OwnProps) => {
         animationRef = undefined;
       };
     },
+    frameMutation,
+  );
+
+  // Completion depends on several refs, so we are calling check after every render to avoid locking the UI.
+  // It follows the mask effect, as tt's `useEffect` followed its `useLayoutEffect`.
+  createEffect(
+    depsOf(
+      () => [fullText(), revealedLength(), props.completionKey, props.shouldAnimateMask, props.onCompleted] as const,
+    ),
+    ([currentFullText, , completionKey, shouldAnimateMask, onCompleted]) => {
+      maybeNotifyCompleted(currentFullText, completionKey, shouldAnimateMask, onCompleted);
+    },
+    frameMutation,
   );
 
   onDestroy(() => {

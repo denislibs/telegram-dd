@@ -26,7 +26,7 @@ function AutoDeleteIcon(props: OwnProps) {
   return (
     <span
       class={buildClassName(styles.root, props.className)}
-      style={hasAvatarPhoto() ? `background-color: ${averageColor}` : undefined}
+      style={hasAvatarPhoto() ? `background-color: ${averageColor()}` : undefined}
       role="img"
       aria-label={props.ariaLabel}
     >

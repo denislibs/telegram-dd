@@ -1,5 +1,6 @@
 import { Show } from 'frameact/dom';
 
+import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 import type { ApiTopic } from '../../api/types';
 
 import CustomEmoji from './CustomEmoji';
@@ -24,7 +25,7 @@ const TopicIcon = (props: OwnProps) => {
       when={!(props.topic.iconEmojiId && props.topic.iconEmojiId !== DEFAULT_ICON_ID)}
       fallback={
         <CustomEmoji
-          documentId={props.topic.iconEmojiId}
+          documentId={props.topic.iconEmojiId!}
           className={props.className}
           size={props.size}
           observeIntersectionForPlaying={props.observeIntersection}

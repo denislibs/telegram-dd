@@ -1,5 +1,7 @@
 import { createMemo } from 'frameact';
 
+import { type MaybeAccessor, read } from '../../../../util/accessors';
+
 export enum ChatAnimationTypes {
   Shift,
   Move,
@@ -9,25 +11,25 @@ export enum ChatAnimationTypes {
 
 export const ARCHIVE_ANIMATION_ID = 'archive';
 
-// TODO(codemod): useChatAnimationType: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: the arguments are `MaybeAccessor`s and the result is an accessor of tt's function (frameact hooks run once).
 export function useChatAnimationType<T extends number | string>(
-  orderDiffById: Record<T, number>,
-  isInitialRender: boolean,
-  isShifted?: boolean,
+  orderDiffById: MaybeAccessor<Record<T, number>>,
+  isInitialRender: MaybeAccessor<boolean>,
+  isShifted?: MaybeAccessor<boolean | undefined>,
 ) {
   return createMemo(() => {
-    if (isInitialRender) {
+    if (read(isInitialRender)) {
       return () => ChatAnimationTypes.None;
     }
 
-    const orderDiffs = Object.values<number>(orderDiffById);
+    const orderDiffs = Object.values<number>(read(orderDiffById));
     const numberOfUp = orderDiffs.filter((diff) => diff < 0).length;
     const numberOfDown = orderDiffs.filter((diff) => diff > 0).length;
 
     return (chatId: T): ChatAnimationTypes => {
-      const orderDiff = orderDiffById[chatId];
+      const orderDiff = read(orderDiffById)[chatId];
       if (!orderDiff) {
-        if (isShifted) {
+        if (read(isShifted)) {
           return ChatAnimationTypes.Shift;
         }
         return ChatAnimationTypes.None;

@@ -1,4 +1,4 @@
-import { createMemo } from 'frameact';
+import { createMemo, frozenWhile } from 'frameact';
 import { getActions } from '../../../global';
 
 import type { GlobalState } from '../../../global/types';
@@ -80,7 +80,7 @@ const ChatBadge = (props: OwnProps) => {
   };
   const topicsReadStates = useShallowSelector(topicsReadStateSelector);
 
-  const isTopicUnopened = createMemo(() => !props.isPinned && props.topic && !props.wasTopicOpened);
+  const isTopicUnopened = createMemo(() => Boolean(!props.isPinned && props.topic && !props.wasTopicOpened));
   const isForum = createMemo(() => props.chat.isForum && !props.topic);
   const topicsWithUnreadIds = createMemo(() =>
     isForum() && listedTopicIds() ? listedTopicIds().filter((tId) => topicsReadStates()[tId]?.unreadCount) : undefined,
@@ -175,8 +175,13 @@ const ChatBadge = (props: OwnProps) => {
           ? 'pinned'
           : 'none',
   );
-  // TODO(codemod): useShowTransitionSwap: build on createShowTransition
-  const effectiveIsOpen = useShowTransitionSwap(isShown(), contentCategory());
+  const effectiveIsOpen = useShowTransitionSwap(isShown, contentCategory);
+
+  // The elements are created when one of them appears or disappears; a change of a count updates its text only
+  // (`AnimatedCounter` keeps animating the digits).
+  const hasUnreadReactions = createMemo(() => Boolean(unreadReactionsCount()));
+  const hasUnreadPollVotes = createMemo(() => Boolean(unreadPollVotesCount()));
+  const hasUnreadMentions = createMemo(() => Boolean(unreadMentionsCount()));
 
   const handleOpenApp = (e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
     e.stopPropagation();
@@ -190,39 +195,39 @@ const ChatBadge = (props: OwnProps) => {
   };
 
   function renderContent() {
-    const baseClassName = buildClassName(styles.badge, props.badgeClassName);
-    const statefulClassName = buildClassName(baseClassName, !shouldBeUnMuted() && styles.muted);
+    const baseClassName = () => buildClassName(styles.badge, props.badgeClassName);
+    const statefulClassName = () => buildClassName(baseClassName(), !shouldBeUnMuted() && styles.muted);
 
-    const unreadReactionsElement = unreadReactionsCount() && (
-      <div class={buildClassName(statefulClassName, styles.reaction, styles.round)}>
+    const unreadReactionsElement = hasUnreadReactions() && (
+      <div class={buildClassName(statefulClassName(), styles.reaction, styles.round)}>
         <Icon name="heart" />
       </div>
     );
 
-    const unreadPollVotesElement = unreadPollVotesCount() && (
-      <div class={buildClassName(statefulClassName, styles.poll, styles.round)}>
+    const unreadPollVotesElement = hasUnreadPollVotes() && (
+      <div class={buildClassName(statefulClassName(), styles.poll, styles.round)}>
         <Icon name="poll-badge" />
       </div>
     );
 
-    const unreadMentionsElement = unreadMentionsCount() && (
-      <div class={buildClassName(baseClassName, styles.mention, styles.round)}>
+    const unreadMentionsElement = hasUnreadMentions() && (
+      <div class={buildClassName(baseClassName(), styles.mention, styles.round)}>
         <Icon name="mention" />
       </div>
     );
 
     const unopenedTopicElement = isTopicUnopened() && (
-      <div class={buildClassName(statefulClassName, styles.unopened)} />
+      <div class={buildClassName(statefulClassName(), styles.unopened)} />
     );
 
     const unreadCountElement = isUnread() ? (
-      <div class={buildClassName(statefulClassName, styles.unread)}>
+      <div class={buildClassName(statefulClassName(), styles.unread)}>
         {!hasUnreadMark() && <AnimatedCounter text={formatIntegerCompact(lang, unreadCount()!)} />}
       </div>
     ) : undefined;
 
     const pinnedElement = props.isPinned && (
-      <div class={buildClassName(baseClassName, styles.pinned)}>
+      <div class={buildClassName(baseClassName(), styles.pinned)}>
         <Icon name="pin-filled" />
       </div>
     );
@@ -230,7 +235,7 @@ const ChatBadge = (props: OwnProps) => {
     const miniAppButton = props.hasMiniApp && (
       <Button
         color={props.isSelected ? 'secondary' : 'primary'}
-        className={buildClassName(baseClassName, styles.miniapp)}
+        className={buildClassName(baseClassName(), styles.miniapp)}
         pill
         size="tiny"
         onClick={handleOpenApp}
@@ -278,6 +283,10 @@ const ChatBadge = (props: OwnProps) => {
     return <div class={styles.wrapper}>{elements}</div>;
   }
 
+  // Deviation: tt's `ShowTransition` keeps the previous children while it closes; the kit's keeps them live, so the
+  // content is frozen while the badge is closing (it would be empty during the fade-out).
+  const content = frozenWhile(renderContent, () => !effectiveIsOpen());
+
   return (
     <ShowTransition
       isCustom
@@ -287,9 +296,9 @@ const ChatBadge = (props: OwnProps) => {
         props.isOnAvatar && styles.onAvatar,
         props.transitionClassName,
       )}
-      isOpen={effectiveIsOpen}
+      isOpen={effectiveIsOpen()}
     >
-      {renderContent()}
+      {content()}
     </ShowTransition>
   );
 };

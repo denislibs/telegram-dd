@@ -1,21 +1,20 @@
-import useForceUpdate from './useForceUpdate';
+import { type Accessor, createSignal } from 'frameact';
 
 export type ReducerAction<Actions> = { type: Actions; payload?: any };
 export type StateReducer<State, Actions> = (state: State, action: ReducerAction<Actions>) => State;
 export type Dispatch<State, Actions> = (action: ReducerAction<Actions>) => State;
 
-// TODO(codemod): useReducer: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: the state is a signal (frameact components run once, there is no `useForceUpdate`): the hook returns an
+// accessor of the state. `dispatch` reduces the committed value, so two dispatches in one tick see each other.
 export default function useReducer<State, Actions>(reducer: StateReducer<State, Actions>, initialState: State) {
-  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
-  const forceUpdate = useForceUpdate();
-  let reducerRef = reducer;
-  let stateRef = initialState;
+  const [state, setState] = createSignal(initialState);
+  let current = initialState;
 
   const dispatch = (action: ReducerAction<Actions>) => {
-    stateRef = reducerRef(stateRef, action);
-    forceUpdate();
-    return stateRef;
+    current = reducer(current, action);
+    setState(() => current);
+    return current;
   };
 
-  return [stateRef, dispatch] as [State, Dispatch<State, Actions>];
+  return [state, dispatch] as [Accessor<State>, Dispatch<State, Actions>];
 }

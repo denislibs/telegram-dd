@@ -36,7 +36,7 @@ const TopicDefaultIcon = (props: OwnProps) => {
         />
       }
     >
-      <div class={buildClassName(styles.root, props.className)} onClick={(e) => props.onClick?.(e)}>
+      <div class={buildClassName(styles.root, props.className)} onClick={() => props.onClick?.()}>
         <img class={styles.icon} src={iconSrc()} alt="" draggable={false} />
         <div class={buildClassName(styles.title, props.letterClassName, 'topic-icon-letter')}>
           {renderText(getFirstLetters(props.title, 1))}

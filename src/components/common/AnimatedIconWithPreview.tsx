@@ -1,4 +1,3 @@
-import { createMemo } from 'frameact';
 import { splitProps } from 'frameact/dom';
 import { createMediaTransition } from '../../lib/kit';
 
@@ -32,7 +31,6 @@ function AnimatedIconWithPreview(props: OwnProps) {
     'className',
     'shouldUseTextColor',
     'noPreviewTransition',
-    'size',
   ]);
 
   let rootRef!: HTMLDivElement;
@@ -43,14 +41,13 @@ function AnimatedIconWithPreview(props: OwnProps) {
   );
 
   const [isThumbOpen, , unmarkThumbOpen] = useFlag(Boolean(props.thumbDataUri));
-  // TODO(codemod): useMediaTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element
-  const thumbClassNames = createMemo(() => createMediaTransition({ hasMediaData: () => Boolean(isThumbOpen()) }));
+  // Deviation: the transition classes are written through the element ref (`t.ref`), not a class string.
+  const thumbTransition = createMediaTransition({ hasMediaData: () => Boolean(isThumbOpen()) });
 
   const [isPreviewOpen, markPreviewOpen, unmarkPreviewOpen] = useFlag(
     Boolean(props.noPreviewTransition) || loadedPreviewUrls.has(props.previewUrl),
   );
-  // TODO(codemod): useMediaTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element
-  const previewClassNames = createMemo(() => createMediaTransition({ hasMediaData: () => Boolean(isPreviewOpen()) }));
+  const previewTransition = createMediaTransition({ hasMediaData: () => Boolean(isPreviewOpen()) });
 
   const [isAnimationReady, markAnimationReady] = useFlag(false);
 
@@ -72,7 +69,7 @@ function AnimatedIconWithPreview(props: OwnProps) {
       style={buildStyle(props.size !== undefined && `width: ${props.size}px; height: ${props.size}px;`)}
     >
       {props.thumbDataUri && !isAnimationReady() && (
-        <img src={props.thumbDataUri} class={buildClassName(styles.preview, thumbClassNames())} draggable={false} />
+        <img ref={thumbTransition.ref} src={props.thumbDataUri} class={styles.preview} draggable={false} />
       )}
       {props.previewUrl &&
         !isAnimationReady() &&
@@ -83,15 +80,18 @@ function AnimatedIconWithPreview(props: OwnProps) {
           />
         ) : (
           <img
+            ref={(el) => {
+              if (!props.noPreviewTransition) previewTransition.ref(el);
+            }}
             src={props.previewUrl}
-            class={buildClassName(styles.preview, !props.noPreviewTransition && previewClassNames())}
+            class={styles.preview}
             draggable={false}
             onLoad={handlePreviewLoad}
           />
         ))}
       {/* Without a color the sticker canvas would paint the original tgs colors before the filter appears */}
-      {(!props.shouldUseTextColor || customColor) && (
-        <AnimatedIcon {...otherProps} color={customColor} onLoad={handleAnimationReady} />
+      {(!props.shouldUseTextColor || customColor()) && (
+        <AnimatedIcon {...otherProps} color={customColor()} onLoad={handleAnimationReady} />
       )}
     </div>
   );

@@ -1,7 +1,7 @@
 /* eslint-disable simple-import-sort/imports -- Sanitize and claim URL login before other startup modules */
 import { getPendingWebLogin } from './util/routing';
 import { webLoginHandoffPromise } from './util/webLoginHandoff';
-import { handleError } from './util/handleError';
+import './util/handleError';
 // Evaluated before enableStrict(), as in telegram-tt: this module probes emoji support by briefly appending an element
 // to <body> at load time, which stricterdom would flag as a mutation outside an effect.
 import './util/browser/windowEnvironment';
@@ -90,12 +90,6 @@ async function init() {
     // TODO(port): updateWebmanifest(), betterView()
     render(() => <App />, document.getElementById('root')!);
   });
-
-  // telegram-tt loads the rest of the actions with the Main bundle (components/main/Main.tsx imports actions/all), after
-  // the first render and without anything waiting for it. Same here: no `await` (the role and the first render do not
-  // depend on it, and a chunk that fails to load must not blank the screen). Their store callbacks read the tab state,
-  // which `init` has created above. TODO(port): move to Main when it is ported.
-  void import('./global/actions/all').catch(handleError);
 
   if (DEBUG) {
     // eslint-disable-next-line no-console

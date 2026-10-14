@@ -53,20 +53,6 @@ const NewChatButton = (props: OwnProps) => {
     setIsMenuOpen(false);
   };
 
-  const menuItems = createMemo(() => (
-    <>
-      <MenuItem icon="channel" onClick={props.onNewChannel}>
-        {lang('NewChannel')}
-      </MenuItem>
-      <MenuItem icon="group" onClick={props.onNewGroup}>
-        {lang('NewGroup')}
-      </MenuItem>
-      <MenuItem icon="user" onClick={props.onNewPrivateChat}>
-        {lang('NewMessageTitle')}
-      </MenuItem>
-    </>
-  ));
-
   return (
     <div class={fabClassName()} dir={lang.isRtl ? 'rtl' : undefined}>
       <Button
@@ -87,7 +73,15 @@ const NewChatButton = (props: OwnProps) => {
         autoClose
         onClose={handleClose}
       >
-        {menuItems()}
+        <MenuItem icon="channel" onClick={props.onNewChannel}>
+          {lang('NewChannel')}
+        </MenuItem>
+        <MenuItem icon="group" onClick={props.onNewGroup}>
+          {lang('NewGroup')}
+        </MenuItem>
+        <MenuItem icon="user" onClick={props.onNewPrivateChat}>
+          {lang('NewMessageTitle')}
+        </MenuItem>
       </Menu>
     </div>
   );

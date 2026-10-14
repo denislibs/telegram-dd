@@ -1,7 +1,8 @@
-import { createMemo } from 'frameact';
+import { createMemo, untrack } from 'frameact';
 import { getActions } from '../../global';
 
-import type { ApiPeer } from '../../api/types';
+import type { ApiEmojiStatusType, ApiPeer } from '../../api/types';
+import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 import type { CustomPeer } from '../../types';
 
 import { EMOJI_STATUS_LOOP_LIMIT } from '../../config';
@@ -62,31 +63,39 @@ const FullNameTitle = (props: OwnProps) => {
 
   const realPeer = createMemo(() => ('id' in props.peer ? props.peer : undefined));
   const customPeer = createMemo(() => ('isCustomPeer' in props.peer ? props.peer : undefined));
-  const isUser = createMemo(() => realPeer() && isApiPeerUser(realPeer()));
-  const title = createMemo(
-    () => realPeer() && (isUser() ? getUserFullName(realPeer()) : getChatTitle(oldLang, realPeer())),
-  );
-  const isPremium = createMemo(() => (isUser() && realPeer().isPremium) || customPeer()?.isPremium);
+  const isUser = createMemo(() => {
+    const peer = realPeer();
+    return Boolean(peer && isApiPeerUser(peer));
+  });
+  const title = createMemo(() => {
+    const peer = realPeer();
+    return peer && (isApiPeerUser(peer) ? getUserFullName(peer) : getChatTitle(oldLang, peer));
+  });
+  const isPremium = createMemo(() => {
+    const peer = realPeer();
+    return Boolean((peer && isApiPeerUser(peer) && peer.isPremium) || customPeer()?.isPremium);
+  });
   const canShowEmojiStatus = createMemo(() => props.withEmojiStatus && !props.isSavedMessages);
-  const emojiStatus = createMemo(
-    () =>
-      realPeer()?.emojiStatus ||
-      (customPeer()?.emojiStatusId ? { type: 'regular', documentId: customPeer().emojiStatusId } : undefined),
-  );
+  const emojiStatus = createMemo((): ApiEmojiStatusType | undefined => {
+    const customEmojiStatusId = customPeer()?.emojiStatusId;
+    return realPeer()?.emojiStatus || (customEmojiStatusId ? { type: 'regular', documentId: customEmojiStatusId } : undefined);
+  });
 
-  const handleTitleClick = (e) => {
-    if (!title() || !props.canCopyTitle) {
+  const handleTitleClick = (e: MouseEvent) => {
+    const currentTitle = title();
+    if (!currentTitle || !props.canCopyTitle) {
       return;
     }
 
     stopEvent(e);
-    copyTextToClipboard(title());
+    copyTextToClipboard(currentTitle);
     showNotification({ message: `${isUser() ? 'User' : 'Chat'} name was copied` });
   };
 
   const specialTitle = createMemo(() => {
-    if (customPeer()) {
-      return renderText(customPeer().title || oldLang(customPeer().titleKey!));
+    const currentCustomPeer = customPeer();
+    if (currentCustomPeer) {
+      return renderText(currentCustomPeer.title || oldLang(currentCustomPeer.titleKey!));
     }
 
     if (props.isSavedMessages) {
@@ -138,33 +147,47 @@ const FullNameTitle = (props: OwnProps) => {
           {!props.noVerified && props.peer?.isVerified && <VerifiedIcon />}
           {!props.noFake && props.peer?.fakeType && <FakeIcon fakeType={props.peer.fakeType} />}
           {canShowEmojiStatus() && emojiStatus() && (
-            // TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6)
             <Transition
               className={styles.statusTransition}
               slideClassName={styles.statusTransitionSlide}
-              activeKey={Number(emojiStatus().documentId)}
+              activeKey={Number(emojiStatus()!.documentId)}
               name="slideFade"
               direction={-1}
               shouldCleanup
             >
-              <GiftEffectWrapper
-                withSparkles={emojiStatus().type === 'collectible'}
-                sparklesClassName="statusSparkles"
-                sparklesColor={
-                  emojiStatus().type === 'collectible' && !props.withStatusTextColor
-                    ? emojiStatus().textColor
-                    : undefined
-                }
-              >
-                <CustomEmoji
-                  className={buildClassName('no-selection', !props.withStatusTextColor && styles.statusPrimaryColor)}
-                  documentId={emojiStatus().documentId}
-                  size={props.emojiStatusSize}
-                  loopLimit={!props.noLoopLimit ? EMOJI_STATUS_LOOP_LIMIT : undefined}
-                  observeIntersectionForLoading={props.observeIntersection}
-                  onClick={props.onEmojiStatusClick}
-                />
-              </GiftEffectWrapper>
+              {(slide) => {
+                // Deviation: the key is the (lossy) Number of the document id, so the slide keeps the status it was
+                // created for and follows the current one only while it is the active slide.
+                let lastStatus = untrack(emojiStatus)!;
+                const status = createMemo(() => {
+                  if (slide.isActive()) lastStatus = emojiStatus() ?? lastStatus;
+                  return lastStatus;
+                });
+                const sparklesColor = createMemo(() => {
+                  const current = status();
+                  return current.type === 'collectible' && !props.withStatusTextColor ? current.textColor : undefined;
+                });
+
+                return (
+                  <GiftEffectWrapper
+                    withSparkles={status().type === 'collectible'}
+                    sparklesClassName="statusSparkles"
+                    sparklesColor={sparklesColor()}
+                  >
+                    <CustomEmoji
+                      className={buildClassName(
+                        'no-selection',
+                        !props.withStatusTextColor && styles.statusPrimaryColor,
+                      )}
+                      documentId={status().documentId}
+                      size={props.emojiStatusSize}
+                      loopLimit={!props.noLoopLimit ? EMOJI_STATUS_LOOP_LIMIT : undefined}
+                      observeIntersectionForLoading={props.observeIntersection}
+                      onClick={props.onEmojiStatusClick}
+                    />
+                  </GiftEffectWrapper>
+                );
+              }}
             </Transition>
           )}
           {canShowEmojiStatus() && !emojiStatus() && isPremium() && <StarIcon />}

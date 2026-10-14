@@ -2,6 +2,8 @@ import { createMemo } from 'frameact';
 import { withGlobal } from '../../global';
 import type { GlobalState } from '../../global/types';
 
+import type { ObserveFn } from '../../hooks/useIntersectionObserver';
+
 import type { ApiFormattedText, ApiMessage, ApiMessagePoll, ApiTypeStory, ApiWebPage } from '../../api/types';
 
 import { extractMessageText, getMessagePollId, groupStatefulContent, isActionMessage } from '../../global/helpers';
@@ -51,8 +53,8 @@ function MessageSummary(ownProps: OwnProps) {
   );
   const emoji = createMemo(() => !props.noEmoji && getMessageSummaryEmoji(props.message));
 
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (!extractedText() && !hasPoll() && !isAction()) {
+  // A body statement of tt that ran on every render: it is a binding here (`<>{renderSummary()}</>` below)
+  function renderPlainSummary() {
     if (props.forcedText?.text) {
       const trimmedText = trimText(
         props.forcedText.text,
@@ -127,16 +129,24 @@ function MessageSummary(ownProps: OwnProps) {
     );
   }
 
-  return (
-    <>
-      {[
-        emoji() ? renderText(`${emoji()} `) : undefined,
-        getMessageSummaryDescription(lang, props.message, statefulContent(), renderMessageText()),
-      ]
-        .flat()
-        .filter(Boolean)}
-    </>
-  );
+  function renderSummary() {
+    if (!extractedText() && !hasPoll() && !isAction()) {
+      return renderPlainSummary();
+    }
+
+    return (
+      <>
+        {[
+          emoji() ? renderText(`${emoji()} `) : undefined,
+          getMessageSummaryDescription(lang, props.message, statefulContent(), renderMessageText()),
+        ]
+          .flat()
+          .filter(Boolean)}
+      </>
+    );
+  }
+
+  return <>{renderSummary()}</>;
 }
 
 const mapStateToProps = (global: GlobalState, { message }: OwnProps): Complete<StateProps> => {

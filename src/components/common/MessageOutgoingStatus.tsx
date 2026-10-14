@@ -19,15 +19,16 @@ enum Keys {
 const MessageOutgoingStatus = (props: OwnProps) => {
   return (
     <div class="MessageOutgoingStatus">
-      {/* TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6) */}
       <Transition name="reveal" activeKey={Keys[props.status]}>
-        {props.status === 'failed' ? (
-          <div class="MessageOutgoingStatus--failed">
-            <Icon name="message-failed" />
-          </div>
-        ) : (
-          <Icon name={props.status === 'succeeded' ? 'check' : `message-${props.status}`} />
-        )}
+        {(slide) =>
+          slide.key === Keys.failed ? (
+            <div class="MessageOutgoingStatus--failed">
+              <Icon name="message-failed" />
+            </div>
+          ) : (
+            <Icon name={slide.key === Keys.succeeded ? 'check' : `message-${Keys[slide.key] as 'pending' | 'read'}`} />
+          )
+        }
       </Transition>
     </div>
   );

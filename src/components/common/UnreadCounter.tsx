@@ -1,4 +1,4 @@
-import { createEffect } from 'frameact';
+import { createEffect, createMemo } from 'frameact';
 import { Show } from 'frameact/dom';
 import { depsOf } from '../../util/effectDeps';
 
@@ -15,22 +15,22 @@ interface OwnProps {
 
 const UnreadCounter = (props: OwnProps) => {
   const unreadCounters = useFolderManagerForUnreadCounters();
-  const unreadNotificationsCount = unreadCounters[ALL_FOLDER_ID]?.notificationsCount || 0;
+  const unreadNotificationsCount = createMemo(() => unreadCounters()[ALL_FOLDER_ID]?.notificationsCount || 0);
 
   const lang = useLang();
 
   createEffect(
-    depsOf(() => [props.isForAppBadge, unreadNotificationsCount] as const),
-    ([isForAppBadge2]) => {
-      if (isForAppBadge2) {
-        updateAppBadge(unreadNotificationsCount);
+    depsOf(() => [props.isForAppBadge, unreadNotificationsCount()] as const),
+    ([isForAppBadge, count]) => {
+      if (isForAppBadge) {
+        updateAppBadge(count);
       }
     },
   );
 
   return (
-    <Show when={!(props.isForAppBadge || !unreadNotificationsCount)}>
-      <div class="unread-count active">{formatIntegerCompact(lang, unreadNotificationsCount)}</div>
+    <Show when={!(props.isForAppBadge || !unreadNotificationsCount())}>
+      <div class="unread-count active">{formatIntegerCompact(lang, unreadNotificationsCount())}</div>
     </Show>
   );
 };

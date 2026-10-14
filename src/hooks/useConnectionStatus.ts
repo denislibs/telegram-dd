@@ -1,5 +1,8 @@
+import { createMemo } from 'frameact';
+
 import type { GlobalState } from '../global/types';
 import type { LangFn } from '../util/localization';
+import { type MaybeAccessor, read } from '../util/accessors';
 
 import useBrowserOnline from './window/useBrowserOnline';
 
@@ -11,46 +14,53 @@ export enum ConnectionStatus {
 
 type ConnectionStatusPosition = 'overlay' | 'minimized' | 'middleHeader' | 'none';
 
-// TODO(codemod): useConnectionStatus: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: a hook runs once, so the reactive parameters are `MaybeAccessor`s and the three results are accessors.
 export default function useConnectionStatus(
   lang: LangFn,
-  connectionState: GlobalState['connectionState'],
-  isSyncing: boolean | undefined,
-  hasMiddleHeader: boolean,
-  isMinimized?: boolean,
-  isDisabled?: boolean,
+  connectionState: MaybeAccessor<GlobalState['connectionState']>,
+  isSyncing: MaybeAccessor<boolean | undefined>,
+  hasMiddleHeader: MaybeAccessor<boolean>,
+  isMinimized?: MaybeAccessor<boolean | undefined>,
+  isDisabled?: MaybeAccessor<boolean | undefined>,
 ) {
-  let status: ConnectionStatus;
   const isBrowserOnline = useBrowserOnline();
-  if (!isBrowserOnline || connectionState === 'connectionStateConnecting') {
-    status = ConnectionStatus.waitingForNetwork;
-  } else if (isSyncing) {
-    status = ConnectionStatus.syncing;
-  } else {
-    status = ConnectionStatus.online;
-  }
 
-  let position: ConnectionStatusPosition;
-  if (status === ConnectionStatus.online || isDisabled) {
-    position = 'none';
-  } else if (hasMiddleHeader) {
-    position = 'middleHeader';
-  } else if (isMinimized) {
-    position = 'minimized';
-  } else {
-    position = 'overlay';
-  }
+  const status = createMemo(() => {
+    if (!isBrowserOnline() || read(connectionState) === 'connectionStateConnecting') {
+      return ConnectionStatus.waitingForNetwork;
+    } else if (read(isSyncing)) {
+      return ConnectionStatus.syncing;
+    } else {
+      return ConnectionStatus.online;
+    }
+  });
 
-  let text: string | undefined;
-  if (status === ConnectionStatus.waitingForNetwork) {
-    text = lang('WaitingForNetwork');
-  } else if (status === ConnectionStatus.syncing) {
-    text = lang('Updating');
-  }
+  const position = createMemo((): ConnectionStatusPosition => {
+    if (status() === ConnectionStatus.online || read(isDisabled)) {
+      return 'none';
+    } else if (read(hasMiddleHeader)) {
+      return 'middleHeader';
+    } else if (read(isMinimized)) {
+      return 'minimized';
+    } else {
+      return 'overlay';
+    }
+  });
 
-  if (position === 'middleHeader') {
-    text = text!.toLowerCase().replace(/\.+$/, '');
-  }
+  const text = createMemo(() => {
+    let result: string | undefined;
+    if (status() === ConnectionStatus.waitingForNetwork) {
+      result = lang('WaitingForNetwork');
+    } else if (status() === ConnectionStatus.syncing) {
+      result = lang('Updating');
+    }
+
+    if (position() === 'middleHeader') {
+      result = result!.toLowerCase().replace(/\.+$/, '');
+    }
+
+    return result;
+  });
 
   return {
     connectionStatus: status,
