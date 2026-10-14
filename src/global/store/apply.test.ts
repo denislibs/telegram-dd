@@ -344,6 +344,56 @@ describe('appsec 4: a sparse array with a huge length does not freeze the walk',
   });
 });
 
+describe('ownership: what the store (frameact adopt) writes into tt objects', () => {
+  /** An object whose every write and deletion is recorded; reads pass through (so `adopt` can walk it). */
+  const watched = <T extends object>(target: T, log: string[], name: string): T =>
+    new Proxy(target, {
+      set(t, key, value) {
+        log.push(`${name}.${String(key)} = …`);
+        return Reflect.set(t, key, value);
+      },
+      deleteProperty(t, key) {
+        log.push(`delete ${name}.${String(key)}`);
+        return Reflect.deleteProperty(t, key);
+      },
+      defineProperty(t, key, descriptor) {
+        log.push(`define ${name}.${String(key)}`);
+        return Reflect.defineProperty(t, key, descriptor);
+      },
+    });
+
+  it('well-formed data: nothing is written into the objects handed to the store', () => {
+    const { setGlobal, getGlobal, mirror } = setup();
+    const log: string[] = [];
+    const photo = watched({ small: 'c.jpg', nested: { deep: [1, 2, { x: 1 }] } }, log, 'photo');
+    const entity = watched({ id: 'c', title: 'C', unread: 1, photo }, log, 'chat');
+    const list = watched(['a', 'b', 'c'], log, 'list');
+    const g = getGlobal();
+    setGlobal({
+      ...g,
+      chats: { ...g.chats, byId: { ...g.chats.byId, c: entity }, listIds: { active: list } },
+    });
+    expect(mirror.chats.byId.c).toBe(entity);
+    expect(log).toEqual([]);
+  });
+
+  it('forged data: the one observable write is the removal of an own __proto__ key — and nothing is polluted', () => {
+    const { setGlobal, getGlobal, mirror } = setup();
+    const forged = JSON.parse(
+      '{"id":"f","title":"F","unread":0,"__proto__":{"polluted":"yes"},"photo":{"__proto__":{"p":1}}}',
+    );
+    expect(Object.hasOwn(forged, '__proto__')).toBe(true);
+    const g = getGlobal();
+    setGlobal({ ...g, chats: { ...g.chats, byId: { ...g.chats.byId, f: forged } } });
+    // frameact's adopt strips it from the object the store was handed — i.e. from the committed tt object as well
+    expect(Object.hasOwn(forged, '__proto__')).toBe(false);
+    expect(Object.hasOwn(forged.photo, '__proto__')).toBe(false);
+    expect(mirror.chats.byId.f).toBe(forged);
+    expect(({} as AnyLiteral).polluted).toBeUndefined();
+    expect(Object.getPrototypeOf(forged)).toBe(Object.prototype);
+  });
+});
+
 describe('C1: tt value semantics hold for code that captured objects before setGlobal', () => {
   it('a captured entity is a snapshot: changedFields detection (apiUpdaters/chats.ts updateChat) works', () => {
     const { setGlobal, getGlobal } = setup();

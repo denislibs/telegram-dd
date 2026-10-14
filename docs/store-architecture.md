@@ -23,15 +23,16 @@ byId: { ...byId, [id]: chat } } }`), with fresh objects along the written path a
   optimistic rollbacks, constants spread into the global — all see tt's objects, never a store object.
 - The store is a **mirror**: `setGlobal` walks the previous and the next global (both immutable), stops at every
   `===` branch and writes each change into the store through `setState`, which notifies only the signals of that leaf
-  (`store/apply.ts`). The walk never writes into a tt object: **entities** (plain objects with an `id`) and **arrays**
+  (`store/apply.ts`). The walk writes into a tt object in two narrow cases only (the ownership contract, §1.4):
+  **entities** (plain objects with an `id`) and **arrays**
   go into the store by reference and are replaced whole when they change; **containers** (the root, the slices,
   dictionaries, id-less records, `byTabId[id]`) are the store's own shallow copies, merged key by key so that a change
   under a dictionary wakes the readers of that key only.
 - Components read the mirror through `withGlobal(ownProps, mapStateToProps)` (tt's mapper, verbatim, in a memo),
   `useSelector(selector)` (an accessor) or `useGlobal()`; a read is a leaf subscription.
 - Action ordering, `execAfterActions`, `forceOnHeavyAnimation`, `forceSyncOnIOs`, `forceOutdated`, `addCallback`,
-  `cache.ts` and `multitab.ts` keep tt's code and semantics; `multitab.ts` and `cache.ts` differ from tt by their
-  import lines only, because `deepDiff(previous, current)` and `currentGlobal === global` work on immutable snapshots.
+  `cache.ts` and `multitab.ts` keep tt's code and semantics; `multitab.ts` differs from tt by its import lines and
+  `cache.ts` by its import lines and a hardening in `loadCache` (§7), because `deepDiff(previous, current)` and `currentGlobal === global` work on immutable snapshots.
 
 What this buys: (a) the action/reducer/selector layer and the `addCallback` consumers port byte-identical apart from
 imports (the prototype runs `actions/apiUpdaters/twoFaSettings.ts`, `reducers/tabs.ts`, `reducers/auth.ts`,
@@ -115,6 +116,38 @@ In DEV, `getGlobal()` returns `{ ...committed, DEBUG_randomId }` and `setGlobal`
 outdated global` when the stamp is not the current one, unless `forceOutdated` is set — tt's rule. In production the
 copy is made too (without the stamp), so `global.x = …; setGlobal(global)` behaves the same in both modes (I2); tt's
 production build mutated `currentGlobal` there and skipped the containers' update until the next write.
+
+### 1.4 Ownership: what the store writes into tt objects, and what it expects back
+
+frameact's store follows a contract (frameact AGENTS.md invariant 7, `docs/llms-full.md` §8, branch
+`perf/store-adopt-owned`): **a value handed to the store is store-owned and is never mutated from outside** — it is
+validated once, at adoption, and later writes stop at it. tt's committed global is the same kind of thing by design: an
+entity or an array that `setGlobal` hands over is immutable, because tt's reducers copy along the path. So the two models
+agree, and the contract is what `mutationGuard.test.ts` (nested `global.a.b = …`) and the `// Deviation:` spreads in
+`stories.ts` enforce on the tt side. The guard cannot see a mutation of a local that was handed over earlier
+(`const list = []; setGlobal({ …, list }); list.push(x)`); tt has none, and a new one is a bug of the same class.
+
+What the mirror writes into tt objects (earlier versions of this document said "never"; checked by `apply.test.ts`,
+"ownership"):
+
+1. **`sanitize` in the walk** replaces a store proxy or a store-owned container copy found inside a written value by a
+   tt-side value, in the object that `setGlobal` received (so the committed global never references the store's
+   private copies, N1). Well-formed tt data contains none.
+2. **frameact's `adopt`**, on an entity or array written by reference, deletes an own `__proto__` key (and unwraps a
+   nested proxy). For well-formed data `adopt` writes nothing — the test hands the store objects whose every write is
+   recorded and sees none. The deletion is observable by tt code only for a forged value (a `JSON.parse` result with an
+   own `__proto__`, from a damaged cache or a multitab diff); it is the intended hardening, and the prototype of no
+   object changes.
+
+Everything else is a read. A DEV build of frameact reports an owned object mutated from outside (sampled).
+
+### 1.5 What the walk refuses (appsec hardening)
+
+`setGlobal` is **atomic**: when the mirror walk throws, the committed global goes back to the previous one, the mirror is
+walked back to it, and the error is rethrown to the caller. The walk throws a `[global] …` error for a value nested
+deeper than 64 levels or containing a cycle (a container walk reaches ~10), and for a sparse array longer than 500 000
+(forged `length`). Only own keys count when comparing containers (`constructor`, `toString`, … are valid dictionary keys).
+`withGlobal` props are read-only (writes throw in strict mode) and no props proxy shares a target with another.
 
 ## 2. The mapping: tt API → telegram-dd API
 
@@ -340,19 +373,34 @@ import lines. It works because the globals are immutable snapshots again:
   then sees `currentGlobal === global` and does not echo it;
 - `globalUpdate` posts `getGlobal()` (tt objects, no proxies: `structuredClone` works).
 
+Known tt behaviour, kept: `deepMerge` assigns `acc[key] = …` for every key of a received diff, so a forged diff with an
+own `__proto__` key swaps the prototype of the merged object in the receiving tab (`getGlobal().byTabId` then inherits
+from the sender's object). It stays local: `Object.prototype` is not touched, the sender is a same-origin tab that could
+send anything anyway, and the mirror (which copies own keys only) does not follow the swap, so mirror and committed
+global differ for those inherited reads. A hardening (`if (key === '__proto__') continue;` in `deepMerge`) belongs to a
+sync with upstream, not to this port; the same holds for `init.ts` rebuilding `threadsById` from cached keys.
+
 Cost: tt's `deepDiff` is 1.2 ms per flush on the bench state (tt paid the same). The journal of the first prototype is
 gone: it had no consumer left and could not express "replace" in tt's diff format across flushes.
 
 ## 7. Cache and persistence
 
 `src/global/cache.ts` ports unchanged except its two imports (`addCallback`/`removeCallback` from `./index`,
-`getIsHeavyAnimating`/`onFullyIdle` from `frameact`): `setupCaching` → `addCallback(updateCacheThrottled)` (5 s
+`getIsHeavyAnimating`/`onFullyIdle` from `frameact`) and one hardening (below): `setupCaching` → `addCallback(updateCacheThrottled)` (5 s
 throttle, `onFullyIdle`, skipped while a heavy animation runs); `updateCache` → `reduceGlobal(getGlobal())` picks and
 trims the cached slices from tt objects (`pick`, spreads, `MAIN_IDB_STORE.set` as they are); `loadCache`/`migrateCache`
 build a new global and `util/init.ts` does `setGlobal(global)` → the mirror writes the cached tree once at start
 (12 ms for a cache-sized global, §4). The passcode vault path and `clearGlobalForLockScreen` (which spreads
 `INITIAL_GLOBAL_STATE` without cloning — safe now: constants are never written into) are unchanged. The round trip is
-tested with `fake-indexeddb` in `src/global/index.test.ts`.
+tested with `fake-indexeddb` in `src/global/cache.test.ts`.
+
+**A corrupted cache never blocks the start** (appsec review, findings 2 and 6). tt throws in `loadCache` for a cache
+that is `{}`, has no `sharedState` or a null `passcode`, and the white screen repeats on every reload. `loadCache` now
+catches, reports, drops this slot's global cache and the shared-state cache, and returns `undefined` (`// Deviation:
+hardening`; the cache is only a head start). A cache that loads but that the mirror walk refuses (a cycle, a 10 000-level
+value, a sparse array with a forged length: `apply.ts` throws a `[global]` error) is handled by `global/safeInit.ts`
+(`initGlobalOrDropCache`, used by the entry): the failed `initGlobal` is retried without the cache. That works because
+`setGlobal` is atomic.
 
 ## 8. The update pipeline from the API worker
 
@@ -506,11 +554,14 @@ byte-identical to tt apart from import lines):
 | `global/actions/ui/bots.ts`           | `@ts-expect-error` → `@ts-ignore` on the `actions[action](…)` union call: tsc 7 does not report it, so tt's directive is unused (TS2578) |
 | `global/selectors/audioPlayer.ts`     | 2 WeakMap guards (`unwrap(x) !== x` bypasses the cache for a store proxy, N2)                                                            |
 | `util/memoized.ts`                    | the same guard in `memoized()` (an import and 5 lines)                                                                                   |
+| `global/cache.ts`                     | `loadCache` catches an unreadable cache, drops it and returns `undefined`; exported `dropCorruptedCache()` (hardening, §7)               |
 | `hooks/useFolderManager.ts`           | the four hooks return accessors backed by signals that the `folderManager` callbacks set (no `useForceUpdate`); allowlisted at 90 %      |
 
 Not deviations of the state layer but listed here because they are edits outside tt's files: the FOUNDATION STUBs that
-cut the state layer off from UI/teact code (`reports/port-state.md`), `src/index.tsx` (the boot order of tt, the actions
-loaded as tt loads them), and `tests/e2e/strictMonitor*.ts` (the MockClient probe request is expected; an uncaught error
+cut the state layer off from UI/teact code (`reports/port-state.md`; the localization and notifications stubs are inert:
+no key leaves the app, no permission is persisted as `false`), `global/safeInit.ts` (not in tt), `src/index.tsx` (the
+boot order of tt; `actions/initial` with the entry, `actions/all` imported without `await` after the first render, as
+tt's `Main` bundle is loaded by the UI loader), and `tests/e2e/strictMonitor*.ts` (the MockClient probe request is expected; an uncaught error
 shows as `console.error` because tt's `handleError` calls `preventDefault()`).
 
 ## 13. Risks
