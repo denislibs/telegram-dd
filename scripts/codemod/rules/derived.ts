@@ -77,7 +77,8 @@ function rewriteDestructuring(
   }
   for (const entry of entries) {
     const read = `${source}.${entry.key}`;
-    lines.push(`const ${entry.local} = () => ${entry.def ? `${read} ?? ${ctx.textWithParens(entry.def)}` : read};`);
+    const withDefault = entry.def ? `(${read} === undefined ? ${ctx.textWithParens(entry.def)} : ${read})` : read;
+    lines.push(`const ${entry.local} = () => ${withDefault};`);
   }
   if (isPropsChain(init)) {
     ctx.ms.appendLeft(ctx.lineStart(statement.node.start!), `${indent}${lines.join(`\n${indent}`)}\n`);

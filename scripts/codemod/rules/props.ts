@@ -9,7 +9,7 @@ import type { Ctx } from '../context.ts';
 import type { Rule } from './index.ts';
 
 import { findBodies, referencesOf, type RunOnceBody } from '../analysis.ts';
-import { MAP_STATE_NAME, MAPPER_PLACEMENT } from './withGlobal.ts';
+import { MAPPER_PLACEMENT, mapperName } from './withGlobal.ts';
 
 interface Entry {
   key: string;
@@ -162,7 +162,7 @@ function rewriteBody(ctx: Ctx, body: RunOnceBody): void {
     const binding = fn.scope.getOwnBinding(name);
     return Boolean(binding && binding !== paramBinding);
   };
-  const propsName = taken('props') ? 'componentProps' : 'props';
+  const propsName = taken('props') ? 'p' : 'props';
   let rawName = paramName ?? propsName;
   if (needsMerge) rawName = connected ? 'ownProps' : 'rawProps';
   if (!needsMerge && paramName === undefined) rawName = propsName;
@@ -195,7 +195,9 @@ function rewriteBody(ctx: Ctx, body: RunOnceBody): void {
   const lines: string[] = [];
   if (needsMerge) {
     const sources: string[] = [];
-    if (defaults.length) {
+    // Store contract §12.2: a connected component reads a destructuring default inline (`props.b === undefined ? 1 :
+    // props.b`); an unconnected one goes through mergeProps (porting guide §4.3). Both apply to `undefined` only.
+    if (defaults.length && !connected) {
       const fields = defaults.map((entry) => {
         if (isConstantDefault(ctx, entry.default!, fn.scope)) return `${entry.key}: ${ctx.text(entry.default!)}`;
         return `get ${entry.key}() { return ${defaultText(ctx, entry.default!, entries)}; }`;
@@ -203,10 +205,9 @@ function rewriteBody(ctx: Ctx, body: RunOnceBody): void {
       sources.push(`{ ${fields.join(', ')} }`);
     }
     if (connected) {
-      // store contract §12.2: `withGlobal(ownProps, MAPPER, ACTIVATION?)`, mapper and activation verbatim
       const mapperText =
         (MAPPER_PLACEMENT as string) === 'module' && connected.mapFn
-          ? MAP_STATE_NAME
+          ? mapperName(ctx, connected.componentName)
           : (connected.mapRef ?? (connected.mapFn ? ctx.text(connected.mapFn.node) : '() => ({})'));
       const activation = connected.activationFn ? `, ${ctx.text(connected.activationFn.node)}` : '';
       sources.push(`withGlobal(${hasOwnProps ? rawName : '{}'}, ${mapperText}${activation})`);
@@ -214,15 +215,12 @@ function rewriteBody(ctx: Ctx, body: RunOnceBody): void {
     } else if (hasOwnProps) {
       sources.push(rawName);
     }
-    let mergedType = typeText;
-    if (defaults.length && typeText) {
-      const keys = defaults.map((entry) => `'${entry.key}'`).join(' | ');
-      mergedType = `${typeText} & Required<Pick<${typeText}, ${keys}>>`;
-      ctx.hit('propsDefaults');
-    }
-    if (sources.length === 1 && connected) {
+    if (defaults.length) ctx.hit('propsDefaults');
+    if (connected) {
       lines.push(`const ${propsName} = ${sources[0]};`);
     } else {
+      const keys = defaults.map((entry) => `'${entry.key}'`).join(' | ');
+      const mergedType = typeText ? `${typeText} & Required<Pick<${typeText}, ${keys}>>` : undefined;
       lines.push(`const ${propsName} = mergeProps(${sources.join(', ')})${mergedType ? ` as ${mergedType}` : ''};`);
     }
   }
@@ -258,7 +256,11 @@ function rewriteBody(ctx: Ctx, body: RunOnceBody): void {
       if (pos >= entry.patternRange[0] && pos < entry.patternRange[1]) continue;
       const parent = ref.parentPath;
       if (parent.isTSTypeQuery()) continue;
-      const replacement = `${mergedName}.${entry.key}`;
+      const read = `${mergedName}.${entry.key}`;
+      const replacement =
+        connected && entry.default
+          ? `(${read} === undefined ? ${defaultText(ctx, entry.default, entries)} : ${read})`
+          : read;
       if (parent.isObjectProperty({ value: ref.node }) && parent.node.shorthand) {
         ctx.overwrite(parent.node, `${entry.key === entry.local ? entry.key : entry.local}: ${replacement}`);
       } else {

@@ -49,40 +49,59 @@ per-rule hit counts and the TODO kinds.
 | `hooks`         | `useHeavyAnimation` → `watchHeavyAnimation`; hooks without a mapping → TODO (`useForceUpdate`, `useStateRef`, `useSignalEffect`, `usePrevDuringAnimation`, …); every other app hook is ported in place and takes accessors, so a reactive **value** argument becomes `() => value` (callbacks and callback props pass through; the kind comes from the file's `OwnProps` type, else a name heuristic); a hook body gets one `hook-params` TODO at its signature.                                                                                                                                                                           |
 | `accessorReads` | Reads of signal / memo / flag accessors (`createSignal`, `useFlag`, `useInfiniteScroll`, `createMemo`, `previous`, `useSelector`, the transition's `shouldRender`…) → `x()`; a hook returns its accessors bare.                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `derived`       | A body const computed from props / signals / `lang()` / `getGlobal()` (`const isOff = props.a \|\| open`) → `createMemo(() => …)` + reads `x()`; a destructuring of a reactive object → one accessor per field (`const duration = () => props.notification.duration ?? DEFAULT`); any other body statement that reads reactive values (an `if`, an assignment) → `runs-once` TODO; `getGlobal()` inside a memo / JSX → TODO (contract §12.4).                                                                                                                                                                                              |
+| `trackGlobal`   | A call to one of the nine `getGlobal()`-reading helpers inside a memo / effect / JSX binding / hook body → `trackGlobal(() => …)` (store contract §12.8).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `earlyReturn`   | Trailing `if (cond) return X;` chains before the final `return` (render helpers in between are allowed) → `<Show when={!cond} fallback={X}>…</Show>`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `jsx`           | `className` → `class` on elements (components keep their `className` prop); a reactive `.map()` child → `<For each>` (by reference; `keyed={(x) => key}` + `x()` reads when the row had `key=`); `teactFastList` + `teactOrderKey` → `<ManualFor orderKey>`; `teactExperimentControlled` → `use:value` / `use:checked`; a static `key=` is removed, a reactive one on a single element and non-function `<Transition>` children are TODOs. `{cond && <X/>}` and ternaries are left alone: the compiler evaluates JSX expressions reactively.                                                                                               |
 | `imports`       | teact / teact-dom / fasterdom / stricterdom specifiers → `frameact`, `frameact/dom`, `frameact/stricterdom`; `lib/teact/teactn` → `../global`; replaced hook imports go when unreferenced; everything the rules introduced (`createSignal`, `For`, `JSX`, `createShowTransition`, `loadBundle`…) is imported; a teact name without a mapping stays on its old line with a TODO.                                                                                                                                                                                                                                                            |
 
 ### Store contract (`docs/store-architecture.md` §12)
 
-Implemented in `rules/props.ts` (the body call) and `rules/withGlobal.ts` (the wrapper), exactly as the contract says:
+Implemented in `rules/props.ts` (the body call and the inline defaults), `rules/withGlobal.ts` (the wrapper, the
+module-level mapper) and `rules/trackGlobal.ts`:
 
 ```tsx
 // before
-const Comp: FC<OwnProps & StateProps> = ({ a, b }) => { BODY };
+const Comp: FC<OwnProps & StateProps> = ({ a, b = 1 }) => { BODY };
 export default memo(withGlobal<OwnProps>(MAPPER, ACTIVATION?)(Comp));
 // after
 const Comp = (ownProps: OwnProps) => {
-  const props = withGlobal(ownProps, MAPPER, ACTIVATION?); // mapper and activation moved verbatim
-  BODY with a → props.a, b → props.b
+  const props = withGlobal(ownProps, mapStateToProps, ACTIVATION?); // no type argument: both types are inferred
+  BODY with a → props.a, b → (props.b === undefined ? 1 : props.b)   // a destructuring default applies to undefined only
 };
+const mapStateToProps = (global: GlobalState, { userId }: OwnProps): Complete<StateProps> => { …tt body, unchanged… };
 export default Comp;
 ```
 
-A StateProps-only component takes no parameter and calls `withGlobal({}, MAPPER)`; destructuring defaults wrap it in
-`mergeProps({ … }, withGlobal(ownProps, MAPPER))`. `withGlobal`, `getActions()` and `getGlobal()` keep their imports from
-`../global`; `useSelector` / `useShallowSelector` keep their calls and their results are read as accessors;
-`useSelectorSignal` is untouched. The one knob: `MAPPER_PLACEMENT` in `rules/withGlobal.ts` (`'module'` keeps a long
-mapper at module level as `const mapStateToProps = …` and passes the reference, for a smaller diff; the contract's
-default is `'inline'`).
+- **Mapper placement**: `MAPPER_PLACEMENT = 'module'` (`rules/withGlobal.ts`, the controller's decision): the mapper
+  stays where tt had it, with `global: GlobalState` (and the own-props parameter) annotated, and only the call sits in the
+  body; a module with several connected components suffixes the name (`mapStateToPropsChat`). `'inline'` moves the
+  text into the call instead.
+- A StateProps-only component takes no parameter and calls `withGlobal({}, mapStateToProps)`; if the body already binds
+  `props` the statement is named `p`. `withGlobal`, `getActions()`, `getGlobal()` keep their imports from `../global`.
+- **§12.3** `useSelector` / `useShallowSelector` keep their calls; their results are read as accessors (`x().y`);
+  `useSelectorSignal` is untouched.
+- **§12.4** `getGlobal()` in JSX or a memo callback is flagged (`getGlobal-tracked`: it should be `useGlobal()`), never
+  rewritten; in handlers, effects and timers it stays.
+- **§12.7** `useMemo(…, [x])` → `createMemo` (deps dropped); a dependency of `useMemo` / `useEffect` whose declared prop
+  type is a **container** (an inline object type, `Record<…>`, a name ending in `State` / `Settings` / `Config` /
+  `Options` / `Info` / `Record` / `Map` / `Tab` / `Dict` / `Params` / `Props`, an indexed access type) is flagged
+  (`identity-dep`); `Api*` names count as entities with an `id`. Heuristic: there is no type checker.
+- **§12.8** A call to one of the nine `getGlobal()`-reading helpers (`getCanPostInChat`, `getPeerColorCount`,
+  `getGroupStatus`, `getMessageTranscription`, `renderMessageSummary`, `renderMessageSummaryHtml`, `sortChatIds`,
+  `filterPeersByQuery`, `getCurrentMaxAccountCount`) inside a `createMemo` / effect / derived memo / JSX binding / hook
+  body is wrapped as `trackGlobal(() => …)`; inside a `withGlobal` / `useSelector` mapper or an event handler it is
+  left alone.
+- **§12.1** `lib/teact/teactn` imports (`addCallback`, `removeCallback`, `ActionOptions`) move to `../global`.
 
 ## Measured on telegram-tt (`pnpm codemod:sweep`, tt @ 090e38f)
 
 1099 files (964 components, 135 hooks; `components/test` and `hooks/tauri` excluded), 0 parse or rule errors.
 
-- **Fully transformed (no TODO): 665 files, 60.5%** — components 654/964 (67.8%), hooks 11/135 (every hook with
-  parameters gets the `hook-params` TODO by design; 73 hooks have no other TODO).
-- Of the 310 components with TODOs: 247 have 1–2, 46 have 3–5, 17 have 6 or more.
+- **Fully transformed (no TODO): 627 files, 57.1%** — components 616/964 (63.9%), hooks 11/135 (every hook with
+  parameters gets the `hook-params` TODO by design; 73 hooks have no other TODO). The final store contract added two
+  flags that are manual by definition (`identity-dep` 130 sites, `getGlobal-tracked` 57): before them the figure was
+  61.4%.
+- `withGlobal` 371 components, `trackGlobal` 42 wrapped calls.
 - Largest hit counts: `propsReads` 19 475, `derivedRead` 10 091, `accessorRead` 5 197, `class` 3 715,
   `derivedMemo` 2 462, `useLastCallback` 2 253, `derivedDestructure` 1 387, `hookArgAccessor` 939, `propsParam` 839,
   `useMemo` 771, `createEffect` 736, `useState` 665, `elementRef` 445, `effectValueDeps` 407, `memo` 393,
@@ -128,10 +147,10 @@ Diagnostics are counted only inside the sample files.
 | `ui/Notification`                     | animated       | 2 TODOs (deprecated transition classes, `key=` remount); store glue; `renderText` stub; accessor narrowing (`title()` in two branches)                     |
 | `hooks/useFlag`                       | hook           | 1 TODO (signature): the return type must say `Accessor<boolean>`                                                                                           |
 
-What blocks the rest, in order: (1) the store glue (`src/global/index.ts` exporting `withGlobal` / `getActions` /
-`getGlobal` / `useGlobal`, the store worktree); (2) app hooks ported in place with accessor signatures (every hook the
-sample touches: `useHistoryBack`, `useContextMenuHandlers`, `useIntersectionObserver`, `useOldLang`…); (3) type-only
-foundation stubs (`renderText`, `global/helpers`); (4) tt's `React.HTMLAttributes` augmentation (`teactFastList`,
+What blocks the rest, in order: (1) app hooks ported in place with accessor signatures (every hook the sample touches:
+`useHistoryBack`, `useContextMenuHandlers`, `useIntersectionObserver`, `useOldLang`…); (2) type-only foundation stubs
+and not-yet-ported selectors/helpers (`renderText`, `selectUser`, `getUserFirstOrLastName`); (3) the remaining TODOs
+of the file itself (forwarded refs, deprecated transition classes); (4) tt's `React.HTMLAttributes` augmentation (`teactFastList`,
 `onFileHoverOpen`, `teactOrderKey`) — the first two go away with the rewrite, `onFileHoverOpen` needs either a
 `frameact/jsx-runtime` module augmentation or a `on:fileHoverOpen` native listener (open question).
 
@@ -157,8 +176,8 @@ rAF harness): props defaults through `mergeProps`, delegated `onClick`, `prevent
 - **`React.*` event types** stay as they are: `src/@types/react-compat.d.ts` maps them to native events with a typed
   `currentTarget` (keeps the diff small; no React code involved). `onFileHoverOpen`-style JSX augmentations are not
   covered.
-- **Diff size:** the store contract moves a connected component's mapper into the body (`MAPPER_PLACEMENT = 'inline'`);
-  for a 40-line mapper the diff gate counts those lines twice. `'module'` placement keeps them in place.
+- **Diff size:** with `MAPPER_PLACEMENT = 'module'` (the default) a connected component's mapper lines stay where tt
+  had them; `'inline'` moves them into the body and the diff gate counts them twice.
 - Hooks (`src/hooks/**`) get the mechanical rewrites (signals, memos, effects, refs) but their parameters stay values:
   the `hook-params` TODO is the port in place.
 - Component bodies without a block (`const X = () => <div/>`) are only touched by the props rule when it has to add a

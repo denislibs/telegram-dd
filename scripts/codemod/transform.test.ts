@@ -83,7 +83,7 @@ const Y = ({ size = 'a' }: OwnProps) => {
 });
 
 describe('withGlobal (store contract §12.2)', () => {
-  it('moves the mapper into a body call, keeps the withGlobal import and exports the plain component', () => {
+  it('keeps the mapper at module level, calls withGlobal(ownProps, mapStateToProps) in the body, exports the plain component', () => {
     const { code, report } = run(
       `import { memo } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
@@ -100,10 +100,13 @@ export default memo(withGlobal<OwnProps>(
 )(X));`,
     );
     expectIncludes(code, 'function X(ownProps: OwnProps) {');
+    expectIncludes(code, 'const props = withGlobal(ownProps, mapStateToProps);');
     expectIncludes(
       code,
-      'const props = withGlobal(ownProps, (global, { userId }): Complete<StateProps> => { return { userName: selectUser(global, userId)?.firstName }; });',
+      'const mapStateToProps = (global: GlobalState, { userId }: OwnProps): Complete<StateProps> => { return { userName: selectUser(global, userId)?.firstName }; };',
     );
+    expectIncludes(code, "import type { GlobalState } from '../../global/types';");
+    expect(code).not.toContain('withGlobal<');
     expectIncludes(code, '{props.userName}');
     expectIncludes(code, 'export default X;');
     expectIncludes(code, "import { getActions, withGlobal } from '../../global';");
@@ -121,14 +124,17 @@ const Y = ({ size = 1, m }: OwnProps & StateProps) => <i>{size + m}</i>;
 export const YConnected = withGlobal<OwnProps>(mapY)(Y);`,
       ['props', 'withGlobal'],
     );
+    // two connected components in one module: the mapper names carry the component name
     expectIncludes(
       code,
-      'const X = () => { const props = withGlobal({}, (global): Complete<StateProps> => ({ n: global.n }), activate); return <b>{props.n}</b>; };',
+      'const X = () => { const props = withGlobal({}, mapStateToPropsX, activate); return <b>{props.n}</b>; };',
     );
+    expectIncludes(code, 'const mapStateToPropsX = (global: GlobalState): Complete<StateProps> => ({ n: global.n });');
     expectIncludes(code, 'export default X;');
+    // a destructuring default of a connected component is read inline, for `undefined` only (not `??`)
     expectIncludes(
       code,
-      "const props = mergeProps({ size: 1 }, withGlobal(ownProps, mapY)) as OwnProps & StateProps & Required<Pick<OwnProps & StateProps, 'size'>>;",
+      'const props = withGlobal(ownProps, mapY); return <i>{(props.size === undefined ? 1 : props.size) + props.m}</i>;',
     );
     expectIncludes(code, 'export const YConnected = Y;');
   });
@@ -355,7 +361,10 @@ describe('derived values and early returns', () => {
 };`,
     );
     expectIncludes(code, 'const localId = () => props.notification.localId;');
-    expectIncludes(code, 'const duration = () => props.notification.duration ?? 3000;');
+    expectIncludes(
+      code,
+      'const duration = () => (props.notification.duration === undefined ? 3000 : props.notification.duration);',
+    );
     expectIncludes(code, 'const isOff = createMemo(() => props.disabled || !open());');
     expectIncludes(code, "const title = createMemo(() => lang('Key'));");
     expectIncludes(code, "data-id={localId()} data-d={duration()} class={isOff() && 'off'} title={title()}");
@@ -433,6 +442,47 @@ describe('jsx', () => {
     );
     expect(report.todos.map((t) => t.kind).sort()).toEqual(['key-remount', 'transition-children']);
     expectIncludes(code, "import { ManualFor } from 'frameact/dom';");
+  });
+});
+
+describe('store contract: trackGlobal and identity deps', () => {
+  it('wraps getGlobal()-reading helpers in trackGlobal inside memos, effects, JSX and hook bodies, not in handlers or mappers', () => {
+    const { code, report } = run(
+      `const useThing = (chat: () => ApiChat) => {
+  return getCanPostInChat(chat());
+};
+const X = (props: { chat: ApiChat }) => {
+  const canPost = useMemo(() => getCanPostInChat(props.chat), [props.chat]);
+  const status = useSelector((global) => getGroupStatus(global, props.chat));
+  useEffect(() => { log(getPeerColorCount(props.chat)); }, [props.chat]);
+  const onClick = () => sortChatIds(getGlobal(), ids);
+  return <div onClick={onClick} title={renderMessageSummary(props.chat)}>{canPost}</div>;
+};`,
+    );
+    expectIncludes(code, 'return trackGlobal(() => getCanPostInChat(chat()));');
+    expectIncludes(code, 'const canPost = createMemo(() => trackGlobal(() => getCanPostInChat(props.chat)));');
+    expectIncludes(code, 'const status = useSelector((global) => getGroupStatus(global, props.chat));');
+    expectIncludes(code, 'log(trackGlobal(() => getPeerColorCount(props.chat)));');
+    expectIncludes(code, 'const onClick = () => sortChatIds(getGlobal(), ids);');
+    expectIncludes(code, 'title={trackGlobal(() => renderMessageSummary(props.chat))}');
+    expectIncludes(code, "import { getGlobal, trackGlobal } from '../../global';");
+    expect(report.hits.trackGlobal).toBe(4);
+  });
+
+  it('flags identity dependencies on container props (no id), not on entities', () => {
+    const { report } = run(
+      `type OwnProps = { chat: ApiChat; tabState: TabState; settings: { theme: string } };
+const X = (props: OwnProps) => {
+  const a = useMemo(() => f(props.chat), [props.chat]);
+  const b = useMemo(() => g(props.settings), [props.settings]);
+  useEffect(() => { h(props.tabState); }, [props.tabState, props.chat]);
+  return <div>{a} {b}</div>;
+};`,
+    );
+    expect(report.todos.map((t) => [t.kind, /\((.*?)\)/.exec(t.message)?.[1]])).toEqual([
+      ['identity-dep', 'settings'],
+      ['identity-dep', 'tabState'],
+    ]);
   });
 });
 

@@ -7,7 +7,15 @@ import type * as t from '@babel/types';
 
 import type { Rule } from './index.ts';
 
-import { classifyBindings, collectPropKinds, findBodies, isFunctionNode, type Kinds } from '../analysis.ts';
+import {
+  classifyBindings,
+  collectPropKinds,
+  collectPropTypes,
+  containerDeps,
+  findBodies,
+  isFunctionNode,
+  type Kinds,
+} from '../analysis.ts';
 import { type Ctx, isGlobalRef } from '../context.ts';
 
 const LAYOUT_READ =
@@ -62,6 +70,7 @@ export const effectsRule: Rule = {
   description: 'useEffect family → createEffect/createMeasureEffect/createMutationEffect/onMount/onDestroy',
   run(ctx: Ctx) {
     const propKinds = collectPropKinds(ctx);
+    const propTypes = collectPropTypes(ctx);
     const bodies = findBodies(ctx);
     const kindsByFn = new Map<t.Node, Kinds>(
       bodies.map((body) => [body.fn.node, classifyBindings(ctx, body, propKinds)]),
@@ -154,6 +163,17 @@ export const effectsRule: Rule = {
         }
 
         if (!rewritePrevParam()) return;
+        {
+          const owner = path.findParent((p) => kindsByFn.has(p.node));
+          const containers = containerDeps(ctx, deps, propTypes, owner ? kindsByFn.get(owner.node) : undefined);
+          if (containers.length) {
+            ctx.todo(
+              call,
+              'identity-dep',
+              `dependency on a container (${containers.join(', ')}) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)`,
+            );
+          }
+        }
         let facade: Facade = spec.facade === 'auto' ? 'createEffect' : spec.facade;
         if (spec.facade === 'auto' && LAYOUT_READ.test(ctx.text(fnNode))) facade = 'createMeasureEffect';
         ctx.overwrite(callee.node, facade);

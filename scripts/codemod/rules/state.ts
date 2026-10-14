@@ -5,7 +5,15 @@ import type * as t from '@babel/types';
 
 import type { Rule } from './index.ts';
 
-import { isFunctionNode } from '../analysis.ts';
+import {
+  classifyBindings,
+  collectPropKinds,
+  collectPropTypes,
+  containerDeps,
+  findBodies,
+  isFunctionNode,
+  type Kinds,
+} from '../analysis.ts';
 import { type Ctx, isGlobalRef } from '../context.ts';
 
 function typeParams(node: t.CallExpression): t.TSTypeParameterInstantiation | undefined {
@@ -55,6 +63,11 @@ export const stateRule: Rule = {
   name: 'state',
   description: 'useState/useSignal → createSignal, useMemo → createMemo, useCallback/useLastCallback → plain function',
   run(ctx: Ctx) {
+    const propKinds = collectPropKinds(ctx);
+    const propTypes = collectPropTypes(ctx);
+    const kindsByFn = new Map<t.Node, Kinds>(
+      findBodies(ctx).map((body) => [body.fn.node, classifyBindings(ctx, body, propKinds)]),
+    );
     ctx.program.traverse({
       CallExpression(path: NodePath<t.CallExpression>) {
         const callee = path.get('callee');
@@ -117,6 +130,17 @@ export const stateRule: Rule = {
               }
               ctx.hit('useMemoOnce');
               return;
+            }
+            if (deps?.type === 'ArrayExpression') {
+              const owner = path.findParent((p) => kindsByFn.has(p.node));
+              const containers = containerDeps(ctx, deps, propTypes, owner ? kindsByFn.get(owner.node) : undefined);
+              if (containers.length) {
+                ctx.todo(
+                  call,
+                  'identity-dep',
+                  `dependency on a container (${containers.join(', ')}) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)`,
+                );
+              }
             }
             ctx.overwrite(callee.node, 'createMemo');
             if (!isFunctionNode(init) && init.type !== 'Identifier') {

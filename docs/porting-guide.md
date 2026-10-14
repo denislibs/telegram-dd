@@ -387,19 +387,19 @@ repository and `LICENSE`.
 
 1. **Copy** the file from `reference/telegram-tt` to the same path, with its stylesheet. Run `pnpm format` on it, then
    commit it unchanged as `port(<area>): import <paths> from tt@<sha>`. Each file's history then starts with tt's code.
-2. **Run the codemod first**: `pnpm codemod src/<path>` rewrites steps 2–3 mechanically (imports, `memo`/`FC`, props
+2. **Run the codemod first**: `pnpm codemod src/<path>` rewrites steps 3–4 mechanically (imports, `memo`/`FC`, props
    getters, hooks → primitives, refs, `className`, `<For>`/`<Show>`, `withGlobal`) and leaves a `// TODO(codemod): …`
    where it has no safe mapping; `--dry --report` shows the result first. Then finish the TODOs by hand
    ([`codemod.md`](codemod.md)). The rest of this list is what the codemod does and what remains for you.
 3. **Adapt imports**: `@teact` / `lib/teact/*` → `frameact`, `frameact/dom`; `components/ui/Transition`, `ShowTransition`, `InfiniteScroll`, `hooks/useShowTransition` → `src/lib/kit`; `lib/fasterdom/*` →
    `frameact` / `frameact/stricterdom`; delete imports of removed hooks.
-3. **Replace teact APIs**:
+4. **Replace teact APIs**:
    - Signature to `(ownProps)`; remove `memo`; `withGlobal(mapper)(Comp)` → `const props = withGlobal(ownProps, mapper)` (§3.4).
    - Hooks to primitives (framework §1, §4.2 here); conditional returns and `.map` to `<Show>` / `<For>`.
    - Refs (§4.3); `className` → `class`.
    - Effects split by phase (§4.5).
    - Identity memos to `createMemo` (§3.5); reducers and handlers stay as they are (§3.3).
-4. **`pnpm check`**: oxlint, prettier, tsc, the script gates (diff against the reference, tt unit tests, licenses),
+5. **`pnpm check`**: oxlint, prettier, tsc, the script gates (diff against the reference, tt unit tests, licenses),
    the build and the bundle budgets, with zero warnings. If `gates:diff` fails, shrink the diff (port, don't rewrite)
    or allowlist the file with a reason; if `gates:tests` fails, copy the tt test next to the code. Both are described
    in [`quality-gates.md`](quality-gates.md#script-gates).

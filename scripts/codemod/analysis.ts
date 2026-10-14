@@ -205,6 +205,89 @@ export function collectPropKinds(ctx: Ctx): Map<string, PropKind> {
   return kinds;
 }
 
+const CONTAINER_TYPE_NAME =
+  /(State|Settings|Config|Options|Info|Record|Map|Tab|Dict|Params|Props)$|^(Record|Partial|Pick|Omit|Readonly)$/;
+const ENTITY_TYPE_NAME = /^Api[A-Z]/;
+
+/**
+ * Store contract §12.7: an identity dependency is sound for an entity (an object with `id`: a new object when it
+ * changed) and unsound for a container (a tab record, `settings`): heuristically, an object type whose name says
+ * container, or an inline object type, or a generic record, is flagged; `Api*` names are taken as entities.
+ */
+export function isContainerType(type: t.TSType | undefined): boolean {
+  if (!type) return false;
+  switch (type.type) {
+    case 'TSTypeLiteral':
+      return true;
+    case 'TSTypeReference': {
+      const name = type.typeName.type === 'Identifier' ? type.typeName.name : undefined;
+      if (!name) return false;
+      if (CONTAINER_TYPE_NAME.test(name)) return true;
+      if (ENTITY_TYPE_NAME.test(name)) return false;
+      return false;
+    }
+    case 'TSUnionType':
+      return type.types.some((member) => isContainerType(member));
+    case 'TSIndexedAccessType':
+      return true; // GlobalState['settings']
+    default:
+      return false;
+  }
+}
+
+/** Prop name -> declared type node, from the module's `…Props` declarations. */
+export function collectPropTypes(ctx: Ctx): Map<string, t.TSType> {
+  const types = new Map<string, t.TSType>();
+  const visit = (members: t.TSTypeElement[]) => {
+    for (const member of members) {
+      if (member.type === 'TSPropertySignature' && member.key.type === 'Identifier' && member.typeAnnotation) {
+        types.set(member.key.name, member.typeAnnotation.typeAnnotation);
+      }
+    }
+  };
+  for (const statement of ctx.ast.program.body) {
+    let node: t.Node = statement;
+    if (node.type === 'ExportNamedDeclaration' && node.declaration) node = node.declaration;
+    if (node.type === 'TSTypeAliasDeclaration' && /Props$/.test(node.id.name)) {
+      const walk = (type: t.TSType) => {
+        if (type.type === 'TSTypeLiteral') visit(type.members);
+        else if (type.type === 'TSIntersectionType') type.types.forEach(walk);
+      };
+      walk(node.typeAnnotation);
+    } else if (node.type === 'TSInterfaceDeclaration' && /Props$/.test(node.id.name)) {
+      visit(node.body.body);
+    }
+  }
+  return types;
+}
+
+/** `props.x` / `x` dependencies whose declared prop type is a container (contract §12.7). */
+export function containerDeps(
+  ctx: Ctx,
+  deps: t.ArrayExpression,
+  propTypes: Map<string, t.TSType>,
+  kinds?: Kinds,
+): string[] {
+  const names: string[] = [];
+  for (const element of deps.elements) {
+    if (!element) continue;
+    let propName: string | undefined;
+    if (
+      element.type === 'MemberExpression' &&
+      !element.computed &&
+      element.property.type === 'Identifier' &&
+      element.object.type === 'Identifier' &&
+      kinds?.byName.get(element.object.name) === 'props'
+    ) {
+      propName = element.property.name;
+    } else if (element.type === 'Identifier' && propTypes.has(element.name) && !kinds?.byName.has(element.name)) {
+      propName = element.name;
+    }
+    if (propName && isContainerType(propTypes.get(propName))) names.push(propName);
+  }
+  return names;
+}
+
 export function propKind(kinds: Map<string, PropKind>, name: string): PropKind {
   return kinds.get(name) ?? (CALLBACK_NAME.test(name) ? 'callback' : 'value');
 }

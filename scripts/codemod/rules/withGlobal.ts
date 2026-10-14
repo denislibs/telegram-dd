@@ -1,9 +1,9 @@
 // `withGlobal(mapper, activation?)(X)` call sites, per the store contract (docs/store-architecture.md §12.2): the HOC
-// becomes a call in the component body, `const props = withGlobal(ownProps, MAPPER, ACTIVATION?)` (emitted by the
-// props rule, which also folds defaults into it), the mapper and the activation function move verbatim, and the
-// export becomes the plain component. `withGlobal` keeps its import from `../global`; `getActions()` / `getGlobal()`
-// are unchanged. This rule removes the wrapper; `MAPPER_PLACEMENT = 'module'` keeps the alternative shape (a
-// module-level `const mapStateToProps = …` referenced from the body) for a smaller diff against the reference.
+// becomes a call in the component body, `const props = withGlobal(ownProps, mapStateToProps, ACTIVATION?)` (emitted by
+// the props rule), the export becomes the plain component, `withGlobal` keeps its import from `../global`, no type
+// argument (both types are inferred). The mapper stays at module level where tt had it, as
+// `const mapStateToProps = (global: GlobalState, ownProps: OwnProps) => …` (`MAPPER_PLACEMENT = 'module'`, the
+// controller's decision: byte-identical mapper lines); `'inline'` moves its text into the call instead.
 import type * as t from '@babel/types';
 
 import type { Ctx } from '../context.ts';
@@ -12,9 +12,14 @@ import type { Rule } from './index.ts';
 import { findConnected } from '../analysis.ts';
 
 /** `'inline'`: the mapper text moves into the `withGlobal(ownProps, …)` call (the contract). `'module'`: it stays at module level. */
-export const MAPPER_PLACEMENT: 'inline' | 'module' = 'inline';
+export const MAPPER_PLACEMENT: 'inline' | 'module' = 'module';
 /** The module-level name given to the mapper when `MAPPER_PLACEMENT === 'module'`. */
 export const MAP_STATE_NAME = 'mapStateToProps';
+
+/** `mapStateToProps`, suffixed with the component name when a module has several connected components. */
+export function mapperName(ctx: Ctx, componentName: string): string {
+  return findConnected(ctx).size > 1 ? `${MAP_STATE_NAME}${componentName}` : MAP_STATE_NAME;
+}
 /** The type of the mapper's `global` parameter (module placement only) and where it comes from (relative to `src/`). */
 export const GLOBAL_STATE_TYPE = { name: 'GlobalState', module: 'global/types' };
 
@@ -43,7 +48,7 @@ export const withGlobalRule: Rule = {
         for (const insert of inserts) {
           text = text.slice(0, insert.at - start) + insert.text + text.slice(insert.at - start);
         }
-        ctx.insertBefore(statement.node.start!, `const ${MAP_STATE_NAME} = ${text};\n\n`);
+        ctx.insertBefore(statement.node.start!, `const ${mapperName(ctx, info.componentName)} = ${text};\n\n`);
       }
       ctx.overwrite(outer.node, info.componentName);
       ctx.hit('withGlobal');

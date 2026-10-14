@@ -78,7 +78,7 @@ const KIT = new Set([
   'InfiniteScroll',
   'createScrollAnchor',
 ]);
-const GLOBAL = new Set(['getGlobal', 'getActions']);
+const GLOBAL = new Set(['getGlobal', 'getActions', 'useGlobal', 'trackGlobal', 'withGlobal']);
 const MODULE_LOADER = new Set(['loadBundle', 'Bundles']);
 const TYPES = new Set(['JSX', GLOBAL_STATE_TYPE.name]);
 
@@ -235,8 +235,10 @@ export const importsRule: Rule = {
     const kitPath = relativeTo(ctx.options.filePath, 'src/lib/kit');
     const globalTypesPath = relativeTo(ctx.options.filePath, `src/${GLOBAL_STATE_TYPE.module}`);
     const moduleLoaderPath = relativeTo(ctx.options.filePath, 'src/util/moduleLoader');
+    const globalPath = globalImport ? globalImport.source.value : relativeTo(ctx.options.filePath, 'src/global');
     for (const name of unbound) {
-      if (FRAMEACT.has(name)) addNeeded('frameact', name);
+      if (GLOBAL.has(name) && !globalImport) addNeeded(globalPath, name);
+      else if (FRAMEACT.has(name)) addNeeded('frameact', name);
       else if (FRAMEACT_DOM.has(name) && name !== 'Portal') addNeeded('frameact/dom', name);
       else if (FRAMEACT_STRICTERDOM.has(name)) addNeeded('frameact/stricterdom', name);
       else if (name === 'JSX') addNeeded('type:frameact/jsx-runtime', name);

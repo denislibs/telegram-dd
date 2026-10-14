@@ -17,6 +17,7 @@ import { moduleLoaderRule } from './moduleLoader.ts';
 import { propsRule } from './props.ts';
 import { refsRule } from './refs.ts';
 import { stateRule } from './state.ts';
+import { trackGlobalRule } from './trackGlobal.ts';
 import { typesRule } from './types.ts';
 import { withGlobalRule } from './withGlobal.ts';
 
@@ -39,6 +40,7 @@ export const RULES: Rule[] = [
   hooksRule,
   accessorReadsRule,
   derivedRule,
+  trackGlobalRule,
   earlyReturnRule,
   jsxRule,
   importsRule,
