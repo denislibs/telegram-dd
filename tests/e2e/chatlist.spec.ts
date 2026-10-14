@@ -16,7 +16,25 @@ const ROW = '#LeftColumn .chat-list .ListItem.Chat';
 const ACTIVE_ROW = '#LeftColumn .Transition_slide-active > .chat-list .ListItem.Chat';
 
 // `count` private chats "Contact 1..count", the message of chat N is N minutes after the previous one (N is the newest).
+// The mocked sync of the app writes whole-global snapshots taken before its awaits, which can undo what the test played
+// (see tests/e2e/authHelpers.ts): the contacts are checked and played again when they are gone.
 async function addContacts(page: Page, count: number, from = 1) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    await playContacts(page, count, from);
+    await page.waitForTimeout(800);
+    const present = await page.evaluate(
+      ([n, first]) => {
+        const { byId } = (window as unknown as TestWindow).getGlobal().chats;
+        return Boolean(byId[String(1000 + first)] && byId[String(1000 + first + n - 1)]);
+      },
+      [count, from] as const,
+    );
+    if (present) return;
+  }
+  throw new Error('the mocked sync keeps undoing the contacts of the test');
+}
+
+async function playContacts(page: Page, count: number, from = 1) {
   await page.evaluate(
     ([n, first]) => {
       const { apiUpdate } = (window as unknown as TestWindow).getActions();
@@ -38,7 +56,14 @@ async function addContacts(page: Page, count: number, from = 1) {
         apiUpdate({
           '@type': 'updateChat',
           id,
-          chat: { id, type: 'chatTypePrivate', title: `Contact ${i}`, isMin: false, lastReadInboxMessageId: 0 },
+          chat: {
+            id,
+            type: 'chatTypePrivate',
+            title: `Contact ${i}`,
+            isMin: false,
+            lastReadInboxMessageId: 0,
+            accessHash: '1',
+          },
         });
         apiUpdate({ '@type': 'updateChatListType', id, folderId: 0 });
         apiUpdate({
@@ -84,6 +109,17 @@ async function patchMainThread(page: Page, chatId: string, patch: Record<string,
       });
     },
     [chatId, patch] as const,
+  );
+}
+
+// The titles of the rows in DOM order (a <ManualFor> list: kept rows are not moved, so it is not the visual order)
+async function domOrder(page: Page, rows = ROW): Promise<string[]> {
+  return page.evaluate(
+    (selector) =>
+      [...document.querySelectorAll<HTMLElement>(selector)].map((row) =>
+        (row.querySelector('.fullName, .title')?.textContent ?? '').replace(/SCAM$/, ''),
+      ),
+    rows,
   );
 }
 
@@ -182,6 +218,7 @@ test.describe('chat list', () => {
       document.querySelectorAll(selector).forEach((row, index) => row.setAttribute('data-node', String(index)));
     }, ROW);
     const before = await page.locator(ROW).count();
+    const domBefore = await domOrder(page);
 
     await page.evaluate(() => {
       const { apiUpdate } = (window as unknown as TestWindow).getActions();
@@ -206,6 +243,33 @@ test.describe('chat list', () => {
     await expect(page.locator(ROW).first().locator('.subtitle')).toBeAttached();
     expect(await page.locator(ROW).count()).toBe(before);
     expect(await page.locator(`${ROW}[data-node]`).count()).toBe(before);
+
+    // <ManualFor>: the kept rows were not moved in the DOM (only the row whose order key changed may have been), so with that
+    // row left out the DOM order is what it was
+    const domAfter = await domOrder(page);
+    expect(domAfter.filter((title) => title !== 'Contact 1')).toEqual(
+      domBefore.filter((title) => title !== 'Contact 1'),
+    );
+
+    // The reorder animation ends clean: no transform / opacity / animation class left on any row
+    await expect
+      .poll(() =>
+        page.evaluate((selector) => {
+          return [...document.querySelectorAll<HTMLElement>(selector)].filter(
+            (row) => row.style.transform || row.style.opacity || row.matches('.animate-transform, .animate-opacity'),
+          ).length;
+        }, ROW),
+      )
+      .toBe(0);
+    // and the rows are laid out one after another
+    const tops = await page.evaluate(
+      (selector) =>
+        [...document.querySelectorAll<HTMLElement>(selector)]
+          .map((row) => row.getBoundingClientRect().top)
+          .sort((a, b) => a - b),
+      ROW,
+    );
+    for (let i = 1; i < tops.length; i++) expect(tops[i] - tops[i - 1]).toBe(72);
     await expect(page.locator(ROW).filter({ hasText: 'a brand new message' })).toHaveCount(1);
 
     // The unread counter badge appears with the read state of the chat
@@ -244,7 +308,7 @@ test.describe('chat list', () => {
 
     await expect.poll(() => page.locator(ROW).count()).toBeGreaterThan(10);
     const first = await page.locator(ROW).count();
-    expect(first).toBeLessThan(92); // a slice of the list is rendered, not all of it
+    expect(first).toBeLessThanOrEqual(60); // a window of the list is rendered (CHAT_LIST_SLICE * 2), not all of it
 
     // Scroll with the wheel, as a user does: the loader asks for more when the list moves down near its end
     await page.mouse.move(150, 400);
@@ -256,6 +320,17 @@ test.describe('chat list', () => {
     const titles = await visualOrder(page);
     expect(titles.length).toBeGreaterThan(first);
     expect(new Set(titles).size).toBe(titles.length);
+    // The window slid without a gap: the rendered rows are contiguous in the list and one row high apart
+    const numbers = titles.map((title) => Number(title.replace('Contact ', '')));
+    for (let i = 1; i < numbers.length; i++) expect(numbers[i - 1] - numbers[i]).toBe(1);
+    const tops = await page.evaluate(
+      (selector) =>
+        [...document.querySelectorAll<HTMLElement>(selector)]
+          .map((row) => row.getBoundingClientRect().top)
+          .sort((a, b) => a - b),
+      ROW,
+    );
+    for (let i = 1; i < tops.length; i++) expect(tops[i] - tops[i - 1]).toBe(72);
   });
 
   test('a hidden chat list that receives reorders comes back at the top (the preload does not slide its window)', async ({
@@ -440,5 +515,74 @@ test.describe('chat list', () => {
 
     await page.locator('#LeftColumn .TabList > [class*="__tab"]').nth(0).click();
     await expect.poll(scrollTop).toBe(0);
+  });
+
+  test('keyboard: Alt+Down / Alt+Up open the next / previous chat of the list', async ({ page }) => {
+    await openApp(page);
+    await addContacts(page, 3);
+    await expect
+      .poll(() => visualOrder(page))
+      .toEqual(['Contact 3', 'Contact 2', 'Contact 1', 'aass', 'SavedMessages']);
+    const openChat = () =>
+      page.evaluate(() => {
+        const global = (window as unknown as TestWindow).getGlobal();
+        const tab = Object.values<any>(global.byTabId)[0];
+        return tab.messageLists.at(-1)?.chatId;
+      });
+
+    await page.keyboard.press('Alt+ArrowDown'); // no chat is open: the first one
+    await expect.poll(openChat).toBe('1003');
+    await page.keyboard.press('Alt+ArrowDown');
+    await expect.poll(openChat).toBe('1002');
+    await page.keyboard.press('Alt+ArrowUp');
+    await expect.poll(openChat).toBe('1003');
+  });
+
+  test('keyboard: Ctrl+Shift+Digit opens the folder, Escape returns to the first one', async ({ page }) => {
+    await openApp(page);
+    await addContacts(page, 3);
+    await page.evaluate(() => {
+      const { apiUpdate } = (window as unknown as TestWindow).getActions();
+      apiUpdate({
+        '@type': 'updateChatFolder',
+        id: 5,
+        folder: {
+          id: 5,
+          title: { text: 'Work' },
+          includedChatIds: ['1001', '1002'],
+          excludedChatIds: [],
+          pinnedChatIds: [],
+        },
+      });
+      apiUpdate({ '@type': 'updateChatFoldersOrder', orderedIds: [0, 5] });
+    });
+    await expect(page.locator('#LeftColumn .TabList > [class*="__tab"]')).toHaveCount(2);
+    const activeFolder = () =>
+      page.evaluate(
+        () => Object.values<any>((window as unknown as TestWindow).getGlobal().byTabId)[0].activeChatFolder,
+      );
+
+    await page.keyboard.press('Control+Shift+Digit2');
+    await expect.poll(activeFolder).toBe(1);
+    await expect.poll(() => visualOrder(page, ACTIVE_ROW)).toEqual(['Contact 2', 'Contact 1']);
+
+    await page.keyboard.press('Escape');
+    await expect.poll(activeFolder).toBe(0);
+    await expect.poll(() => visualOrder(page, ACTIVE_ROW)).toHaveLength(5);
+  });
+
+  test('a context menu item runs its action (Quick Preview opens the preview of that chat)', async ({ page }) => {
+    await openApp(page);
+    await addContacts(page, 2);
+    await page.locator(ROW).filter({ hasText: 'Contact 2' }).click({ button: 'right' });
+    await page.locator('.ListItem-context-menu .bubble').getByText('Quick Preview').click();
+    await expect(page.locator('.ListItem-context-menu')).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => Object.values<any>((window as unknown as TestWindow).getGlobal().byTabId)[0].quickPreview?.chatId,
+        ),
+      )
+      .toBe('1002');
   });
 });
