@@ -79,9 +79,9 @@ const AuthPhoneNumber = () => {
   const [isLoading, markIsLoading, unmarkIsLoading] = useFlag();
 
   const accountsInfo = useMultiaccountInfo();
-  const hasActiveAccount = Object.values(accountsInfo).length > 0;
+  const hasActiveAccount = () => Object.values(accountsInfo()).length > 0;
   const phoneNumberSlots = createMemo(() =>
-    Object.entries(accountsInfo)
+    Object.entries(accountsInfo())
       .filter(([, info]) => info.isTest === props.isTestServer)
       .reduce(
         (acc, [key, { phone }]) => {
@@ -261,7 +261,7 @@ const AuthPhoneNumber = () => {
 
   return (
     <div id="auth-phone-number-form" class="custom-scroll">
-      {hasActiveAccount && (
+      {hasActiveAccount() && (
         <Button
           size="smaller"
           round

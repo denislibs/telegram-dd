@@ -54,9 +54,9 @@ function waitForQuietSync(page: Page, quietMs = 1000, giveUpMs = 4000) {
   });
 }
 
-export async function openApp(page: Page) {
+export async function openApp(page: Page, path = '/') {
   const quiet = waitForQuietSync(page);
-  await page.goto('/');
+  await page.goto(path);
   await expect(page.locator('#Main')).toBeVisible();
   await quiet;
 }

@@ -49,7 +49,7 @@ const AuthCode = () => {
   const [isQrMounted, markQrMounted, unmarkQrMounted] = useFlag();
 
   const accountsInfo = useMultiaccountInfo();
-  const hasActiveAccount = Object.values(accountsInfo).length > 0;
+  const hasActiveAccount = () => Object.values(accountsInfo()).length > 0;
 
   const { result: qrCode } = useAsync(
     () =>
@@ -119,7 +119,7 @@ const AuthCode = () => {
 
   return (
     <div id="auth-qr-form" class="custom-scroll">
-      {hasActiveAccount && (
+      {hasActiveAccount() && (
         <Button
           size="smaller"
           round
