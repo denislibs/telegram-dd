@@ -46,6 +46,9 @@ test('phone number -> code -> password -> registration -> main', async ({ page }
   // 4. Registration
   await serverSays(page, 'authorizationStateWaitRegistration');
   await expect(page.locator('#auth-registration-form')).toBeVisible();
+  // The 2FA password does not stay in the DOM of the slide that was left (appsec review, Low 1)
+  await expect(page.locator('#sign-in-password')).toHaveCount(0);
+  await expect(page.locator('#auth-password-form')).toHaveCount(0);
   await page.locator('#registration-first-name').fill('Ada');
   await page.locator('#auth-registration-form').getByRole('button', { name: 'Next' }).click();
   await expect
