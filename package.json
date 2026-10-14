@@ -29,6 +29,7 @@
     "gates:size": "tsx scripts/gates/size.ts",
     "gates:licenses": "tsx scripts/gates/licenses.ts",
     "gates:reference": "tsx scripts/gates/setup-reference.ts",
+    "bench:store": "tsx scripts/bench/store.ts",
     "framework:update": "git submodule update --remote src/vendor/frameact",
     "test:e2e": "playwright test --project=e2e",
     "test:a11y": "playwright test --project=a11y",

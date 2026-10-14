@@ -5,6 +5,21 @@
     },
     "src/index.tsx": {
       "reason": "Entry point rewritten for frameact: render(), enableStrict(), no teact/fasterdom bootstrap, no TeactN init. Keep tt's early side-effect imports."
+    },
+    "src/global/index.ts": {
+      "reason": "The store glue replacing TeactN (docs/store-architecture.md): tt's exported names and types are kept, the binding behind them is frameact's store.",
+      "maxRatio": 0.9
+    },
+    "src/global/reducers/index.ts": {
+      "reason": "Barrel trimmed to the reducers ported so far; it grows back to tt's list with each slice. Remove the entry when all reducers are in."
+    },
+    "src/hooks/data/useSelector.ts": {
+      "reason": "tt kept one signal per selector refreshed from addCallback; over the tracked store each hook is a createMemo returning an accessor (store-architecture.md, codemod contract).",
+      "maxRatio": 0.85
+    },
+    "src/components/middle/MessageListHistoryHandler.tsx": {
+      "reason": "55-line component: the component-model change (withGlobal in the body, <For>, props getters) is 20 lines (store-architecture.md §5, the tab-specific example).",
+      "maxRatio": 0.55
     }
   }
 }
