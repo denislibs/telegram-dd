@@ -131,7 +131,7 @@ export const screens: VisualScreen[] = [
     candidate: { app: 'ours', path: '/', ready: TT_MAIN_READY },
     selector: '#LeftColumn',
     mask: TT_MAIN_MASK,
-    threshold: 0.001,
+    threshold: 0,
   },
   {
     name: 'main-menu',
@@ -149,7 +149,7 @@ export const screens: VisualScreen[] = [
       prepare: (page) => page.getByRole('button', { name: 'Open menu' }).click(),
     },
     mask: TT_MAIN_MASK,
-    threshold: 0.001,
+    threshold: 0,
   },
   {
     name: 'chat-with-history',

@@ -97,12 +97,15 @@ class TelegramClient {
     return this.mockData.dialogs[type].map((dialog) => createMockedDialog(dialog.id, this.mockData));
   }
 
-  start({
+  // Deviation: tt's `start()` ignores `onConnected`, so the API worker's `initApi()` never resolved under the mock and every
+  // `callApi` queued forever (the chat list stayed on its spinner). Same fix as `scripts/visual/tt-patches.mjs`.
+  async start({
     mockScenario,
   }: {
     mockScenario: string;
-  }) {
-    return this.loadScenario(mockScenario);
+  }, onConnected?: () => void) {
+    await this.loadScenario(mockScenario);
+    onConnected?.();
   }
 
   async invoke<A, R>(request: Api.Request<A, R>) {

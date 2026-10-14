@@ -61,7 +61,8 @@ export default function useMenuPosition(
 
       const options2 = read(options);
 
-      if (!('getTriggerElement' in options2)) {
+      // Deviation: the key can be present with an `undefined` value (a menu that passes the dynamic options as props).
+      if (!isDynamicOptions(options2)) {
         applyStaticOptions(containerRef, bubbleRef, options2);
       } else {
         requestForcedReflow(() => {
@@ -75,6 +76,10 @@ export default function useMenuPosition(
     },
     frameMutation,
   );
+}
+
+function isDynamicOptions(options: MenuPositionOptions): options is DynamicPositionOptions {
+  return typeof (options as Partial<DynamicPositionOptions>).getTriggerElement === 'function';
 }
 
 function applyStaticOptions(
