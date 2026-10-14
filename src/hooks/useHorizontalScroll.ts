@@ -1,21 +1,23 @@
 import { createMeasureEffect, requestMutation } from 'frameact';
+import { type MaybeAccessor, read } from '../util/accessors';
 import { depsOf } from '../util/effectDeps';
 
-// TODO(codemod): useHorizontalScroll: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 const useHorizontalScroll = (
-  containerRef: (el: HTMLDivElement) => void,
-  isDisabled?: boolean,
-  shouldPreventDefault = false,
-  shouldStopPropagation = false,
+  containerRef: MaybeAccessor<HTMLDivElement | undefined>,
+  isDisabled?: MaybeAccessor<boolean | undefined>,
+  shouldPreventDefault: MaybeAccessor<boolean> = false,
+  shouldStopPropagation: MaybeAccessor<boolean> = false,
 ) => {
   createMeasureEffect(
-    depsOf(() => [containerRef, isDisabled, shouldPreventDefault, shouldStopPropagation]),
-    () => {
-      if (isDisabled) {
+    depsOf(
+      () => [read(containerRef), read(isDisabled), read(shouldPreventDefault), read(shouldStopPropagation)] as const,
+    ),
+    ([containerEl, isDisabled2, shouldPreventDefault2, shouldStopPropagation2]) => {
+      if (isDisabled2 || !containerEl) {
         return undefined;
       }
 
-      const container = containerRef.current!;
+      const container = containerEl;
 
       function handleScroll(e: WheelEvent) {
         // Ignore horizontal scroll and let it work natively (e.g. on touchpad)
@@ -27,12 +29,12 @@ const useHorizontalScroll = (
           if (!e.deltaY || (e.deltaY < 0 ? scrollLeft <= minScrollLeft : scrollLeft >= maxScrollLeft)) return;
 
           requestMutation(() => container.scrollBy({ left: e.deltaY / 4, behavior: 'instant' }));
-          if (shouldPreventDefault) e.preventDefault();
-          if (shouldStopPropagation) e.stopPropagation();
+          if (shouldPreventDefault2) e.preventDefault();
+          if (shouldStopPropagation2) e.stopPropagation();
         }
       }
 
-      container.addEventListener('wheel', handleScroll, { passive: !shouldPreventDefault });
+      container.addEventListener('wheel', handleScroll, { passive: !shouldPreventDefault2 });
 
       return () => {
         container.removeEventListener('wheel', handleScroll);

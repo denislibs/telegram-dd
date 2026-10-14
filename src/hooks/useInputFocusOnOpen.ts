@@ -1,4 +1,5 @@
 import { createEffect, requestMeasure } from 'frameact';
+import { type MaybeAccessor, read } from '../util/accessors';
 import { depsOf } from '../util/effectDeps';
 
 import { IS_TOUCH_ENV } from '../util/browser/windowEnvironment';
@@ -6,24 +7,24 @@ import focusNoScroll from '../util/focusNoScroll';
 
 const MODAL_HIDE_DELAY_MS = 300;
 
-// TODO(codemod): useInputFocusOnOpen: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useInputFocusOnOpen(
-  inputRef: (el: HTMLInputElement | HTMLTextAreaElement) => void,
-  isOpen?: boolean,
+  inputRef: MaybeAccessor<HTMLInputElement | HTMLTextAreaElement | undefined>,
+  isOpen?: MaybeAccessor<boolean | undefined>,
   onClose?: NoneToVoidFunction,
 ) {
   createEffect(
-    depsOf(() => [inputRef, isOpen, onClose]),
-    () => {
-      if (isOpen) {
-        if (!IS_TOUCH_ENV && inputRef.current?.isConnected) {
+    depsOf(() => [read(isOpen)] as const),
+    ([isOpen2]) => {
+      const input = read(inputRef);
+      if (isOpen2) {
+        if (!IS_TOUCH_ENV && input?.isConnected) {
           requestMeasure(() => {
-            focusNoScroll(inputRef.current);
+            focusNoScroll(input);
           });
         }
       } else {
-        if (inputRef.current?.isConnected) {
-          inputRef.current.blur();
+        if (input?.isConnected) {
+          input.blur();
         }
 
         if (onClose) {

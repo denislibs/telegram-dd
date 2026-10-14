@@ -1,21 +1,21 @@
 import { createEffect } from 'frameact';
 
+import { type MaybeAccessor, read } from '../util/accessors';
 import { IS_IOS, IS_PWA, IS_TOUCH_ENV } from '../util/browser/windowEnvironment';
 
 const metaViewport = document.querySelector('meta[name="viewport"]');
 const defaultViewportContent = metaViewport?.getAttribute('content') || '';
 const allowedZoomViewportContent = 'width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover';
 
-// TODO(codemod): usePreventPinchZoomGesture: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function usePreventPinchZoomGesture(isDisabled = false) {
+export default function usePreventPinchZoomGesture(isDisabled: MaybeAccessor<boolean> = false) {
   createEffect(
-    () => isDisabled,
-    () => {
+    () => read(isDisabled),
+    (isDisabled2) => {
       if (!IS_TOUCH_ENV) {
         return undefined;
       }
 
-      if (isDisabled) {
+      if (isDisabled2) {
         // Clean viewport content from values values that disable the ability to zoom a webpage
         // https://web.dev/meta-viewport/
         metaViewport?.setAttribute('content', allowedZoomViewportContent);

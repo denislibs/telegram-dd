@@ -1,4 +1,5 @@
 import { createMeasureEffect } from 'frameact';
+import { type MaybeAccessor, read } from '../util/accessors';
 import { depsOf } from '../util/effectDeps';
 
 import animateHorizontalScroll from '../util/animateHorizontalScroll';
@@ -6,18 +7,19 @@ import animateHorizontalScroll from '../util/animateHorizontalScroll';
 const TAB_SCROLL_THRESHOLD_PX = 16;
 const SCROLL_DURATION = 300;
 
-// TODO(codemod): useScrollToActiveTab: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function useScrollToActiveTab(containerRef: (el: HTMLDivElement) => void, activeTab: number) {
+export default function useScrollToActiveTab(
+  containerRef: MaybeAccessor<HTMLDivElement | undefined>,
+  activeTab: MaybeAccessor<number>,
+) {
   createMeasureEffect(
-    depsOf(() => [activeTab, containerRef]),
-    () => {
-      const container = containerRef.current;
+    depsOf(() => [read(activeTab), read(containerRef)] as const),
+    ([activeTab2, container]) => {
       if (!container) return;
 
       const { scrollWidth, offsetWidth, scrollLeft } = container;
       if (scrollWidth <= offsetWidth) return;
 
-      const activeTabElement = container.childNodes[activeTab] as HTMLElement | undefined;
+      const activeTabElement = container.childNodes[activeTab2] as HTMLElement | undefined;
       if (!activeTabElement) return;
 
       const { offsetLeft, offsetWidth: tabWidth } = activeTabElement;

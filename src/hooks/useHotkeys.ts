@@ -1,5 +1,7 @@
 import { createEffect } from 'frameact';
 
+import { type MaybeAccessor, read } from '../util/accessors';
+
 import { createCallbackManager } from '../util/callbacks';
 import { getHotkeyMatcher } from '../util/parseHotkey';
 
@@ -8,16 +10,15 @@ const IGNORE_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 const handlers = createCallbackManager();
 document.documentElement.addEventListener('keydown', handlers.runCallbacks);
 
-// TODO(codemod): useHotkeys: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export function useHotkeys(hotkeys?: Record<string, (e: KeyboardEvent) => void>) {
+export function useHotkeys(hotkeys?: MaybeAccessor<Record<string, (e: KeyboardEvent) => void> | undefined>) {
   createEffect(
-    () => hotkeys,
-    () => {
-      if (!hotkeys) {
+    () => read(hotkeys),
+    (hotkeys2) => {
+      if (!hotkeys2) {
         return undefined;
       }
 
-      const entries = Object.entries(hotkeys);
+      const entries = Object.entries(hotkeys2);
 
       function handleKeyDown(e: KeyboardEvent) {
         if (!shouldFireEvent(e)) {

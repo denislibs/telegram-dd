@@ -1,10 +1,7 @@
 import { createSignal } from 'frameact';
 
-import useLastCallback from './useLastCallback';
-
 const THRESHOLD = 5;
 
-// TODO(codemod): useScrolledState: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useScrolledState(threshold = THRESHOLD) {
   const [isAtBeginning, setIsAtBeginning] = createSignal(true);
   const [isAtEnd, setIsAtEnd] = createSignal(true);
