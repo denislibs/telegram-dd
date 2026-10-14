@@ -4,7 +4,7 @@ import type { OwnProps } from './LockScreen';
 
 import { Bundles, loadBundle } from '../../util/moduleLoader';
 
-const LockScreen = lazy(() => loadBundle(Bundles.Main).then((m) => ({ default: m.LockScreen })));
+const LockScreen = lazy<OwnProps>(() => loadBundle(Bundles.Main).then((m) => ({ default: m.LockScreen })));
 
 const LockScreenAsync = (props: OwnProps) => {
   return (

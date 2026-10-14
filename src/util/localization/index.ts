@@ -1,4 +1,4 @@
-import type { TeactNode } from '../../lib/teact/teact';
+import type { TeactNode } from '../../lib/frameactNode';
 
 import type {
   ApiLanguage,

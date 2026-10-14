@@ -1,22 +1,16 @@
-import { onMount } from 'frameact';
-
 import * as langProvider from '../util/oldLangProvider';
-import useEffectOnce from './useEffectOnce';
-import useForceUpdate from './useForceUpdate';
+import { createReactiveCallable } from '../util/reactiveCallable';
 
 export type OldLangFn = langProvider.LangFn;
+
+// Deviation: see hooks/useLang.ts.
+const reactiveOldLang = createReactiveCallable<OldLangFn>(langProvider.getTranslationFn, langProvider.addCallback);
+
 /**
  * @deprecated
  */
 const useOldLang = (): OldLangFn => {
-  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
-  const forceUpdate = useForceUpdate();
-
-  onMount(() => {
-    return langProvider.addCallback(forceUpdate);
-  });
-
-  return langProvider.getTranslationFn();
+  return reactiveOldLang;
 };
 
 export default useOldLang;

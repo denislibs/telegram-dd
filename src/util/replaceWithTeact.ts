@@ -1,4 +1,4 @@
-import { type TeactNode } from '../lib/teact/teact';
+import { type TeactNode } from '../lib/frameactNode';
 
 export function replaceWithTeact(
   input: string, searchValue: string | RegExp, replaceValue: TeactNode,

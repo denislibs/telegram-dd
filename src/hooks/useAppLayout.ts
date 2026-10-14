@@ -1,4 +1,4 @@
-import { onMount } from 'frameact';
+import { createSignal } from 'frameact';
 
 import {
   MIN_SCREEN_WIDTH_FOR_STATIC_LEFT_COLUMN,
@@ -9,7 +9,6 @@ import {
 import { IS_IOS } from '../util/browser/windowEnvironment';
 import { createCallbackManager } from '../util/callbacks';
 import { updateSizes } from '../util/windowSize';
-import useForceUpdate from './useForceUpdate';
 
 type MediaQueryCacheKey = 'mobile' | 'tablet' | 'landscape' | 'touch';
 
@@ -71,17 +70,24 @@ function initMediaQueryCache() {
 initMediaQueryCache();
 handleMediaQueryChange();
 
+// Deviation: a component runs once, so the layout flags are accessors over one module-level signal that follows the media
+// query callbacks (tt re-rendered the component with `useForceUpdate`).
+const [layoutVersion, setLayoutVersion] = createSignal(0);
+callbacks.addCallback(() => setLayoutVersion((value) => value + 1));
+
+const tracked =
+  <T>(getValue: () => T) =>
+  () => {
+    layoutVersion();
+    return getValue();
+  };
+
 export default function useAppLayout() {
-  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
-  const forceUpdate = useForceUpdate();
-
-  onMount(() => callbacks.addCallback(forceUpdate));
-
   return {
-    isMobile,
-    isTablet,
-    isLandscape,
-    isDesktop: !isMobile && !isTablet,
-    isTouchScreen,
+    isMobile: tracked(() => isMobile),
+    isTablet: tracked(() => isTablet),
+    isLandscape: tracked(() => isLandscape),
+    isDesktop: tracked(() => !isMobile && !isTablet),
+    isTouchScreen: tracked(() => isTouchScreen),
   };
 }

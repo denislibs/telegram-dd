@@ -1,7 +1,7 @@
-import { createSignal } from 'frameact';
+import { type Accessor, createSignal } from 'frameact';
 
-// TODO(codemod): useFlag: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-const useFlag = (initial = false, debugKey?: string): [boolean, NoneToVoidFunction, NoneToVoidFunction] => {
+// Deviation: returns an accessor (frameact components run once); call sites read `isOpen()`.
+const useFlag = (initial = false, debugKey?: string): [Accessor<boolean>, NoneToVoidFunction, NoneToVoidFunction] => {
   const [value, setValue] = createSignal(initial);
 
   const setTrue = () => {

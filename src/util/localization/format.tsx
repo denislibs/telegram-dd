@@ -9,11 +9,17 @@ import GramIcon from '../../components/common/icons/GramIcon';
 import Icon from '../../components/common/icons/Icon';
 import StarIcon from '../../components/common/icons/StarIcon';
 
+// Deviation: a frameact JSX element is a DOM node that can live in one place only, so the shared replacement is a
+// getter that builds a fresh icon each time the replacement is used.
 export const NEXT_ARROW_REPLACEMENT = {
-  '>': <Icon name="next-link" className="link-arrow-icon" />,
+  get '>'() {
+    return <Icon name="next-link" className="link-arrow-icon" />;
+  },
 };
 export const PREVIOUS_ARROW_REPLACEMENT = {
-  '<': <Icon name="previous-link" className="link-arrow-icon" />,
+  get '<'() {
+    return <Icon name="previous-link" className="link-arrow-icon" />;
+  },
 };
 
 export function formatStarsAsText(lang: LangFn, amount: number) {
@@ -56,7 +62,7 @@ export function formatTonAsIcon(
 
   if (containerClassName || withWrapper) {
     return (
-      <span className={containerClassName}>
+      <span class={containerClassName}>
         {lang(key, { amount: formattedAmount }, {
           withNodes: true,
           specialReplacement: {
@@ -91,7 +97,7 @@ export function formatStarsAsIcon(lang: LangFn, amount: number | string, options
 
   if (containerClassName || withWrapper) {
     return (
-      <span className={containerClassName}>
+      <span class={containerClassName}>
         {lang(key, { amount }, {
           withNodes: true,
           specialReplacement: {

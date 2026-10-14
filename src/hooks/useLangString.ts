@@ -2,29 +2,32 @@ import { createEffect, createSignal } from 'frameact';
 
 import type { RegularLangKey } from '../types/language';
 
-import { LANG_PACK } from '../config';
 import { callApi } from '../api/gramjs';
-import useLastCallback from './useLastCallback';
+import { LANG_PACK } from '../config';
+import { type MaybeAccessor, read } from '../util/accessors';
 
-// TODO(codemod): useLangString: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function useLangString(key: RegularLangKey, langCode?: string) {
+export default function useLangString(
+  key: MaybeAccessor<RegularLangKey>,
+  langCode?: MaybeAccessor<string | undefined>,
+) {
   const [value, setValue] = createSignal<string | undefined>(undefined);
 
   const fetchLangString = async () => {
-    if (!langCode) return undefined;
+    const code = read(langCode);
+    if (!code) return undefined;
 
     const result = await callApi('fetchLangStrings', {
-      langCode,
+      langCode: code,
       langPack: LANG_PACK,
-      keys: [key],
+      keys: [read(key)],
     });
-    const langString = result?.strings[key];
+    const langString = result?.strings[read(key)];
     if (!langString || typeof langString !== 'string') return undefined;
     return langString;
   };
 
   createEffect(
-    () => [key, langCode],
+    () => [read(key), read(langCode)],
     () => {
       fetchLangString().then(setValue);
     },

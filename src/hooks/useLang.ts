@@ -1,18 +1,12 @@
-import { onMount } from 'frameact';
-
 import { addLocalizationCallback, getTranslationFn, type LangFn } from '../util/localization';
-import useEffectOnce from './useEffectOnce';
-import useForceUpdate from './useForceUpdate';
+import { createReactiveCallable } from '../util/reactiveCallable';
+
+// Deviation: a component runs once, so there is no per-component `forceUpdate`. One module-level function object
+// follows the localization callbacks through a signal (util/reactiveCallable.ts): `lang('Key')` in JSX is reactive.
+const reactiveLang = createReactiveCallable<LangFn>(getTranslationFn, addLocalizationCallback);
 
 const useLang = (): LangFn => {
-  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
-  const forceUpdate = useForceUpdate();
-
-  onMount(() => {
-    return addLocalizationCallback(forceUpdate);
-  });
-
-  return getTranslationFn();
+  return reactiveLang;
 };
 
 export default useLang;
