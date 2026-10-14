@@ -63,7 +63,7 @@ Keep the telegram-tt path. A tt file `src/components/left/main/Chat.tsx` becomes
 here, and its stylesheet, hooks and helpers move next to it under the same names. That way
 `diff reference/telegram-tt/<path> <path>` always works.
 
-| telegram-tt                                                                                                                          | tg-frameact                  | Status                                                                                                                                          |
+| telegram-tt                                                                                                                          | telegram-dd                  | Status                                                                                                                                          |
 | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/lib/gramjs/`                                                                                                                    | same                         | **Verbatim.** No UI dependencies (no teact or fasterdom imports).                                                                               |
 | `src/api/gramjs/`, `src/api/types/`                                                                                                  | same                         | **Verbatim**, except one adaptation in `worker/connector.ts` ([§6](#6-workers-and-gramjs)).                                                     |
@@ -168,7 +168,7 @@ export default memo(
 );
 ```
 
-tg-frameact:
+telegram-dd:
 
 ```tsx
 const Notifications = (ownProps: AnyLiteral) => {
@@ -245,7 +245,7 @@ re-derive them. The short version:
 
 ### 4.2 App-specific mapping
 
-| telegram-tt                                                                         | tg-frameact                                                                                                                                                                                                                                                                                      |
+| telegram-tt                                                                         | telegram-dd                                                                                                                                                                                                                                                                                      |
 | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `useFlag()` (172 files)                                                             | Port `src/hooks/useFlag.ts` in place: `createSignal`, returning `[Accessor<boolean>, setTrue, setFalse]`. Call sites change `isOpen` to `isOpen()`.                                                                                                                                              |
 | `useLang()`, `useOldLang()`                                                         | Port in place. `lang` reads the language signal, so `lang('Key')` in JSX is reactive. `lang.isRtl` becomes a getter.                                                                                                                                                                             |
