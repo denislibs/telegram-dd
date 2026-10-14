@@ -6,3 +6,4 @@ dist
 /reference/
 .env.local
 /.worktrees/
+.cache

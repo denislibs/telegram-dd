@@ -1,18 +1,33 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "strict": true,
-    "noImplicitOverride": true,
+    // Mirrors telegram-tt's tsconfig.base.json (strict, bundler resolution, dom + webworker libs, allowJs…).
+    // Deviations: JSX goes through frameact; `incremental`/tsBuildInfo are dropped (tsc 7).
+    "target": "ESNext",
+    "lib": ["DOM", "DOM.Iterable", "WebWorker", "ESNext"],
+    "allowJs": true,
     "skipLibCheck": true,
-    "types": ["vite/client", "node"],
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowImportingTsExtensions": true,
+    "noImplicitReturns": true,
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
     "jsx": "preserve",
     "jsxImportSource": "frameact",
-    "allowImportingTsExtensions": true,
-    "noEmit": true
+    "types": ["dom-chromium-ai", "dom-view-transitions", "vite/client"]
   },
-  "include": ["src", "vite.config.ts"],
-  "exclude": ["src/vendor", "reference"]
+  "include": ["src"],
+  "exclude": [
+    "src/vendor",
+    "reference",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/lib/gramjs/tl/generateModules.ts",
+    "src/lib/gramjs/tl/types-generator"
+  ]
 }
