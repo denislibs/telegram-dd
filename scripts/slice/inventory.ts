@@ -142,6 +142,7 @@ function tryFile(base: string, style: boolean): Resolved {
   return { type: 'unresolved', spec: base };
 }
 
+/** Specifiers of a script; the ones only imported as types come back prefixed with `type:`. */
 function scriptDeps(path: string, source: string): string[] {
   const specs = new Set<string>();
   let ast;
@@ -169,14 +170,15 @@ function scriptDeps(path: string, source: string): string[] {
       (n.type === 'ImportDeclaration' || n.type === 'ExportNamedDeclaration' || n.type === 'ExportAllDeclaration') &&
       n.source?.value
     ) {
-      // Type-only imports are not part of the runtime closure (the type-only stubs in src/ already satisfy tsc).
+      // Type-only imports are followed only to files that are not in src/ yet (tsc needs them); a type-only edge into
+      // a file that exists, a FOUNDATION STUB included, is not a reason to descend.
       const typeOnly =
         n.importKind === 'type' ||
         n.exportKind === 'type' ||
         (n.type === 'ImportDeclaration' &&
           Boolean(n.specifiers?.length) &&
           n.specifiers!.every((sp) => sp.importKind === 'type'));
-      if (!typeOnly) specs.add(n.source.value);
+      specs.add(typeOnly ? `type:${n.source.value}` : n.source.value);
     }
     if ((n.type === 'CallExpression' || n.type === 'ImportExpression') && n.callee?.type === 'Import') {
       const arg = n.arguments?.[0];
@@ -333,8 +335,11 @@ while (queue.length) {
   } else if (/\.s?css$/.test(path)) {
     for (const spec of styleDeps(source)) specs.push({ spec, style: true });
   }
-  for (const { spec, style } of specs) {
+  for (const { spec: rawSpec, style } of specs) {
+    const typeOnly = rawSpec.startsWith('type:');
+    const spec = typeOnly ? rawSpec.slice(5) : rawSpec;
     const resolved = resolveSpec(path, spec, style);
+    if (typeOnly && resolved.type === 'file' && readOurs(resolved.path) !== undefined) continue;
     // moduleLoader.ts `import()`s every bundle; a bundle joins the closure only through the `Bundles.X` of an *.async wrapper.
     if (resolved.type === 'file' && /^src\/bundles\//.test(resolved.path)) continue;
     if (resolved.type === 'file') {
