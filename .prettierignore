@@ -1,5 +1,26 @@
 reference
 src/vendor
 dist
+.cache
 pnpm-lock.yaml
 LICENSE
+
+# Ported from telegram-tt verbatim: its style is not prettier's (formatting it would rewrite ~20% of the lines:
+# ~+23k/-18k in src/api, src/lib/gramjs, src/util, src/global, src/types), and keeping it byte-identical keeps
+# diffs against reference/telegram-tt readable. tt's own stylistic rules are mapped in .prettierrc.json.
+src/api
+src/lib
+src/util
+src/types
+src/config.ts
+src/limits.ts
+src/global/types
+src/global/helpers
+src/global/shared
+src/components/common/helpers/waveform.ts
+src/@types/global.d.ts
+public
+index.html
+dev
+plugins
+postcss.config.ts
