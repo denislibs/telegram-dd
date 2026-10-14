@@ -167,6 +167,10 @@
     "src/lib/kit/transition.ts": {
       "reason": "The kit's frameact-native Transition (moved from frameact, then extended with tt's nextKey, slideOptimized, watched-slide and swipe-control behaviour): a signals/effects/mutate-phase rewrite of tt's component with a different slide model (a record per key, classes written in one mutation effect), not a line-by-line port.",
       "maxRatio": 0.95
+    },
+    "src/util/swipeController.ts": {
+      "reason": "tt's swipe controller with the Transition completion's hardening (every end path of a swipe, cleanup on dispose, cached animations, a local inertia loop instead of util/animation, a handle for the kit); each change is marked // Deviation: in the file.",
+      "maxRatio": 0.65
     }
   }
 }

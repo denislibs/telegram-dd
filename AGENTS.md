@@ -54,7 +54,7 @@ Toolchain: Vite 8, TypeScript 7 (native `tsc`), oxlint, prettier, pnpm 10, Node 
   stricterdom problems, visual diff vs tt, no leaks, no long tasks, axe): [`docs/quality-gates.md`](docs/quality-gates.md).
   Every e2e test imports `test` from `tests/e2e/fixtures.ts`.
 - **Animations**: use `src/lib/kit` (`Transition`, `ShowTransition`, `InfiniteScroll`, `createScrollAnchor`; it replaces tt's
-  `components/ui/{Transition,ShowTransition,InfiniteScroll}.tsx` and `hooks/useShowTransition`, and imports only frameact's public API) with tt's
+  `components/ui/{Transition,ShowTransition,InfiniteScroll}.tsx` and `hooks/useShowTransition`, and imports only frameact's public API plus `util/dom/natives` and tt's `util/swipeController`; `src/util` never imports the kit) with tt's
   class contracts and stylesheets; blocking animations go through heavy-animation scopes.
 
 ## Frameact API boundary

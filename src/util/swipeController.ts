@@ -2,14 +2,13 @@ import { requestMeasure, requestMutation } from 'frameact';
 
 import type { MoveOffsets } from './captureEvents';
 
-import { waitForAnimationEnd } from '../lib/kit/animationEnd';
 import { IS_IOS } from './browser/windowEnvironment';
-import { animateNumber, timingFunctions } from './animation';
 import { captureEvents, SwipeDirection } from './captureEvents';
+import { waitForAnimationEnd } from './cssAnimationEndListeners';
 import { clamp } from './math';
 
 const INERTIA_DURATION = 300;
-const INERTIA_EASING = timingFunctions.easeOutCubic;
+const easeOutCubic = (t: number) => (--t) * t * t + 1; // = timingFunctions.easeOutCubic
 
 let isSwipeActive = false;
 let swipeOffsets: MoveOffsets | undefined;
@@ -225,11 +224,9 @@ export function allowSwipeControlForTransition(
         waitForAnimationEnd(currentSlide, cleanup);
       }
 
-      ownCancelReleaseAnimation = cancelCurrentReleaseAnimation = animateNumber({
+      ownCancelReleaseAnimation = cancelCurrentReleaseAnimation = animateInertia({
         from: progress,
         to: isRevertSwipe ? 0 : 1,
-        duration: INERTIA_DURATION,
-        timing: INERTIA_EASING,
         onUpdate(releaseProgress) {
           updateAnimationProgress(animations, releaseProgress);
         },
@@ -266,6 +263,42 @@ export function allowSwipeControlForTransition(
         ownCancelReleaseAnimation();
       }
     },
+  };
+}
+
+// Deviation: tt's `animateNumber` (util/animation) for the one number the inertia needs. Importing util/animation moved
+// its 2 KB into the entry chunk of every app that merely contains the Transition. Same behaviour: the first tick is
+// immediate, the next ones run in the measure phase of each frame, a cancel reports `onEnd(true)`.
+function animateInertia({ from, to, onUpdate, onEnd }: {
+  from: number;
+  to: number;
+  onUpdate: (value: number) => void;
+  onEnd: (isCanceled?: boolean) => void;
+}) {
+  const startedAt = Date.now();
+  let isFinished = false;
+
+  function tick() {
+    if (isFinished) return;
+
+    const t = Math.min((Date.now() - startedAt) / INERTIA_DURATION, 1);
+    onUpdate(from + (to - from) * easeOutCubic(t));
+
+    if (t === 1) {
+      isFinished = true;
+      onEnd();
+      return;
+    }
+
+    requestMeasure(tick);
+  }
+
+  tick();
+
+  return () => {
+    if (isFinished) return;
+    isFinished = true;
+    onEnd(true);
   };
 }
 

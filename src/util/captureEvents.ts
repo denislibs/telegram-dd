@@ -96,7 +96,8 @@ function getTouchCenter(a: Touch, b: Touch) {
 }
 
 let lastClickTime = 0;
-const lethargy = new Lethargy({
+// Deviation: `@__PURE__` lets a bundle without a `captureEvents` caller drop the whole Lethargy class (~1.2 KB).
+const lethargy = /* @__PURE__ */ new Lethargy({
   stability: 5,
   sensitivity: 25,
   tolerance: IS_WINDOWS ? 1 : 0.6, // Windows `scrollDelta` does not die down to 0
