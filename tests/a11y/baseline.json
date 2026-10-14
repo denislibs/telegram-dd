@@ -60,5 +60,32 @@
       "target": "button",
       "reason": "telegram-tt's stylesheet: the colour of this text is below 4.5:1 on the white background (floating labels of the form controls, styles/_forms.scss and Auth.scss, copied as they are); a design decision, tracked for the accessibility pass. Measured after the screen transition has settled (an earlier run caught labels mid-fade, which hid most of these)."
     }
+  ],
+  "main: main menu": [
+    {
+      "rule": "aria-required-parent",
+      "target": ".left > .MenuItem.compact[role=\"menuitem\"]:nth-child(1)",
+      "reason": "telegram-tt's markup: the main menu is a `Menu` without `ariaLabel`/`ariaLabelledBy`, so its bubble has no `role=menu` while the items are `role=menuitem` (ui/Menu.tsx and MenuItem.tsx are ported verbatim); the fix is an aria label on the bubble and belongs to the accessibility pass"
+    },
+    {
+      "rule": "aria-required-parent",
+      "target": ".left > .MenuItem.compact[role=\"menuitem\"]:nth-child(2)",
+      "reason": "telegram-tt's markup: the main menu is a `Menu` without `ariaLabel`/`ariaLabelledBy`, so its bubble has no `role=menu` while the items are `role=menuitem` (ui/Menu.tsx and MenuItem.tsx are ported verbatim); the fix is an aria label on the bubble and belongs to the accessibility pass"
+    },
+    {
+      "rule": "aria-required-parent",
+      "target": ".left > .MenuItem.compact[role=\"menuitem\"]:nth-child(3)",
+      "reason": "telegram-tt's markup: the main menu is a `Menu` without `ariaLabel`/`ariaLabelledBy`, so its bubble has no `role=menu` while the items are `role=menuitem` (ui/Menu.tsx and MenuItem.tsx are ported verbatim); the fix is an aria label on the bubble and belongs to the accessibility pass"
+    },
+    {
+      "rule": "aria-required-parent",
+      "target": ".MenuItem.compact[role=\"menuitem\"]:nth-child(4)",
+      "reason": "telegram-tt's markup: the main menu is a `Menu` without `ariaLabel`/`ariaLabelledBy`, so its bubble has no `role=menu` while the items are `role=menuitem` (ui/Menu.tsx and MenuItem.tsx are ported verbatim); the fix is an aria label on the bubble and belongs to the accessibility pass"
+    },
+    {
+      "rule": "aria-required-parent",
+      "target": ".submenu",
+      "reason": "telegram-tt's markup: the main menu is a `Menu` without `ariaLabel`/`ariaLabelledBy`, so its bubble has no `role=menu` while the items are `role=menuitem` (ui/Menu.tsx and MenuItem.tsx are ported verbatim); the fix is an aria label on the bubble and belongs to the accessibility pass"
+    }
   ]
 }
