@@ -214,8 +214,21 @@ export function setGlobal(newGlobal: GlobalState, options?: ActionOptions) {
   const prev = currentGlobal;
   currentGlobal = newGlobal;
   const apply = () => applyGlobal(setState, prev, newGlobal);
-  if (options?.forceOnHeavyAnimation || options?.forceSyncOnIOs) ungated(apply);
-  else apply();
+  try {
+    if (options?.forceOnHeavyAnimation || options?.forceSyncOnIOs) ungated(apply);
+    else apply();
+  } catch (error) {
+    // Atomic: a walk that throws (a value the glue refuses, a getter, a frozen object) must not leave `newGlobal`
+    // committed with a half-applied mirror — later walks diff from the committed global and would skip the unwritten
+    // branches for good. Back to `prev`, and the mirror is walked back to it (appsec review, finding 3).
+    currentGlobal = prev;
+    try {
+      applyGlobal(setState, unwrap(trackedGlobal), prev);
+    } catch (resyncError) {
+      handleError(resyncError as Error);
+    }
+    throw error;
+  }
 
   if (options?.forceSyncOnIOs) {
     forceOnHeavyAnimation = true;

@@ -509,6 +509,39 @@ describe('I2: tt code that mutates the global it got from getGlobal() behaves th
   });
 });
 
+describe('appsec 3: setGlobal is atomic — a walk that throws leaves the committed global and the mirror untouched', () => {
+  it('rolls the committed global back, resyncs the half-applied mirror and keeps working', () => {
+    setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, byId: { a: chat('a') } } });
+    const before = getGlobal().chats.byId;
+    const poisoned: AnyLiteral = { fine: 1 };
+    Object.defineProperty(poisoned, 'boom', {
+      enumerable: true,
+      get() {
+        throw new Error('boom');
+      },
+    });
+    // `chats` is walked first and written (a new chat), then `poisoned` throws inside the walk
+    const next = {
+      ...getGlobal(),
+      chats: { ...getGlobal().chats, byId: { a: chat('a'), b: chat('b') } },
+      poisoned,
+    } as unknown as GlobalState;
+
+    expect(() => setGlobal(next)).toThrow('boom');
+
+    expect(getGlobal().chats.byId).toBe(before); // committed: the previous one
+    expect('poisoned' in getGlobal()).toBe(false);
+    expect(useGlobal().chats.byId.b).toBeUndefined(); // mirror: the half-applied write is undone
+    expect('poisoned' in unwrap(useGlobal())).toBe(false);
+    expect(Object.keys(unwrap(useGlobal()).chats.byId)).toEqual(['a']);
+
+    // the next legal write is a plain diff against the (restored) committed global
+    setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, byId: { a: chat('a'), c: chat('c') } } });
+    expect(Object.keys(unwrap(useGlobal()).chats.byId).sort()).toEqual(['a', 'c']);
+    expect(getGlobal().chats.byId.c).toBeDefined();
+  });
+});
+
 describe('M4: getPromiseActions returns a promise for a synchronous action too', () => {
   it('awaits and .then() work', async () => {
     register('test:syncAction', () => undefined);
