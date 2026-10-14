@@ -205,6 +205,13 @@ with 404 for a scenario without a middleware. `strictMonitor.spec.ts` is the gat
 first becomes the master, the second gets its global through `requestGlobal`; a chat and a tab-state field written in A
 reach B, B posts nothing back, and a write in B reaches A.
 
+The auth flow (`tests/e2e/auth.spec.ts`, helpers in `tests/e2e/authHelpers.ts`, shared with `tests/a11y/auth.a11y.spec.ts` and
+`tests/perf/perf.spec.ts`): the test plays the server with `apiUpdate` actions and drives the real UI through phone number,
+code, password, registration and the main placeholder, plus the QR code screen. `openApp()` first waits until the
+mocked sync has been quiet for a second (see the visual section for why). frameact's DEV timing hints (`Slow effect run`,
+`Slow measure drain`, `Slow store update`) are ignored by the monitor: they fire on a cold dev server under parallel CPU
+load; real jank is the long-task gate's job.
+
 Adding a screen: `tests/e2e/<screen>.spec.ts`, `import { expect, test } from './fixtures'`, open the route, exercise it.
 For a screen that needs data open it with the mock (`/#?mockScenario=...`).
 
@@ -254,6 +261,13 @@ Real vs scaffolded today:
   (`global.auth.state = 'authorizationStateReady'` when `IS_MOCKED_CLIENT`).
 - tt's mock does not implement every request (e.g. folders, language pack: errors in its console, a perpetual sync
   spinner). That is tt's noise, identical on every run; do not "fix" it in the screens, mask it.
+
+Ported screens (auth slice): `auth-phone-number`, `auth-code`, `auth-password`, `auth-registration`, `auth-qr-code`
+(`authScreen()` in `tests/visual/screens.ts`). Both apps boot logged in under the mock, so each target plays the server:
+after the mocked API has settled (its `sync` handlers write whole-global snapshots taken before their awaits, which undo
+an auth step played in the middle of them) it feeds the same `apiUpdate({'@type': 'updateAuthorizationState', …})` that
+the API worker would send (both apps expose `window.getActions()` in the dev/test build), waits for the form and for
+the screen transition. Result: 0 differing pixels on all five, threshold 0.05 %.
 
 ### 3. Leak check
 

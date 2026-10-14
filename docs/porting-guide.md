@@ -283,6 +283,26 @@ takes accessors instead of values, and returns accessors. Keeping the `use*` nam
   A handler that comes from props and can change is written `onClick={(e) => props.onClick?.(e)}`. A handler may read
   layout (it is a measure context), but it schedules DOM writes with `requestMutation`.
 
+### 4.3.1 Traps found by the auth slice
+
+- **A prop is not readable in an effect apply when its getter is a memo.** The compiler wraps a conditional / logical
+  prop value (`error={key && lang(key)}`, `size={big ? A : B}`) in a `memo()` inside the prop getter; reading
+  `props.error` in an `apply` (which runs without an owner) throws in DEV ("onCleanup()/createEffect()/createMemo()
+  inside an effect apply has no owner"). Put every prop an effect uses into its compute half and take it as a value in
+  the apply (`createEffect(() => props.error, (error2) => …)`; the codemod does this for `props.x` dependencies), or read
+  it through a memo of the component (`AnimatedSticker`'s `live`). Event handlers and timers are not applies.
+- **`onChange` is `onInput`.** teact fires `onChange` of every element except `<select>` on the `input` event;
+  frameact's is the native `change`. The codemod renames it on intrinsic elements; check components that forward both.
+- **DOM attribute names**: `autocomplete`, `autoplay`, `playsinline`, `spellcheck`… (codemod `attributes`). A component
+  that spreads onto a `<video>` takes `class`, not `className`.
+- **`focus()` / `select()` are layout reads**: schedule them with `requestMeasure`, not `requestMutation`.
+- **A shared JSX constant is one DOM node**: `const ICON = <Icon/>` can sit in one place only; use a getter or a function
+  (`NEXT_ARROW_REPLACEMENT`).
+- **`useLayoutEffect(…, [])` that writes the DOM** is not `onMount` (a measure-phase callback): `onMount(() =>
+requestMutation(…))`.
+- **Third-party DOM writers** (the QR code library) go into a subtree marked `data-stricterdom-ignore` instead of
+  switching stricterdom off.
+
 ### 4.4 Styles in JSX
 
 `className={buildClassName('Chat', isSelected && 'selected', props.className)}` becomes `class={buildClassName(…)}`.
@@ -369,7 +389,7 @@ Each step ends with `pnpm check` green and a dev run with a clean stricterdom co
    Done on `port/state` (T1–T5; [`reports/port-state.md`](reports/port-state.md) lists the FOUNDATION STUBs that cut it
    off from UI code).
 4. **Auth**: `src/components/auth/*`, `src/bundles/auth.ts`, the UI primitives they need (`components/ui`, `Transition`
-   adapters), and the styles.
+   adapters), and the styles. Done on `port/auth` ([`reports/slice-auth.md`](reports/slice-auth.md)).
 5. **Chat list**: `src/components/left/main/*` (`ChatList` with `<ManualFor orderKey>`, `Chat`), folders, archive.
 6. **Message list**: `src/components/middle/MessageList*`, `message/*`, scroll anchoring (`createScrollAnchor`), the
    `useInfiniteScroll` port.

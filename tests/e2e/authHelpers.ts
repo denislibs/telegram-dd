@@ -38,13 +38,18 @@ export async function readAuth(page: Page) {
 // then runs its sync (DEBUG logs `>>> START SYNC`, a few times). The sync handlers write whole-global snapshots taken
 // before their awaits, which would silently undo an auth step the test played in the middle of them. So the test waits
 // until the sync has been quiet for a moment before it starts playing the server.
-function waitForQuietSync(page: Page, quietMs = 1000) {
+function waitForQuietSync(page: Page, quietMs = 1000, giveUpMs = 4000) {
   return new Promise<void>((resolve) => {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // A build without DEBUG logs (the production build of the perf gates) never prints it: wait a fixed time instead.
+    const giveUp = setTimeout(resolve, giveUpMs);
     page.on('console', (message) => {
       if (!message.text().includes('>>> START SYNC')) return;
       if (timer) clearTimeout(timer);
-      timer = setTimeout(resolve, quietMs);
+      timer = setTimeout(() => {
+        clearTimeout(giveUp);
+        resolve();
+      }, quietMs);
     });
   });
 }
