@@ -61,7 +61,7 @@ const PasswordForm = (rawProps: OwnProps) => {
 
   useTimeout(() => {
     if (!IS_TOUCH_ENV) {
-      inputRef!.focus();
+      inputRef.focus();
     }
   }, focusDelayTimeoutMs);
 
@@ -70,8 +70,8 @@ const PasswordForm = (rawProps: OwnProps) => {
     () => {
       if (props.error) {
         requestMutation(() => {
-          inputRef!.focus();
-          inputRef!.select();
+          inputRef.focus();
+          inputRef.select();
         });
       }
     },

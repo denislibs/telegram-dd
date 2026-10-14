@@ -254,8 +254,8 @@ describe('effects', () => {
     );
     expectIncludes(code, 'onMount(() => { mount(); return () => unmount(); });');
     // an accessor dependency is received as a value by apply
-    expectIncludes(code, 'createMeasureEffect(() => n(), (n) => { const h = el.offsetHeight; use(h, n); });');
-    expectIncludes(code, 'createMutationEffect(() => [props.isOpen, n()] as const, ([, n]) => {');
+    expectIncludes(code, 'createMeasureEffect(() => n(), (n2) => { const h = el.offsetHeight; use(h, n2); });');
+    expectIncludes(code, 'createMutationEffect(() => [props.isOpen, n()] as const, ([, n2]) => {');
     expectIncludes(code, 'onDestroy(() => stop());');
     expectIncludes(code, 'onMount(() => once());');
     expect(report.hits).toMatchObject({ onMount: 2, onDestroy: 1, createMeasureEffect: 1, createMutationEffect: 1 });

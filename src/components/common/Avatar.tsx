@@ -233,12 +233,12 @@ const Avatar = (rawProps: OwnProps) => {
             <OptimizedVideo
               canPlay
               src={videoBlobUrl()}
-              className={buildClassName(cn.media, 'avatar-media', 'poster')}
+              class={buildClassName(cn.media, 'avatar-media', 'poster')}
               muted
               loop={props.loopIndefinitely}
-              autoPlay
-              disablePictureInPicture
-              playsInline
+              autoplay
+              disablepictureinpicture
+              playsinline
               draggable={false}
               onEnded={handleVideoEnded}
             />

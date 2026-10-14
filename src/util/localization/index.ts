@@ -1,11 +1,10 @@
-import type { TeactNode } from '../../lib/frameactNode';
-
 import type {
   ApiLanguage,
   CachedLangData,
   LangPack,
   LangPackStringValue,
 } from '../../api/types';
+import type { TeactNode } from '../../lib/frameactNode';
 import type { TimeFormat } from '../../types';
 import type { LangKey, LangVariable } from '../../types/language';
 import {

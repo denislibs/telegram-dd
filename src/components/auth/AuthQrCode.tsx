@@ -1,11 +1,11 @@
 import { createMemo, createMutationEffect } from 'frameact';
 import { disableStrict, enableStrict } from 'frameact/stricterdom';
 import { getActions, withGlobal } from '../../global';
-import { createMediaTransition } from '../../lib/kit';
 
 import type { GlobalState } from '../../global/types';
 
 import { STRICTERDOM_ENABLED } from '../../config';
+import { createMediaTransition } from '../../lib/kit';
 import { selectSharedSettings } from '../../global/selectors/sharedState';
 import { oldSetLanguage } from '../../util/oldLangProvider';
 import { createStyledQrCode } from '../../util/qrCode/buildStyledQrCode';
@@ -67,30 +67,30 @@ const AuthCode = () => {
 
   createMutationEffect(
     () => [isConnected(), authQrCode(), isQrMounted(), qrCode()] as const,
-    ([isConnected, authQrCode, isQrMounted, qrCode]) => {
-      if (!authQrCode || !qrCode) {
+    ([isConnected2, authQrCode2, isQrMounted2, qrCode2]) => {
+      if (!authQrCode2 || !qrCode2) {
         return () => {
           unmarkQrMounted();
         };
       }
 
-      if (!isConnected) {
+      if (!isConnected2) {
         return undefined;
       }
 
-      const container = qrCodeRef!;
-      const data = `${DATA_PREFIX}${authQrCode.token}`;
+      const container = qrCodeRef;
+      const data = `${DATA_PREFIX}${authQrCode2.token}`;
 
       if (STRICTERDOM_ENABLED) {
         disableStrict();
       }
 
-      qrCode.update({
+      qrCode2.update({
         data,
       });
 
-      if (!isQrMounted) {
-        qrCode.append(container);
+      if (!isQrMounted2) {
+        qrCode2.append(container);
         markQrMounted();
       }
 

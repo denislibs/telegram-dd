@@ -1,8 +1,8 @@
 import { For, Show } from 'frameact/dom';
 import { withGlobal } from '../../global';
-import type { GlobalState } from '../../global/types';
 
 import type { ApiNotification } from '../../api/types';
+import type { GlobalState } from '../../global/types';
 
 import { selectTabState } from '../../global/selectors';
 import { pick } from '../../util/iteratees';

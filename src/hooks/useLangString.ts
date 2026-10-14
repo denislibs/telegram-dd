@@ -2,9 +2,9 @@ import { createEffect, createSignal } from 'frameact';
 
 import type { RegularLangKey } from '../types/language';
 
-import { callApi } from '../api/gramjs';
 import { LANG_PACK } from '../config';
 import { type MaybeAccessor, read } from '../util/accessors';
+import { callApi } from '../api/gramjs';
 
 export default function useLangString(
   key: MaybeAccessor<RegularLangKey>,

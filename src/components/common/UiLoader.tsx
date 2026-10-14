@@ -1,13 +1,12 @@
 import { createMemo, onMount } from 'frameact';
 import { Show } from 'frameact/dom';
-
 import { getActions, getGlobal, withGlobal } from '../../global';
-import { createShowTransition } from '../../lib/kit';
 
 import type { GlobalState, TabState } from '../../global/types';
 import { ApiMediaFormat } from '../../api/types';
 
 import { FOLDERS_POSITION_LEFT } from '../../config';
+import { createShowTransition } from '../../lib/kit';
 import { getChatAvatarHash } from '../../global/helpers/chats'; // Direct import for better module splitting
 import { selectAreFoldersPresent, selectIsRightColumnShown, selectTabState } from '../../global/selectors';
 import { selectSharedSettings } from '../../global/selectors/sharedState';

@@ -224,13 +224,13 @@ const StickerView = (rawProps: OwnProps) => {
           <OptimizedVideo
             ref={fullMediaRef}
             canPlay={shouldPlay()}
-            className={buildClassName(styles.media, props.fullMediaClassName, 'sticker-media')}
+            class={buildClassName(styles.media, props.fullMediaClassName, 'sticker-media')}
             src={fullMediaData()}
-            playsInline
+            playsinline
             muted
             loop={props.shouldLoop && !props.loopLimit}
             isPriority={props.forceAlways}
-            disablePictureInPicture
+            disablepictureinpicture
             onReady={markPlayerReady}
             onBroken={markVideoBroken}
             onEnded={props.onVideoEnded}

@@ -54,7 +54,9 @@ test('phone number -> code -> password -> registration -> main', async ({ page }
   const phone = page.locator('#sign-in-phone-number');
   await phone.fill('+1 650 555 1234');
   await page.getByRole('button', { name: 'Next' }).click();
-  await expect.poll(() => readAuth(page)).toMatchObject({ state: 'authorizationStateWaitPhoneNumber', isLoading: true });
+  await expect
+    .poll(() => readAuth(page))
+    .toMatchObject({ state: 'authorizationStateWaitPhoneNumber', isLoading: true });
 
   // 2. Code
   await serverSays(page, 'authorizationStateWaitCode', { isCodeViaApp: false });
@@ -85,7 +87,9 @@ test('phone number -> code -> password -> registration -> main', async ({ page }
   await expect(page.locator('#auth-registration-form')).toBeVisible();
   await page.locator('#registration-first-name').fill('Ada');
   await page.locator('#auth-registration-form').getByRole('button', { name: 'Next' }).click();
-  await expect.poll(() => readAuth(page)).toMatchObject({ state: 'authorizationStateWaitRegistration', isLoading: true });
+  await expect
+    .poll(() => readAuth(page))
+    .toMatchObject({ state: 'authorizationStateWaitRegistration', isLoading: true });
 
   // 5. Ready: the main placeholder
   await serverSays(page, 'authorizationStateReady');

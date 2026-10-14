@@ -37,7 +37,7 @@ const AuthCode = () => {
 
   onMount(() => {
     if (!IS_TOUCH_ENV) {
-      inputRef!.focus();
+      inputRef.focus();
     }
   });
 

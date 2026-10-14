@@ -1,9 +1,9 @@
 import { createMemo, createSignal } from 'frameact';
 import { For } from 'frameact/dom';
 import { withGlobal } from '../../global';
-import type { GlobalState } from '../../global/types';
 
 import type { ApiCountryCode } from '../../api/types';
+import type { GlobalState } from '../../global/types';
 
 import { ANIMATION_END_DELAY } from '../../config';
 import { IS_TAURI } from '../../util/browser/globalEnvironment';
@@ -79,7 +79,7 @@ const CountryCodeInput = (ownProps: OwnProps) => {
       }
 
       setTimeout(() => {
-        inputRef!.select();
+        inputRef.select();
       }, SELECT_TIMEOUT);
 
       trigger.onTrigger();

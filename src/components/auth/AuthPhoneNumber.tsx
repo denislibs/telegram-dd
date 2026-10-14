@@ -101,15 +101,15 @@ const AuthPhoneNumber = () => {
     () => country(),
     () => {
       if (!IS_TOUCH_ENV) {
-        inputRef!.focus();
+        inputRef.focus();
       }
     },
   );
 
   createEffect(
     () => [isConnected(), nearestCountry()] as const,
-    ([isConnected, nearestCountry]) => {
-      if (isConnected && !nearestCountry) {
+    ([isConnected2, nearestCountry2]) => {
+      if (isConnected2 && !nearestCountry2) {
         loadNearestCountry();
       }
     },
@@ -117,8 +117,8 @@ const AuthPhoneNumber = () => {
 
   createEffect(
     () => [isConnected(), props.language] as const,
-    ([isConnected]) => {
-      if (isConnected) {
+    ([isConnected2]) => {
+      if (isConnected2) {
         loadCountryList({ langCode: props.language });
       }
     },
@@ -126,9 +126,9 @@ const AuthPhoneNumber = () => {
 
   createEffect(
     () => [country(), nearestCountry(), isTouched(), props.phoneCodeList] as const,
-    ([country, nearestCountry, isTouched]) => {
-      if (nearestCountry && props.phoneCodeList && !country && !isTouched) {
-        setCountry(getCountryCodeByIso(props.phoneCodeList, nearestCountry));
+    ([country2, nearestCountry2, isTouched2]) => {
+      if (nearestCountry2 && props.phoneCodeList && !country2 && !isTouched2) {
+        setCountry(getCountryCodeByIso(props.phoneCodeList, nearestCountry2));
       }
     },
   );
@@ -166,18 +166,18 @@ const AuthPhoneNumber = () => {
 
   createEffect(
     () => [authPhoneNumber(), phoneNumber(), parseFullNumber] as const,
-    ([authPhoneNumber, phoneNumber]) => {
-      if (phoneNumber === undefined && authPhoneNumber) {
-        parseFullNumber(authPhoneNumber);
+    ([authPhoneNumber2, phoneNumber2]) => {
+      if (phoneNumber2 === undefined && authPhoneNumber2) {
+        parseFullNumber(authPhoneNumber2);
       }
     },
   );
 
   createMutationEffect(
     () => lastSelection(),
-    (lastSelection) => {
-      if (inputRef && lastSelection) {
-        inputRef.setSelectionRange(...lastSelection);
+    (lastSelection2) => {
+      if (inputRef && lastSelection2) {
+        inputRef.setSelectionRange(...lastSelection2);
       }
     },
   );

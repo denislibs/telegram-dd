@@ -1,6 +1,6 @@
-// Review m4/m5: the FOUNDATION STUBs of the UI-bound util modules must be inert. They may not write wrong data into the
-// global (a notification permission that is always `false`) nor hand an internal localization key to the server or the
-// OS (a bot-forum topic title, a passkey name).
+// Review m4/m5: the FOUNDATION STUB of util/notifications must be inert. It may not write wrong data into the global
+// (a notification permission that is always `false`). The localization stub of the same review is gone with the real
+// runtime (util/localization, covered by util/localization/localization.test.ts).
 import '../global/actions/all';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,33 +11,9 @@ import type { TabState } from '../global/types';
 import { INITIAL_GLOBAL_STATE, INITIAL_TAB_STATE } from '../global/initialState';
 import { getCurrentTabId } from './establishMultitabRole';
 import { cloneDeep } from './iteratees';
-import { getTranslationFn } from './localization';
 import { requestPermission } from './notifications';
 
 const tabId = getCurrentTabId();
-
-describe('the localization stub', () => {
-  it('never answers with the key it was asked for, and implements every LangFn member', () => {
-    const lang = getTranslationFn();
-    // a key that ends up as a bot-forum topic title or a passkey name must not leave the app
-    expect(lang('PasscodePasskeyName')).not.toBe('PasscodePasskeyName');
-    expect(lang('BotForumTopicTitlePlaceholder')).not.toBe('BotForumTopicTitlePlaceholder');
-
-    expect(lang.with({ key: 'PasscodePasskeyName' })).toBeDefined();
-    expect(lang.withRegular({ key: 'PasscodePasskeyName' })).toBe('');
-    expect(lang.withAdvanced({ key: 'PasscodePasskeyName', options: { withNodes: true } })).toBeDefined();
-    expect(lang.conjunction(['a', 'b'])).toBe('a, b');
-    expect(lang.disjunction(['a', 'b'])).toBe('a, b');
-    expect(lang.region('US')).toBeUndefined();
-    expect(lang.currency('USD')).toBeUndefined();
-    expect(lang.number(1234)).toBe('1234');
-    expect(lang.preciseNumber(1.5)).toBe('1.5');
-    expect(lang.timeFormat).toBeDefined();
-    expect(lang.internalFormatters).toBeDefined();
-    expect(typeof lang.code).toBe('string');
-    expect(typeof lang.rawCode).toBe('string');
-  });
-});
 
 describe('the notifications stub', () => {
   let permission = 'default';

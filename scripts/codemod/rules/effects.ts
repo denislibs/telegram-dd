@@ -15,6 +15,7 @@ import {
   findBodies,
   isFunctionNode,
   type Kinds,
+  rewriteReads,
 } from '../analysis.ts';
 import { type Ctx, isGlobalRef } from '../context.ts';
 
@@ -186,10 +187,22 @@ export const effectsRule: Rule = {
         ctx.remove(fnNode.end!, args[args.length - 1].end!);
         if (shadowed && isFunctionNode(fnNode) && !prevParam) {
           const arrow = fnNode as t.ArrowFunctionExpression | t.FunctionExpression;
-          const pattern = keepArray ? `[${shadowed.join(', ')}]` : shadowed[0];
+          // The parameter is `name2`, not `name`: tt's `no-shadow` is on. The reads of the accessor inside the callback
+          // become reads of the parameter (the value the compute half returned), so TypeScript still narrows them.
+          const renamed = shadowed.map((dep) => (dep ? `${dep}2` : dep));
+          const pattern = keepArray ? `[${renamed.join(', ')}]` : renamed[0];
           if (arrow.params.length === 0) {
             const open = ctx.code.indexOf('(', arrow.start!);
-            if (open !== -1 && open < arrow.body.start!) ctx.insertAfter(open + 1, pattern);
+            if (open !== -1 && open < arrow.body.start!) {
+              ctx.insertAfter(open + 1, pattern);
+              for (const dep of shadowed.filter(Boolean)) {
+                const binding = path.scope.getBinding(dep);
+                if (!binding) continue;
+                rewriteReads(ctx, binding, `${dep}2`, {
+                  filter: (ref) => ref.node.start! >= arrow.start! && ref.node.end! <= arrow.end!,
+                });
+              }
+            }
           }
           ctx.hit('effectValueDeps');
         }

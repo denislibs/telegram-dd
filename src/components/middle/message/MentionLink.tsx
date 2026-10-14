@@ -1,8 +1,8 @@
 import type { JSX } from 'frameact/jsx-runtime';
 import { getActions, withGlobal } from '../../../global';
-import type { GlobalState } from '../../../global/types';
 
 import type { ApiPeer } from '../../../api/types';
+import type { GlobalState } from '../../../global/types';
 import { ApiMessageEntityTypes } from '../../../api/types';
 
 import { selectUser } from '../../../global/selectors';
