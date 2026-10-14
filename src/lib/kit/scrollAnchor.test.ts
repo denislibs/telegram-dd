@@ -1,5 +1,5 @@
 import { createRoot, createSignal, requestMutation } from 'frameact';
-import { createComponent, For,insert } from 'frameact/dom';
+import { createComponent, For, insert } from 'frameact/dom';
 import { createStore, produce } from 'frameact/store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -29,7 +29,15 @@ function mountList(initial: number[], extra: Record<string, unknown> = {}) {
   fakeLayout(root);
   const [items, setItems] = createSignal(initial);
   const anchor = createRoot(() => {
-    insert(root, createComponent(ForC, { get each() { return items(); }, children: row }));
+    insert(
+      root,
+      createComponent(ForC, {
+        get each() {
+          return items();
+        },
+        children: row,
+      }),
+    );
     return createScrollAnchor({ container: () => root, items, ...extra });
   });
   return { root, items, setItems, anchor };
@@ -67,28 +75,46 @@ describe('a store array is followed by its shape version, not by copies of its i
     const raw = ids(0, 50).map((id) => ({ id }));
     let reads = 0;
     raw.forEach((item, i) => {
-      Object.defineProperty(raw, i, { configurable: true, enumerable: true, get: () => { reads++; return item; }, set: () => {} });
+      Object.defineProperty(raw, i, {
+        configurable: true,
+        enumerable: true,
+        get: () => {
+          reads++;
+          return item;
+        },
+        set: () => {},
+      });
     });
     const [state, setState] = createStore({ items: raw });
     createRoot(() => createScrollAnchor({ container: () => root, items: () => state.items }));
     await frame();
     reads = 0;
-    setState('items', produce((list: { id: number }[]) => { list.push({ id: 50 }); }));
+    setState(
+      'items',
+      produce((list: { id: number }[]) => {
+        list.push({ id: 50 });
+      }),
+    );
     root.append(row(50));
     await frame();
     root.scrollTop = 80;
-    setState('items', produce((list: { id: number }[]) => { list.push({ id: 51 }); }));
+    setState(
+      'items',
+      produce((list: { id: number }[]) => {
+        list.push({ id: 51 });
+      }),
+    );
     await frame();
     expect(reads).toBe(0);
   });
 });
 
 // The fake layout lists `.ListItem` rows itself, so the anchor under test uses its own selector.
-const listings = (spy: { mock: { calls: unknown[][] } }) => spy.mock.calls.filter(([selector]) => selector === '.Row').length;
+const listings = (spy: { mock: { calls: unknown[][] } }) =>
+  spy.mock.calls.filter(([selector]) => selector === '.Row').length;
 const mountRows = (initial: number[]) => mountList(initial, { itemSelector: '.Row' });
 
 describe('the list of item elements', () => {
-
   it('a change lists nothing; items() builds the list once per change, on demand (scroll handlers), and it is current', async () => {
     const { root, setItems, anchor, items } = mountRows(ids(0, 20));
     const all = vi.spyOn(root, 'querySelectorAll');

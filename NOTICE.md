@@ -43,11 +43,19 @@ The teact → frameact adaptation of every ported file, the store glue that repl
 this repository), the build and tooling configuration (Vite 8, TypeScript 7, oxlint, prettier), and the documentation
 (`AGENTS.md`, `docs/`, this file). Original code is licensed GPL-3.0-or-later like the rest of the work.
 
-Original code moved in from frameact: the UI kit in `src/lib/kit` (`Transition`, `ShowTransition`, `InfiniteScroll`,
+Original code moved in from frameact: the UI kit in `src/lib/kit` (`ShowTransition`, `InfiniteScroll`,
 `createScrollAnchor`, `waitForAnimationEnd`, with their tests and test helpers), moved from frameact (MIT, © 2026 Denis
 Maramygin) at commit `a3c2d7d` (`src/kit`, before frameact PR #16 removed it). It is clean-room code written from
 behaviour and tests, with no telegram-tt code; the files keep their provenance lines and are combined into this
 GPL-3.0-or-later work like the rest of the app. The app's own DOM helper `src/util/dom/natives.ts` is original too.
+
+Kit code derived from telegram-tt: `src/lib/kit/transition.ts` (`Transition`) started as the same clean-room frameact
+code, and since the Transition completion it also carries telegram-tt's behaviour from `src/components/ui/Transition.tsx`
+(`nextKey` pre-rendering, the `slideOptimized` / `slideOptimizedRtl` variant, the watched slide of `reveal` and
+`slideFadeAndroid`, the swipe-control hook) and `src/util/swipeController.ts`. The file is therefore a telegram-tt
+derivative and GPL-3.0-or-later as a whole (its header says so); the frameact MIT origin stays noted there. The
+swipe gesture code is ported from telegram-tt too: `src/util/{swipeController,captureEvents,lethargy}.ts` (adapted
+for frameact phases: DOM writes through `requestMutation`).
 
 ## frameact: a separately licensed component
 

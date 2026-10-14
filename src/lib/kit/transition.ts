@@ -1,6 +1,10 @@
-// Moved from frameact (MIT, © 2026 Denis Maramygin) at a3c2d7d (src/kit/transition.ts, before frameact PR #16 removed the kit).
-// Original frameact code (clean-room, written from the kit's behavioural spec): keyed slides with a
-// CSS animation between them, on telegram-tt's class contract (bring the stylesheet).
+// Ported from telegram-tt src/components/ui/Transition.tsx (GPL-3.0-or-later)
+// This file is GPL-3.0-or-later as a whole. It started as frameact's MIT kit (moved from frameact at a3c2d7d,
+// src/kit/transition.ts, before frameact PR #16 removed the kit; MIT, © 2026 Denis Maramygin; clean-room, written from
+// the kit's behavioural spec) and now also carries code ported from telegram-tt's Transition (GPL-3.0-or-later,
+// © Alexander Zinchuk and the telegram-tt contributors): the watched slide of reveal / slideFadeAndroid, nextKey
+// pre-rendering, the slideOptimized variant and the swipe-control hook (each noted in the model below).
+// Keyed slides with a CSS animation between them, on telegram-tt's class contract (bring the stylesheet).
 //
 // Model
 //   - One `<div class="Transition">` holds one `<div class="Transition_slide">` per live key, in
@@ -9,9 +13,19 @@
 //   - A STEP (`activeKey` changes) is one mutation effect: compute creates the missing slide on
 //     detached DOM; apply (mutate phase) writes the classes — container `Transition-${name}` or
 //     `Transition-${name}Backwards`, previous slide `-from`, new slide `-to`, the rest `-inactive` —
-//     begins a heavy animation on the scope, watches the `to` slide's own `animationend`, calls
-//     `onStart`. Which slides survive a step: `renderCount` / `shouldCleanup` keep every live slide;
-//     otherwise only {previous, active} (keep-alive).
+//     begins a heavy animation on the scope, watches the animated slide's own `animationend` (the `to` slide,
+//     except `reveal` and `slideFadeAndroid` going backwards: their only animation is on `from`, and with no `from`
+//     slide the step ends at once, as in tt), calls `onStart`. Which slides survive a step: `renderCount` /
+//     `shouldCleanup` keep every live slide; otherwise only {previous, active, next} (keep-alive).
+//   - `nextKey` (tt: the slide for that key is rendered ahead of time): its slide is created and attached as an
+//     `-inactive` one before it is ever active, and no step or cleanup drops it. Like tt (`if (nextKey)`), key 0 is not
+//     pre-rendered.
+//   - `slideOptimized` / `slideOptimizedRtl` (tt): no `-from` / `-to` / `-inactive` classes and no keyframes. The
+//     stylesheet puts every slide at `scale(0)` and animates `transform` with a CSS transition; the step sets inline
+//     `transform` on the two slides (the `to` one starts at +-100%, a forced reflow in between) and watches the `to`
+//     slide's `transitionend`. Only the active slide has `Transition_slide-active`. The container keeps its
+//     `Transition-slideOptimized*` class after the first step (and gets it as soon as a second slide, a pre-rendered
+//     one, exists). Switching from/to an optimized name drops every slide but the active (and next) one.
 //   - The END arrives through `waitForAnimationEnd` and is applied in a mutation task: the heavy
 //     animation is released first, then (unless the step was superseded or the component disposed)
 //     the classes settle (`-active` / `-inactive`), `shouldCleanup` drops slides, `shouldRestoreHeight`
@@ -23,18 +37,38 @@
 //     cancels it (waiter, heavy animation, `onStop`) so nothing stays stuck. Disposal cancels every
 //     in-flight end, releases every heavy animation and disposes the slides; nothing touches the DOM
 //     or calls `onStop` after it.
+//   - `withSwipeControl` (tt, iOS swipe-to-go-back): when a swipe (`captureControlledSwipe`, util/swipeController) is in
+//     progress as the step starts, its CSS animations are paused and driven by the finger. Then the step has no 1 s end
+//     fallback (a held animation must not settle), its blocking heavy animation is non-blocking while the finger is
+//     down and blocking again from the release; a swipe that is reverted stops the step (`onStop`, heavy animation
+//     released) and the NEXT key change is applied without animation (tt `isSwipeJustCancelled`). Disposal mid-swipe
+//     lets the swipe go without calling its cancel callbacks.
 //   - Scopes: the slides' effects are gated by `props.scope` (default: a fresh child of the enclosing
 //     scope); the component's own effects live under a child owner that re-provides the ENCLOSING
 //     scope, so a step is never parked by this transition's own blocking animation.
 import {
-type Accessor,
-  createEffect, createHeavyAnimationScope, createMemo, createMutationEffect, createRoot, createSignal, currentHeavyAnimationScope, getOwner,
+  type Accessor,
+  createEffect,
+  createHeavyAnimationScope,
+  createMemo,
+  createMutationEffect,
+  createRoot,
+  createSignal,
+  currentHeavyAnimationScope,
+  getOwner,
   type HeavyAnimationScope,
-  onCleanup, provideHeavyAnimationScope, requestForcedReflow, requestMutation, runWithOwner, untrack, } from 'frameact';
+  onCleanup,
+  provideHeavyAnimationScope,
+  requestForcedReflow,
+  requestMutation,
+  runWithOwner,
+  untrack,
+} from 'frameact';
 import { insert, setExtraStyles, spread } from 'frameact/dom';
 
 import { getNatives } from '../../util/dom/natives';
-import { waitForAnimationEnd } from './animationEnd';
+import { allowSwipeControlForTransition, type SwipeControl } from '../../util/swipeController';
+import { waitForAnimationEnd, waitForTransitionEnd } from './animationEnd';
 
 export type TransitionDirection = 'auto' | 'inverse' | 1 | -1;
 
@@ -50,7 +84,15 @@ export interface TransitionSlide {
 
 export interface TransitionProps {
   activeKey: number;
-  /** CSS animation name: the container gets `Transition-${name}` (`'none'`: switch without animating). */
+  /**
+   * Pre-render the slide of this key (tt `nextKey`): it is created and mounted hidden (`-inactive`) ahead of time and is
+   * not dropped by a step or `shouldCleanup`. Key 0 is not pre-rendered (tt tests the key for truthiness).
+   */
+  nextKey?: number;
+  /**
+   * CSS animation name: the container gets `Transition-${name}` (`'none'`: switch without animating). `slideOptimized`
+   * and `slideOptimizedRtl` run on inline `transform` and a CSS transition instead of keyframes (see the model).
+   */
   name: string;
   direction?: TransitionDirection;
   /**
@@ -74,6 +116,11 @@ export interface TransitionProps {
   /** `shouldRestoreHeight`: measure this descendant of the active slide instead of the slide. */
   contentSelector?: string;
   isBlockingAnimation?: boolean;
+  /**
+   * Let a swipe in progress (`captureControlledSwipe`, iOS) drive the step's animation (tt `withSwipeControl`).
+   * Read when a step starts. Keyframe animations only (not `slideOptimized`, as in tt).
+   */
+  withSwipeControl?: boolean;
   /**
    * The heavy-animation scope the animation runs on and that the slides' effects are gated by
    * (default: a fresh child of the scope this component is under, so a blocking animation parks only
@@ -110,6 +157,7 @@ const CONTAINER_CLASS_NAME = 'Transition';
 const SLIDE_CLASS_NAME = 'Transition_slide';
 /** A slide whose stylesheet has no animation (or `animation: none`) still settles. */
 const ANIMATION_END_FALLBACK_MS = 1000;
+const OPTIMIZED_AT_REST = 'translate3d(0, 0, 0)';
 
 type SlideStateClass =
   | typeof ACTIVE_SLIDE_CLASS_NAME
@@ -133,12 +181,31 @@ interface Step {
   endHeavyAnimation: () => void;
   /** `onStop` ran for this step (supersede, interrupt, drop or its own end): exactly once per `onStart`. */
   stopped: boolean;
+  /** A swipe took the animation over (`withSwipeControl`). */
+  swipe?: SwipeControl;
 }
 
 /** The props the component consumes itself; everything else (`id`, `class`, `ref`, `data-*`, `on*`) is spread onto the container. */
 const OWN_PROPS = new Set([
-  'activeKey', 'name', 'direction', 'renderCount', 'shouldCleanup', 'cleanupExceptionKey', 'cleanupOnlyKey', 'shouldRestoreHeight',
-  'restoreHeightKey', 'contentSelector', 'isBlockingAnimation', 'scope', 'disableAnimation', 'slideClass', 'onStart', 'onStop', 'children',
+  'activeKey',
+  'nextKey',
+  'name',
+  'direction',
+  'renderCount',
+  'shouldCleanup',
+  'cleanupExceptionKey',
+  'cleanupOnlyKey',
+  'shouldRestoreHeight',
+  'restoreHeightKey',
+  'contentSelector',
+  'isBlockingAnimation',
+  'withSwipeControl',
+  'scope',
+  'disableAnimation',
+  'slideClass',
+  'onStart',
+  'onStop',
+  'children',
 ]);
 const isOwnProp = (key: string) => OWN_PROPS.has(key);
 
@@ -150,6 +217,15 @@ function callback(fn: (() => void) | undefined, what: string): void {
     // eslint-disable-next-line no-console
     console.error(`[frameact] <Transition> ${what} failed`, error);
   }
+}
+
+/** The animation names whose backwards variant animates `from` only (the stylesheet gives `to` no animation). */
+function animatesFromWhenBackwards(name: string): boolean {
+  return name === 'reveal' || name === 'slideFadeAndroid';
+}
+
+function isOptimizedName(name: string): boolean {
+  return name === 'slideOptimized' || name === 'slideOptimizedRtl';
 }
 
 function isForwards(direction: TransitionDirection | undefined, fromKey: number, toKey: number): boolean {
@@ -180,6 +256,10 @@ export function Transition(props: TransitionProps): unknown {
   let containerAnimationClass: string | undefined;
   let disposed = false;
   let warnedRenderCount = false;
+  /** The DOM is in the `slideOptimized` style (see the model). */
+  let isOptimizedMode = untrack(() => isOptimizedName(props.name));
+  /** A swipe was reverted: the next step is applied without animation (tt `isSwipeJustCancelledRef`). */
+  let isSwipeJustCancelled = false;
 
   // The slides' scope: every effect their content creates snapshots it.
   provideHeavyAnimationScope(scope);
@@ -188,6 +268,9 @@ export function Transition(props: TransitionProps): unknown {
     for (let i = 0; i < slides.length; i++) if (slides[i].key === key) return slides[i];
     return undefined;
   };
+
+  /** The pre-rendered key (tt: `if (nextKey)`, so 0 is none). */
+  const nextKeyNow = (): number | undefined => untrack(() => props.nextKey) || undefined;
 
   /** Create the slide for `key` (detached): its content under its own root, in the component's context. */
   function createSlide(key: number): SlideRecord {
@@ -234,6 +317,19 @@ export function Transition(props: TransitionProps): unknown {
     record.state = state;
   }
 
+  function clearSlideState(record: SlideRecord): void {
+    if (record.state === '') return;
+    record.el.classList.remove(record.state);
+    record.state = '';
+  }
+
+  /** `transition` and `transform` inline on an optimized slide (`''`: the stylesheet's). */
+  function setSlideTransform(record: SlideRecord | undefined, transition: string, transform: string): void {
+    if (record === undefined) return;
+    record.el.style.transition = transition;
+    record.el.style.transform = transform;
+  }
+
   function setContainerAnimation(cls: string | undefined): void {
     if (containerAnimationClass === cls) return;
     if (containerAnimationClass !== undefined) container.classList.remove(containerAnimationClass);
@@ -253,11 +349,12 @@ export function Transition(props: TransitionProps): unknown {
     }
   }
 
-  /** Dispose and detach every slide `drop` selects (never the active one). */
+  /** Dispose and detach every slide `drop` selects (never the active one nor the pre-rendered next one). */
   function dropSlides(drop: (record: SlideRecord) => boolean): void {
+    const next = nextKeyNow();
     for (let i = slides.length - 1; i >= 0; i--) {
       const record = slides[i];
-      if (record.key === currentKey || !drop(record)) continue;
+      if (record.key === currentKey || record.key === next || !drop(record)) continue;
       slides.splice(i, 1);
       // A step still waiting on the removed slide would hold its heavy animation until the fallback.
       for (let j = inFlight.length - 1; j >= 0; j--) if (inFlight[j].to === record) interrupt(inFlight[j]);
@@ -267,9 +364,27 @@ export function Transition(props: TransitionProps): unknown {
   }
 
   function settleSlides(active: SlideRecord): void {
-    for (const record of slides) setSlideState(record, record === active ? ACTIVE_SLIDE_CLASS_NAME : INACTIVE_SLIDE_CLASS_NAME);
+    for (const record of slides) {
+      setSlideState(record, record === active ? ACTIVE_SLIDE_CLASS_NAME : INACTIVE_SLIDE_CLASS_NAME);
+    }
     setContainerAnimation(undefined);
     setFromKey(undefined);
+  }
+
+  /** The optimized variant of `settleSlides`: only the active slide has a class, and the container keeps its class. */
+  function settleOptimizedSlides(active: SlideRecord): void {
+    for (const record of slides) {
+      if (record === active) setSlideState(record, ACTIVE_SLIDE_CLASS_NAME);
+      else clearSlideState(record);
+    }
+    setFromKey(undefined);
+  }
+
+  /** Slides the stylesheet hides need the container's optimized class (tt sets it with the first step). */
+  function ensureOptimizedContainerClass(): void {
+    if (isOptimizedMode && containerAnimationClass === undefined) {
+      setContainerAnimation(`${CONTAINER_CLASS_NAME}-${untrack(() => props.name)}`);
+    }
   }
 
   /** The step is over (end event, instant switch, mount): cleanup policy, height restore. */
@@ -290,7 +405,9 @@ export function Transition(props: TransitionProps): unknown {
       const record = findSlide(key);
       if (record === undefined) return undefined;
       const selector = props.contentSelector;
-      const target = selector ? (natives.querySelectorAll.call(record.el, selector)[0] as HTMLElement | undefined) : record.el;
+      const target = selector
+        ? (natives.querySelectorAll.call(record.el, selector)[0] as HTMLElement | undefined)
+        : record.el;
       if (target === undefined) return undefined;
       const height = target.clientHeight;
       return () => {
@@ -308,11 +425,16 @@ export function Transition(props: TransitionProps): unknown {
   }
 
   /** The end of `step`'s animation, in the mutate phase. */
-  function finish(step: Step): void {
+  function finish(step: Step, from: SlideRecord | undefined): void {
     step.endHeavyAnimation(); // always: the scope must not stay animating for a superseded step
     forget(step);
     if (disposed || step.seq !== stepSeq) return; // superseded: the later step finishes the classes
-    settleSlides(step.to);
+    if (isOptimizedMode) {
+      settleOptimizedSlides(step.to);
+      setSlideTransform(from, 'none', '');
+    } else {
+      settleSlides(step.to);
+    }
     settle();
     stopStep(step);
   }
@@ -327,26 +449,96 @@ export function Transition(props: TransitionProps): unknown {
   /** A non-animated switch during `step`: stop it now so no class or scope stays stuck. */
   function interrupt(step: Step): void {
     step.cancelWait();
+    step.swipe?.dispose();
     step.endHeavyAnimation();
     forget(step);
     stopStep(step);
   }
 
+  /**
+   * A new animated step starts while `running` is still going: it is over for `onStop` now (so every `onStart` has one
+   * `onStop`); its own end only releases its heavy animation. A swiped step lets its swipe go first. Returns the step to
+   * pass to `releaseSuperseded` once the new step has begun its own heavy animation.
+   */
+  function supersede(): Step | undefined {
+    const prev = running;
+    if (prev === undefined) return undefined;
+    prev.swipe?.dispose();
+    stopStep(prev);
+    return prev;
+  }
+
+  /**
+   * A swiped step waits for an animation end without a fallback, on a slide whose animation the swipe has just cancelled
+   * (or that is hidden now): its end may never come, and its heavy animation would stay for good. End it here, after the
+   * new step has begun its own (the scope never flickers idle). A step with a fallback ends itself.
+   */
+  function releaseSuperseded(prev: Step | undefined): void {
+    if (prev?.swipe === undefined) return;
+    prev.cancelWait();
+    prev.endHeavyAnimation();
+    forget(prev);
+  }
+
+  /** The step's heavy animation, swapped for one with `blocking` (the new one begins first: the scope never flickers idle). */
+  function reBeginHeavyAnimation(step: Step, blocking: boolean): void {
+    const end = scope.begin(Infinity, blocking);
+    step.endHeavyAnimation();
+    step.endHeavyAnimation = end;
+  }
+
+  /** A step is the running one: not superseded, cancelled or disposed. */
+  function isLive(step: Step): boolean {
+    return !disposed && step.seq === stepSeq && inFlight.indexOf(step) !== -1;
+  }
+
+  /** Leaving or entering the optimized style (a name change): everything but the active and the next slide goes. */
+  function resetForMode(optimized: boolean): void {
+    isOptimizedMode = optimized;
+    if (running !== undefined) interrupt(running);
+    dropSlides(() => true);
+    setContainerAnimation(undefined);
+    for (const record of slides) setSlideTransform(record, '', '');
+  }
+
+  /** The state at rest of the slides in the current style: the active one is on, the rest is hidden. */
+  function placeAtRest(active: SlideRecord): void {
+    if (isOptimizedMode) {
+      settleOptimizedSlides(active);
+      setSlideTransform(active, 'none', OPTIMIZED_AT_REST);
+      if (slides.length > 1) ensureOptimizedContainerClass();
+    } else {
+      settleSlides(active);
+    }
+  }
+
   function applyStep(key: number, prevKey: number | undefined): void {
     currentKey = key;
     const next = findSlide(key)!;
+    const name = props.name;
+    const optimized = isOptimizedName(name);
+    if (optimized !== isOptimizedMode) resetForMode(optimized);
     if (prevKey === undefined) {
       // Mount: the active slide, no animation.
-      setSlideState(next, ACTIVE_SLIDE_CLASS_NAME);
+      if (optimized) {
+        placeAtRest(next);
+      } else {
+        setSlideState(next, ACTIVE_SLIDE_CLASS_NAME);
+      }
       syncChildren();
       settle();
       return;
     }
+    // After a style reset the previous slide may be gone.
     const prev = findSlide(prevKey);
-    // Keep-alive: without renderCount/shouldCleanup only the previous and the new slide live on.
+    // Keep-alive: without renderCount/shouldCleanup only the previous, the new and the pre-rendered next slide live on.
     if (!props.renderCount && !props.shouldCleanup) dropSlides((record) => record !== prev);
-    const name = props.name;
-    if (name === 'none' || props.disableAnimation) {
+    if (optimized) {
+      applyOptimizedStep(next, prev, name, !isForwards(props.direction, prevKey, key));
+      return;
+    }
+    if (name === 'none' || props.disableAnimation || isSwipeJustCancelled) {
+      isSwipeJustCancelled = false;
       if (running !== undefined) interrupt(running);
       settleSlides(next);
       syncChildren();
@@ -355,18 +547,112 @@ export function Transition(props: TransitionProps): unknown {
     }
     // A step still running is superseded: it is over for `onStop` now (so every `onStart` has one `onStop`);
     // its own end only releases its heavy animation.
-    if (running !== undefined) stopStep(running);
+    const superseded = supersede();
     const step: Step = { seq: ++stepSeq, to: next, cancelWait: () => {}, endHeavyAnimation: () => {}, stopped: false };
     running = step;
     inFlight.push(step);
     for (const record of slides) {
-      setSlideState(record, record === next ? TO_SLIDE_CLASS_NAME : record === prev ? FROM_SLIDE_CLASS_NAME : INACTIVE_SLIDE_CLASS_NAME);
+      setSlideState(
+        record,
+        record === next ? TO_SLIDE_CLASS_NAME : record === prev ? FROM_SLIDE_CLASS_NAME : INACTIVE_SLIDE_CLASS_NAME,
+      );
     }
-    setContainerAnimation(`${CONTAINER_CLASS_NAME}-${name}${isForwards(props.direction, prevKey, key) ? '' : 'Backwards'}`);
+    const isBackwards = !isForwards(props.direction, prevKey, key);
+    setContainerAnimation(`${CONTAINER_CLASS_NAME}-${name}${isBackwards ? 'Backwards' : ''}`);
     syncChildren();
     setFromKey(prevKey);
+    const isBlocking = Boolean(props.isBlockingAnimation);
+    step.endHeavyAnimation = scope.begin(Infinity, isBlocking);
+    releaseSuperseded(superseded);
+    // The slide the stylesheet animates: `to`, except the two names whose backwards variant animates `from` only
+    // (tt `watchedNode`). Without that slide nothing animates and the step ends at once.
+    const watched = isBackwards && animatesFromWhenBackwards(name) ? prev : next;
+    const end = () => requestMutation(() => finish(step, prev));
+    if (watched === undefined) {
+      end();
+    } else {
+      step.cancelWait = waitForAnimationEnd(watched.el, end, { fallbackMs: ANIMATION_END_FALLBACK_MS });
+      if (props.withSwipeControl && prev !== undefined) {
+        const swipe = allowSwipeControlForTransition(
+          prev.el,
+          next.el,
+          () => {
+            // The swipe was reverted: this step is over, the client's own cancel changes the key back next.
+            step.cancelWait();
+            isSwipeJustCancelled = true;
+            stopStep(step);
+            step.endHeavyAnimation();
+            forget(step);
+          },
+          {
+            onRelease: () => {
+              if (isBlocking && isLive(step)) reBeginHeavyAnimation(step, true);
+            },
+          },
+        );
+        if (swipe !== undefined) {
+          step.swipe = swipe;
+          // A held animation must not settle on the fallback timer; and a finger on the screen does not park the app.
+          step.cancelWait();
+          step.cancelWait = waitForAnimationEnd(watched.el, end);
+          if (isBlocking) reBeginHeavyAnimation(step, false);
+        }
+      }
+    }
+    callback(props.onStart, 'onStart');
+  }
+
+  /** tt `performSlideOptimized`: inline `transform` on the two slides, a CSS transition, a forced reflow between. */
+  function applyOptimizedStep(
+    next: SlideRecord,
+    prev: SlideRecord | undefined,
+    name: string,
+    isBackwardsByKeys: boolean,
+  ): void {
+    if (props.disableAnimation) {
+      if (running !== undefined) interrupt(running);
+      setContainerAnimation(`${CONTAINER_CLASS_NAME}-${name}${isBackwardsByKeys ? 'Backwards' : ''}`);
+      if (prev !== undefined) {
+        clearSlideState(prev);
+        setSlideTransform(prev, 'none', '');
+      }
+      setSlideState(next, ACTIVE_SLIDE_CLASS_NAME);
+      setSlideTransform(next, 'none', OPTIMIZED_AT_REST);
+      syncChildren();
+      settleOptimizedSlides(next);
+      settle();
+      return;
+    }
+    // The Rtl variant mirrors the direction.
+    const isBackwards = name === 'slideOptimizedRtl' ? !isBackwardsByKeys : isBackwardsByKeys;
+    const superseded = supersede();
+    const step: Step = { seq: ++stepSeq, to: next, cancelWait: () => {}, endHeavyAnimation: () => {}, stopped: false };
+    running = step;
+    inFlight.push(step);
+    setContainerAnimation(`${CONTAINER_CLASS_NAME}-${name}${isBackwards ? 'Backwards' : ''}`);
+    setSlideTransform(prev, 'none', OPTIMIZED_AT_REST);
+    setSlideTransform(next, 'none', `translate3d(${isBackwards ? '-' : ''}100%, 0, 0)`);
+    syncChildren();
+    setFromKey(prev?.key);
     step.endHeavyAnimation = scope.begin(Infinity, Boolean(props.isBlockingAnimation));
-    step.cancelWait = waitForAnimationEnd(next.el, () => requestMutation(() => finish(step)), { fallbackMs: ANIMATION_END_FALLBACK_MS });
+    releaseSuperseded(superseded);
+    // The reflow commits the starting positions; then the CSS transition runs to the final ones.
+    requestForcedReflow(() => {
+      if (!isLive(step)) return undefined;
+      void next.el.offsetWidth;
+      return () => {
+        if (!isLive(step)) return;
+        if (prev !== undefined) {
+          clearSlideState(prev);
+          setSlideTransform(prev, '', `translate3d(${isBackwards ? '' : '-'}100%, 0, 0)`);
+        }
+        setSlideState(next, ACTIVE_SLIDE_CLASS_NAME);
+        setSlideTransform(next, '', OPTIMIZED_AT_REST);
+      };
+    });
+    step.cancelWait = waitForTransitionEnd(next.el, () => requestMutation(() => finish(step, prev)), {
+      fallbackMs: ANIMATION_END_FALLBACK_MS,
+    });
     callback(props.onStart, 'onStart');
   }
 
@@ -383,6 +669,36 @@ export function Transition(props: TransitionProps): unknown {
       },
       applyStep,
       { name: 'transition.step' },
+    );
+    // A name change that switches the style (optimized / not) without a key change; with a key change the step does it.
+    createMutationEffect(
+      () => isOptimizedName(props.name),
+      (optimized) => {
+        if (optimized === isOptimizedMode || props.activeKey !== currentKey) return;
+        resetForMode(optimized);
+        const active = findSlide(currentKey);
+        if (active === undefined) return;
+        placeAtRest(active);
+        syncChildren();
+      },
+      { name: 'transition.mode' },
+    );
+    // tt `nextKey`: the slide of that key is created ahead of time and mounted hidden.
+    createMutationEffect(
+      () => {
+        const key = props.nextKey || undefined;
+        if (key !== undefined && findSlide(key) === undefined) createSlide(key);
+        return key;
+      },
+      (key) => {
+        if (key === undefined) return;
+        const record = findSlide(key);
+        if (record === undefined || natives.parentNode.call(record.el) === container) return;
+        if (isOptimizedMode) ensureOptimizedContainerClass();
+        else setSlideState(record, INACTIVE_SLIDE_CLASS_NAME);
+        syncChildren();
+      },
+      { name: 'transition.nextKey' },
     );
     let restoreHeightRuns = 0;
     createEffect(
@@ -403,6 +719,7 @@ export function Transition(props: TransitionProps): unknown {
     disposeOwn();
     for (const step of inFlight.splice(0)) {
       step.cancelWait();
+      step.swipe?.dispose();
       step.endHeavyAnimation();
     }
     running = undefined;

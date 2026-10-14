@@ -16,8 +16,15 @@
 // element is handed in through `ref`, which writes the current classes once; every later state
 // change is one apply of the mutation effect (five classList toggles).
 import {
-type Accessor,
-  createEffect, createMemo, createMutationEffect, createSignal, onCleanup, requestMeasure, untrack, } from 'frameact';
+  type Accessor,
+  createEffect,
+  createMemo,
+  createMutationEffect,
+  createSignal,
+  onCleanup,
+  requestMeasure,
+  untrack,
+} from 'frameact';
 import { insert, spread } from 'frameact/dom';
 
 import { getNatives } from '../../util/dom/natives';
@@ -163,7 +170,10 @@ export function createShowTransition(options: ShowTransitionOptions): ShowTransi
   };
 }
 
-export interface MediaTransitionOptions extends Omit<ShowTransitionOptions, 'isOpen' | 'noMountTransition' | 'className'> {
+export interface MediaTransitionOptions extends Omit<
+  ShowTransitionOptions,
+  'isOpen' | 'noMountTransition' | 'className'
+> {
   hasMediaData: Accessor<boolean | undefined>;
   className?: string | false;
 }
@@ -198,7 +208,14 @@ export interface ShowTransitionProps {
 }
 
 /** The props the component consumes itself; everything else is spread onto the div. */
-const OWN_PROPS = new Set(['isOpen', 'isHidden', 'isCustom', 'noCloseTransition', 'shouldAnimateFirstRender', 'children']);
+const OWN_PROPS = new Set([
+  'isOpen',
+  'isHidden',
+  'isCustom',
+  'noCloseTransition',
+  'shouldAnimateFirstRender',
+  'children',
+]);
 const isOwnProp = (key: string) => OWN_PROPS.has(key);
 
 /**

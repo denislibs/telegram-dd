@@ -9,7 +9,9 @@ LICENSE
 # ~+23k/-18k in src/api, src/lib/gramjs, src/util, src/global, src/types), and keeping it byte-identical keeps
 # diffs against reference/telegram-tt readable. tt's own stylistic rules are mapped in .prettierrc.json.
 src/api
-src/lib
+# (src/lib/kit is our own code and is formatted: a directory pattern cannot be re-included, so its siblings are listed)
+src/lib/*
+!src/lib/kit
 src/util
 src/types
 src/config.ts

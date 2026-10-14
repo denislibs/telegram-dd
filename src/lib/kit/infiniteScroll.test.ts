@@ -1,6 +1,14 @@
-import { createHeavyAnimationScope, createMutationEffect, createRoot, createSignal, getPhase, provideHeavyAnimationScope, requestMutation } from 'frameact';
-import { createComponent, For,insert } from 'frameact/dom';
-import { $SHAPE,$TRACK, createStore, produce, reconcile } from 'frameact/store';
+import {
+  createHeavyAnimationScope,
+  createMutationEffect,
+  createRoot,
+  createSignal,
+  getPhase,
+  provideHeavyAnimationScope,
+  requestMutation,
+} from 'frameact';
+import { createComponent, For, insert } from 'frameact/dom';
+import { $SHAPE, $TRACK, createStore, produce, reconcile } from 'frameact/store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { container, useDomHarness } from './testing/dom';
@@ -39,10 +47,23 @@ describe('createScrollAnchor', () => {
     fakeLayout(root, root, 40, 200, (top) => log.push(`write:${getPhase()}:${top}`));
     const [items, setItems] = createSignal(ids(100, 120));
     createRoot(() => {
-      insert(root, createComponent(ForC, { get each() { return items(); }, children: row }));
+      insert(
+        root,
+        createComponent(ForC, {
+          get each() {
+            return items();
+          },
+          children: row,
+        }),
+      );
       createScrollAnchor({ container: () => root, items });
       // an observer of the list's mutate phase, to see the order of the phases
-      createMutationEffect(() => items(), (v, prev) => { if (prev) log.push(`list:${getPhase()}`); });
+      createMutationEffect(
+        () => items(),
+        (v, prev) => {
+          if (prev) log.push(`list:${getPhase()}`);
+        },
+      );
     });
     await frame(); // the snapshot effect's first run
     root.scrollTop = 120; // item 103 at the top of the viewport
@@ -69,7 +90,15 @@ describe('createScrollAnchor', () => {
     const [onTop, setOnTop] = createSignal(false);
     const [never, setNever] = createSignal(false);
     createRoot(() => {
-      insert(root, createComponent(ForC, { get each() { return items(); }, children: row }));
+      insert(
+        root,
+        createComponent(ForC, {
+          get each() {
+            return items();
+          },
+          children: row,
+        }),
+      );
       createScrollAnchor({ container: () => root, items, noScrollRestore: never, noScrollRestoreOnTop: onTop });
     });
     await frame();
@@ -102,9 +131,22 @@ describe('createScrollAnchor', () => {
     const scope = createHeavyAnimationScope();
     createRoot(() => {
       provideHeavyAnimationScope(scope);
-      insert(root, createComponent(ForC, { get each() { return state.items; }, children: row }));
+      insert(
+        root,
+        createComponent(ForC, {
+          get each() {
+            return state.items;
+          },
+          children: row,
+        }),
+      );
       createScrollAnchor({ container: () => root, items: () => state.items });
-      createMutationEffect(() => state.items, (v, prev) => { if (prev) log.push(`list:${getPhase()}`); });
+      createMutationEffect(
+        () => state.items,
+        (v, prev) => {
+          if (prev) log.push(`list:${getPhase()}`);
+        },
+      );
     });
     await settle();
     root.scrollTop = 120;
@@ -116,7 +158,12 @@ describe('createScrollAnchor', () => {
     expect(log).toEqual([]);
     requestMutation(() => end()); // a Transition's onAnimationEnd ends the animation from the mutate phase
     const [other, setOther] = createSignal(0);
-    createRoot(() => createMutationEffect(() => other(), () => {})); // a mutate drain of that frame runs after end()
+    createRoot(() =>
+      createMutationEffect(
+        () => other(),
+        () => {},
+      ),
+    ); // a mutate drain of that frame runs after end()
     setOther(1);
     await settle(); // the frame in which end() runs: nothing of ours must apply in it
     expect(log).toEqual([]);
@@ -129,12 +176,25 @@ describe('createScrollAnchor', () => {
     fakeLayout(root);
     const [state, setState] = createStore({ items: ids(100, 120).map((id) => ({ id })) });
     createRoot(() => {
-      insert(root, createComponent(ForC, { get each() { return state.items; }, children: (m: { id: number }) => row(m.id) }));
+      insert(
+        root,
+        createComponent(ForC, {
+          get each() {
+            return state.items;
+          },
+          children: (m: { id: number }) => row(m.id),
+        }),
+      );
       createScrollAnchor({ container: () => root, items: () => state.items });
     });
     await settle();
     root.scrollTop = 120;
-    setState('items', produce((list: { id: number }[]) => { list.unshift(...ids(80, 100).map((id) => ({ id }))); }));
+    setState(
+      'items',
+      produce((list: { id: number }[]) => {
+        list.unshift(...ids(80, 100).map((id) => ({ id })));
+      }),
+    );
     await settle();
     expect(root.querySelectorAll('.ListItem').length).toBe(40);
     expect(root.scrollTop).toBe(920);
@@ -155,11 +215,22 @@ function mount(extra: Record<string, unknown>, initial: number[]) {
     insert(
       root,
       createComponent(InfiniteScroll, {
-        get items() { return items(); },
-        ref: (e: HTMLDivElement) => { el = e; },
+        get items() {
+          return items();
+        },
+        ref: (e: HTMLDivElement) => {
+          el = e;
+        },
         onLoadMore: (args: unknown) => loads.push(args),
         class: 'list',
-        get children() { return createComponent(ForC, { get each() { return items(); }, children: row }); },
+        get children() {
+          return createComponent(ForC, {
+            get each() {
+              return items();
+            },
+            children: row,
+          });
+        },
         ...extra,
       }),
     );
@@ -184,7 +255,7 @@ describe('<InfiniteScroll>', () => {
     expect(full.loads).toEqual([]);
   });
 
-  it('scrolling near the bottom (moving down) asks backwards, near the top (moving up) forwards; quiet for 1 s; the restore\'s own scroll event is ignored', async () => {
+  it("scrolling near the bottom (moving down) asks backwards, near the top (moving up) forwards; quiet for 1 s; the restore's own scroll event is ignored", async () => {
     const { el, setItems, loads } = mount({ sensitiveArea: 100 }, ids(0, 50)); // 2000 px, viewport 200
     await frame();
     el.dispatchEvent(new Event('scroll')); // first event: the anchor is tracked, no load
@@ -215,7 +286,7 @@ describe('<InfiniteScroll>', () => {
 });
 
 describe('<InfiniteScroll> restore scroll event', () => {
-  it('the scroll event of the restore\'s own write is not a user scroll: it lands within sensitiveArea of the bottom, yet asks for nothing (N5)', async () => {
+  it("the scroll event of the restore's own write is not a user scroll: it lands within sensitiveArea of the bottom, yet asks for nothing (N5)", async () => {
     const { el, setItems, loads } = mount({ sensitiveArea: 100 }, ids(0, 50)); // 2000 px, viewport 200
     await frame();
     el.dispatchEvent(new Event('scroll')); // the first event tracks the anchor
@@ -245,10 +316,21 @@ describe('<InfiniteScroll> switching lists', () => {
       insert(
         root,
         createComponent(InfiniteScroll, {
-          get items() { return state[which()]; },
-          ref: (e: HTMLDivElement) => { el = e; },
+          get items() {
+            return state[which()];
+          },
+          ref: (e: HTMLDivElement) => {
+            el = e;
+          },
           onLoadMore: (args: unknown) => loads.push(args),
-          get children() { return createComponent(ForC, { get each() { return state[which()]; }, children: row }); },
+          get children() {
+            return createComponent(ForC, {
+              get each() {
+                return state[which()];
+              },
+              children: row,
+            });
+          },
         }),
       );
     });
@@ -265,7 +347,7 @@ describe('<InfiniteScroll> switching lists', () => {
 });
 
 describe('<InfiniteScroll> tracked reads', () => {
-  it('reads the list\'s shape once per update — one tracked read beyond createScrollAnchor\'s own (clean-room finding 7)', async () => {
+  it("reads the list's shape once per update — one tracked read beyond createScrollAnchor's own (clean-room finding 7)", async () => {
     // A list whose shape read is observable: a Proxy over a plain array that answers [$SHAPE] / [$TRACK] like a store array does.
     let shapeReads = 0;
     let version = 0;

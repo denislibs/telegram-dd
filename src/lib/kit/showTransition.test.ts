@@ -69,7 +69,14 @@ it('noMountTransition starts open; re-opening while closing cancels the timer; n
   let t!: ReturnType<typeof createShowTransition>;
   const el = document.createElement('div');
   createRoot(() => {
-    t = createShowTransition({ isOpen: open, noMountTransition: true, noCloseTransition: noClose, forceOpen: force, className: false, prefix: 'x-' });
+    t = createShowTransition({
+      isOpen: open,
+      noMountTransition: true,
+      noCloseTransition: noClose,
+      forceOpen: force,
+      className: false,
+      prefix: 'x-',
+    });
     t.ref(el);
   });
   expect(t.state()).toBe('open');
@@ -120,10 +127,16 @@ it('<ShowTransition>: a div with the rest props spread, children kept while clos
     insert(
       root,
       createComponent(ShowTransition, {
-        get isOpen() { return open(); },
-        get isHidden() { return hidden(); },
+        get isOpen() {
+          return open();
+        },
+        get isHidden() {
+          return hidden();
+        },
         id: 'panel',
-        get class() { return `panel ${text()}`; },
+        get class() {
+          return `panel ${text()}`;
+        },
         onClick: clicks,
         ref: (el: HTMLDivElement) => refs.push(el),
         get children() {
@@ -171,7 +184,9 @@ it('<ShowTransition>: isHidden toggled while open keeps the same element through
       root,
       createComponent(ShowTransition, {
         isOpen: true,
-        get isHidden() { return hidden(); },
+        get isHidden() {
+          return hidden();
+        },
         get children() {
           made++;
           return document.createElement('b');
@@ -247,8 +262,14 @@ it('per-instance cost: an instance costs about as much as its 2 signals + 2 effe
   const baseline = () => {
     const [a] = createSignal(0);
     const [b] = createSignal(0);
-    createEffect(() => open() && a(), () => {});
-    createMutationEffect(() => b(), () => {});
+    createEffect(
+      () => open() && a(),
+      () => {},
+    );
+    createMutationEffect(
+      () => b(),
+      () => {},
+    );
   };
   const time = (fn: () => void, n: number) => {
     const t0 = performance.now();

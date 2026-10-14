@@ -34,12 +34,35 @@ it('kit: <Transition>, <ShowTransition> and <InfiniteScroll> render and update w
   const [rows, setRows] = createSignal([1, 2]);
   const dispose = render(
     () => [
-      createComponent(Transition, { get activeKey() { return key(); }, name: 'slide', children: (slide: TransitionSlide) => `slide ${slide.key}` }),
-      createComponent(ShowTransition, { get isOpen() { return open(); }, children: 'shown' }),
+      createComponent(Transition, {
+        get activeKey() {
+          return key();
+        },
+        name: 'slide',
+        children: (slide: TransitionSlide) => `slide ${slide.key}`,
+      }),
+      createComponent(ShowTransition, {
+        get isOpen() {
+          return open();
+        },
+        children: 'shown',
+      }),
       createComponent(InfiniteScroll, {
-        get items() { return rows(); },
+        get items() {
+          return rows();
+        },
         get children() {
-          return createComponent(ForC, { get each() { return rows(); }, children: (n: number) => { const li = mk('li'); li.className = 'ListItem'; insert(li, () => `row ${n}`); return li; } });
+          return createComponent(ForC, {
+            get each() {
+              return rows();
+            },
+            children: (n: number) => {
+              const li = mk('li');
+              li.className = 'ListItem';
+              insert(li, () => `row ${n}`);
+              return li;
+            },
+          });
         },
       }),
     ],

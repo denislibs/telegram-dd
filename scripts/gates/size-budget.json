@@ -4,12 +4,12 @@
     "assets/all.js": {
       "kind": "chunk",
       "baseline": {
-        "brotli": 91624,
-        "gzip": 110060
+        "brotli": 91629,
+        "gzip": 110079
       },
       "budget": {
-        "brotli": 100787,
-        "gzip": 121067
+        "brotli": 100792,
+        "gzip": 121087
       }
     },
     "assets/base64.js": {
@@ -37,12 +37,12 @@
     "assets/config.js": {
       "kind": "entry",
       "baseline": {
-        "brotli": 10398,
-        "gzip": 11568
+        "brotli": 10228,
+        "gzip": 11371
       },
       "budget": {
-        "brotli": 11438,
-        "gzip": 12725
+        "brotli": 11251,
+        "gzip": 12509
       }
     },
     "assets/decoderWorker.min.js": {
@@ -59,34 +59,34 @@
     "assets/dom.js": {
       "kind": "entry",
       "baseline": {
-        "brotli": 10246,
-        "gzip": 11264
+        "brotli": 10244,
+        "gzip": 11262
       },
       "budget": {
-        "brotli": 11271,
-        "gzip": 12391
+        "brotli": 11269,
+        "gzip": 12389
       }
     },
     "assets/generateUniqueId.js": {
       "kind": "entry",
       "baseline": {
-        "brotli": 26322,
-        "gzip": 30357
+        "brotli": 26368,
+        "gzip": 30354
       },
       "budget": {
-        "brotli": 28955,
-        "gzip": 33393
+        "brotli": 29005,
+        "gzip": 33390
       }
     },
     "assets/index.js": {
       "kind": "entry",
       "baseline": {
-        "brotli": 95924,
-        "gzip": 107935
+        "brotli": 96640,
+        "gzip": 108948
       },
       "budget": {
-        "brotli": 105517,
-        "gzip": 118729
+        "brotli": 106305,
+        "gzip": 119843
       }
     },
     "assets/index.css": {
@@ -103,12 +103,12 @@
     "assets/oldLangProvider.js": {
       "kind": "entry",
       "baseline": {
-        "brotli": 44040,
-        "gzip": 52032
+        "brotli": 44152,
+        "gzip": 52070
       },
       "budget": {
-        "brotli": 48445,
-        "gzip": 57236
+        "brotli": 48568,
+        "gzip": 57278
       }
     },
     "assets/oldLangProvider.css": {
@@ -203,12 +203,12 @@
   "totals": {
     "js": {
       "baseline": {
-        "brotli": 578521,
-        "gzip": 686422
+        "brotli": 579235,
+        "gzip": 687301
       },
       "budget": {
-        "brotli": 636374,
-        "gzip": 755065
+        "brotli": 637159,
+        "gzip": 756032
       }
     },
     "css": {

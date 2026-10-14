@@ -1,5 +1,5 @@
 import { clearDelegatedEvents } from 'frameact/dom';
-import { afterEach, beforeEach } from 'vitest';
+import { afterEach, beforeAll, beforeEach } from 'vitest';
 
 import { frame as fireFrame } from './frame';
 import { flushMicrotasks } from './micro';
@@ -11,6 +11,12 @@ import { installFakeRaf } from './raf';
  */
 export function useDomHarness() {
   let raf: ReturnType<typeof installFakeRaf>;
+  // A module imported by the file (util/windowSize through the swipe controller, ...) may book a frame on the REAL rAF at
+  // import; until that frame ran, the scheduler would not ask the fake rAF installed below for another one.
+  beforeAll(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  });
   beforeEach(() => {
     raf = installFakeRaf();
   });
