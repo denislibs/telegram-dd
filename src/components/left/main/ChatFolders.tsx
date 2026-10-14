@@ -1,4 +1,4 @@
-import { createEffect, createMeasureEffect, createMemo, onMount } from 'frameact';
+import { createEffect, createMemo, onMount, requestMeasure } from 'frameact';
 import { Show } from 'frameact/dom';
 import { getActions, withGlobal } from '../../../global';
 
@@ -71,12 +71,16 @@ const ChatFolders = (ownProps: OwnProps) => {
     loadChatFolders();
   });
 
-  // Reads the scroll geometry of the active list.
-  createMeasureEffect(
+  // Reads the scroll geometry of the active list. Deviation: the kit's Transition moves `Transition_slide-active` in a mutation
+  // effect of the same frame, so a measure effect here would read the previous folder's list; the read is booked for the next
+  // frame (tt: a `useEffect`, after the commit). The slide is a wrapper of the list (tt's Transition had none), hence the `>`.
+  createEffect(
     () => props.activeChatFolder,
     () => {
-      const activeList = transitionRef?.querySelector<HTMLElement>('.chat-list.Transition_slide-active');
-      updateScrollState(activeList ?? undefined);
+      requestMeasure(() => {
+        const activeList = transitionRef?.querySelector<HTMLElement>('.Transition_slide-active > .chat-list');
+        updateScrollState(activeList ?? undefined);
+      });
     },
   );
 
@@ -90,7 +94,7 @@ const ChatFolders = (ownProps: OwnProps) => {
   });
 
   const scrollToTop = () => {
-    const activeList = rootRef.querySelector<HTMLElement>('#LeftColumn .chat-list.Transition_slide-active');
+    const activeList = rootRef.querySelector<HTMLElement>('#LeftColumn .Transition_slide-active > .chat-list');
     activeList?.scrollTo({
       top: 0,
       behavior: 'smooth',

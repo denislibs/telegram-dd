@@ -200,8 +200,11 @@ const ChatList = (props: OwnProps) => {
   // Deviation: tt's `teactFastList` + `teactOrderKey` is `<ManualFor orderKey>`: kept rows are never moved in the DOM, a
   // row moves only when its order key changes; the visual position is `offsetTop`, not the DOM order. A pinned row's key
   // is its index in `viewportIds` (tt: `isPinned ? i : getOrderKey(id, isSaved)`).
+  // The index of each id in the window comes from a map built once per window: `indexOf` per row was O(n) per row, O(n^2) per
+  // update, which matters with `noVirtualization` (the whole list is the window).
+  const indexInViewport = createMemo(() => new Map(viewportIds()?.map((id, index) => [id, index])));
   const getRowOrderKey = (id: string) => {
-    const index = viewportIds()!.indexOf(id);
+    const index = indexInViewport().get(id)!;
     return viewportOffset() + index < pinnedCount() ? index : getOrderKey(id, isSaved());
   };
 

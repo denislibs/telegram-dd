@@ -414,4 +414,31 @@ test.describe('chat list', () => {
     await expect(draft).toHaveCount(1);
     await expect(draft).not.toContainText('9917');
   });
+
+  test('a click on the active folder tab scrolls its list to the top', async ({ page }) => {
+    await openApp(page);
+    await addContacts(page, 90);
+    await page.evaluate(() => {
+      const { apiUpdate } = (window as unknown as TestWindow).getActions();
+      apiUpdate({
+        '@type': 'updateChatFolder',
+        id: 5,
+        folder: { id: 5, title: { text: 'Work' }, includedChatIds: ['1001'], excludedChatIds: [], pinnedChatIds: [] },
+      });
+      apiUpdate({ '@type': 'updateChatFoldersOrder', orderedIds: [0, 5] });
+    });
+    await expect(page.locator('#LeftColumn .TabList > [class*="__tab"]')).toHaveCount(2);
+
+    const scrollTop = () =>
+      page.evaluate(() => document.querySelector('#LeftColumn .Transition_slide-active > .chat-list')!.scrollTop);
+    await page.mouse.move(150, 400);
+    for (let i = 0; i < 4; i++) {
+      await page.mouse.wheel(0, 400);
+      await page.waitForTimeout(120);
+    }
+    await expect.poll(scrollTop).toBeGreaterThan(300);
+
+    await page.locator('#LeftColumn .TabList > [class*="__tab"]').nth(0).click();
+    await expect.poll(scrollTop).toBe(0);
+  });
 });
