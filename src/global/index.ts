@@ -15,7 +15,7 @@ import { afterActions, createStore, defineActions, ungated, unwrap } from 'frame
 
 import type { ActionPayloads, GlobalState, RequiredActionPayloads, RequiredGlobalState } from './types';
 
-import { DEBUG, DEBUG_MORE } from '../config';
+import { DEBUG, DEBUG_MORE, IS_MOCKED_CLIENT } from '../config';
 import { areRecordsShallowEqual } from '../util/areShallowEqual';
 import { deepDiff } from '../util/deepDiff';
 import { handleError } from '../util/handleError';
@@ -390,7 +390,9 @@ export function withGlobal<OwnProps extends AnyLiteral, StateProps extends AnyLi
   ) as OwnProps & StateProps;
 }
 
-if (DEBUG) {
+// Mocked-client builds (APP_MOCKED_CLIENT=1) expose the same handles in production mode: the perf comparison
+// (tests/perfcmp) injects `apiUpdate`s through them and tt's copy gets the same hook (scripts/visual/tt-patches.mjs).
+if (DEBUG || IS_MOCKED_CLIENT) {
   (window as any).getGlobal = getGlobal;
   (window as any).setGlobal = setGlobal;
   (window as any).getActions = getActions;

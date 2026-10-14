@@ -28,6 +28,7 @@ pnpm test:e2e | test:a11y | test:perf | test:visual   # browser quality gates (d
 pnpm framework:update            # move the submodule to frameact's latest main
 pnpm codemod <files|globs>       # teact → frameact rewrite of a tt component/hook (docs/codemod.md); --dry --report to preview
 pnpm bench:store                 # store compat-layer micro-benchmark (docs/store-architecture.md §4)
+pnpm perf:compare                # telegram-dd vs telegram-tt perf comparison, same mocked data (docs/quality-gates.md, "Performance vs telegram-tt"); --aa = tt vs tt noise check
 ```
 
 Toolchain: Vite 8, TypeScript 7 (native `tsc`), oxlint, prettier, pnpm 10, Node >= 22.12.

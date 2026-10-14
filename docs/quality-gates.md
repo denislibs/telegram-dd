@@ -226,10 +226,18 @@ How the reference is run (`scripts/visual/tt-run.mjs`): `reference/telegram-tt` 
 it (without `node_modules`, `.git`, `dist`) to `.cache/tt-run`, applies `scripts/visual/tt-patches.mjs`, runs
 `npm install --ignore-scripts` there (once; re-done when the reference commit or the patch list changes, or with
 `--refresh`) and starts its vite in mocked mode. In a git worktree it finds the reference in the main checkout
-(`TT_REFERENCE=<dir>` overrides). Patches are exact-string replacements that fail loudly when the text moved. There is one:
+(`TT_REFERENCE=<dir>` overrides). Patches are exact-string replacements that fail loudly when the text moved. There are
+three (`scripts/visual/tt-patches.mjs`; the first two fix the mock and are marked `shared`, because our `MockClient` is a
+verbatim port with the same defects, see "Performance vs telegram-tt"):
 
 - `MockClient.start()` ignores its `onConnected` callback at the baseline commit, so the worker's `initApi()` never
   resolves, `callApi` queues forever and tt's chat list stays on a spinner. The patch makes it call the callback.
+- `MockClient` answers `GetDialogFilters` with a bare array, but `fetchChatFolders()` reads `messages.DialogFilters`
+  (`{ filters, tagsEnabled }`): it threw ("reading 'findIndex'") and no folder tabs ever appeared. The patch returns the
+  real shape. (A scenario's folder `title` must also be a `{ text, entities }` object now; the committed scenarios
+  predate that.)
+- `teactn.tsx` exposes `window.getGlobal / setGlobal / getActions` only when `DEBUG` is on; the patch also exposes them in
+  a mocked-client build, so the performance comparison can run a production build and still inject updates.
 
 Determinism (`tests/visual/determinism.ts`), the same for both apps: fixed viewport (1280x800, DPR 1), `en-US`, UTC,
 light scheme, reduced motion, service workers blocked, `Date` frozen at 2026-10-12T12:00Z, seeded `Math.random`, all
@@ -321,3 +329,127 @@ baseline commit from the porting guide into `reference/telegram-tt` and runs `pn
 | leaks      | 512 KB over 50 runs after 5 warm-up runs | `maxGrowthKb`, `runs`, `warmupRuns`                               |
 | long tasks | 50 ms at 4x CPU throttling               | `maxMs` (>= 50), `cpuThrottlingRate`                              |
 | a11y       | no violations outside the baseline       | baseline entries with a reason                                    |
+
+## Performance vs telegram-tt
+
+The frameact spec (§5) makes this the go/no-go measurement: if frameact does not beat teact on messenger scenarios, the
+architecture did not pay off. `pnpm perf:compare` runs **both apps** on identical mocked data and reports the ratio
+telegram-dd ÷ telegram-tt per scenario and metric. It is a measurement, not a gate: it never fails on a number, and CI runs
+it only by hand (`.github/workflows/perf-compare.yml`, `workflow_dispatch`).
+
+```bash
+pnpm perf:compare                                   # every scenario, 5 runs per app, CPU x4, ~25 min
+pnpm perf:compare --scenario cold-start,scroll      # chosen scenarios (ids: pnpm perf:compare --list)
+pnpm perf:compare --runs 9 --cpu 6                  # more runs / other throttling
+pnpm perf:compare --aa                              # tt against tt: the noise of the method on this machine
+pnpm perf:compare --no-trace                        # skip the CDP trace (no script/style/layout/paint/GC columns)
+pnpm perf:compare --no-build | --rebuild            # reuse the built apps as they are / force a rebuild
+```
+
+Reports land in `tests/perfcmp/results/<name>.{md,json}` (and `latest-dd-vs-tt.*`, `latest-aa.*`). The first run needs
+`pnpm playwright:install` and the telegram-tt reference (it also builds the patched tt copy of the visual gate).
+
+### How it measures
+
+- **Both apps are production builds** of the mocked client (`APP_ENV=production APP_MOCKED_CLIENT=1`, dummy api id):
+  ours with `vite build`, tt's patched copy (`.cache/tt-run`, `reference/` is never touched) with its own `vite build`.
+  Production matters: tt's DEBUG build copies the whole global on every `getGlobal()`, ours runs stricterdom. Builds are
+  cached by their inputs (our sources + working tree, the tt reference + patch list + scenario), so a rerun only rebuilds
+  what changed; both are served by the same plain static server.
+- **Chromium (Playwright, headless), 1280x800, CPU throttling x4** (`Emulation.setCPUThrottlingRate`), a **fresh browser
+  per run**. N runs per app and scenario, **interleaved** (run 1 of every scenario for both apps, then run 2, ...; the
+  order of the two apps alternates), medians reported with the min-max range. Each machine load average is recorded.
+- A warm scenario boots unthrottled, rests 2.5 s, forces a GC, then switches the throttle on and measures only the
+  scenario. Cold start is throttled from the first byte.
+- **Metrics** (all lower-is-better; the legend is at the bottom of every report): long tasks (count, total, max;
+  `PerformanceObserver`), total blocking time, the longest task of any length, script / style / layout / paint / GC **self
+  time** from a CDP trace (`devtools.timeline`, `toplevel`, `blink.user_timing`; `tests/perfcmp/trace.ts`), frames dropped
+  (rAF gaps against 60 Hz), DOM mutations (MutationObserver records), JS heap after two forced GCs. The trace and the
+  observers cost some CPU, equally in both apps: read ratios, not absolute milliseconds. A difference below the
+  per-metric floor (`minDelta` in `metrics.ts`, printed in the legend) is shown as "~".
+- Everything is driven **from timers inside the page** (`tests/perfcmp/probe.js`, `window.__pc`), so Playwright round
+  trips neither add to nor hide main-thread work. Updates are injected through `window.getActions().apiUpdate(...)`, the
+  action the API worker's messages end up in; the worker itself (verbatim GramJS in both apps) is not what is compared.
+
+### Scenarios
+
+| id                | Scenario                                                                                                             |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `boot`            | cold start until `#Main` (informational: works before the chat list exists, ours renders a stub there)               |
+| `cold-start`      | 1. navigation to the first chat row (1200 chats, 4 folders), plus 1.5 s                                              |
+| `newmsg-burst`    | 2a. 20 new messages in chats 9-28, delivered in one task; every chat moves to the top                                |
+| `newmsg-seq`      | 2b. the same 20, one per task, 100 ms apart                                                                          |
+| `storm`           | 3. typing indicators and online/offline flips, 100 updates per second for 3 s                                        |
+| `scroll`          | 4. scroll the 1200-chat list from the top to the bottom, 120 px per frame                                            |
+| `folders`         | 5. switch chat folders x10                                                                                           |
+| `heavy-animation` | 6. a folder slide (blocking animation) starts, 20 new messages arrive during it; the **longest task after it ended** |
+
+Scenario 6 is the frameact heavy-animation gating claim (updates held during a blocking animation, applied after it);
+the spec criterion is "not worse than teact's pass over the same volume" (`postReleaseMaxTaskMs`).
+
+### The mock data and the hooks
+
+- The large scenario (`perfcmp-large`: 1200 chats, users / groups / channels, unread badges, 4 folders) is **generated**
+  by `tests/perfcmp/scenario.ts` (seeded, so identical) and written into each tree only for the duration of its build; ours
+  is restored afterwards (`git status` stays clean, a crash is repaired by the next run). It is not committed, so
+  `tests/visual/mocks.spec.ts` never sees it.
+- The tt copy gets the hook through `scripts/visual/tt-patches.mjs` (expose `getActions` in a mocked build); our
+  `src/global/index.ts` has the same line (`DEBUG || IS_MOCKED_CLIENT`).
+- tt's MockClient has two defects that tt-run already patched for the visual gate (`start()` ignoring `onConnected`; the bare
+  array for `GetDialogFilters`, which hid the folder tabs). Ours is a verbatim port, so the harness applies the same
+  `shared` patches to our tree for the build only, and skips a patch whose text is already gone, i.e. it does nothing once
+  the port fixed the mock natively. Port those two fixes into `src/lib/gramjs/client/MockClient.ts` with the chat list.
+
+### What the ported app must provide
+
+A scenario is "n/a" for an app that lacks what it needs; a preflight loads each app once and checks. Nothing to configure:
+the comparison starts working as soon as the markup contracts of tt exist in our port (they are tt's own class names):
+
+| Need       | Checked as                                                                                 |
+| ---------- | ------------------------------------------------------------------------------------------ |
+| `shell`    | `#Main` rendered                                                                           |
+| `chatList` | `.chat-list .ListItem` rows rendered from the mocked dialogs                               |
+| `folders`  | at least two `.ChatFolders .TabList > [data-file-hover-open]` tabs (click = switch folder) |
+| `inject`   | `window.getActions().apiUpdate` exposed                                                    |
+
+Folder switches also rely on tt's `Transition` classes: a slide is "running" while `.ChatFolders .Transition_slide-from` or
+`-to` exists (`src/lib/kit/Transition` has the same contract). After the chat list lands: `pnpm perf:compare --scenario
+cold-start,newmsg-burst,newmsg-seq,storm,scroll,folders,heavy-animation`.
+
+### Validating the method: A/A
+
+`pnpm perf:compare --aa` runs tt against tt (the same build behind both labels). Ratios must be about 1.0; how far they
+stray is the resolution of every dd-vs-tt number from the same machine. The report prints the spread. Read a dd-vs-tt
+ratio as a difference only when it is clearly outside that spread, and repeat a result that looks off (the machine
+load average is in the report; other work on the machine is the main source of noise).
+
+### Results so far (2026-10-14, Apple M1 Pro, 5 runs, CPU x4)
+
+Committed reports: `tests/perfcmp/results/aa-20261014-1723.md` (A/A) and `dd-vs-tt-20261014-1729.md`. The machine was busy
+with other work the whole time (1-min load average 6 to 35, median 12-18 on 10 cores), so these are noisy numbers.
+
+**A/A (tt vs tt).** Over 100 comparable metrics |ratio - 1| has median 3%, p90 22% and max 213% (a 20 ms blocking-time
+total against 60 ms); over the 78 metrics well above their resolution floor median 2%, p90 14%, max 56%. Run-to-run spread
+of one side (relative MAD): median 4%, p90 17%. In practice: a ratio is meaningful from about +-15% for the large
+metrics (script, style, paint, mutations, heap are within a few percent), and the small tail metrics (blocking time of
+a scenario with one or two long tasks, frames dropped, the longest task after the release) can swing by a factor of two
+between two identical apps; take more runs (`--runs 9`) and a quiet machine before judging those.
+
+**telegram-tt, medians** (dd is "n/a" for everything but `boot` until the chat list is ported):
+
+| Scenario       | long tasks (count / max ms) | blocking ms | script ms | style / layout / paint ms | dropped frames | DOM mutations | heap MB |
+| -------------- | --------------------------- | ----------: | --------: | ------------------------- | -------------: | ------------: | ------: |
+| cold start     | 7 / 296                     |         582 |      1106 | 110 / 85 / 86             |             67 |           553 |    14.6 |
+| 2a burst of 20 | 2 / 172                     |         127 |       283 | 52 / 12 / 74              |             12 |           511 |    14.9 |
+| 2b one by one  | 0 / 0 (longest task 42 ms)  |           0 |       653 | 147 / 43 / 272            |              6 |          1227 |    15.2 |
+| 3 storm        | 0 / 0 (longest task 10 ms)  |           0 |      1171 | 110 / 8 / 180             |              0 |            68 |    19.3 |
+| 4 scroll       | 20 / 121                    |         265 |      2405 | 414 / 261 / 532           |             84 |          3848 |    18.7 |
+| 5 folders x10  | 4 / 72                      |          35 |       489 | 190 / 52 / 224            |              9 |           673 |    23.4 |
+| 6 heavy-anim.  | 1 / 71                      |          21 |       382 | 51 / 11 / 72              |              6 |           735 |    17.2 |
+
+Scenario 6: the longest task after the animation ended is 46 ms in tt (teact holds the global updates during the
+animation and applies the 20 messages when it ends).
+
+**telegram-dd, today** (stub `Main`, `boot` only, informational because it renders far less than tt's shell): 0.84x script,
+0.71x long tasks, 0.44x DOM mutations, 0.75x heap. This says nothing about the architecture yet; the real answer is the
+rerun of every scenario after the chat list lands.
