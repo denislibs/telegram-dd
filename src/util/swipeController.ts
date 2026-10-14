@@ -205,6 +205,9 @@ export function allowSwipeControlForTransition(
         : dragOffsetY - swipeOffsets!.dragOffsetY;
 
       const newProgress = clamp(dragOffset / distance, 0, 1);
+      // Kept as in tt (review m1): a move that brings no progress (the same x, which iOS also sends for force / radius
+      // changes, or a finger past the end of the clamp) counts as a step back, so releasing right after it reverts the
+      // swipe. Pinned by a test; changing it is a decision about the gesture, not a port detail.
       currentDirection = newProgress > progress ? 1 : -1;
       progress = newProgress;
 

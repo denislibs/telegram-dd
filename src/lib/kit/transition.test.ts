@@ -1379,3 +1379,52 @@ it('swipe I2: a swipe whose step is superseded by an instant switch (and an opti
   stop();
 });
 
+it('swipe: the swipe starts at 10 px of horizontal movement, not before (9 px, a vertical drag and the iOS edge strip do not start it)', async () => {
+  nowMs = 0;
+  const { t, s1, swipeCalls, log, stop } = await swipeSetup();
+  touch('touchstart', s1, 100);
+  touch('touchmove', s1, 109);
+  expect(swipeCalls).toEqual([]);
+  touch('touchend', s1);
+  touch('touchstart', s1, 100); // a vertical drag fixes the axis: a horizontal move after it is a scroll, not a swipe
+  touch('touchmove', s1, 102, 140);
+  touch('touchmove', s1, 140, 140);
+  expect(swipeCalls).toEqual([]);
+  touch('touchend', s1);
+  touch('touchstart', s1, 100);
+  touch('touchmove', s1, 111);
+  expect(swipeCalls).toEqual(['right']); // 11 px
+  await frame();
+  await frame();
+  touch('touchend', slidesOf(t)[1]);
+  await advance(500);
+  await advance(16);
+  fireAnimationEnd(...slidesOf(t));
+  await frame();
+  expect(log).toEqual(['start', 'stop']);
+
+  const edge = await swipeSetup();
+  touch('touchstart', edge.s1, 10); // within 20 px of the edge on iOS: the system back gesture owns it
+  touch('touchmove', edge.s1, 60);
+  expect(edge.swipeCalls).toEqual([]);
+  touch('touchend', edge.s1);
+  stop();
+  edge.stop();
+});
+
+it('swipe (tt behaviour, documented): a move event that brings no progress (same x, or past the end) counts as a step back, so releasing then reverts', async () => {
+  nowMs = 0;
+  const { t, s1, swipeCalls, stop } = await swipeSetup();
+  await startSwipe(t, s1);
+  const [, s1b] = slidesOf(t);
+  touch('touchmove', s1b, 312);
+  touch('touchmove', s1b, 312); // the same position (iOS reports force / radius changes this way)
+  touch('touchend', s1b);
+  await advance(0);
+  await advance(200);
+  await advance(200);
+  await advance(16);
+  expect(swipeCalls).toEqual(['right', 'cancel']);
+  stop();
+});
+
