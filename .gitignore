@@ -11,3 +11,4 @@ dist
 /test-results/
 /playwright-report*/
 /tests/visual/__diff__/
+/tests/perfcmp/results/
