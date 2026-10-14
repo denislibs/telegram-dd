@@ -486,8 +486,23 @@ const Chat = (ownProps: OwnProps) => {
     frameMutation,
   );
 
-  // Deviation: the row is always the root (a `ManualFor` row is one DOM node); an absent chat renders it empty,
-  // where tt rendered nothing.
+  // Deviation: the row is always the root (a `ManualFor` row is one DOM node); where tt rendered nothing for a chat that is
+  // not in the store, the row is an inert, hidden placeholder: no link, no click, no menu, no ripple, no focus.
+  const isMissing = () => !props.chat;
+  const applyMissing = (element2: HTMLElement, isMissing2: boolean) => {
+    element2.style.display = isMissing2 ? 'none' : '';
+    if (isMissing2) element2.setAttribute('aria-hidden', 'true');
+    else element2.removeAttribute('aria-hidden');
+  };
+  createEffect(
+    isMissing,
+    (isMissing2) => {
+      const element2 = element();
+      if (element2) applyMissing(element2, isMissing2);
+    },
+    frameMutation,
+  );
+
   return (
     <ListItem
       ref={(el) => {
@@ -495,14 +510,21 @@ const Chat = (ownProps: OwnProps) => {
         // The first `top` is written with the (detached) element, so that the row is laid out where the list
         // measures it in the same frame (the infinite scroll preloads while the list does not fill the viewport).
         if (props.offsetTop !== undefined) el.style.top = `${props.offsetTop}px`;
+        if (isMissing()) applyMissing(el, true);
       }}
       className={chatClassName()}
-      href={href()}
-      ripple={!isForum() && !isMobile()}
-      contextActions={contextActions()}
+      href={isMissing() ? undefined : href()}
+      ripple={!isMissing() && !isForum() && !isMobile()}
+      inactive={isMissing()}
+      isStatic={isMissing()}
+      contextActions={isMissing() ? undefined : contextActions()}
       withPortalForMenu
-      onClick={handleClick}
-      onFileHoverOpen={openChatEntry}
+      onClick={(e) => {
+        if (!isMissing()) handleClick(e);
+      }}
+      onFileHoverOpen={() => {
+        if (!isMissing()) openChatEntry();
+      }}
     >
       <Show when={props.chat}>
         <div class={buildClassName('status', 'status-clickable')}>
