@@ -197,14 +197,20 @@ describe('applyGlobal: the store mirrors the committed tt global', () => {
       // deep inside an entity field: entity.photo.deep.proxy
       setGlobal({
         ...g,
-        chats: { ...g.chats, byId: { ...g.chats.byId, a: { ...g.chats.byId.a, photo: { small: 's', deep: { p: proxyB } } as never } } },
+        chats: {
+          ...g.chats,
+          byId: { ...g.chats.byId, a: { ...g.chats.byId.a, photo: { small: 's', deep: { p: proxyB } } as never } },
+        },
       });
       expect(error).toHaveBeenCalledTimes(1);
       // deep inside an array: [{ wrap: { p: proxy } }]
       g = getGlobal();
       setGlobal({
         ...g,
-        byTabId: { ...g.byTabId, 1: { ...g.byTabId[1], giftCraftModal: { gifts: [{ wrap: { p: proxyB } } as never] } } },
+        byTabId: {
+          ...g.byTabId,
+          1: { ...g.byTabId[1], giftCraftModal: { gifts: [{ wrap: { p: proxyB } } as never] } },
+        },
       });
       expect(error).toHaveBeenCalledTimes(2);
       // a container-only change with no proxies: nothing reported
