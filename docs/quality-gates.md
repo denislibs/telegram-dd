@@ -282,12 +282,16 @@ the screen transition. Result: 0 differing pixels on all five, threshold 0.05 %.
 ### 3. Leak check
 
 `tests/perf/leaks.ts`: `expectNoLeak(page, action, { runs: 50, maxGrowthKb: 512, warmupRuns: 5 })`. It runs `warmupRuns`
-unmeasured, forces GC (`HeapProfiler.collectGarbage`, twice), reads `Runtime.getHeapUsage`, runs the action `runs`
-times, forces GC and reads again; it fails when the growth exceeds `maxGrowthKb` and returns the numbers. The action
-must be a full cycle (open and close a modal, mount and unmount a chat, scroll there and back): a one-way state change
-legitimately grows the heap. Main thread only (workers are not measured). Run on the production build. Pick
-`maxGrowthKb` as ~2x the growth you see on a clean run (`test.info().annotations` in the example prints it) and keep it
-tight: a real leak is proportional to `runs`. `perf.spec.ts` shows the usage and proves detection with a deliberate leak.
+unmeasured, forces GC (`HeapProfiler.collectGarbage`, twice), reads `Runtime.getHeapUsage`, runs the action `runs / 2`
+times, reads again, runs the other half and reads a last time; it fails when the total growth exceeds `maxGrowthKb` **or** the second
+half alone grows by more than `maxGrowthKb / 2` (a leak is linear; compiled code and warmed caches are front-loaded), and returns the
+numbers. The action must be a full cycle (open and close a modal, mount and unmount a chat, scroll there and back): a one-way state
+change legitimately grows the heap, and a cycle that only toggles kept-alive views disposes nothing (the kit's `Transition` keeps a
+slide per key: remount the screen to test disposal). Main thread only (workers are not measured). Run on the production build.
+`Runtime.getHeapUsage` counts V8's compiled code: a screen with hot paths needs a longer warm-up (the chat list tests use 25 runs;
+`docs/reports/slice-chatlist.md` has the heap snapshot diff that told code growth from a retained object). Pick `maxGrowthKb` as ~2x
+the growth you see on a clean run and keep it at the default unless a snapshot diff says why: a real leak is proportional to `runs`.
+`perf.spec.ts` shows the usage and proves detection with a deliberate leak.
 
 ### 4. Long tasks
 

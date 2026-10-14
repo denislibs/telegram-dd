@@ -75,7 +75,7 @@ accessors, effects split by phase, hooks with accessor signatures; each with its
   positioned list is rendered by `ChatList` itself (a wrapper component that receives the rows as `children` would flatten
   them into a larger array and lose the manual order); the `noAbsolutePositioning` case (right column profile) goes through
   `beforeChildren` and falls back to the ordinary diff, correctly (the DOM order is the visual one there).
-- **Chat row**: the `ListItem` is always the root (a `ManualFor` row is one DOM node), an absent chat renders an empty row; the first
+- **Chat row**: the `ListItem` is always the root (a `ManualFor` row is one DOM node); a chat that is not in the store makes it an inert, hidden placeholder (tt rendered nothing); the first
   `top` is written with the detached element and later ones by an effect (a string `style` rewrite would drop the `transform` /
   `opacity` of the reorder animation); the preview (typing, draft, message) is built once per row, only the bindings update;
   `ChatBadge` freezes its content while it fades out (`frozenWhile`, the kit's `ShowTransition` has no `prevChildren`).
@@ -84,6 +84,10 @@ accessors, effects split by phase, hooks with accessor signatures; each with its
 - **ChatFolders**: each `<Transition>` slide renders the folder of its own key (tt's closure kept the folder of the last
   render in which the key was active); the tab bar is `<Show>` (a JSX ternary re-ran the slot on every folder switch and
   dirtied the tab list's measure effect in the mutate phase, a DEV warning).
+- **renderTextWithEntities stub**: conceals Spoiler ranges (braille characters of the same length, as tt's plain-string summaries do): the
+  chat list is always on screen and the 777000 login code is a Spoiler there.
+- **ChatFolders**: the selectors of the active list expect the kit's wrapped slide (`.Transition_slide-active > .chat-list`); the
+  scroll state is read in the next frame.
 - **Main**: trimmed shell. Kept: the layout, `Wallpaper`, `LeftColumn`, the stubs of the middle/right columns, `MessageListHistoryHandler`,
   `UnreadCounter`, all the initial API calls and effects, the left/right column show transitions (`createShowTransition` with `prefix`
   on the wallpaper root), `heavy animation` around the column animation. Removed (`// TODO(port)` in the file): FoldersSidebar,
@@ -111,15 +115,17 @@ accessors, effects split by phase, hooks with accessor signatures; each with its
 
 ## Gate results
 
-| Gate               | Result                                                                                                                                                                                                                                                                                                                                                                   |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `pnpm check`       | green (oxlint 0 warnings, prettier, tsc, gates:diff / tests / licenses, build, gates:size)                                                                                                                                                                                                                                                                               |
-| `pnpm test`        | 37 files, 373 passed + 2 opt-in skipped (new: `hooks/useInfiniteScroll.test.ts` 5; the kit's `infiniteScroll.test.ts` adapted)                                                                                                                                                                                                                                           |
-| `pnpm gates`       | diff / tests / licenses pass, upstream reported, size re-baselined: JS +64 KiB brotli (the main bundle 138 KiB, the list, header, menu, wallpaper, localization strings), CSS +13 KiB                                                                                                                                                                                    |
-| `pnpm test:e2e`    | 41 passed, zero console / page / request / stricterdom problems. New: `chatlist.spec.ts` (6): the list renders, the context menu opens and closes (Escape and backdrop), folder switch, a new message moves the chat to the top with zero row recreation (`<ManualFor>`) and the unread badge appears, the typing status shows and goes away, infinite scroll loads more |
-| `pnpm test:a11y`   | 13 passed (new: the chat list, the open main menu). Baseline entry: `aria-required-parent` of the main menu (tt's `Menu` without `ariaLabel`: no `role=menu` on the bubble, ported verbatim)                                                                                                                                                                             |
-| `pnpm test:perf`   | 9 passed: folder switching x30 +124 KB (limit 1024), context menu x30 +327 KB (x90: +496 KB, about 3 KB per cycle after the warm-up, not chased down), a new message + folder switching under 4x CPU throttling: no task over 50 ms (the first mount of a folder's list, ~70 ms, is outside the measured window), scrolling through 90 chats: no task over 100 ms        |
-| `pnpm test:visual` | 10 passed, nothing skipped. `main-chat-list` and `main-menu` are `ported: true` at threshold 0: **0 px** against tt (1280x800, mock `default`)                                                                                                                                                                                                                           |
+At HEAD of the fix round 1 (rebased on `origin/main` with PR #15, the perfcmp harness):
+
+| Gate               | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm check`       | green (oxlint 0 warnings, prettier, tsc, gates:diff / tests / licenses, build, gates:size)                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `pnpm test`        | 45 files, 408 passed + 2 opt-in skipped                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `pnpm gates`       | diff / tests / licenses pass, upstream reported, size within the budget (the budget was re-baselined in the slice: JS +64 KiB brotli, CSS +13 KiB)                                                                                                                                                                                                                                                                                                                                                               |
+| `pnpm test:e2e`    | 48 passed, zero console / page / request / stricterdom problems. `chatlist.spec.ts` has 14 tests: the list renders, the context menu (Escape, backdrop, an item runs its action), folders (tabs, Escape, Ctrl+Shift+Digit, a click on the active tab scrolls to the top), a new message (DOM moves, animation end state, contiguity, the badge), typing, infinite scroll (window size, contiguity), Alt+Up/Down, a hidden list that receives reorders, rows mounted by a later scroll, spoilers/login code/draft |
+| `pnpm test:a11y`   | 13 passed (the chat list, the open main menu). Baseline entry: `aria-required-parent` of the main menu (tt's `Menu` without `ariaLabel`: no `role=menu` on the bubble, ported verbatim)                                                                                                                                                                                                                                                                                                                          |
+| `pnpm test:perf`   | 11 passed. Leaks (documented limit 512 KB over 50 runs after 25 warm-up runs, the second half of the runs may add 256 KB): folder switching +255 KB, list remount (Settings -> Archive -> chats: the lists are disposed) +212 KB, context menu +249 KB. Long tasks at 4x CPU: a new message + folder switching under 50 ms, mounting a folder's list under 100 ms, scrolling under 107 ms (telegram-tt's worst task, measured)                                                                                   |
+| `pnpm test:visual` | 10 passed, nothing skipped. `main-chat-list` and `main-menu` are `ported: true` at threshold 0: **0 px** against tt (1280x800, mock `default`)                                                                                                                                                                                                                                                                                                                                                                   |
 
 Visual notes: the search field's spinner is masked as before (the mocked sync never answers); the main menu footer shows the
 revision in both apps under DEBUG but the "More" submenu is closed, so it is not in the picture. `harness-detects-difference` now
@@ -133,28 +139,180 @@ tab's main screen before it opens the second tab (the election raced the heavier
 
 One flake seen once in a full e2e run on a cold dev server: `authMultiaccount.spec.ts` "a number that is not logged in anywhere starts the login" (`lazy: loading the component failed ... bundles/main.ts`, the test navigates while the Main chunk is still being fetched); it passed in 3 of 3 reruns.
 
-## frameact engine gaps found (engine-only; to go to the frameact repo clean-room, not implemented here)
+## frameact engine gaps found (engine-only; for frameact PRs, not implemented here)
 
-1. **A `{...(cond ? { a, b } : undefined)}` spread on a component** fixes the key set of the props object at creation (a later
-   `a` / `b` never appears, `'a' in props` stays false). `DropdownMenu` lost its portal anchor that way. Either the spread
-   should be reactive in its keys or the compiler should say so (a DEV warning like the destructuring one).
-2. **A JSX ternary in an element's children** (`{cond() ? <A prop={props.x}/> : cond2() ? <B/> : undefined}`) re-evaluated its
-   slot when only `props.x` changed (`activeChatFolder` in `ChatFolders`), and releasing the child effects that had bailed onto
-   it booked a measure effect from the mutate phase ("was dirtied during the mutate phase", DEV warning, one frame late).
-   `<Show when>` does not. Worth a look at what the compiled ternary tracks.
-3. **A string `style=` rewrite (`cssText`) drops the `transform` / `opacity` that a mutate effect set imperatively on the same
-   element**, and the order of the two effects is not fixed: a per-property diff for string values (or ordered effects) would let a
-   component keep `style={buildStyle(...)}`. The chat row writes `top` with an effect instead.
-4. `createMutationEffect` applies synchronously at creation, before the component's `ref`s are assigned (already gap 4 of
-   the auth report): `Tab`, `Chat`, `useChatListEntry`, `useGradientBackground` use `createEffect(c, a, frameMutation)`.
-5. **A `let`-backed ref accessor passed to a hook** (`useHorizontalScroll(() => el)`) works only if the element exists when the first
-   compute runs; `createEffect` runs its first compute synchronously at creation. `TabList` keeps the element in a signal set in
-   `onMount`. A "first compute after attach" option would remove the pattern.
-6. `ManualFor` nested in a larger array silently falls back to the ordinary diff in production (a DEV warning only): the
-   `InfiniteScroll` adapter had to stop wrapping the children.
-7. The kit's `Transition` calls a slide's render function once and untracked: a bare ternary returned from it is not reactive
-   (wrap in `<>{...}</>`), and a key cannot be mapped back to large numeric data (`FullNameTitle` keeps a slide-local snapshot of
-   the emoji status). App-level (`src/lib/kit`), not engine.
+Each repro is a vitest file against this repo's `frameact` (`src/lib/kit/testing/dom` harness, `render` from `frameact/dom`); run
+it with `APP_ENV=test pnpm exec vitest run <file> --silent=false`. The outputs are the ones observed on `frameact` at the
+submodule revision of this branch.
+
+**#1. `splitProps` freezes the key set of its rest object (a conditional spread loses later keys).** `DropdownMenu` passed
+`{...(withPortal && anchor() ? { anchor, getTriggerElement, ... } : undefined)}` to `Menu`; `Menu` does
+`const [, positionOptions] = splitProps(props, [...])` and `'getTriggerElement' in positionOptions` stayed false after the anchor
+appeared (`props` itself sees the key). The client works around it with explicit props.
+
+```tsx
+const Child = (props: Record<string, unknown>) => {
+  const [, rest] = splitProps(props, ['own']);
+  return (
+    <span>
+      {() => {
+        seen.push(`a in rest: ${'a' in rest}; a in props: ${'a' in props}`);
+        return '';
+      }}
+    </span>
+  );
+};
+const [on, setOn] = createSignal(false);
+render(() => <Child own={1} {...(on() ? { a: 1 } : undefined)} />, container());
+await frame();
+setOn(true);
+await frame();
+// seen: ["a in rest: false; a in props: false", "a in rest: false; a in props: true"]   <- expected true in the second
+```
+
+**#2. A measure effect "dirtied during the mutate phase" when the parent slot is a JSX ternary (not reproduced in isolation).**
+The warning (`measure effect ChatFolders > div.children > ChatFolderTabList > TabList > measure [mutate] was dirtied during the mutate
+phase by signal "store.activeChatFolder" — it will run next frame`) came from `releaseBailed` (`core/effects.ts:421`) inside the
+mutate drain, i.e. the child effect had bailed onto the `div.children` insert effect, so that effect re-ran on a folder switch
+(the component node itself was NOT recreated: the same `<TabList>` DOM node before and after). The slot was
+`{shouldRenderFolders() ? <ChatFolderTabList tabs={folderTabs()!} activeTab={props.activeChatFolder} .../> : shouldRenderPlaceholder() ? <div/> : undefined}`
+inside a `<Transition>` parent; `<Show>` removed it. Tried in isolation (store leaf as a prop of a component in a ternary,
+the component with a `createMeasureEffect` on that prop; with and without `!`, with a memo condition): no warning. To reproduce:
+`git checkout b79101c` (the last commit with the ternary), `pnpm exec playwright test --project=e2e tests/e2e/chatlist.spec.ts -g
+"switches between folders"`: the strict gate lists the warning. Expect the cause in how the Transition's heavy-animation scope
+(`slideOptimized`, folder switch) parks and releases the effects below it, not in the ternary alone.
+
+**#4. `createMutationEffect` applies at creation, before the component's `ref`s are assigned.**
+
+```tsx
+const C = () => {
+  let el!: HTMLDivElement;
+  createMutationEffect(
+    () => 1,
+    () => seen.push(el),
+  );
+  return <div ref={el} />;
+};
+render(() => <C />, container());
+await frame();
+// seen: [undefined]
+```
+
+The client uses `createEffect(compute, apply, frameMutation)` (applied in the mutate drain of the same frame) in `Chat`, `Tab`,
+`useChatListEntry`, `useGradientBackground`. Ask: an `immediateApply: false` for mutation effects, or a line in the porting guide.
+
+**#5. A `let`-backed ref accessor passed to a hook is read at the first compute, before attach, and never again.**
+
+```tsx
+const useEl = (el: () => HTMLElement | undefined) =>
+  createEffect(
+    () => el(),
+    (v) => seen.push(v ? v.tagName : String(v)),
+  );
+const C = () => {
+  let r: HTMLDivElement | undefined;
+  useEl(() => r);
+  return <div ref={r} />;
+};
+render(() => <C />, container());
+await frame();
+await frame();
+// seen: ["undefined"]   <- a hook that takes `() => el` never gets the element (TabList keeps its elements in signals)
+```
+
+**#6. `<ManualFor>` nested in a larger array loses its manual order, with a DEV-only warning.** In `frameact/src/dom/insert.ts`
+(`flattenArray`, the `DEV && !warnedNestedManual` branch) the fallback to the ordinary diff is announced only in DEV; a production
+build swaps the reconciler silently. The kit's `InfiniteScroll` adapter had to stop wrapping its children for that reason.
+
+```tsx
+const Nested = (props: { children?: unknown }) => <ul>{props.children}</ul>;
+render(
+  () => (
+    <Nested>
+      <li>header</li>
+      <ManualFor each={list()} keyed={(r) => r.id} orderKey={(r) => r.rank}>
+        {(r) => <li>{r().id}</li>}
+      </ManualFor>
+    </Nested>
+  ),
+  el,
+);
+// console.warn: "[frameact] <ManualFor> nested in a larger array loses its manual order (it needs its own slot); the ordinary diff is used"
+// (only when DEV is true)
+```
+
+## Fix round 1 (reviews `review-chatlist-fidelity.md` and `review-chatlist-security.md`)
+
+Rebased onto `origin/main` (PR #15, the perfcmp harness): no conflicts. `src/global/index.ts` keeps main's `DEBUG || IS_MOCKED_CLIENT`;
+`scripts/visual/tt-patches.mjs` and `tests/perfcmp` are main's. The harness applies the `shared` MockClient patches to our tree only
+when their text is still there (`tests/perfcmp/apps.ts`, `next.includes(patch.find)`): our `MockClient.start()` already calls
+`onConnected`, so that patch is skipped, and `GetDialogFilters` (which this branch did not touch) is still patched at build time.
+Fixing `GetDialogFilters` natively here was tried and reverted: the mock's folder objects then fail one step later in
+`buildApiChatFolder` (the title is not a `TextWithEntities`), the same as in tt, so the e2e noise filter has to stay.
+
+Every fix has a test that failed before it (checked by reverting the fix).
+
+| Finding                         | Result                                                                                                                                                                                                                                      | Test (red before)                                                                                              |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| C1 preload slides a hidden list | fixed: tt's `clientHeight && scrollHeight < clientHeight`, a `disposed` guard (M2 too)                                                                                                                                                      | `infiniteScroll.test.ts` (2), `chatlist.spec.ts` "a hidden chat list ... comes back at the top"                |
+| I1 stale order diff             | fixed: `useOrderDiff(..., renderKey)`; `ChatList` passes the rendered window, a re-render without a reorder resets the diff (tt: the next render)                                                                                           | `useOrderDiff.test.ts`, e2e "rows mounted by a later scroll do not replay a reorder" (11 animated rows before) |
+| I2 leak gates                   | fixed, see below                                                                                                                                                                                                                            | `leaks.ts` second-half slope; `chatlist.perf.spec.ts` remount cycle                                            |
+| S1 spoilers in clear            | fixed: the stub conceals Spoiler ranges with `generateBrailleSpoiler`, overlaps merged                                                                                                                                                      | `renderTextWithEntities.test.ts`; e2e: the 777000 login code and a spoilered draft are not in the row          |
+| S2 `forumColors` throws         | fixed (`?.`, grey)                                                                                                                                                                                                                          | `forumColors.test.ts`                                                                                          |
+| M1 O(n^2) `indexOf`             | fixed: a `Map` per window                                                                                                                                                                                                                   | covered by the e2e and the unit tests of the list                                                              |
+| M2 preload after dispose        | fixed with C1                                                                                                                                                                                                                               | kit test                                                                                                       |
+| M3 missing chat                 | fixed: the single root is an inert hidden placeholder (`display: none`, `aria-hidden`, no link, no click, no menu, no ripple, no focus); a `ManualFor` row must be one DOM node, so "nothing" is not possible                               | `Chat.test.tsx`                                                                                                |
+| M4 tab titles rebuilt           | fixed: the title function is cached per folder, an unchanged tab keeps its object, `TabList` reads the title through its own memo                                                                                                           | `useFolderTabs.test.ts`                                                                                        |
+| M5 `ChatFolders` measure order  | fixed (next frame). Found on the way: the selectors expected tt's unwrapped slide (`.chat-list.Transition_slide-active`), so a click on the active folder tab never scrolled to the top and the "scrolled" shadow never followed the folder | e2e "a click on the active folder tab scrolls its list to the top"                                             |
+| M6 e2e under-asserts            | fixed: DOM order (only the moved row may move), animation end state, contiguity, a window of at most 60 rows, Alt+Up/Down, Ctrl+Shift+Digit and Escape, a context-menu action                                                               | `chatlist.spec.ts`                                                                                             |
+| M7 unit test gaps               | fixed: forwards, window identity, the scroll-driven load                                                                                                                                                                                    | `useInfiniteScroll.test.ts` (8)                                                                                |
+| M8 long-task limits             | fixed from tt's measurements, below                                                                                                                                                                                                         | `chatlist.perf.spec.ts`                                                                                        |
+| `ChatFolders` mount             | not changed                                                                                                                                                                                                                                 |                                                                                                                |
+
+Not changed and why: the engine gaps (#1, #2, #4, #5, #6 are in the section above, with repros; no frameact edits).
+
+### I2: the retainers
+
+A heap snapshot diff (CDP `HeapProfiler.takeHeapSnapshot` after 6 warm-up cycles and after 30 more, a production build with
+`minify: false`, 60 chats, one folder) of the three cycles. Finding: **there is no retained application object**.
+
+- The computation graph is identical before and after (`Computation` 6737 = 6737, `Effect` 1823 = 1823, `SignalNode` 2662 =
+  2662, `Scope` 612 = 612, `StoreNode` 279 -> 277), no detached DOM nodes, no growing closures or arrays.
+- What `Runtime.getHeapUsage` counts as growth (+124 KB folders, +327 KB menu over 30 cycles with 5 warm-up runs): **V8 code**
+  (`InstructionStream` +190 KB, `TrustedByteArray` +42 KB, `FeedbackVector`, `Code`: the hot paths still tier up in the first ~30
+  cycles), and **one step of ~860 dependency-link objects** (+34 KB) that appears between 10 and 30 cycles and does not grow from 30
+  to 60 (the dependency lists of the rows differ in size between two moments of the page, the number of computations and signals does
+  not). The main menu cycle and a plain hover show neither.
+- The `NavigationHistoryEntry` +30 and the `markReplaced` closures +30 in the folder cycle are the browser's history entries that
+  `useHistoryBack` pushes per folder switch: the same in telegram-tt (`history.length` 2 -> 6 over 5 switches in both apps).
+- With 25 warm-up runs the slope is small and settling: +50 / +100 / +150 runs = +294 / +344 / +410 KB (menu), +191 / +363 / +485 KB
+  (remount), +278 / +386 / +478 KB (folders); about 1-3 KB per cycle, not attributed to an object in the snapshot (history entries,
+  feedback vectors). So no code fix; the gate is made to see a real leak instead.
+- The gate: `tests/perf/leaks.ts` also checks the second half of the runs against half of the limit; the chat list tests use the documented
+  512 KB / 50 runs with 25 warm-up runs (the earlier 1024 KB / 30 runs / 5 warm-up was 3.4 times looser and counted JIT growth as
+  noise it could not tell from a leak); the folder switch cannot dispose a list (the kit keeps a slide per key), so a second test
+  remounts the list (Settings -> Archive -> chats drops the main screen and mounts a new `ChatFolders` with its rows) 50 times.
+  `docs/quality-gates.md` is aligned.
+
+### Long tasks against telegram-tt (`pnpm perf:compare --scenario scroll|folders`, CPU x4, 5 runs, this machine under load ~5)
+
+| Scenario                                | metric              |       this app |          telegram-tt |
+| --------------------------------------- | ------------------- | -------------: | -------------------: |
+| scroll the 1200-chat list to the bottom | longest long task   | 82 ms (76-102) | **104 ms (102-107)** |
+|                                         | long tasks          |             41 |                    4 |
+|                                         | long tasks, total   |        2370 ms |               266 ms |
+|                                         | total blocking time |         354 ms |                66 ms |
+|                                         | script              |        2208 ms |              1797 ms |
+|                                         | frames dropped      |            102 |                   58 |
+| 10 folder switches                      | longest long task   |  85 ms (80-92) |        51 ms (50-65) |
+|                                         | long tasks          |              4 |                    1 |
+|                                         | script              |         586 ms |               409 ms |
+
+The scroll gate is tt's worst task, 107 ms (it was an arbitrary 100). The numbers say what is behind it: this app has the same worst
+task as tt but ten times as many long tasks while scrolling (each page-in of ~30 rows costs 50-80 ms at 4x, tt's mostly stays under
+50 ms; script 1.23x), and mounting a folder's list is 1.7x tt's longest task. Both are gaps to work on (the per-row cost of `Chat`:
+its mapper memo alone has ~58 dependencies, `useChatListEntry`, the avatar), not hidden: the first mount of a folder list has its own test with a
+100 ms cap (this app's measured worst plus a margin), so it cannot get worse.
 
 ## Remaining stubs
 
@@ -169,8 +327,8 @@ entities / custom emoji is plain), `renderMessageText`, `PaymentModal`, `util/no
 (`foldersPosition: left` shows no sidebar).
 
 Known gaps: the Archive row opens a stub (`ArchivedChats`); a tab's `TabList` context menu items work, the folder modals do not;
-the first switch to a folder takes ~70 ms at 4x throttling (mounting its list); scrolling slides the window by 25-30 rows at once
-(60-95 ms at 4x, mostly the browser's style/layout of the new rows); the context-menu leak check grows ~3 KB per cycle;
+the first switch to a folder takes 70-90 ms at 4x throttling (mounting its list, tt: 51-65 ms) and scrolling has ten times tt's number
+of long tasks (see the fix round);
 `localization`: the mocked build has no language pack, so labels such as the weekday of the last message time show their keys
 (identically in tt).
 
