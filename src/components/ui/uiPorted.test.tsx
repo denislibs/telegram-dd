@@ -13,6 +13,7 @@ import { INITIAL_GLOBAL_STATE } from '../../global/initialState';
 import Button from './Button';
 import DropdownMenu from './DropdownMenu';
 import InputText from './InputText';
+import Loading from './Loading';
 import Menu from './Menu';
 import MenuItem from './MenuItem';
 import Modal from './Modal';
@@ -37,7 +38,7 @@ const portalsHost = () => {
 
 beforeEach(() => {
   violations.length = 0;
-  delegateEvents(['click', 'input', 'mousedown', 'keydown']);
+  delegateEvents(['click', 'input', 'mousedown', 'mouseup', 'contextmenu', 'transitionend', 'keydown']);
   enableStrict();
   setHandler((error) => violations.push(`${error.kind} ${error.detail} [${error.phase}]`));
 });
@@ -398,5 +399,61 @@ it('RoundTimer: one step per second, onEnd once when the time is up (the effect 
   await flushMicrotasks();
   flushSync();
   expect(onEnd).toHaveBeenCalledTimes(1);
+  dispose();
+});
+
+it('handlers that the parent adds after the first render are called (frameact binds a prop handler once)', async () => {
+  const el = host();
+  const [handlers, setHandlers] = createSignal<Record<string, () => void>>({});
+  const dispose = render(
+    () => (
+      <>
+        <Loading onClick={handlers().loading} />
+        <MenuItem onContextMenu={handlers().menuItemContext}>Item</MenuItem>
+        <Button
+          onContextMenu={handlers().buttonContext}
+          onMouseUp={handlers().buttonMouseUp}
+          onTransitionEnd={handlers().buttonTransitionEnd}
+          onFileHoverOpen={handlers().buttonFileHoverOpen}
+        >
+          B
+        </Button>
+      </>
+    ),
+    el,
+  );
+  await flushMicrotasks();
+  await frame();
+  const calls: string[] = [];
+  const named = (name: string) => () => calls.push(name);
+  setHandlers({
+    loading: named('loading'),
+    menuItemContext: named('menuItemContext'),
+    buttonContext: named('buttonContext'),
+    buttonMouseUp: named('buttonMouseUp'),
+    buttonTransitionEnd: named('buttonTransitionEnd'),
+    buttonFileHoverOpen: named('buttonFileHoverOpen'),
+  });
+  flushSync();
+
+  const fire = (target: Element, event: Event) => target.dispatchEvent(event);
+  fire(el.querySelector('.Loading')!, new MouseEvent('click', { bubbles: true }));
+  fire(el.querySelector('.MenuItem')!, new MouseEvent('contextmenu', { bubbles: true }));
+  const button = el.querySelector('button.Button')!;
+  fire(button, new MouseEvent('contextmenu', { bubbles: true }));
+  fire(button, new MouseEvent('mouseup', { bubbles: true }));
+  fire(button, new Event('transitionend', { bubbles: true }));
+  fire(button, new CustomEvent('filehoveropen', { bubbles: true }));
+
+  expect(calls.sort()).toEqual(
+    [
+      'buttonContext',
+      'buttonFileHoverOpen',
+      'buttonMouseUp',
+      'buttonTransitionEnd',
+      'loading',
+      'menuItemContext',
+    ].sort(),
+  );
   dispose();
 });

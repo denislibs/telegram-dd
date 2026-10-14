@@ -105,7 +105,7 @@ const DropdownMenu = (rawProps: OwnProps) => {
       ref={triggerRef}
       class={`DropdownMenu ${props.className || ''}`}
       onKeyDown={handleKeyDown}
-      onTransitionEnd={props.onTransitionEnd}
+      onTransitionEnd={() => props.onTransitionEnd?.()}
     >
       <Dynamic component={triggerComponent()} onTrigger={toggleIsOpen} isOpen={isOpen()} />
 

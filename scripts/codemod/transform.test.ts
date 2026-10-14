@@ -391,6 +391,20 @@ describe('derived values and early returns', () => {
   });
 });
 
+describe('forwardedHandlers', () => {
+  it('a handler forwarded from props to an element calls through the prop; components and body functions stay', () => {
+    const { code } = run(
+      `const X = (props: { onClick?: () => void; onOpen?: () => void }) => {
+  const handleOpen = () => {};
+  return <div onClick={props.onClick} onMouseDown={handleOpen}><Child onOpen={props.onOpen} /></div>;
+};`,
+      ['forwardedHandlers'],
+    );
+    expectIncludes(code, '<div onClick={(e) => props.onClick?.(e)} onMouseDown={handleOpen}>');
+    expectIncludes(code, '<Child onOpen={props.onOpen} />');
+  });
+});
+
 describe('effectDeps', () => {
   it('an effect compute that returns an array compares by value; a single value and a wrapped compute stay', () => {
     const { code } = run(

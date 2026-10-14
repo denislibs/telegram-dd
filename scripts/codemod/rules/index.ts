@@ -11,6 +11,7 @@ import { derivedHooksRule } from './derivedHooks.ts';
 import { earlyReturnRule } from './earlyReturn.ts';
 import { effectDepsRule } from './effectDeps.ts';
 import { effectsRule } from './effects.ts';
+import { forwardedHandlersRule } from './forwardedHandlers.ts';
 import { hooksRule } from './hooks.ts';
 import { importsRule } from './imports.ts';
 import { inputEventsRule } from './inputEvents.ts';
@@ -47,6 +48,7 @@ export const RULES: Rule[] = [
   trackGlobalRule,
   earlyReturnRule,
   jsxRule,
+  forwardedHandlersRule,
   inputEventsRule,
   attributesRule,
   importsRule,
