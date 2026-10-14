@@ -20,6 +20,7 @@ import { getDek, writeGlobalsVaultForSlot } from '../util/passcode';
 import { addChats, replaceChatListIds, updateChatLastMessageId } from './reducers/chats';
 import { addMessages, updateMessageStore } from './reducers/messages';
 import { updateUsers } from './reducers/users';
+import { buildBenchGlobal, medianMs } from './store/benchState';
 import { clearCaching, loadCache, serializeGlobal, setupCaching } from './cache';
 import { getGlobal, setGlobal, useGlobal } from './index';
 import { INITIAL_GLOBAL_STATE, INITIAL_TAB_STATE } from './initialState';
@@ -176,60 +177,12 @@ describe('cache.ts on the store: the real round trip', () => {
 // objects, so the number is tt's, not the store's. Skipped otherwise.
 describe.skipIf(!process.env.BENCH_CACHE)('reduceGlobal on the §4 bench state', () => {
   it('prints the median cost', () => {
-    const chats: Record<string, ApiChat> = {};
-    const users: Record<string, ApiUser> = {};
-    const lastMessageIds: Record<string, number> = {};
-    const byChatId: GlobalState['messages']['byChatId'] = {};
-    for (let i = 0; i < 2000; i++) {
-      chats[String(1000 + i)] = chat(String(1000 + i), { unreadCount: i % 7 });
-      lastMessageIds[String(1000 + i)] = 500;
-    }
-    for (let i = 0; i < 5000; i++) users[String(i)] = user(String(i));
-    for (let c = 0; c < 100; c++) {
-      const chatId = String(1000 + c);
-      const byId: Record<number, ApiMessage> = {};
-      const ids: number[] = [];
-      for (let m = 1; m <= 500; m++) {
-        byId[m] = message(chatId, m, `message ${m} of ${chatId}`);
-        ids.push(m);
-      }
-      byChatId[chatId] = {
-        byId,
-        ephemeralById: {},
-        anchoredById: {},
-        summaryById: {},
-        threadsById: { [MAIN_THREAD_ID]: { localState: { listedIds: ids }, readState: {} } },
-      } as never;
-    }
-    const base = seed();
-    setGlobal(
-      {
-        ...base,
-        chats: {
-          ...base.chats,
-          byId: chats,
-          listIds: { active: Object.keys(chats) },
-          lastMessageIds: { all: lastMessageIds },
-        },
-        users: { ...base.users, byId: users },
-        messages: { ...base.messages, byChatId },
-      },
-      { forceOutdated: true },
-    );
+    setGlobal(buildBenchGlobal(), { forceOutdated: true });
 
-    const time = (fn: () => unknown, n = 15) => {
-      const samples: number[] = [];
-      for (let i = 0; i < n; i++) {
-        const start = performance.now();
-        fn();
-        samples.push(performance.now() - start);
-      }
-      return samples.sort((a, b) => a - b)[Math.floor(n / 2)];
-    };
     const serialized = serializeGlobal(getGlobal());
     const reduced = JSON.parse(serialized);
-    const serializeMs = time(() => serializeGlobal(getGlobal()));
-    const stringifyMs = time(() => JSON.stringify(reduced));
+    const serializeMs = medianMs(() => serializeGlobal(getGlobal()));
+    const stringifyMs = medianMs(() => JSON.stringify(reduced));
     // eslint-disable-next-line no-console
     console.info(
       `[bench] serializeGlobal ${serializeMs.toFixed(2)} ms = reduceGlobal ~${(serializeMs - stringifyMs).toFixed(2)} ms` +

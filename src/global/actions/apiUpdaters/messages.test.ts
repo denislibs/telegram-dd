@@ -19,6 +19,7 @@ import { INITIAL_GLOBAL_STATE, INITIAL_TAB_STATE } from '../../initialState';
 import { addChats, replaceChatListIds, updateChatLastMessageId } from '../../reducers/chats';
 import { addMessages, updateMessageStore } from '../../reducers/messages';
 import { selectChat, selectChatLastMessageId, selectListedIds } from '../../selectors';
+import { buildBenchGlobal, medianMs } from '../../store/benchState';
 
 const tabId = getCurrentTabId();
 const actions = getActions();
@@ -109,5 +110,22 @@ describe('apiUpdaters/messages.ts on the store', () => {
     expect(sorted(unwrap(mirror))).toBe(sorted(withoutStamp(getGlobal())));
     expect(sorted(withoutStamp(before))).toBe(beforeJson);
     dispose();
+  });
+});
+
+// `BENCH_STATE=1 pnpm exec vitest run src/global/actions/apiUpdaters/messages.test.ts` prints the cost of tt's real
+// `newMessage` handler + `setGlobal` (the mirror walk) on the section 4 bench state, no subscribers. Skipped otherwise.
+describe.skipIf(!process.env.BENCH_STATE)('real newMessage on the §4 bench state', () => {
+  it('prints the median cost', async () => {
+    setGlobal(buildBenchGlobal(), { forceOutdated: true });
+    await tick();
+    let id = 1000;
+    const ms = medianMs(() => {
+      id++;
+      actions.apiUpdate({ '@type': 'newMessage', id, chatId: '1000', message: message('1000', id, 'bench') });
+    }, 50);
+    // eslint-disable-next-line no-console
+    console.info(`[bench] real apiUpdate newMessage + setGlobal: ${ms.toFixed(2)} ms (2 000 chats, 100 x 500 messages)`);
+    expect(ms).toBeGreaterThan(0);
   });
 });

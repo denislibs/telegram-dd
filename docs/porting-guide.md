@@ -366,6 +366,8 @@ Each step ends with `pnpm check` green and a dev run with a clean stricterdom co
    the console.
 3. **Global/store**: `src/global/types`, `initialState`, `selectors`, `helpers`, `reducers`, `actions/**`, `init.ts`
    (verbatim); `index.ts` is the glue (done). [`plans/2026-10-14-store.md`](plans/2026-10-14-store.md).
+   Done on `port/state` (T1–T5; [`reports/port-state.md`](reports/port-state.md) lists the FOUNDATION STUBs that cut it
+   off from UI code).
 4. **Auth**: `src/components/auth/*`, `src/bundles/auth.ts`, the UI primitives they need (`components/ui`, `Transition`
    adapters), and the styles.
 5. **Chat list**: `src/components/left/main/*` (`ChatList` with `<ManualFor orderKey>`, `Chat`), folders, archive.

@@ -195,8 +195,15 @@ test.use({ strictOptions: { ignoreRequests: [/__invokeMiddlewares__\//], ignoreC
 ```
 
 `DEFAULT_IGNORED_CONSOLE` in `strictMonitor.ts` holds the two entries that are not ours (headless-GPU `GL Driver
-Message`, the vite HMR client). `strictMonitor.spec.ts` is the gate's self-test (uses plain `@playwright/test` on
-purpose): it proves each class of problem is seen.
+Message`, the vite HMR client); `DEFAULT_IGNORED_REQUESTS` the one request every page makes since the entry boots the
+state layer against the MockClient: its optional `__invokeMiddlewares__/<scenario>` probe, which the dev server answers
+with 404 for a scenario without a middleware. `strictMonitor.spec.ts` is the gate's self-test (uses plain
+`@playwright/test` on purpose): it proves each class of problem is seen. Uncaught errors reach the gate as
+`console.error` once the entry imports tt's `handleError` (it `preventDefault()`s them), not as `pageerror`.
+
+`tests/e2e/multitab.spec.ts` is the two-tab test of the state layer: two pages of one context boot the real entry, the
+first becomes the master, the second gets its global through `requestGlobal`; a chat and a tab-state field written in A
+reach B, B posts nothing back, and a write in B reaches A.
 
 Adding a screen: `tests/e2e/<screen>.spec.ts`, `import { expect, test } from './fixtures'`, open the route, exercise it.
 For a screen that needs data open it with the mock (`/#?mockScenario=...`).
