@@ -6,7 +6,7 @@ import { expect, test } from './fixtures';
 // What the auth screens DO (tt's behaviour, line by line): errors on the fields, phone formatting and country detection,
 // the country choice, focus handling, QR refresh, back navigation. The country list is not served by the mocked client,
 // so the test puts it into the global the way the API updates would.
-type TestGlobalWindow = TestWindow & {
+type TestGlobalWindow = Omit<TestWindow, 'getGlobal'> & {
   getGlobal: () => { auth: Record<string, unknown>; countryList: Record<string, unknown> };
   setGlobal: (global: unknown) => void;
 };
