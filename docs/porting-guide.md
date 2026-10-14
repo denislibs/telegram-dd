@@ -70,10 +70,10 @@ here, and its stylesheet, hooks and helpers move next to it under the same names
 | `src/lib/{tlottie,mediaWorker,offscreen-canvas,fasttextweb,latex,ton,vibecalls,diamond,hljs-tl}`, `src/lib/*.js`, `src/lib/color.ts` | same                         | Verbatim. `diamond/index.ts` swaps its teact imports (`getIsHeavyAnimating`, `onFullyIdle`) for `frameact`.                                     |
 | `src/util/`                                                                                                                          | same                         | Verbatim where DOM- and teact-free (most of it). 21 files import teact or fasterdom and are adapted ([§4.5](#45-fasterdom--frame-phases)).      |
 | `src/global/types`, `initialState.ts`, `selectors/`, `helpers/`                                                                      | same                         | Verbatim. Selectors are pure functions and work over the store proxy.                                                                           |
-| `src/global/reducers/`                                                                                                               | same                         | **Adapted**: they become writers ([§3.3](#33-reducers-become-writers)).                                                                         |
-| `src/global/actions/**`                                                                                                              | same                         | **Adapted**: same `addActionHandler` calls; handlers write instead of returning state ([§3.5](#35-worked-example-an-action-handler)).           |
-| `src/global/index.ts`                                                                                                                | same path, **rewritten**     | The store glue: `createStore` + an `addActionHandler` registry over `defineActions` ([§3.2](#32-the-tg-frameact-store)).                        |
-| `src/global/cache.ts`, `src/util/browser/multitab.ts`, `src/global/shared/`                                                          | same                         | **Deferred** ([§3.7](#37-cache-and-multitab)).                                                                                                  |
+| `src/global/reducers/`                                                                                                               | same                         | **Verbatim** ([§3.3](#33-reducers-and-handlers-unchanged)).                                                                                     |
+| `src/global/actions/**`                                                                                                              | same                         | **Verbatim** (imports of `teactn` move to `../global`; [§3.2](#32-the-decision-tts-immutable-layer-over-frameacts-in-place-store)).             |
+| `src/global/index.ts`                                                                                                                | same path, **rewritten**     | The store glue: tt's API over `createStore` + `defineActions` ([`store-architecture.md`](store-architecture.md)).                               |
+| `src/global/cache.ts`, `src/util/browser/multitab.ts`, `src/global/shared/`                                                          | same                         | Verbatim apart from imports; `multitab.ts` 12 lines ([§3.6](#36-cache-and-multitab)).                                                           |
 | `src/components/**`, `src/bundles/`                                                                                                  | same                         | Adapted ([§4](#4-components)).                                                                                                                  |
 | `src/components/ui/{Transition,ShowTransition,InfiniteScroll}.tsx`, `Portal.ts`                                                      | same path, **thin adapters** | Re-export the `src/lib/kit` / `frameact/dom` components and import tt's stylesheet, so call sites keep their imports.                           |
 | `src/hooks/`                                                                                                                         | same                         | A hook with a framework primitive is **deleted**. Any other hook is **ported in place** under the same name ([§4.2](#42-app-specific-mapping)). |
@@ -107,106 +107,29 @@ here, and its stylesheet, hooks and helpers move next to it under the same names
 - Cache: `addCallback` + a throttled serializer into IndexedDB/localStorage. Multitab: the master tab owns the API and
   broadcasts `deepDiff`s of the global over a `BroadcastChannel`.
 
-### 3.2 The tg-frameact store
+### 3.2 The decision: tt's immutable layer over frameact's in-place store
 
-One store, written in place (model B). `src/global/index.ts` keeps tt's exported names so that ported code changes as
-little as possible:
+The full design, the measurements and the codemod contract are in [`store-architecture.md`](store-architecture.md);
+the plan is [`plans/2026-10-14-store.md`](plans/2026-10-14-store.md). The short version:
 
-```ts
-// src/global/index.ts — sketch of the glue; tt's types are kept (`ActionOptions` moves from teactn to ./types)
-import { createStore, defineActions, ungated } from 'frameact/store';
-import { flushSync } from 'frameact';
+- `src/global/index.ts` keeps tt's API: `getGlobal`, `setGlobal`, `getActions`, `getPromiseActions`,
+  `addActionHandler`, `execAfterActions`, `withGlobal`, `addCallback`/`removeCallback`, `ActionOptions`.
+- **Actions, reducers and selectors port byte-identical** (only `lib/teact/teactn` imports move to `../global`).
+  `getGlobal()` is the raw store tree; a reducer spread-copies the path it changes; `setGlobal(next)` walks the copy
+  against the tree, skips every `===` branch and writes the changed leaves in place through frameact's `setState`
+  (`src/global/store/apply.ts`). Nothing is rewritten to `setState` paths by hand; `reconcile`/`produce` are an opt-in
+  for a reducer that a trace shows to be hot.
+- Components read the tracked view: `const props = withGlobal(ownProps, mapStateToProps)` in the body (mapper body
+  unchanged), `useSelector(sel)` returns an accessor, a direct read in JSX uses `useGlobal()`. A read is a leaf
+  subscription: a chat row re-runs for its chat only.
+- `forceOnHeavyAnimation` → the handler's writes run `ungated`; `forceSyncOnIOs` → `ungated` + `flushSync()`;
+  `forceOutdated` and the DEV outdated-global check work as in tt. Cache and multitab port unchanged except their
+  imports and 12 lines in `multitab.ts` (the journal replaces `deepDiff(prev, current)`).
 
-import type {
-  ActionOptions,
-  ActionPayloads,
-  GlobalState,
-  RequiredActionPayloads,
-  RequiredGlobalActions,
-} from './types';
-import { INITIAL_GLOBAL_STATE } from './initialState';
-
-type Payloads = ActionPayloads & RequiredActionPayloads;
-type Handler<N extends keyof Payloads> = (
-  global: GlobalState,
-  actions: RequiredGlobalActions,
-  payload: Payloads[N],
-) => void | Promise<void>;
-
-export const [state, setState] = createStore<GlobalState>(structuredClone(INITIAL_GLOBAL_STATE));
-// The store type is deep-readonly; handlers and selectors keep tt's `GlobalState` signatures (writes through it throw).
-const global = state as unknown as GlobalState;
-
-const handlers: { [N in keyof Payloads]?: Handler<N>[] } = {};
-const actions = {} as RequiredGlobalActions;
-
-export function addActionHandler<N extends keyof Payloads>(name: N, handler: Handler<N>) {
-  const list = handlers[name];
-  if (list) {
-    list.push(handler);
-    return;
-  }
-  handlers[name] = [handler];
-  // One action per name, created at the first registration (late bundles such as `calls.async.ts` register later).
-  Object.assign(
-    actions,
-    defineActions({ [name]: (payload?: Payloads[N], options?: ActionOptions) => run(name, payload, options) }),
-  );
-}
-
-function run<N extends keyof Payloads>(name: N, payload: Payloads[N] | undefined, options?: ActionOptions) {
-  const runAll = () => {
-    const pending: Promise<void>[] = [];
-    for (const handler of handlers[name]!) {
-      const result = handler(global, actions, payload!);
-      if (result instanceof Promise) pending.push(result);
-      else if (import.meta.env.DEV && result !== undefined) {
-        throw new Error(`[global] action "${String(name)}" returned a value: write with setState instead`);
-      }
-    }
-    return pending.length ? Promise.all(pending).then(() => undefined) : undefined;
-  };
-  if (!options?.forceOnHeavyAnimation && !options?.forceSyncOnIOs) return runAll();
-  const result = ungated(runAll); // covers the synchronous writes; an async handler wraps its later writes itself
-  if (options.forceSyncOnIOs) flushSync();
-  return result;
-}
-
-export const getActions = () => actions;
-export const getGlobal = () => global; // a live, read-only view: there is no setGlobal
-export { afterActions as execAfterActions } from 'frameact/store';
-```
-
-- **There is no `setGlobal` and no `withGlobal`.** Every leftover use fails to compile, which makes the compiler your
-  to-do list. In `src/global/types`, change `ActionReturnType` to `void | Promise<void>`. That flags every
-  `return updateX(global, …)` as well.
-- `getActions()` and the call shape `actions.foo({ …payload, tabId })` are unchanged. Destructuring
-  `const { openChat } = getActions();` is fine: actions are stable functions, not props.
-- `global` inside a handler is the live proxy. A read after a write sees the write, so a `global = getGlobal()`
-  re-read after `await` is harmless but no longer needed.
-- **Never put a proxy inside a new object you write or send.** `setState` unwraps the value you pass, but not
-  proxies nested inside it. Copy with `unwrap(x)` (or `snapshot(x)` for a detached deep copy).
-  `structuredClone(proxy)` and `postMessage(proxy)` throw.
-
-### 3.3 Reducers become writers
-
-Each reducer keeps its file, name and parameter list, including the leading `global`, which is now used only for reads.
-It performs path writes and returns `void`. At the call site, delete `global = ` and `return`.
-
-| tt reducer body                                              | Writer body                                                                                           |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `{ ...global, x: value }`                                    | `setState('x', value)`                                                                                |
-| `{ ...global, a: { ...global.a, b: value } }`                | `setState('a', 'b', value)`                                                                           |
-| `updateTabState(global, partial, tabId)` (spreads `byTabId`) | `setState('byTabId', tabId, merge(partial))`                                                          |
-| a partial merge of a chat/user                               | `setState('chats', 'byId', id, merge(chatUpdate))` (a plain object at a path **replaces**)            |
-| deleting a key (`omit(byId, [id])`)                          | `setState('chats', 'byId', id, undefined)`                                                            |
-| a new array (`[...list, item]`, `filter`, `splice` copy)     | `setState(…path, produce((list) => { list.push(item) }))`                                             |
-| a server chunk replacing a list or a `byId` slice            | `setState(…path, reconcile(chunk))` (matched by `id`; rows keep identity, only changed leaves notify) |
-| several fields of one entity                                 | `setState(…path, produce((draft) => { … }))`                                                          |
+### 3.3 Reducers and handlers: unchanged
 
 ```ts
-// src/global/reducers/tabs.ts
-// tt
+// src/global/reducers/tabs.ts — identical to tt
 export function updateTabState<T extends GlobalState>(
   global: T,
   tabStatePartial: Partial<TabState>,
@@ -214,43 +137,21 @@ export function updateTabState<T extends GlobalState>(
 ): T {
   return { ...global, byTabId: { ...global.byTabId, [tabId]: { ...global.byTabId[tabId], ...tabStatePartial } } };
 }
-// tg-frameact
-export function updateTabState<T extends GlobalState>(
-  global: T,
-  tabStatePartial: Partial<TabState>,
-  ...[tabId = getCurrentTabId()]: TabArgs<T>
-): void {
-  setState('byTabId', tabId, merge(tabStatePartial));
-}
 ```
 
-Paths are typed up to 7 keys. For deeper writes, use `produce` at the 7th level.
+`setGlobal(updateTabState(global, { isLeftColumnShown: false }))` writes one leaf (`byTabId.<id>.isLeftColumnShown`);
+the tab object and every proxy of it keep their identity. `addActionHandler('showNotification', (global, actions,
+payload): ActionReturnType => { …; return updateTabState(global, { notifications }, tabId); })` is tt's code.
 
 ### 3.4 Worked example: a connected component
 
-`src/components/common/Notifications.tsx`, tt (the "before" snippets are shown prettier-formatted, as in the import
-commit of [§7.2](#72-per-file-checklist)):
+`src/components/common/Notifications.tsx`, tt:
 
 ```tsx
-import { memo } from '../../lib/teact/teact';
-import { withGlobal } from '../../global';
-
-import type { ApiNotification } from '../../api/types';
-
-import { selectTabState } from '../../global/selectors';
-import { pick } from '../../util/iteratees';
-
-import Notification from '../ui/Notification';
-
-type StateProps = {
-  notifications: ApiNotification[];
-};
-
 const Notifications = ({ notifications }: StateProps) => {
   if (!notifications.length) {
     return undefined;
   }
-
   return (
     <div id="Notifications">
       {notifications.map((notification) => (
@@ -268,21 +169,13 @@ export default memo(
 tg-frameact:
 
 ```tsx
-import { For, Show } from 'frameact/dom';
-import { getGlobal } from '../../global';
-
-import { selectTabState } from '../../global/selectors';
-
-import Notification from '../ui/Notification';
-
-const Notifications = () => {
-  // The old `mapStateToProps` becomes an accessor over the store; each read is a leaf subscription
-  const notifications = () => selectTabState(getGlobal()).notifications;
+const Notifications = (ownProps: AnyLiteral) => {
+  const props = withGlobal(ownProps, (global): Complete<StateProps> => pick(selectTabState(global), ['notifications']));
 
   return (
-    <Show when={notifications().length > 0}>
+    <Show when={props.notifications.length > 0}>
       <div id="Notifications">
-        <For each={notifications()} keyed={(notification) => notification.localId}>
+        <For each={props.notifications} keyed={(notification) => notification.localId}>
           {(notification) => <Notification notification={notification()} />}
         </For>
       </div>
@@ -293,119 +186,38 @@ const Notifications = () => {
 export default Notifications;
 ```
 
-What changed, and the general rule behind each change:
+- The mapper is tt's; `withGlobal` runs it in a memo over the tracked global and merges the result with the own props
+  (own props win, as in tt). `memo(...)` is gone, because a component runs once.
+- State props are read as `props.x` where they are used; a store object in them (`chat`) is a stable proxy and a field
+  read from it (`props.chat.title`) subscribes that binding to that leaf.
+- An early `return undefined` becomes `<Show>`; `.map` with `key` becomes `<For>` (keyed by `localId` here, because
+  notifications are replaced as a whole array; rows that are store entities edited in place use the default
+  by-reference mode).
+- `OwnProps` stay: `(props: OwnProps)`, read as `props.userId`, never destructured. The ported
+  `src/components/middle/MessageListHistoryHandler.tsx` is the reference example (tab state, `For`, `getActions`).
 
-- `withGlobal` + `StateProps` + `Complete<…>` are gone. Each state prop becomes an accessor
-  (`const x = () => selectX(getGlobal(), props.id)`) or a direct read in JSX. If the mapping computes a list,
-  wrap it in `createMemo`.
-- `memo(...)` is gone, because a component runs once.
-- An early `return undefined` becomes `<Show>`, because the body runs once.
-- `.map` with `key={x.id}` becomes `<For keyed={(x) => x.id}>`. In that mode the child receives an **accessor**
-  (`notification()`), which is the closest match to teact's keyed reconciliation. Use plain `<For each>` (keyed by
-  reference) when rows are store proxies that are only edited in place.
-- `OwnProps` stay: `(props: OwnProps)`, read as `props.userId`, never destructured.
+### 3.5 Selectors, identity and heavy animations
 
-### 3.5 Worked example: an action handler
+- **Selectors port verbatim.** Called from a handler they get the raw tree; called from a component (through
+  `withGlobal`/`useSelector`/`useGlobal()`) they get the proxy and track exactly what they read. Keep them pure.
+- **Identity no longer means change** (framework §5.3): `useMemo(…, [chatsById])`, `memoized(selector)` over store
+  objects and `prevGlobal.chats.byId !== global.chats.byId` checks are stale forever. In components use
+  `createMemo(() => selector(useGlobal(), …))`; in `addCallback` consumers (`folderManager`) read the `diff` argument
+  (tt's `deepDiff` format: `Object.keys(diff.chats.byId)` are the changed chats). The plan lists every site.
+- **A local variable holding a state object is live.** `const chat = selectChat(global, id)` kept across an `await`
+  sees later writes (tt's copy was frozen in time). Use `structuredClone`/`snapshot` when the old value matters.
+- Heavy animations: `actions.x(payload, { forceOnHeavyAnimation: true })` and `forceOnHeavyAnimationOnce()` work as in
+  tt; an **async** handler that must write during an animation after an `await` wraps that `setGlobal` in
+  `ungated(() => …)`. A component read that must update while its subtree animates → `live(() => …)`.
+  `getIsHeavyAnimating()` and `onFullyIdle()` keep their names (from `frameact`).
 
-`src/global/actions/ui/initial.ts`, tt:
+### 3.6 Cache and multitab
 
-```ts
-addActionHandler('showNotification', (global, actions, payload): ActionReturnType => {
-  const { tabId = getCurrentTabId(), ...notification } = payload;
-  const hasLocalId = notification.localId;
-  notification.localId ||= generateUniqueId();
-
-  const newNotifications = [...selectTabState(global, tabId).notifications];
-  const existingNotificationIndex = newNotifications.findIndex((n) =>
-    hasLocalId ? n.localId === notification.localId : n.message === notification.message,
-  );
-  if (existingNotificationIndex !== -1) {
-    newNotifications.splice(existingNotificationIndex, 1);
-  }
-
-  newNotifications.push(notification as ApiNotification);
-
-  return updateTabState(
-    global,
-    {
-      notifications: newNotifications,
-    },
-    tabId,
-  );
-});
-```
-
-tg-frameact:
-
-```ts
-addActionHandler('showNotification', (global, actions, payload): ActionReturnType => {
-  const { tabId = getCurrentTabId(), ...notification } = payload;
-  const hasLocalId = notification.localId;
-  notification.localId ||= generateUniqueId();
-
-  setState(
-    'byTabId',
-    tabId,
-    'notifications',
-    produce((notifications) => {
-      const existingNotificationIndex = notifications.findIndex((n) =>
-        hasLocalId ? n.localId === notification.localId : n.message === notification.message,
-      );
-      if (existingNotificationIndex !== -1) {
-        notifications.splice(existingNotificationIndex, 1);
-      }
-
-      notifications.push(notification as ApiNotification);
-    }),
-  );
-});
-```
-
-An alternative with an even smaller diff: keep the copied array and call the writer,
-`updateTabState(global, { notifications: newNotifications }, tabId);`. The list is then replaced as a whole. With
-`keyed={(n) => n.localId}` in the component, rows survive the replacement. Prefer `produce` on hot paths, and the writer
-where the diff matters more.
-
-Async handlers keep their shape. `const result = await callApi(…)` stays, the `global = getGlobal(); global = {…};
-setGlobal(global)` tail becomes path writes, and a handler that ran under `forceOnHeavyAnimation` wraps its post-`await`
-writes in `ungated(() => …)`:
-
-```ts
-addActionHandler('loadAvailableReactions', async (global): Promise<void> => {
-  const result = await callApi('fetchAvailableReactions');
-  if (!result) return;
-  // … preload animations, unchanged …
-  setState('reactions', 'availableReactions', reconcile(result, { key: 'reaction' }));
-});
-```
-
-Before you write a `reconcile`, check the key of the items: the default is `id`, and `key: null` matches by index.
-
-### 3.6 Selectors, identity and heavy animations
-
-- **Selectors port verbatim.** `selectChat(global, id)` over the proxy tracks exactly what it reads. Keep them pure.
-- **Identity caches go stale** (framework §5.3), because the same object is mutated in place. Delete
-  `src/util/memoized.ts`-style caches over store objects, `useMemo(…, [chatsById])` identity dependencies and
-  `areShallowEqual` guards on state. Replace them with `createMemo(() => selector(getGlobal(), …))`.
-- **A local variable holding a state object is live.** Code that kept `const chat = selectChat(global, id)` across an
-  `await` and expected a snapshot now sees later writes. Use `snapshot(chat)` when you really need the old value.
-- Heavy animations:
-  - `setGlobal(g, { forceOnHeavyAnimation: true })` and `forceOnHeavyAnimationOnce()` → `ungated(() => setState(…))`.
-  - `forceSyncOnIOs` → `ungated(…)` followed by `flushSync()`.
-  - A component read that must update while its subtree animates → `live(() => getGlobal().x)`.
-  - `getIsHeavyAnimating()` and `onFullyIdle()` keep their names (from `frameact`). They look at `rootScope`, so pass
-    `scope={rootScope}` to a `<Transition>` whose animation must pause lottie/video like tt does.
-
-### 3.7 Cache and multitab
-
-- **Cache: deferred to the milestone after the chat list.** `addCallback` has no equivalent yet (no store change feed).
-  The planned interim keeps `src/global/cache.ts` with `serializeGlobal` and `migrateCache` unchanged, and replaces its
-  trigger: after every action cascade, `afterActions(() => updateCacheThrottled())` from the registry's `run`. The
-  throttled save itself runs in `onFullyIdle` and serializes `unwrap(state)` through tt's reducer of cached sections.
-  All writes go through actions, so this misses nothing.
-- **Multitab: deferred.** For the first milestones every tab is the master tab and owns its API connection.
-  `deepDiff` broadcasting needs a change feed (or snapshots, which cost O(n) per write). That feed is an engine concern,
-  so it is proposed clean-room in frameact first (`onStoreWrite` / a patch journal, see framework §5.5).
+- **Cache**: `src/global/cache.ts` ports unchanged except two imports (`addCallback` from `./index`, `onFullyIdle` /
+  `getIsHeavyAnimating` from `frameact`). It serialises `reduceGlobal(getGlobal())` — plain objects, nothing to unwrap.
+- **Multitab**: `src/util/browser/multitab.ts` is ported (12 changed lines): the store callbacks hand it the journal
+  diff of each tick (`globalDiffUpdate`, one message per callback run), a received global is applied with
+  `setGlobal(global, { fromRemote: true })` so it is not echoed back. `establishMultitabRole.ts` is verbatim.
 
 ## 4. Components
 
@@ -545,8 +357,8 @@ Each step ends with `pnpm check` green and a dev run with a clean stricterdom co
    `src/config.ts`, `src/types`, `src/@types`, DOM-free `src/util`.
 2. **GramJS + API**: `src/lib/gramjs`, `src/api` (verbatim, plus the `connector.ts` unwrap). Smoke-test `callApi` from
    the console.
-3. **Global/store**: `src/global/types`, `initialState`, `selectors`, `helpers` (verbatim); `index.ts` (the glue);
-   `reducers` (writers); `actions/**`; `init.ts`. Use the compiler errors as the checklist.
+3. **Global/store**: `src/global/types`, `initialState`, `selectors`, `helpers`, `reducers`, `actions/**`, `init.ts`
+   (verbatim); `index.ts` is the glue (done). [`plans/2026-10-14-store.md`](plans/2026-10-14-store.md).
 4. **Auth**: `src/components/auth/*`, `src/bundles/auth.ts`, the UI primitives they need (`components/ui`, `Transition`
    adapters), and the styles.
 5. **Chat list**: `src/components/left/main/*` (`ChatList` with `<ManualFor orderKey>`, `Chat`), folders, archive.
@@ -571,11 +383,11 @@ repository and `LICENSE`.
 2. **Adapt imports**: `@teact` / `lib/teact/*` → `frameact`, `frameact/dom`; `components/ui/Transition`, `ShowTransition`, `InfiniteScroll`, `hooks/useShowTransition` → `src/lib/kit`; `lib/fasterdom/*` →
    `frameact` / `frameact/stricterdom`; delete imports of removed hooks.
 3. **Replace teact APIs**:
-   - Signature to `(props)`; remove `memo` and `withGlobal`; turn state props into accessors (§3.4).
+   - Signature to `(ownProps)`; remove `memo`; `withGlobal(mapper)(Comp)` → `const props = withGlobal(ownProps, mapper)` (§3.4).
    - Hooks to primitives (framework §1, §4.2 here); conditional returns and `.map` to `<Show>` / `<For>`.
    - Refs (§4.3); `className` → `class`.
    - Effects split by phase (§4.5).
-   - Identity memos to `createMemo` (§3.6); reducers and handlers to writes (§3.3–3.5).
+   - Identity memos to `createMemo` (§3.5); reducers and handlers stay as they are (§3.3).
 4. **`pnpm check`**: oxlint, prettier, tsc, the script gates (diff against the reference, tt unit tests, licenses),
    the build and the bundle budgets, with zero warnings. If `gates:diff` fails, shrink the diff (port, don't rewrite)
    or allowlist the file with a reason; if `gates:tests` fails, copy the tt test next to the code. Both are described
