@@ -1,3 +1,5 @@
+import { requestMeasure, requestMutation } from 'frameact';
+
 import type { EmojiFitzModifier } from '../../util/emoji/skinTone';
 
 import { animate } from '../../util/animation';
@@ -11,7 +13,6 @@ import generateUniqueId from '../../util/generateUniqueId';
 import { handleError } from '../../util/handleError';
 import launchMediaWorkers, { MAX_WORKERS } from '../../util/launchMediaWorkers';
 import { type Color, convertColor } from '../color';
-import { requestMeasure, requestMutation } from '../fasterdom/fasterdom';
 
 interface Params {
   size: number;

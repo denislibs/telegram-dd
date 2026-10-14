@@ -1,7 +1,6 @@
 import { createSignal, onMount } from 'frameact';
 
 import { createCallbackManager } from '../../util/callbacks';
-import useEffectOnce from '../useEffectOnce';
 
 const callbacks = createCallbackManager();
 

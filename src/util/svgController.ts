@@ -1,6 +1,6 @@
+import { requestMutation } from 'frameact';
+
 import { SVG_NAMESPACE } from '../config';
-import { requestMutation } from '../lib/fasterdom/fasterdom';
-import jsxToHtml from './element/jsxToHtml';
 import generateUniqueId from './generateUniqueId';
 
 const DEFINITION_MAP = new Map<string, Element>();
@@ -28,13 +28,13 @@ function appendElement(element: Element) {
   });
 }
 
-export function addSvgDefinition(element: React.JSX.Element, id?: string) {
+// Deviation: frameact JSX is a DOM element already, so the element is taken as it is and its `id` is set on the node.
+export function addSvgDefinition(element: Element, id?: string) {
   id ??= generateUniqueId();
-  element.props.id = id;
+  element.id = id;
 
-  const htmlElement = jsxToHtml(element)[0];
-  DEFINITION_MAP.set(element.props.id, htmlElement);
-  appendElement(htmlElement);
+  DEFINITION_MAP.set(id, element);
+  appendElement(element);
   return id;
 }
 

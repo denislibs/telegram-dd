@@ -1,8 +1,6 @@
-import { createMemo } from 'frameact';
-
 import { debounce } from '../util/schedulers';
 
-// TODO(codemod): useDebouncedCallback: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: `fn` reads accessors when called, so it is never stale: `deps` is ignored (kept for call sites).
 export default function useDebouncedCallback<T extends AnyToVoidFunction>(
   fn: T,
   deps: any[],
@@ -10,10 +8,5 @@ export default function useDebouncedCallback<T extends AnyToVoidFunction>(
   noFirst = false,
   noLast = false,
 ) {
-  // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps
-  const fnMemo = fn;
-
-  return createMemo(() => {
-    return debounce(fnMemo, ms, !noFirst, !noLast);
-  });
+  return debounce(fn, ms, !noFirst, !noLast);
 }

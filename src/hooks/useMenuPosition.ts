@@ -1,9 +1,9 @@
-import { createMutationEffect, requestForcedReflow } from 'frameact';
+import { createEffect, frameMutation, requestForcedReflow } from 'frameact';
 import { addExtraClass, removeExtraClass, setExtraStyles } from 'frameact/dom';
 
 import type { IAnchorPosition } from '../types';
 
-import { useStateRef } from './useStateRef';
+import { type MaybeAccessor, read } from '../util/accessors';
 
 interface StaticPositionOptions {
   anchor?: IAnchorPosition;
@@ -47,22 +47,19 @@ const EMPTY_RECT = {
   top: 0,
 };
 
-// TODO(codemod): useMenuPosition: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: scheduled in the mutate phase, as a mutation effect would apply at creation, before the refs are set.
 export default function useMenuPosition(
-  isOpen: boolean,
-  containerRef: (el: HTMLDivElement) => void,
-  bubbleRef: (el: HTMLDivElement) => void,
-  options: MenuPositionOptions,
+  isOpen: MaybeAccessor<boolean>,
+  containerRef: MaybeAccessor<HTMLDivElement | undefined>,
+  bubbleRef: MaybeAccessor<HTMLDivElement | undefined>,
+  options: MaybeAccessor<MenuPositionOptions>,
 ) {
-  // TODO(codemod): useStateRef: a handler reads the current value through the accessor; replace ref.current with the accessor call
-  const optionsRef = useStateRef(options);
+  createEffect(
+    () => read(isOpen),
+    (isOpen2) => {
+      if (!isOpen2) return;
 
-  createMutationEffect(
-    () => [isOpen, containerRef, bubbleRef, optionsRef],
-    () => {
-      if (!isOpen) return;
-
-      const options2 = optionsRef.current;
+      const options2 = read(options);
 
       if (!('getTriggerElement' in options2)) {
         applyStaticOptions(containerRef, bubbleRef, options2);
@@ -76,12 +73,13 @@ export default function useMenuPosition(
         });
       }
     },
+    frameMutation,
   );
 }
 
 function applyStaticOptions(
-  containerRef: (el: HTMLDivElement) => void,
-  bubbleRef: (el: HTMLDivElement) => void,
+  containerRef: MaybeAccessor<HTMLDivElement | undefined>,
+  bubbleRef: MaybeAccessor<HTMLDivElement | undefined>,
   {
     positionX = 'left',
     positionY = 'top',
@@ -91,8 +89,8 @@ function applyStaticOptions(
     bubbleStyle,
   }: StaticPositionOptions,
 ) {
-  const containerEl = containerRef.current!;
-  const bubbleEl = bubbleRef.current!;
+  const containerEl = read(containerRef)!;
+  const bubbleEl = read(bubbleRef)!;
 
   if (style) {
     containerEl.style.cssText = style;
@@ -121,8 +119,8 @@ function applyStaticOptions(
 }
 
 function processDynamically(
-  containerRef: (el: HTMLDivElement) => void,
-  bubbleRef: (el: HTMLDivElement) => void,
+  containerRef: MaybeAccessor<HTMLDivElement | undefined>,
+  bubbleRef: MaybeAccessor<HTMLDivElement | undefined>,
   {
     anchor,
     positionY: requestedPositionY,

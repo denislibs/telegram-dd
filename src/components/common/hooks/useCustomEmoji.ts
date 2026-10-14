@@ -5,42 +5,43 @@ import type { ApiSticker } from '../../../api/types';
 import type { GlobalState } from '../../../global/types';
 
 import { selectCanPlayAnimatedEmojis, selectCustomEmoji } from '../../../global/selectors';
+import { type MaybeAccessor, read } from '../../../util/accessors';
 import { addCustomEmojiCallback, removeCustomEmojiCallback } from '../../../util/emoji/customEmojiManager';
 import ensureCustomEmoji from '../../../util/emoji/ensureCustomEmoji';
 
-// TODO(codemod): useCustomEmoji: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function useCustomEmoji(documentId?: string) {
+export default function useCustomEmoji(documentId?: MaybeAccessor<string | undefined>) {
   const [customEmoji, setCustomEmoji] = createSignal<ApiSticker | undefined>(
-    (() => (documentId ? selectCustomEmoji(getGlobal(), documentId) : undefined))(),
+    read(documentId) ? selectCustomEmoji(getGlobal(), read(documentId)!) : undefined,
   );
-  const [canPlay, setCanPlay] = createSignal((() => selectCanPlayAnimatedEmojis(getGlobal()))());
+  const [canPlay, setCanPlay] = createSignal(selectCanPlayAnimatedEmojis(getGlobal()));
 
   const handleGlobalChange = (customEmojis?: GlobalState['customEmojis']) => {
-    if (!documentId) return;
+    const documentId2 = read(documentId);
+    if (!documentId2) return;
 
     const newGlobal = getGlobal();
-    setCustomEmoji((customEmojis ?? newGlobal.customEmojis).byId[documentId]);
+    setCustomEmoji((customEmojis ?? newGlobal.customEmojis).byId[documentId2]);
     setCanPlay(selectCanPlayAnimatedEmojis(newGlobal));
   };
 
   createEffect(
-    () => documentId,
-    () => {
-      ensureCustomEmoji(documentId);
+    () => read(documentId),
+    (documentId2) => {
+      ensureCustomEmoji(documentId2);
     },
   );
 
   createEffect(
-    () => documentId,
+    () => read(documentId),
     () => handleGlobalChange(),
   );
 
   createEffect(
-    () => documentId,
-    () => {
-      if (!documentId) return undefined;
+    () => read(documentId),
+    (documentId2) => {
+      if (!documentId2) return undefined;
 
-      addCustomEmojiCallback(handleGlobalChange, documentId);
+      addCustomEmojiCallback(handleGlobalChange, documentId2);
 
       return () => {
         removeCustomEmojiCallback(handleGlobalChange);

@@ -1,11 +1,10 @@
-import { createEffect, createSignal, watchHeavyAnimation } from 'frameact';
+import { type Accessor, createEffect, createSignal, watchHeavyAnimation } from 'frameact';
 
 import type { Scheduler } from '../util/schedulers';
 
+import { type MaybeAccessor, read } from '../util/accessors';
 import { type CallbackManager, createCallbackManager } from '../util/callbacks';
 import { debounce, throttle, throttleWith } from '../util/schedulers';
-import useHeavyAnimation from './useHeavyAnimation';
-import useLastCallback from './useLastCallback';
 
 type TargetCallback = (entry: IntersectionObserverEntry) => void;
 type RootCallback = (entries: IntersectionObserverEntry[]) => void;
@@ -25,7 +24,7 @@ interface Response {
   unfreeze: NoneToVoidFunction;
 }
 
-// TODO(codemod): useIntersectionObserver: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: `rootRef` is an accessor of the root element (read when the observer is created).
 export function useIntersectionObserver(
   {
     rootRef,
@@ -37,23 +36,20 @@ export function useIntersectionObserver(
     threshold,
     isDisabled,
   }: {
-    rootRef: (el: HTMLDivElement) => void;
+    rootRef: MaybeAccessor<HTMLElement | undefined>;
     throttleMs?: number;
     throttleScheduler?: Scheduler;
     debounceMs?: number;
     shouldSkipFirst?: boolean;
     margin?: number | string;
     threshold?: number | number[];
-    isDisabled?: boolean;
+    isDisabled?: MaybeAccessor<boolean | undefined>;
   },
   rootCallback?: RootCallback,
 ): Response {
   let controllerRef: IntersectionController | undefined;
-  let rootCallbackRef: RootCallback | undefined;
   let freezeFlagsRef = 0;
   let onUnfreezeRef: NoneToVoidFunction | undefined;
-
-  rootCallbackRef = rootCallback;
 
   const freeze = () => {
     freezeFlagsRef++;
@@ -75,9 +71,9 @@ export function useIntersectionObserver(
   watchHeavyAnimation(freeze, unfreeze);
 
   createEffect(
-    () => isDisabled,
-    () => {
-      if (isDisabled) {
+    () => read(isDisabled),
+    (isDisabled2) => {
+      if (isDisabled2) {
         return undefined;
       }
 
@@ -119,8 +115,8 @@ export function useIntersectionObserver(
         callbackManager?.runCallbacks(entry);
       });
 
-      if (rootCallbackRef) {
-        rootCallbackRef(entries);
+      if (rootCallback) {
+        rootCallback(entries);
       }
 
       entriesAccumulator.clear();
@@ -158,7 +154,7 @@ export function useIntersectionObserver(
         }
       },
       {
-        root: rootRef.current,
+        root: read(rootRef),
         rootMargin: typeof margin === 'number' ? `${margin}px` : margin,
         threshold,
       },
@@ -178,7 +174,7 @@ export function useIntersectionObserver(
     };
   }
 
-  const observe = (target, targetCallback) => {
+  const observe: ObserveFn = (target, targetCallback) => {
     if (!controllerRef) {
       initController();
     }
@@ -202,29 +198,26 @@ export function useIntersectionObserver(
   return { observe, freeze, unfreeze };
 }
 
-// TODO(codemod): useOnIntersect: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: `observe` is an accessor (a function cannot be a `MaybeAccessor`).
 export function useOnIntersect(
-  targetRef: (el: HTMLDivElement) => void,
-  observe?: ObserveFn,
+  targetRef: MaybeAccessor<HTMLElement | undefined>,
+  observe?: Accessor<ObserveFn | undefined>,
   callback?: TargetCallback,
 ) {
-  const lastCallback = callback;
-
   createEffect(
-    () => [lastCallback, observe, targetRef],
-    () => {
-      return observe ? observe(targetRef.current!, lastCallback) : undefined;
+    () => observe?.(),
+    (observe2) => {
+      return observe2 ? observe2(read(targetRef)!, callback) : undefined;
     },
   );
 }
 
-// TODO(codemod): useIsIntersecting: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export function useIsIntersecting(
-  targetRef: (el: HTMLDivElement) => void,
-  observe?: ObserveFn,
+  targetRef: MaybeAccessor<HTMLElement | undefined>,
+  observe?: Accessor<ObserveFn | undefined>,
   callback?: TargetCallback,
 ) {
-  const [isIntersecting, setIsIntersecting] = createSignal(!observe);
+  const [isIntersecting, setIsIntersecting] = createSignal(!observe?.());
 
   useOnIntersect(targetRef, observe, (entry) => {
     setIsIntersecting(entry.isIntersecting);

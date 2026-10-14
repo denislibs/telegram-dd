@@ -1,6 +1,6 @@
-import { addExtraClass } from '../../lib/teact/teact-dom';
+import { requestMutation } from 'frameact';
+import { addExtraClass } from 'frameact/dom';
 
-import { requestMutation } from '../../lib/fasterdom/fasterdom';
 import { removeVS16s } from '../../lib/twemojiRegex';
 import withCache from '../withCache';
 

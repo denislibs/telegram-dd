@@ -1,10 +1,11 @@
-import { createMemo } from 'frameact';
-import { mergeProps } from 'frameact/dom';
-import { getGlobal } from '../../global';
-import { createMediaTransition } from '../../lib/kit';
+import { type Accessor, createMemo, createSignal, getIsHeavyAnimating, onMount } from 'frameact';
+import { mergeProps, Show } from 'frameact/dom';
+import { useGlobal } from '../../global';
 
 import type { ApiSticker } from '../../api/types';
+import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 
+import { createMediaTransition } from '../../lib/kit';
 import { getStickerMediaHash } from '../../global/helpers';
 import { selectIsAlwaysHighPriorityEmoji } from '../../global/selectors';
 import { IS_ANDROID, IS_IOS, IS_WEBM_SUPPORTED } from '../../util/browser/windowEnvironment';
@@ -17,7 +18,6 @@ import useCoordsInSharedCanvas from '../../hooks/useCoordsInSharedCanvas';
 import useFlag from '../../hooks/useFlag';
 import { useIsIntersecting } from '../../hooks/useIntersectionObserver';
 import useMedia from '../../hooks/useMedia';
-import useMountAfterHeavyAnimation from '../../hooks/useMountAfterHeavyAnimation';
 import useUniqueId from '../../hooks/useUniqueId';
 import useDevicePixelRatio from '../../hooks/window/useDevicePixelRatio';
 
@@ -27,7 +27,7 @@ import AnimatedSticker from './AnimatedSticker';
 import styles from './StickerView.module.scss';
 
 type OwnProps = {
-  containerRef: (el: HTMLDivElement) => void;
+  containerRef: Accessor<HTMLDivElement | undefined>;
   sticker: ApiSticker;
   thumbClassName?: string;
   fullMediaHash?: string;
@@ -48,7 +48,7 @@ type OwnProps = {
   forceAnimatedStickerOnEnd?: boolean;
   noVideoOnMobile?: boolean;
   withSharedAnimation?: boolean;
-  sharedCanvasRef?: (el: HTMLCanvasElement) => void;
+  sharedCanvasRef?: Accessor<HTMLCanvasElement | undefined>;
   withTranslucentThumb?: boolean; // With shared canvas thumbs are opaque by default to provide better transition effect
   onVideoEnded?: AnyToVoidFunction;
   onAnimatedStickerLoop?: AnyToVoidFunction;
@@ -62,11 +62,10 @@ const STICKER_SIZE = 24;
 const StickerView = (rawProps: OwnProps) => {
   const props = mergeProps({ size: STICKER_SIZE, shouldLoop: false }, rawProps) as OwnProps &
     Required<Pick<OwnProps, 'size' | 'shouldLoop'>>;
-  const source = createMemo(() => props.sticker);
-  const id = () => source().id;
-  const isLottie = () => source().isLottie;
-  const stickerSetInfo = () => source().stickerSetInfo;
-  const emoji = () => source().emoji;
+  const id = () => props.sticker.id;
+  const isLottie = () => props.sticker.isLottie;
+  const stickerSetInfo = () => props.sticker.stickerSetInfo;
+  const emoji = () => props.sticker.emoji;
   const [isVideoBroken, markVideoBroken] = useFlag();
   const isUnsupportedVideo = createMemo(
     () => props.sticker.isVideo && (!IS_WEBM_SUPPORTED || (props.noVideoOnMobile && (IS_IOS || IS_ANDROID))),
@@ -81,22 +80,34 @@ const StickerView = (rawProps: OwnProps) => {
   const filterStyle = useColorFilter(() => props.customColor);
 
   const isIntersectingForLoading = useIsIntersecting(props.containerRef, () => props.observeIntersectionForLoading);
-  const shouldLoad = createMemo(() => isIntersectingForLoading && !props.noLoad);
-  const isIntersectingForPlaying = createMemo(
-    () => useIsIntersecting(props.containerRef, () => props.observeIntersectionForPlaying) && isIntersectingForLoading,
-  );
+  const shouldLoad = createMemo(() => isIntersectingForLoading() && !props.noLoad);
+  const isIntersectingForPlayingRaw = useIsIntersecting(props.containerRef, () => props.observeIntersectionForPlaying);
+  const isIntersectingForPlaying = createMemo(() => isIntersectingForPlayingRaw() && isIntersectingForLoading());
   const shouldPlay = createMemo(() => isIntersectingForPlaying() && !props.noPlay);
   let hasIntersectedForPlayingRef = isIntersectingForPlaying();
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (!hasIntersectedForPlayingRef && isIntersectingForPlaying()) {
-    hasIntersectedForPlayingRef = true;
-  }
+  // Deviation: tt updated this ref on every render; here a memo keeps it sticky and is read by `isReadyToMountFullMedia`.
+  const hasIntersectedForPlaying = createMemo(() => {
+    if (!hasIntersectedForPlayingRef && isIntersectingForPlaying()) {
+      hasIntersectedForPlayingRef = true;
+    }
+    return hasIntersectedForPlayingRef;
+  });
 
+  // Deviation: read again only when the hash changes (`previewMediaData` below covers a preview loaded later).
   const cachedPreview = createMemo(() => mediaLoader.getFromMemory(previewMediaHash()));
-  // TODO(codemod): useMountAfterHeavyAnimation: deferUntilIdle(scope, () => <Heavy/>, placeholder)
-  const isMountedAfterHeavyAnimation = useMountAfterHeavyAnimation(hasIntersectedForPlayingRef);
+  // Deviation: `useMountAfterHeavyAnimation` is an inline signal. tt checked once on mount (next frame) and, if an
+  // animation was running, stayed unmounted for good; here the signal is also set when that animation ends.
+  const [hasNoHeavyAnimation, setNoHeavyAnimation] = createSignal(false);
+  onMount(() => {
+    if (!getIsHeavyAnimating()) {
+      setNoHeavyAnimation(true);
+    } else {
+      getIsHeavyAnimating.once(() => setNoHeavyAnimation(true));
+    }
+  });
+  const isMountedAfterHeavyAnimation = () => hasNoHeavyAnimation() && hasIntersectedForPlaying();
   const isReadyToMountFullMedia = createMemo(() =>
-    props.forceOnHeavyAnimation ? hasIntersectedForPlayingRef : isMountedAfterHeavyAnimation,
+    props.forceOnHeavyAnimation ? hasIntersectedForPlaying() : isMountedAfterHeavyAnimation(),
   );
   const shouldForcePreview = createMemo(
     () => !props.skipPreview && (isUnsupportedVideo() || (isStatic() ? props.isSmall : props.noPlay)),
@@ -108,51 +119,43 @@ const StickerView = (rawProps: OwnProps) => {
       !cachedPreview() &&
       (!isReadyToMountFullMedia() || shouldForcePreview()),
   );
-  const previewMediaData = useMedia(
-    () => previewMediaHash(),
-    () => !shouldLoadPreview(),
-  );
+  const previewMediaData = useMedia(previewMediaHash, () => !shouldLoadPreview());
   const withPreview = createMemo(() => !props.skipPreview && (shouldLoadPreview() || cachedPreview()));
   const fullMediaHashForLoad = createMemo(() => props.fullMediaHash || getStickerMediaHash(props.sticker, 'inline'));
 
   const shouldSkipLoadingFullMedia = createMemo(() =>
     Boolean(
-      shouldForcePreview() || (fullMediaHashForLoad() === previewMediaHash() && (cachedPreview() || previewMediaData)),
+      shouldForcePreview() ||
+      (fullMediaHashForLoad() === previewMediaHash() && (cachedPreview() || previewMediaData())),
     ),
   );
-  const fullMediaData = useMedia(
-    () => fullMediaHashForLoad(),
-    () => !shouldLoad() || shouldSkipLoadingFullMedia(),
-  );
+  const fullMediaData = useMedia(fullMediaHashForLoad, () => !shouldLoad() || shouldSkipLoadingFullMedia());
   const shouldRenderFullMedia = createMemo(
-    () => isReadyToMountFullMedia() && Boolean(fullMediaData) && !isVideoBroken(),
+    () => isReadyToMountFullMedia() && Boolean(fullMediaData()) && !isVideoBroken(),
   );
   const [isPlayerReady, markPlayerReady] = useFlag();
   const isFullMediaReady = createMemo(() => shouldRenderFullMedia() && (isStatic() || isPlayerReady()));
 
   const thumbDataUri = useThumbnail(() => props.sticker.thumbnail);
   const thumbData = createMemo(() =>
-    !props.skipPreview ? cachedPreview() || previewMediaData || thumbDataUri : undefined,
+    !props.skipPreview ? cachedPreview() || previewMediaData() || thumbDataUri() : undefined,
   );
   const isThumbOpaque = createMemo(() => props.sharedCanvasRef && !props.withTranslucentThumb);
 
   const noCrossTransition = createMemo(() => Boolean(isLottie() && withPreview()));
   const { ref: thumbRef } = createMediaTransition({
     hasMediaData: () => Boolean(thumbData() && !isFullMediaReady()),
-    noCloseTransition: () => noCrossTransition(),
+    noCloseTransition: noCrossTransition,
   });
   const { ref: fullMediaRef } = createMediaTransition({
-    hasMediaData: () => isFullMediaReady(),
-    noOpenTransition: () => noCrossTransition(),
+    hasMediaData: isFullMediaReady,
+    noOpenTransition: noCrossTransition,
   });
 
   const coords = useCoordsInSharedCanvas(props.containerRef, props.sharedCanvasRef);
 
   // Preload preview for Message Input and local message
-  useMedia(
-    () => previewMediaHash(),
-    () => !shouldLoad() || !props.shouldPreloadPreview,
-  );
+  useMedia(previewMediaHash, () => !shouldLoad() || !props.shouldPreloadPreview);
 
   const renderId = createMemo(() =>
     [
@@ -160,7 +163,7 @@ const StickerView = (rawProps: OwnProps) => {
       id(),
       props.size,
       props.withSharedAnimation ? props.customColor : undefined,
-      dpr,
+      dpr(),
     ]
       .filter(Boolean)
       .join('_'),
@@ -183,45 +186,46 @@ const StickerView = (rawProps: OwnProps) => {
           props.thumbClassName,
           'sticker-media',
         )}
-        style={filterStyle}
+        style={filterStyle()}
         alt=""
         draggable={false}
       />
       {shouldRenderFullMedia() &&
         (isLottie() ? (
-          // TODO(codemod): getGlobal() in a memo / JSX is a one-time read: use useGlobal() (store contract §12.4)
-          // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show>
-          <AnimatedSticker
-            ref={fullMediaRef as (el: HTMLDivElement) => void}
-            key={renderId()}
-            renderId={renderId()}
-            size={props.size}
-            className={buildClassName(
-              styles.media,
-              (noCrossTransition() || isThumbOpaque()) && styles.noTransition,
-              props.fullMediaClassName,
+          <Show when={renderId()} keyed>
+            {() => (
+              <AnimatedSticker
+                ref={fullMediaRef}
+                renderId={renderId()}
+                size={props.size}
+                className={buildClassName(
+                  styles.media,
+                  (noCrossTransition() || isThumbOpaque()) && styles.noTransition,
+                  props.fullMediaClassName,
+                )}
+                tgsUrl={fullMediaData()}
+                play={shouldPlay()}
+                seekToEnd={props.forceAnimatedStickerOnEnd}
+                noLoop={!props.shouldLoop}
+                forceOnHeavyAnimation={props.forceAlways || props.forceOnHeavyAnimation}
+                forceAlways={props.forceAlways}
+                isLowPriority={props.isSmall && !selectIsAlwaysHighPriorityEmoji(useGlobal(), stickerSetInfo())}
+                sharedCanvas={props.sharedCanvasRef?.() || undefined}
+                sharedCanvasCoords={coords()}
+                onLoad={handleAnimatedStickerLoad}
+                onLoop={props.onAnimatedStickerLoop}
+                onEnded={props.onAnimatedStickerLoop}
+                onFrame={props.onAnimatedStickerFrame}
+                color={props.customColor}
+              />
             )}
-            tgsUrl={fullMediaData}
-            play={shouldPlay()}
-            seekToEnd={props.forceAnimatedStickerOnEnd}
-            noLoop={!props.shouldLoop}
-            forceOnHeavyAnimation={props.forceAlways || props.forceOnHeavyAnimation}
-            forceAlways={props.forceAlways}
-            isLowPriority={props.isSmall && !selectIsAlwaysHighPriorityEmoji(getGlobal(), stickerSetInfo())}
-            sharedCanvas={props.sharedCanvasRef?.current || undefined}
-            sharedCanvasCoords={coords}
-            onLoad={handleAnimatedStickerLoad}
-            onLoop={props.onAnimatedStickerLoop}
-            onEnded={props.onAnimatedStickerLoop}
-            onFrame={props.onAnimatedStickerFrame}
-            color={props.customColor}
-          />
+          </Show>
         ) : isVideo() ? (
           <OptimizedVideo
-            ref={fullMediaRef as (el: HTMLVideoElement) => void}
+            ref={fullMediaRef}
             canPlay={shouldPlay()}
             className={buildClassName(styles.media, props.fullMediaClassName, 'sticker-media')}
-            src={fullMediaData}
+            src={fullMediaData()}
             playsInline
             muted
             loop={props.shouldLoop && !props.loopLimit}
@@ -230,15 +234,15 @@ const StickerView = (rawProps: OwnProps) => {
             onReady={markPlayerReady}
             onBroken={markVideoBroken}
             onEnded={props.onVideoEnded}
-            style={filterStyle}
+            style={filterStyle()}
           />
         ) : (
           <img
-            ref={fullMediaRef as (el: HTMLImageElement) => void}
+            ref={fullMediaRef}
             class={buildClassName(styles.media, props.fullMediaClassName, 'sticker-media')}
-            src={fullMediaData}
+            src={fullMediaData()}
             alt={emoji()}
-            style={filterStyle}
+            style={filterStyle()}
             draggable={false}
           />
         ))}

@@ -1,7 +1,8 @@
-import { createMemo, createSignal } from 'frameact';
+import { type Accessor, createMemo, createSignal } from 'frameact';
 import { mergeProps } from 'frameact/dom';
-import { getGlobal } from '../../global';
+import { useGlobal } from '../../global';
 
+import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 import { ApiMessageEntityTypes, type ApiSticker } from '../../api/types';
 
 import { selectIsAlwaysHighPriorityEmoji } from '../../global/selectors';
@@ -29,8 +30,8 @@ type OwnProps = {
   shouldNotLoop?: boolean;
   isSelectable?: boolean;
   withSharedAnimation?: boolean;
-  sharedCanvasRef?: (el: HTMLCanvasElement) => void;
-  sharedCanvasHqRef?: (el: HTMLCanvasElement) => void;
+  sharedCanvasRef?: Accessor<HTMLCanvasElement | undefined>;
+  sharedCanvasHqRef?: Accessor<HTMLCanvasElement | undefined>;
   withTranslucentThumb?: boolean;
   shouldPreloadPreview?: boolean;
   skipPreview?: boolean;
@@ -57,17 +58,11 @@ const STICKER_SIZE = 20;
 
 const CustomEmoji = (rawProps: OwnProps) => {
   const props = mergeProps({ size: STICKER_SIZE }, rawProps) as OwnProps & Required<Pick<OwnProps, 'size'>>;
-  let containerRef!: HTMLDivElement;
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (props.ref) {
-    // TODO(codemod): "containerRef" was a ref object and is reassigned here (a forwarded ref?): use a callback ref
-    containerRef = props.ref;
-  }
+  // Deviation: a forwarded ref is a callback prop; the element is kept in a variable and handed on to `props.ref`.
+  let containerRef: HTMLDivElement | undefined;
 
   // An alternative to `withGlobal` to avoid adding numerous global containers
-  const customEmojiResult = createMemo(() => useCustomEmoji(() => props.documentId));
-  const customEmojiFromDocumentId = () => customEmojiResult().customEmoji;
-  const canPlay = () => customEmojiResult().canPlay;
+  const { customEmoji: customEmojiFromDocumentId, canPlay } = useCustomEmoji(() => props.documentId);
   const customEmoji = createMemo(() => customEmojiFromDocumentId() || props.sticker);
 
   let loopCountRef = 0;
@@ -80,7 +75,7 @@ const CustomEmoji = (rawProps: OwnProps) => {
     () => !hasCustomColor(),
   );
 
-  const handleVideoEnded = (e) => {
+  const handleVideoEnded = (e: React.SyntheticEvent<HTMLVideoElement>) => {
     if (!props.loopLimit) return;
 
     loopCountRef += 1;
@@ -105,15 +100,18 @@ const CustomEmoji = (rawProps: OwnProps) => {
   };
 
   const isHq = createMemo(
-    () => customEmoji()?.stickerSetInfo && selectIsAlwaysHighPriorityEmoji(getGlobal(), customEmoji().stickerSetInfo),
+    () => customEmoji()?.stickerSetInfo && selectIsAlwaysHighPriorityEmoji(useGlobal(), customEmoji()!.stickerSetInfo),
   );
 
   return (
     <div
-      ref={containerRef}
+      ref={(el) => {
+        containerRef = el;
+        props.ref?.(el);
+      }}
       class={buildClassName(styles.root, props.className, 'custom-emoji', 'emoji')}
-      onClick={props.onClick}
-      onAnimationEnd={props.onAnimationEnd}
+      onClick={() => props.onClick?.()}
+      onAnimationEnd={() => props.onAnimationEnd?.()}
       data-entity-type={ApiMessageEntityTypes.CustomEmoji}
       data-document-id={props.documentId}
       data-alt={customEmoji()?.emoji}
@@ -133,10 +131,8 @@ const CustomEmoji = (rawProps: OwnProps) => {
         !props.noPlaceholder && <div class={buildClassName(styles.placeholder)} draggable={false} />
       ) : (
         <StickerView
-          containerRef={(el) => {
-            containerRef = el;
-          }}
-          sticker={customEmoji()}
+          containerRef={() => containerRef}
+          sticker={customEmoji()!}
           isSmall={!props.isBig}
           size={props.size}
           noPlay={props.noPlay || !(shouldPlay() && canPlay())}
@@ -156,7 +152,7 @@ const CustomEmoji = (rawProps: OwnProps) => {
           withTranslucentThumb={props.withTranslucentThumb}
           onVideoEnded={handleVideoEnded}
           onAnimatedStickerLoop={handleStickerLoop}
-          customColor={customColor}
+          customColor={customColor()}
         />
       )}
     </div>

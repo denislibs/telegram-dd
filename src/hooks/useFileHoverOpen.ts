@@ -1,7 +1,5 @@
 import { onMount, requestMutation } from 'frameact';
 
-import useLastCallback from './useLastCallback';
-
 const FILE_DRAG_TYPE = 'Files';
 const FILE_HOVER_OPEN_EVENT = 'filehoveropen';
 export const FILE_HOVER_OPEN_SELECTOR = '[data-file-hover-open]';
@@ -118,7 +116,7 @@ export default function useFileHoverOpen() {
   });
 }
 
-// TODO(codemod): useFileHoverOpenHandler: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: `onFileHoverOpen` is read when the event fires; pass `() => props.onFileHoverOpen?.()` if the prop can change.
 export function useFileHoverOpenHandler(onFileHoverOpen?: NoneToVoidFunction) {
   return (e: Event) => {
     handleFileHoverOpenEvent(e, onFileHoverOpen!);

@@ -1,4 +1,11 @@
-import { beginHeavyAnimation, createEffect, createSignal, requestMutation, requestNextMutation } from 'frameact';
+import {
+  type Accessor,
+  beginHeavyAnimation,
+  createEffect,
+  createSignal,
+  requestMutation,
+  requestNextMutation,
+} from 'frameact';
 import { getGlobal } from '../../global';
 
 import type { AnimationLevel } from '../../types';
@@ -13,7 +20,7 @@ type TransitionFunction = () => Promise<void> | void;
 
 type TransitionState = 'idle' | 'capturing-old' | 'capturing-new' | 'animating' | 'skipped';
 interface ViewTransitionController {
-  transitionState: TransitionState;
+  transitionState: Accessor<TransitionState>;
   startViewTransition: (
     types: VTTypes,
     domUpdateCallback?: TransitionFunction,
@@ -39,8 +46,8 @@ export function useViewTransition(): ViewTransitionController {
 
   createEffect(
     () => transitionState(),
-    (transitionState) => {
-      if (transitionState !== 'capturing-old') return;
+    (transitionState2) => {
+      if (transitionState2 !== 'capturing-old') return;
       const { domUpdateCallback, types } = parametersRef || {};
 
       const onHeavyAnimationEnd = beginHeavyAnimation();

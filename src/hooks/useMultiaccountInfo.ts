@@ -1,18 +1,18 @@
 import { createEffect, createMemo, createSignal, onMount } from 'frameact';
-import { getGlobal } from '../global';
+import { useGlobal } from '../global';
 
 import type { ApiUser } from '../api/types';
 
 import { SESSION_ACCOUNT_PREFIX } from '../config';
 import { getChatAvatarHash } from '../global/helpers';
 import { selectIsSynced } from '../global/selectors';
+import { type MaybeAccessor, read } from '../util/accessors';
 import { preloadImage } from '../util/files';
 import { resizeImage } from '../util/imageResize';
 import { ACCOUNT_SLOT, getAccountsInfo, storeAccountData } from '../util/multiaccount';
 import { addSessionStoreChangeListener } from '../util/passcode/sessionStore';
 import useSelector from './data/useSelector';
 import useInterval from './schedulers/useInterval';
-import useLastCallback from './useLastCallback';
 import useMedia from './useMedia';
 import useThrottledCallback from './useThrottledCallback';
 
@@ -20,14 +20,17 @@ const LOCAL_STORAGE_LISTENING_THROTTLE = 1000;
 const REFRESH_INTERVAL = 1000 * 60;
 const PREVIEW_SIZE = 72;
 
-// TODO(codemod): useMultiaccountInfo: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function useMultiaccountInfo(currentUser?: ApiUser) {
-  const isUpdater = createMemo(() => Boolean(currentUser) && getGlobal().auth.rememberMe);
+export default function useMultiaccountInfo(userArg?: MaybeAccessor<ApiUser | undefined>) {
+  const global = useGlobal();
+  const isUpdater = createMemo(() => Boolean(read(userArg)) && global.auth.rememberMe);
   const isSynced = useSelector(selectIsSynced);
 
-  const [accountsInfo, setAccountsInfo] = createSignal((() => getAccountsInfo())());
+  const [accountsInfo, setAccountsInfo] = createSignal(getAccountsInfo());
 
-  const avatarHash = currentUser && getChatAvatarHash(currentUser);
+  const avatarHash = () => {
+    const currentUser = read(userArg);
+    return currentUser && getChatAvatarHash(currentUser);
+  };
   const avatarUrl = useMedia(avatarHash, () => !isUpdater());
 
   const refresh = useThrottledCallback(
@@ -39,20 +42,24 @@ export default function useMultiaccountInfo(currentUser?: ApiUser) {
   );
 
   createEffect(
-    () => [
-      isUpdater(),
-      currentUser?.emojiStatus?.documentId,
-      currentUser?.firstName,
-      currentUser?.id,
-      currentUser?.lastName,
-      currentUser?.color,
-      currentUser?.isPremium,
-      currentUser?.phoneNumber,
-      refresh,
-      isSynced(),
-    ],
-    ([isUpdater, , , , , , , , , isSynced]) => {
-      if (!isUpdater || !isSynced) return;
+    () => {
+      const currentUser = read(userArg);
+      return [
+        isUpdater(),
+        currentUser?.emojiStatus?.documentId,
+        currentUser?.firstName,
+        currentUser?.id,
+        currentUser?.lastName,
+        currentUser?.color,
+        currentUser?.isPremium,
+        currentUser?.phoneNumber,
+        refresh,
+        isSynced(),
+      ] as const;
+    },
+    ([isUpdater2, , , , , , , , , isSynced2]) => {
+      if (!isUpdater2 || !isSynced2) return;
+      const currentUser = read(userArg)!;
       const color = currentUser.color?.type === 'regular' ? currentUser.color.color : undefined;
       storeAccountData(ACCOUNT_SLOT, {
         userId: currentUser.id,
@@ -84,11 +91,11 @@ export default function useMultiaccountInfo(currentUser?: ApiUser) {
   };
 
   createEffect(
-    () => [avatarUrl, isSynced(), isUpdater()],
-    ([, isSynced, isUpdater]) => {
-      if (!avatarUrl || !isUpdater || !isSynced) return undefined;
+    () => [avatarUrl(), isSynced(), isUpdater()] as const,
+    ([avatarUrl2, isSynced2, isUpdater2]) => {
+      if (!avatarUrl2 || !isUpdater2 || !isSynced2) return undefined;
       const controller = new AbortController();
-      updateAvatar(avatarUrl, controller.signal);
+      updateAvatar(avatarUrl2, controller.signal);
 
       return () => {
         controller.abort();

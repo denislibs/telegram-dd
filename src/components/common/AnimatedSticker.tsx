@@ -1,5 +1,6 @@
 import {
   createEffect,
+  createMeasureEffect,
   createMemo,
   createSignal,
   getIsHeavyAnimating,
@@ -23,7 +24,6 @@ import useColorFilter from '../../hooks/stickers/useColorFilter';
 import useFlag from '../../hooks/useFlag';
 import usePriorityPlaybackCheck, { isPriorityPlaybackActive } from '../../hooks/usePriorityPlaybackCheck';
 import useSharedIntersectionObserver from '../../hooks/useSharedIntersectionObserver';
-import { useStateRef } from '../../hooks/useStateRef';
 import useThrottledCallback from '../../hooks/useThrottledCallback';
 import useUniqueId from '../../hooks/useUniqueId';
 import useBackgroundMode, { isBackgroundModeActive } from '../../hooks/window/useBackgroundMode';
@@ -60,12 +60,8 @@ export type OwnProps = {
 const THROTTLE_MS = 150;
 
 const AnimatedSticker = (props: OwnProps) => {
-  let containerRef!: HTMLDivElement;
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (props.ref) {
-    // TODO(codemod): "containerRef" was a ref object and is reassigned here (a forwarded ref?): use a callback ref
-    containerRef = props.ref;
-  }
+  // Deviation: a forwarded ref is a callback prop; the element is kept in a variable and handed on to `props.ref`.
+  let containerRef: HTMLDivElement | undefined;
 
   const viewId = useUniqueId();
   const rendererId = createMemo(() =>
@@ -80,36 +76,30 @@ const AnimatedSticker = (props: OwnProps) => {
   const colorFilter = useColorFilter(() => (shouldUseColorFilter() ? props.color : undefined));
 
   const playKey = createMemo(() => props.play || (props.play === false ? false : props.playSegment));
-  // TODO(codemod): useStateRef: a handler reads the current value through the accessor; replace ref.current with the accessor call
-  const playRef = useStateRef(props.play);
-  // TODO(codemod): useStateRef: a handler reads the current value through the accessor; replace ref.current with the accessor call
-  const playSegmentRef = useStateRef(props.playSegment);
 
-  let colorRef: Color | undefined;
+  // Deviation: `useSyncEffect` that filled a ref is a memo (pulled when `init` or the color effect read it).
+  const colorRef = createMemo(() =>
+    props.color && !shouldUseColorFilter() ? buildColor(props.color) : (undefined as Color | undefined),
+  );
 
   const shouldForceOnHeavyAnimation = createMemo(() => props.forceAlways || props.forceOnHeavyAnimation);
   // Delay initialization until heavy animation ends
   const [canInitialize, markCanInitialize, unmarkCanInitialize] = useFlag(
     !getIsHeavyAnimating() || shouldForceOnHeavyAnimation(),
   );
-  // TODO(codemod): useHeavyAnimation(…, isDisabled): watchHeavyAnimation has no disable flag; guard inside the callbacks
-  watchHeavyAnimation(unmarkCanInitialize, markCanInitialize);
-  createEffect(
-    () => shouldForceOnHeavyAnimation(),
-    (shouldForceOnHeavyAnimation) => {
-      if (shouldForceOnHeavyAnimation) markCanInitialize();
+  // Deviation: `watchHeavyAnimation` has no `isDisabled`; the callbacks are guarded instead.
+  watchHeavyAnimation(
+    () => {
+      if (!shouldForceOnHeavyAnimation()) unmarkCanInitialize();
+    },
+    () => {
+      if (!shouldForceOnHeavyAnimation()) markCanInitialize();
     },
   );
-
-  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
   createEffect(
-    () => [props.color, shouldUseColorFilter()],
-    ([, shouldUseColorFilter]) => {
-      if (props.color && !shouldUseColorFilter) {
-        colorRef = buildColor(props.color);
-      } else {
-        colorRef = undefined;
-      }
+    () => shouldForceOnHeavyAnimation(),
+    (shouldForce) => {
+      if (shouldForce) markCanInitialize();
     },
   );
 
@@ -153,7 +143,7 @@ const AnimatedSticker = (props: OwnProps) => {
         fitzModifier: props.fitzModifier,
       },
       viewId,
-      colorRef,
+      colorRef(),
       props.onLoad,
       props.onEnded,
       props.onLoop,
@@ -172,11 +162,11 @@ const AnimatedSticker = (props: OwnProps) => {
     animationRef = newAnimation;
   };
 
-  // TODO(codemod): dependency on a container (sharedCanvasCoords) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)
-  createEffect(
-    () => [init, props.tgsUrl, props.sharedCanvas, props.sharedCanvasCoords, canInitialize()],
-    ([init, , , , canInitialize]) => {
-      if (!canInitialize) return;
+  // Deviation: `init` reads layout (`offsetWidth`), so this is a measure effect; `sharedCanvasCoords` is tracked by its fields.
+  createMeasureEffect(
+    () => [props.tgsUrl, props.sharedCanvas, props.sharedCanvasCoords?.x, props.sharedCanvasCoords?.y, canInitialize()],
+    () => {
+      if (!canInitialize()) return;
       if (getTLottie()) {
         init();
       } else {
@@ -190,16 +180,16 @@ const AnimatedSticker = (props: OwnProps) => {
 
   createEffect(
     () => [props.color, animation()],
-    ([, animation]) => {
-      animation?.setColor(colorRef);
+    () => {
+      animation()?.setColor(colorRef());
     },
   );
 
   createEffect(
     () => [props.speed, animation()],
-    ([, animation]) => {
+    () => {
       if (typeof props.speed === 'number') {
-        animation?.setSpeed(props.speed);
+        animation()?.setSpeed(props.speed);
       }
     },
   );
@@ -209,20 +199,21 @@ const AnimatedSticker = (props: OwnProps) => {
   });
 
   const playAnimation = (shouldRestart = false) => {
+    const currentAnimation = animation();
     if (
-      !animation() ||
-      !(playRef.current || playSegmentRef.current) ||
+      !currentAnimation ||
+      !(props.play || props.playSegment) ||
       isFrozen(props.forceAlways, props.forceOnHeavyAnimation)
     ) {
       return;
     }
 
-    if (playSegmentRef.current) {
-      animation().playSegment(playSegmentRef.current, shouldRestart, viewId);
+    if (props.playSegment) {
+      currentAnimation.playSegment(props.playSegment, shouldRestart, viewId);
     } else if (props.seekToEnd) {
-      animation().seekToEnd();
+      currentAnimation.seekToEnd();
     } else {
-      animation().play(shouldRestart, viewId);
+      currentAnimation.play(shouldRestart, viewId);
     }
   };
 
@@ -231,8 +222,9 @@ const AnimatedSticker = (props: OwnProps) => {
   };
 
   const pauseAnimation = () => {
-    if (animation()?.isPlaying()) {
-      animation().pause(viewId);
+    const currentAnimation = animation();
+    if (currentAnimation?.isPlaying()) {
+      currentAnimation.pause(viewId);
     }
   };
 
@@ -246,33 +238,25 @@ const AnimatedSticker = (props: OwnProps) => {
     },
   );
 
-  // TODO(codemod): dependency on a container (sharedCanvasCoords) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)
+  // Deviation: `sharedCanvasCoords` is compared by its fields (the object may be a new one with the same values).
   createEffect(
-    () => [props.sharedCanvasCoords, viewId, animation()],
-    (_deps, prev) => {
-      const [prevSharedCanvasCoords] = prev ?? [];
-      if (prevSharedCanvasCoords !== undefined && props.sharedCanvasCoords !== prevSharedCanvasCoords) {
+    () => [props.sharedCanvasCoords?.x, props.sharedCanvasCoords?.y, viewId, animation()],
+    ([x, y], prev) => {
+      const [prevX, prevY] = prev ?? [];
+      if (prevX !== undefined && (x !== prevX || y !== prevY)) {
         animation()?.setSharedCanvasCoords(viewId, props.sharedCanvasCoords);
       }
     },
   );
 
   createEffect(
-    () => [
-      animation(),
-      playKey(),
-      props.noLoop,
-      playAnimation,
-      pauseAnimation,
-      props.forceAlways,
-      props.forceOnHeavyAnimation,
-    ],
-    ([animation, playKey]) => {
-      if (!animation) {
+    () => [animation(), playKey(), props.noLoop, props.forceAlways, props.forceOnHeavyAnimation],
+    () => {
+      if (!animation()) {
         return;
       }
 
-      if (playKey) {
+      if (playKey()) {
         if (!isFrozen(props.forceAlways, props.forceOnHeavyAnimation)) {
           playAnimation(props.noLoop);
         }
@@ -283,21 +267,29 @@ const AnimatedSticker = (props: OwnProps) => {
   );
 
   createEffect(
-    () => [playAnimation, animation(), props.tgsUrl, props.fitzModifier],
-    ([, animation]) => {
-      if (animation) {
+    () => [animation(), props.tgsUrl, props.fitzModifier],
+    () => {
+      const currentAnimation = animation();
+      if (currentAnimation) {
         if (isFirstRenderRef) {
           isFirstRenderRef = false;
         } else if (props.tgsUrl) {
-          animation.changeData(props.tgsUrl, props.fitzModifier);
+          currentAnimation.changeData(props.tgsUrl, props.fitzModifier);
           playAnimation();
         }
       }
     },
   );
 
-  // TODO(codemod): useHeavyAnimation(…, isDisabled): watchHeavyAnimation has no disable flag; guard inside the callbacks
-  watchHeavyAnimation(pauseAnimation, playAnimation);
+  // Deviation: `watchHeavyAnimation` has no `isDisabled`; the callbacks are guarded instead.
+  watchHeavyAnimation(
+    () => {
+      if (playKey() && !shouldForceOnHeavyAnimation()) pauseAnimation();
+    },
+    () => {
+      if (playKey() && !shouldForceOnHeavyAnimation()) playAnimation();
+    },
+  );
   usePriorityPlaybackCheck(pauseAnimation, playAnimation, () => !playKey() || props.forceAlways);
   // Pausing frame may not happen in background,
   // so we need to make sure it happens right after focusing,
@@ -307,17 +299,20 @@ const AnimatedSticker = (props: OwnProps) => {
   return (
     <Show when={!props.sharedCanvas}>
       <div
-        ref={containerRef}
+        ref={(el) => {
+          containerRef = el;
+          props.ref?.(el);
+        }}
         class={buildClassName('AnimatedSticker', props.className)}
         style={buildStyle(
           props.size !== undefined && `width: ${props.size}px; height: ${props.size}px;`,
           props.onClick && !IS_TAURI && 'cursor: pointer',
-          colorFilter,
+          colorFilter(),
           props.style,
         )}
-        onClick={props.onClick}
-        onMouseEnter={props.onMouseEnter}
-        onMouseLeave={props.onMouseLeave}
+        onClick={() => props.onClick?.()}
+        onMouseEnter={() => props.onMouseEnter?.()}
+        onMouseLeave={() => props.onMouseLeave?.()}
       />
     </Show>
   );

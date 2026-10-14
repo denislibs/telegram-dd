@@ -1,11 +1,10 @@
-import { createEffect, createMemo, previous } from 'frameact';
-import { getGlobal } from '../../global';
+import { createEffect, createMemo, createSignal } from 'frameact';
+import { useGlobal } from '../../global';
 
 import { selectCanAnimateInterface } from '../../global/selectors';
 import buildClassName from '../../util/buildClassName';
 import { throttleWithTickEnd } from '../../util/schedulers';
 
-import useForceUpdate from '../../hooks/useForceUpdate';
 import useLang from '../../hooks/useLang';
 
 import styles from './AnimatedCounter.module.scss';
@@ -27,29 +26,35 @@ const resetCounterOnTickEnd = throttleWithTickEnd(() => {
 });
 
 const AnimatedCounter = (props: OwnProps) => {
-  const { isRtl } = useLang();
+  const lang = useLang();
 
-  const prevText = previous(() => props.text);
-  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
-  const forceUpdate = useForceUpdate();
+  // Deviation: no re-render to track the previous text or to force an update: the previous text is kept by the memo
+  // below (as `usePreviousDeprecated` did per render) and `forceUpdate` bumps a version signal that the memo reads.
+  const [version, setVersion] = createSignal(0);
+  const forceUpdate = () => setVersion((current) => current + 1);
+  let prevTextRef: string | undefined;
 
-  const shouldAnimate = createMemo(() =>
-    scheduleAnimation(
-      !props.isDisabled &&
-        selectCanAnimateInterface(getGlobal()) &&
-        prevText() !== undefined &&
-        prevText() !== props.text,
-    ),
-  );
+  const animation = createMemo(() => {
+    version();
+
+    const prevText = prevTextRef;
+    prevTextRef = props.text;
+
+    const shouldAnimate = scheduleAnimation(
+      !props.isDisabled && selectCanAnimateInterface(useGlobal()) && prevText !== undefined && prevText !== props.text,
+    );
+
+    return { shouldAnimate, prevText };
+  });
 
   const characters = createMemo(() => {
-    return shouldAnimate() ? renderAnimatedCharacters(props.text, prevText()) : props.text;
+    return animation().shouldAnimate ? renderAnimatedCharacters(props.text, animation().prevText) : props.text;
   });
 
   createEffect(
-    () => [shouldAnimate(), props.text],
-    ([shouldAnimate]) => {
-      if (!shouldAnimate) return undefined;
+    () => [animation().shouldAnimate, props.text],
+    () => {
+      if (!animation().shouldAnimate) return undefined;
 
       const timeoutId = window.setTimeout(() => {
         forceUpdate();
@@ -65,7 +70,7 @@ const AnimatedCounter = (props: OwnProps) => {
     <span
       ref={props.ref}
       class={buildClassName(props.className, !props.isDisabled && styles.root)}
-      dir={isRtl ? 'rtl' : undefined}
+      dir={lang.isRtl ? 'rtl' : undefined}
     >
       {characters()}
     </span>

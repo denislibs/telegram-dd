@@ -4,8 +4,8 @@ import { addExtraClass, removeExtraClass } from 'frameact/dom';
 import type { IAnchorPosition } from '../types';
 import type { Signal } from '../util/signals';
 
+import { type MaybeAccessor, read } from '../util/accessors';
 import { IS_IOS, IS_PWA, IS_TOUCH_ENV } from '../util/browser/windowEnvironment';
-import useLastCallback from './useLastCallback';
 
 const LONG_TAP_DURATION_MS = 200;
 const IOS_PWA_CONTEXT_MENU_DELAY_MS = 100;
@@ -16,7 +16,7 @@ function stopEvent(e: Event) {
   e.stopPropagation();
 }
 
-function isNativeLinkTarget(target: EventTarget | undefined) {
+function isNativeLinkTarget(target: EventTarget | null | undefined) {
   if (!(target instanceof HTMLElement)) {
     return false;
   }
@@ -26,14 +26,14 @@ function isNativeLinkTarget(target: EventTarget | undefined) {
   return Boolean(link && link.getAttribute('href') !== '#');
 }
 
-// TODO(codemod): useContextMenuHandlers: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: `elementRef` is an accessor of the element, read when the effect applies (not tracked).
 const useContextMenuHandlers = (
-  elementRef: (el: HTMLElement) => void,
-  isMenuDisabled?: boolean,
-  shouldDisableOnLink?: boolean,
-  shouldDisableOnLongTap?: boolean,
+  elementRef: MaybeAccessor<HTMLElement | undefined>,
+  isMenuDisabled?: MaybeAccessor<boolean | undefined>,
+  shouldDisableOnLink?: MaybeAccessor<boolean | undefined>,
+  shouldDisableOnLongTap?: MaybeAccessor<boolean | undefined>,
   getIsReady?: Signal<boolean>,
-  shouldDisablePropagation?: boolean,
+  shouldDisablePropagation?: MaybeAccessor<boolean | undefined>,
 ) => {
   const [isContextMenuOpen, setIsContextMenuOpen] = createSignal(false);
   const [contextMenuAnchor, setContextMenuAnchor] = createSignal<IAnchorPosition | undefined>(undefined);
@@ -41,7 +41,7 @@ const useContextMenuHandlers = (
   const [isContextMenuAltKeyPressed, setIsContextMenuAltKeyPressed] = createSignal(false);
 
   const handleBeforeContextMenu = (e: React.MouseEvent) => {
-    if (!isMenuDisabled && e.button === 2) {
+    if (!read(isMenuDisabled) && e.button === 2) {
       requestMutation(() => {
         addExtraClass(e.target as HTMLElement, 'no-selection');
       });
@@ -53,7 +53,7 @@ const useContextMenuHandlers = (
       removeExtraClass(e.target as HTMLElement, 'no-selection');
     });
 
-    if (isMenuDisabled || (shouldDisableOnLink && isNativeLinkTarget(e.target))) {
+    if (read(isMenuDisabled) || (read(shouldDisableOnLink) && isNativeLinkTarget(e.target))) {
       return;
     }
     e.preventDefault();
@@ -79,21 +79,20 @@ const useContextMenuHandlers = (
 
   // Support context menu on touch devices
   createEffect(
-    () => [
-      contextMenuAnchor(),
-      isMenuDisabled,
-      shouldDisableOnLongTap,
-      elementRef,
-      shouldDisableOnLink,
-      getIsReady,
-      shouldDisablePropagation,
-    ],
-    ([contextMenuAnchor]) => {
-      if (isMenuDisabled || !IS_TOUCH_ENV || shouldDisableOnLongTap || (getIsReady && !getIsReady())) {
+    () =>
+      [
+        contextMenuAnchor(),
+        read(isMenuDisabled),
+        read(shouldDisableOnLongTap),
+        read(shouldDisableOnLink),
+        read(shouldDisablePropagation),
+      ] as const,
+    ([anchor, isMenuDisabled2, shouldDisableOnLongTap2, shouldDisableOnLink2, shouldDisablePropagation2]) => {
+      if (isMenuDisabled2 || !IS_TOUCH_ENV || shouldDisableOnLongTap2 || (getIsReady && !getIsReady())) {
         return undefined;
       }
 
-      const element = elementRef.current;
+      const element = read(elementRef);
       if (!element) {
         return undefined;
       }
@@ -112,7 +111,7 @@ const useContextMenuHandlers = (
 
         const { clientX, clientY, target } = originalEvent.touches[0];
 
-        if (contextMenuAnchor || (shouldDisableOnLink && isNativeLinkTarget(target))) {
+        if (anchor || (shouldDisableOnLink2 && isNativeLinkTarget(target))) {
           return;
         }
 
@@ -159,10 +158,10 @@ const useContextMenuHandlers = (
       };
 
       const startLongPressTimer = (e: TouchEvent) => {
-        if (isMenuDisabled) {
+        if (isMenuDisabled2) {
           return;
         }
-        if (shouldDisablePropagation) e.stopPropagation();
+        if (shouldDisablePropagation2) e.stopPropagation();
         clearLongPressTimer();
 
         timer = window.setTimeout(() => emulateContextMenuEvent(e), LONG_TAP_DURATION_MS);

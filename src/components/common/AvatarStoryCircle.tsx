@@ -1,9 +1,9 @@
-import { createMemo, createMutationEffect } from 'frameact';
+import { createMemo, createMutationEffect, createSignal } from 'frameact';
 import { Show } from 'frameact/dom';
 import { withGlobal } from '../../global';
-import type { GlobalState } from '../../global/types';
 
 import type { ApiTypeStory } from '../../api/types';
+import type { GlobalState } from '../../global/types';
 import type { ThemeKey } from '../../types';
 
 import { selectPeerStories, selectTheme } from '../../global/selectors';
@@ -45,7 +45,8 @@ const EXTRA_GAP_ANGLE = Math.PI / 4;
 
 function AvatarStoryCircle(ownProps: OwnProps) {
   const props = withGlobal(ownProps, mapStateToProps);
-  let ref!: HTMLCanvasElement;
+  // Deviation: the canvas is a signal, because it is created by the `<Show>` below, after the effect, and the effect must redraw once it exists.
+  const [canvas, setCanvas] = createSignal<HTMLCanvasElement | undefined>(undefined);
 
   const dpr = useDevicePixelRatio();
 
@@ -67,14 +68,14 @@ function AvatarStoryCircle(ownProps: OwnProps) {
     );
   });
 
-  // TODO(codemod): dependency on a container (peerStories) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
   const isCloseFriend = createMemo(() => {
-    if (!props.peerStories || !props.storyIds?.length) {
+    const peerStories = props.peerStories;
+    if (!peerStories || !props.storyIds?.length) {
       return false;
     }
 
     return props.storyIds.some((id) => {
-      const story = props.peerStories[id];
+      const story = peerStories[id];
       if (!story || !('isForCloseFriends' in story)) {
         return false;
       }
@@ -85,6 +86,7 @@ function AvatarStoryCircle(ownProps: OwnProps) {
 
   createMutationEffect(
     () => [
+      canvas(),
       props.appTheme,
       isCloseFriend(),
       adaptedSize(),
@@ -92,27 +94,28 @@ function AvatarStoryCircle(ownProps: OwnProps) {
       values().total,
       props.withExtraGap,
       props.extraGapPercent,
-      dpr,
+      dpr(),
       props.colors,
       props.size,
       strokeWidth(),
     ],
-    ([, isCloseFriend, adaptedSize, , , , , , , , strokeWidth]) => {
-      if (!ref) {
+    () => {
+      const canvasEl = canvas();
+      if (!canvasEl) {
         return;
       }
 
       drawGradientCircle({
-        canvas: ref,
-        size: adaptedSize,
-        strokeWidth,
+        canvas: canvasEl,
+        size: adaptedSize(),
+        strokeWidth: strokeWidth(),
         segmentsCount: values().total,
-        colorStops: props.colors || (isCloseFriend ? GREEN : BLUE),
+        colorStops: props.colors || (isCloseFriend() ? GREEN : BLUE),
         readSegmentsCount: values().read,
         withExtraGap: props.withExtraGap,
         extraGapPercent: props.extraGapPercent,
         readSegmentColor: props.appTheme === 'dark' ? DARK_GRAY : GRAY,
-        dpr,
+        dpr: dpr(),
       });
     },
   );
@@ -120,7 +123,7 @@ function AvatarStoryCircle(ownProps: OwnProps) {
   return (
     <Show when={values().total}>
       <canvas
-        ref={ref}
+        ref={(el) => setCanvas(el)}
         class={buildClassName('story-circle', props.className)}
         style={buildStyle(`max-width: ${adaptedSize()}px`, `max-height: ${adaptedSize()}px`, props.style)}
       />

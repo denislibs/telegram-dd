@@ -1,21 +1,19 @@
 import { createEffect, getIsHeavyAnimating, requestMeasure, watchHeavyAnimation } from 'frameact';
 
+import { type MaybeAccessor, read } from '../../../../util/accessors';
+
 import usePriorityPlaybackCheck, { isPriorityPlaybackActive } from '../../../../hooks/usePriorityPlaybackCheck';
 import useBackgroundMode, { isBackgroundModeActive } from '../../../../hooks/window/useBackgroundMode';
 
-// TODO(codemod): useVideoAutoPause: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useVideoAutoPause(
-  playerRef: (el: HTMLVideoElement) => void,
-  canPlay: boolean,
-  isPriority?: boolean,
+  playerRef: MaybeAccessor<HTMLVideoElement | undefined>,
+  canPlay: MaybeAccessor<boolean>,
+  isPriority?: MaybeAccessor<boolean | undefined>,
 ) {
-  let canPlayRef;
-  canPlayRef = canPlay;
-
   const { play, pause } = usePlayPause(playerRef);
 
   const unfreezePlaying = () => {
-    if (canPlayRef && (isPriority || !isFrozen())) {
+    if (read(canPlay) && (read(isPriority) || !isFrozen())) {
       play();
     }
   };
@@ -24,22 +22,31 @@ export default function useVideoAutoPause(
     requestMeasure(unfreezePlaying);
   };
 
-  useBackgroundMode(pause, unfreezePlayingOnRaf, !canPlay || isPriority);
-  // TODO(codemod): useHeavyAnimation(…, isDisabled): watchHeavyAnimation has no disable flag; guard inside the callbacks
-  watchHeavyAnimation(pause, unfreezePlaying);
-  usePriorityPlaybackCheck(pause, unfreezePlaying, !canPlay || isPriority);
+  const isDisabled = () => !read(canPlay) || read(isPriority);
+
+  useBackgroundMode(pause, unfreezePlayingOnRaf, isDisabled);
+  // Deviation: `watchHeavyAnimation` has no disable flag (tt's `useHeavyAnimation(…, isDisabled)`), so the callbacks check it.
+  watchHeavyAnimation(
+    () => {
+      if (!isDisabled()) pause();
+    },
+    () => {
+      if (!isDisabled()) unfreezePlaying();
+    },
+  );
+  usePriorityPlaybackCheck(pause, unfreezePlaying, isDisabled);
 
   const handlePlaying = () => {
-    if (!canPlayRef || (!isPriority && isFrozen())) {
+    if (!read(canPlay) || (!read(isPriority) && isFrozen())) {
       pause();
     }
   };
 
   createEffect(
-    () => [canPlay, play, pause, isPriority],
-    () => {
-      if (canPlay) {
-        if (isPriority || !isFrozen()) {
+    () => [read(canPlay), read(isPriority)] as const,
+    ([canPlay2, isPriority2]) => {
+      if (canPlay2) {
+        if (isPriority2 || !isFrozen()) {
           play();
         }
       } else {
@@ -51,21 +58,21 @@ export default function useVideoAutoPause(
   return { handlePlaying };
 }
 
-// TODO(codemod): usePlayPause: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-function usePlayPause(mediaRef: (el: HTMLMediaElement) => void) {
+function usePlayPause(mediaRef: MaybeAccessor<HTMLMediaElement | undefined>) {
   let shouldPauseRef = false;
   let isLoadingPlayRef = false;
 
   const play = () => {
     shouldPauseRef = false;
-    if (mediaRef.current && !isLoadingPlayRef && document.body.contains(mediaRef.current)) {
+    const media = read(mediaRef);
+    if (media && !isLoadingPlayRef && document.body.contains(media)) {
       isLoadingPlayRef = true;
-      mediaRef.current
+      media
         .play()
         .then(() => {
           isLoadingPlayRef = false;
           if (shouldPauseRef) {
-            mediaRef.current?.pause();
+            read(mediaRef)?.pause();
             shouldPauseRef = false;
           }
         })
@@ -80,7 +87,7 @@ function usePlayPause(mediaRef: (el: HTMLMediaElement) => void) {
     if (isLoadingPlayRef) {
       shouldPauseRef = true;
     } else {
-      mediaRef.current?.pause();
+      read(mediaRef)?.pause();
     }
   };
 

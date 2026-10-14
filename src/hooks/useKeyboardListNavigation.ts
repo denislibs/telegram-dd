@@ -1,24 +1,23 @@
 import { createMeasureEffect, createSignal, requestMeasure, requestMutation } from 'frameact';
 
-import useLastCallback from './useLastCallback';
+import { type MaybeAccessor, read } from '../util/accessors';
 
-// TODO(codemod): useKeyboardListNavigation: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 const useKeyboardListNavigation = (
-  elementRef: (el: HTMLElement) => void,
-  isOpen: boolean,
+  elementRef: MaybeAccessor<HTMLElement | undefined>,
+  isOpen: MaybeAccessor<boolean>,
   onSelectWithEnter?: (index: number) => void,
   itemSelector?: string,
-  noCaptureFocus?: boolean,
+  noCaptureFocus?: MaybeAccessor<boolean | undefined>,
 ) => {
   const [focusedIndex, setFocusedIndex] = createSignal(-1);
 
   createMeasureEffect(
-    () => [elementRef, isOpen, noCaptureFocus],
-    () => {
+    () => [read(isOpen), read(noCaptureFocus)] as const,
+    ([isOpen2, noCaptureFocus2]) => {
       setFocusedIndex(-1);
 
-      const element = elementRef.current;
-      if (isOpen && element && !noCaptureFocus) {
+      const element = read(elementRef);
+      if (isOpen2 && element && !noCaptureFocus2) {
         requestMutation(() => {
           element.tabIndex = -1;
         });
@@ -28,9 +27,9 @@ const useKeyboardListNavigation = (
   );
 
   return (e: React.KeyboardEvent<any>) => {
-    const element = elementRef.current;
+    const element = read(elementRef);
 
-    if (!element || !isOpen) {
+    if (!element || !read(isOpen)) {
       return;
     }
 

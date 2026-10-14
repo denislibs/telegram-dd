@@ -1,12 +1,12 @@
-import { createEffect, createMemo, createSignal, requestMeasure, requestMutation } from 'frameact';
+import { createMemo, createSignal, onMount, requestMeasure, requestMutation } from 'frameact';
 
 import type { CallbackManager } from '../util/callbacks';
 
+import { type MaybeAccessor, read } from '../util/accessors';
 import { createCallbackManager } from '../util/callbacks';
 import { round } from '../util/math';
 import { throttleWith } from '../util/schedulers';
 import getOffsetToContainer from '../util/visibility/getOffsetToContainer';
-import useLastCallback from './useLastCallback';
 import useResizeObserver from './useResizeObserver';
 import useSharedIntersectionObserver from './useSharedIntersectionObserver';
 import useThrottledCallback from './useThrottledCallback';
@@ -38,10 +38,10 @@ const PENDING_SHARED_CANVAS_RECALCULATIONS = new Set<HTMLCanvasElement>();
 const SCHEDULE_SHARED_CANVAS_RECALCULATION = throttleWith(requestMeasure, flushSharedCanvasCoordsRecalculations);
 
 export function requestSharedCanvasCoordsRecalculation(
-  ...sharedCanvasRefs: Array<(el: HTMLCanvasElement) => void | undefined>
+  ...sharedCanvasRefs: Array<MaybeAccessor<HTMLCanvasElement | undefined> | undefined>
 ) {
   sharedCanvasRefs.forEach((sharedCanvasRef) => {
-    const canvas = sharedCanvasRef?.current;
+    const canvas = sharedCanvasRef && read(sharedCanvasRef);
     if (canvas) {
       PENDING_SHARED_CANVAS_RECALCULATIONS.add(canvas);
     }
@@ -52,21 +52,16 @@ export function requestSharedCanvasCoordsRecalculation(
   }
 }
 
-// TODO(codemod): useCoordsInSharedCanvas: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useCoordsInSharedCanvas(
-  containerRef: (el: HTMLDivElement) => void,
-  sharedCanvasRef?: (el: HTMLCanvasElement) => void,
+  containerRef: MaybeAccessor<HTMLDivElement | undefined>,
+  sharedCanvasRef?: MaybeAccessor<HTMLCanvasElement | undefined>,
 ) {
   const [coords, setCoords] = createSignal<SharedCanvasCoords | undefined>(undefined);
-  const sharedCanvasContainerRef = createMemo<(el: HTMLElement) => void>(() => ({
-    get current() {
-      return sharedCanvasRef?.current?.parentElement || undefined;
-    },
-  }));
+  const sharedCanvasContainerRef = () => (sharedCanvasRef && read(sharedCanvasRef))?.parentElement || undefined;
 
   const recalculate = (canvasMetrics?: SharedCanvasMetrics) => {
-    const container = containerRef.current;
-    const canvas = sharedCanvasRef?.current;
+    const container = read(containerRef);
+    const canvas = sharedCanvasRef && read(sharedCanvasRef);
     if (!container || !canvas) {
       return;
     }
@@ -100,47 +95,44 @@ export default function useCoordsInSharedCanvas(
     );
   };
 
-  createEffect(
-    () => sharedCanvasRef,
-    () => {
-      if (sharedCanvasRef?.current) {
-        requestSharedCanvasCoordsRecalculation(sharedCanvasRef);
-      }
-    },
-  );
-  createEffect(
-    () => [recalculate, sharedCanvasRef],
-    () => {
-      const canvas = sharedCanvasRef?.current;
-      if (!canvas) {
-        return undefined;
-      }
+  onMount(() => {
+    if (sharedCanvasRef && read(sharedCanvasRef)) {
+      requestSharedCanvasCoordsRecalculation(sharedCanvasRef);
+    }
+  });
+  onMount(() => {
+    const canvas = sharedCanvasRef && read(sharedCanvasRef);
+    if (!canvas) {
+      return undefined;
+    }
 
-      let manager = SHARED_CANVAS_RECALCULATION_MANAGERS.get(canvas);
-      if (!manager) {
-        manager = createCallbackManager();
-        SHARED_CANVAS_RECALCULATION_MANAGERS.set(canvas, manager);
-      }
+    let manager = SHARED_CANVAS_RECALCULATION_MANAGERS.get(canvas);
+    if (!manager) {
+      manager = createCallbackManager();
+      SHARED_CANVAS_RECALCULATION_MANAGERS.set(canvas, manager);
+    }
 
-      const removeCallback = manager.addCallback(recalculate);
-      return () => {
-        removeCallback();
-        if (!manager.hasCallbacks()) {
-          SHARED_CANVAS_RECALCULATION_MANAGERS.delete(canvas);
-        }
-      };
-    },
-  );
+    const removeCallback = manager.addCallback(recalculate);
+    return () => {
+      removeCallback();
+      if (!manager.hasCallbacks()) {
+        SHARED_CANVAS_RECALCULATION_MANAGERS.delete(canvas);
+      }
+    };
+  });
 
   const throttledRequestRecalculation = useThrottledCallback(
     () => requestSharedCanvasCoordsRecalculation(sharedCanvasRef),
     [sharedCanvasRef],
     THROTTLE_MS,
   );
-  useResizeObserver(() => sharedCanvasContainerRef(), throttledRequestRecalculation);
+  useResizeObserver(sharedCanvasContainerRef, throttledRequestRecalculation);
   useSharedIntersectionObserver(sharedCanvasRef, throttledRequestRecalculation);
 
-  return createMemo(() => (coords() ? { x: coords().x, y: coords().y } : undefined));
+  return createMemo(() => {
+    const currentCoords = coords();
+    return currentCoords ? { x: currentCoords.x, y: currentCoords.y } : undefined;
+  });
 }
 
 function flushSharedCanvasCoordsRecalculations() {

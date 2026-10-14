@@ -1,9 +1,9 @@
 import { createEffect, createSignal } from 'frameact';
 
+import { type MaybeAccessor, read } from '../util/accessors';
 import { areDeepEqual } from '../util/areDeepEqual';
 import { isSafariPatchInProgress } from '../util/patchSafariProgressiveAudio';
 import { debounce } from '../util/schedulers';
-import useLastCallback from './useLastCallback';
 
 type BufferingEvent = (e: Event | React.SyntheticEvent<HTMLMediaElement>) => void;
 
@@ -18,21 +18,20 @@ const BUFFERING_EVENTS = ['play', 'loadeddata', 'playing', 'loadstart', 'pause',
  */
 export type BufferedRange = { start: number; end: number };
 
-// TODO(codemod): useBuffering: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 const useBuffering = (
-  noInitiallyBuffered = false,
+  noInitiallyBuffered: MaybeAccessor<boolean> = false,
   onTimeUpdate?: AnyToVoidFunction,
   onBroken?: AnyToVoidFunction,
-  mediaElement?: HTMLMediaElement,
+  mediaElement?: MaybeAccessor<HTMLMediaElement | undefined>,
 ) => {
-  const [isBuffered, setIsBuffered] = createSignal(!noInitiallyBuffered);
+  const [isBuffered, setIsBuffered] = createSignal(!read(noInitiallyBuffered));
   const [isReady, setIsReady] = createSignal(false);
   const [bufferedProgress, setBufferedProgress] = createSignal(0);
   const [bufferedRanges, setBufferedRanges] = createSignal<BufferedRange[]>([]);
 
   const setIsBufferedDebounced = debounce(setIsBuffered, DEBOUNCE, false, true);
 
-  const handleBuffering = (e) => {
+  const handleBuffering: BufferingEvent = (e) => {
     const media = e.currentTarget as HTMLMediaElement;
 
     if (media.duration < MIN_ALLOWED_MEDIA_DURATION) {
@@ -60,15 +59,15 @@ const useBuffering = (
   };
 
   createEffect(
-    () => [mediaElement, handleBuffering],
-    () => {
-      if (!mediaElement) return undefined;
+    () => read(mediaElement),
+    (mediaElement2) => {
+      if (!mediaElement2) return undefined;
 
-      const listener = handleBuffering as EventListener;
-      BUFFERING_EVENTS.forEach((event) => mediaElement.addEventListener(event, listener));
+      const listener = handleBuffering;
+      BUFFERING_EVENTS.forEach((event) => mediaElement2.addEventListener(event, listener));
 
       return () => {
-        BUFFERING_EVENTS.forEach((event) => mediaElement.removeEventListener(event, listener));
+        BUFFERING_EVENTS.forEach((event) => mediaElement2.removeEventListener(event, listener));
       };
     },
   );

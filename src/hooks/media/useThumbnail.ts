@@ -1,21 +1,21 @@
 import { createMemo } from 'frameact';
-import { getGlobal } from '../../global';
+import { useGlobal } from '../../global';
 
 import type { ApiThumbnail, MediaContainer } from '../../api/types';
 
 import { selectTheme } from '../../global/selectors';
 import { selectMessageMediaThumbDataUri } from '../../global/selectors/media';
+import { type MaybeAccessor, read } from '../../util/accessors';
 
-// TODO(codemod): useThumbnail: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function useThumbnail(media?: MediaContainer | ApiThumbnail) {
-  const isMediaContainer = media && 'content' in media;
-  const global = createMemo(() => getGlobal());
-  const thumbDataUri = createMemo(() =>
-    isMediaContainer ? selectMessageMediaThumbDataUri(global(), media) : media?.dataUri,
-  );
+// Deviation: a memo over the tracked global, so the thumbnail also follows a theme change (tt had a TODO for that).
+export default function useThumbnail(media?: MaybeAccessor<MediaContainer | ApiThumbnail | undefined>) {
+  const global = useGlobal();
+  const thumbDataUri = createMemo(() => {
+    const media2 = read(media);
+    return media2 && 'content' in media2 ? selectMessageMediaThumbDataUri(global, media2) : media2?.dataUri;
+  });
 
-  // TODO Find a way to update thumbnail on theme change
-  const theme = createMemo(() => selectTheme(global()));
+  const theme = createMemo(() => selectTheme(global));
 
   const dataUri = createMemo(() => {
     const uri = thumbDataUri();

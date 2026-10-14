@@ -1,7 +1,7 @@
 import { createEffect } from 'frameact';
 
+import { type MaybeAccessor, read } from '../util/accessors';
 import { createCallbackManager } from '../util/callbacks';
-import useLastCallback from './useLastCallback';
 
 const startCallbacks = createCallbackManager();
 const endCallbacks = createCallbackManager();
@@ -9,15 +9,19 @@ const endCallbacks = createCallbackManager();
 let timeout: number | undefined;
 let isActive = false;
 
-// TODO(codemod): usePriorityPlaybackCheck: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-const usePriorityPlaybackCheck = (onStart?: AnyToVoidFunction, onEnd?: AnyToVoidFunction, isDisabled = false) => {
+// Deviation: `isDisabled` is a value or an accessor; the callbacks are required (tt crashed on a missing one).
+const usePriorityPlaybackCheck = (
+  onStart: AnyToVoidFunction,
+  onEnd: AnyToVoidFunction,
+  isDisabled: MaybeAccessor<boolean | undefined> = false,
+) => {
   const lastOnStart = onStart;
   const lastOnEnd = onEnd;
 
   createEffect(
-    () => [isDisabled, lastOnStart, lastOnEnd],
-    () => {
-      if (isDisabled) {
+    () => read(isDisabled),
+    (isDisabled2) => {
+      if (isDisabled2) {
         return undefined;
       }
 

@@ -2,24 +2,23 @@ import { createEffect, getIsHeavyAnimating, requestMeasure } from 'frameact';
 
 import type { CallbackManager } from '../util/callbacks';
 
+import { type MaybeAccessor, read } from '../util/accessors';
 import { createCallbackManager } from '../util/callbacks';
-import useLastCallback from './useLastCallback';
 
 const elementObserverMap = new Map<HTMLElement, [IntersectionObserver, CallbackManager]>();
 
-// TODO(codemod): useSharedIntersectionObserver: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useSharedIntersectionObserver(
-  refOrElement: (el: HTMLElement) => void | HTMLElement | undefined,
+  refOrElement: MaybeAccessor<HTMLElement | undefined> | undefined,
   onIntersectionChange: (entry: IntersectionObserverEntry) => void,
-  isDisabled = false,
+  isDisabled: MaybeAccessor<boolean | undefined> = false,
 ) {
   const onIntersectionChangeLast = onIntersectionChange;
 
   createEffect(
-    () => [isDisabled, refOrElement],
-    () => {
-      const el = refOrElement && 'current' in refOrElement ? refOrElement.current : refOrElement;
-      if (!el || isDisabled) {
+    () => read(isDisabled),
+    (isDisabled2) => {
+      const el = refOrElement && read(refOrElement);
+      if (!el || isDisabled2) {
         return undefined;
       }
 

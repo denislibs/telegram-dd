@@ -1,8 +1,8 @@
-import { Show, splitProps } from 'frameact/dom';
-import { createShowTransition } from '../../lib/kit';
+import { Match, Show, Switch } from 'frameact/dom';
 
 import type { GlobalState } from '../../global/types';
 
+import { createShowTransition } from '../../lib/kit';
 import { selectTabState } from '../../global/selectors';
 import buildClassName from '../../util/buildClassName';
 import buildStyle from '../../util/buildStyle';
@@ -107,7 +107,6 @@ const BUTTON_POSITIONS = [
 const PROGRESS_POSITIONS = generateRandomProgressPositions(100);
 
 const Sparkles = (props: OwnProps) => {
-  const [, presetSettings] = splitProps(props, ['className', 'style', 'noAnimation']);
   const isHeavyModalOpen = useSelector(selectIsHeavyModalOpen);
 
   const { ref, shouldRender } = createShowTransition({
@@ -117,9 +116,8 @@ const Sparkles = (props: OwnProps) => {
 
   return (
     <Show when={shouldRender()}>
-      <Show
-        when={!(presetSettings.preset === 'button')}
-        fallback={
+      <Switch>
+        <Match when={props.preset === 'button'}>
           <div
             ref={ref}
             class={buildClassName(styles.root, styles.button, props.className, props.noAnimation && styles.noAnimation)}
@@ -146,36 +144,30 @@ const Sparkles = (props: OwnProps) => {
               );
             })}
           </div>
-        }
-      >
-        <Show
-          when={!(presetSettings.preset === 'progress')}
-          fallback={
-            <div ref={ref} class={buildClassName(styles.root, styles.progress, props.className)} style={props.style}>
-              {PROGRESS_POSITIONS.map((position) => {
-                return (
-                  <div
-                    class={styles.symbol}
-                    style={buildStyle(
-                      `top: ${position.y}%`,
-                      `left: ${position.x}%`,
-                      `--_shift-x: ${position.velocityX}%`,
-                      `--_shift-y: ${position.velocityY}%`,
-                      `scale: ${position.scale}%`,
-                      `--_duration-shift: ${(-position.durationShift / 100) * ANIMATION_DURATION}s`,
-                    )}
-                    aria-hidden="true"
-                  >
-                    {SYMBOL}
-                  </div>
-                );
-              })}
-            </div>
-          }
-        >
-          {undefined}
-        </Show>
-      </Show>
+        </Match>
+        <Match when={props.preset === 'progress'}>
+          <div ref={ref} class={buildClassName(styles.root, styles.progress, props.className)} style={props.style}>
+            {PROGRESS_POSITIONS.map((position) => {
+              return (
+                <div
+                  class={styles.symbol}
+                  style={buildStyle(
+                    `top: ${position.y}%`,
+                    `left: ${position.x}%`,
+                    `--_shift-x: ${position.velocityX}%`,
+                    `--_shift-y: ${position.velocityY}%`,
+                    `scale: ${position.scale}%`,
+                    `--_duration-shift: ${(-position.durationShift / 100) * ANIMATION_DURATION}s`,
+                  )}
+                  aria-hidden="true"
+                >
+                  {SYMBOL}
+                </div>
+              );
+            })}
+          </div>
+        </Match>
+      </Switch>
     </Show>
   );
 };

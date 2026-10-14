@@ -1,19 +1,16 @@
 import { createEffect } from 'frameact';
 
-import useLastCallback from '../useLastCallback';
+import { type MaybeAccessor, read } from '../../util/accessors';
 
-// TODO(codemod): useTimeout: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-function useTimeout(callback: NoneToVoidFunction, delay?: number) {
-  const savedCallback = callback;
-
+function useTimeout(callback: NoneToVoidFunction, delay?: MaybeAccessor<number | undefined>) {
   createEffect(
-    () => delay,
-    () => {
-      if (typeof delay !== 'number') {
+    () => read(delay),
+    (delay2) => {
+      if (typeof delay2 !== 'number') {
         return undefined;
       }
 
-      const id = setTimeout(() => savedCallback(), delay);
+      const id = setTimeout(() => callback(), delay2);
       return () => clearTimeout(id);
     },
   );

@@ -2,25 +2,21 @@ import { createEffect } from 'frameact';
 
 import type { CallbackManager } from '../util/callbacks';
 
+import { type MaybeAccessor, read } from '../util/accessors';
 import { createCallbackManager } from '../util/callbacks';
-import { useStateRef } from './useStateRef';
 
 const elementObserverMap = new Map<HTMLElement, [ResizeObserver, CallbackManager]>();
 
-// TODO(codemod): useResizeObserver: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useResizeObserver(
-  ref: (el: HTMLElement) => void | undefined,
+  ref: MaybeAccessor<HTMLElement | undefined> | undefined,
   onResize: (entry: ResizeObserverEntry) => void,
-  isDisabled = false,
+  isDisabled: MaybeAccessor<boolean | undefined> = false,
 ) {
-  // TODO(codemod): useStateRef: a handler reads the current value through the accessor; replace ref.current with the accessor call
-  const onResizeRef = useStateRef(onResize);
-
   createEffect(
-    () => [isDisabled, onResizeRef, ref],
-    () => {
-      const el = ref?.current;
-      if (!el || isDisabled) {
+    () => read(isDisabled),
+    (isDisabled2) => {
+      const el = ref && read(ref);
+      if (!el || isDisabled2) {
         return undefined;
       }
 
@@ -30,7 +26,7 @@ export default function useResizeObserver(
           return;
         }
 
-        onResizeRef.current(entry);
+        onResize(entry);
       };
 
       let [observer, callbackManager] = elementObserverMap.get(el) || [undefined, undefined];

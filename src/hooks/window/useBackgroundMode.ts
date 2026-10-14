@@ -1,7 +1,7 @@
 import { createEffect } from 'frameact';
 
+import { type MaybeAccessor, read } from '../../util/accessors';
 import { createSignal } from '../../util/signals';
-import useLastCallback from '../useLastCallback';
 
 const [getIsInBackgroundLocal, setIsInBackground] = createSignal(!document.hasFocus());
 export const getIsInBackground = getIsInBackgroundLocal;
@@ -17,15 +17,19 @@ function handleFocus() {
 window.addEventListener('blur', handleBlur);
 window.addEventListener('focus', handleFocus);
 
-// TODO(codemod): useBackgroundMode: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function useBackgroundMode(onBlur?: AnyToVoidFunction, onFocus?: AnyToVoidFunction, isDisabled = false) {
+// Deviation: `isDisabled` is a value or an accessor; the callbacks are required (tt crashed on a missing one).
+export default function useBackgroundMode(
+  onBlur: AnyToVoidFunction,
+  onFocus: AnyToVoidFunction,
+  isDisabled: MaybeAccessor<boolean | undefined> = false,
+) {
   const lastOnBlur = onBlur;
   const lastOnFocus = onFocus;
 
   createEffect(
-    () => [isDisabled, lastOnBlur, lastOnFocus],
-    () => {
-      if (isDisabled) {
+    () => read(isDisabled),
+    (isDisabled2) => {
+      if (isDisabled2) {
         return undefined;
       }
 

@@ -1,22 +1,26 @@
-import { createEffect, createSignal } from 'frameact';
+import { createMeasureEffect, createSignal } from 'frameact';
 
+import { type MaybeAccessor, read } from '../../util/accessors';
 import { createCallbackManager } from '../../util/callbacks';
 
 const BALANCE_BAR_MODAL_SELECTOR = '.Modal.with-balance-bar';
 
 const balanceBarCallbacks = createCallbackManager();
 
-// TODO(codemod): useIsTopmostBalanceBarModal: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function useIsTopmostBalanceBarModal(ref: { current?: HTMLElement }, isActive?: boolean) {
+// Deviation: a measure effect, as it reads layout (`getComputedStyle`).
+export default function useIsTopmostBalanceBarModal(
+  ref: MaybeAccessor<HTMLElement | undefined>,
+  isActive?: MaybeAccessor<boolean | undefined>,
+) {
   const [isTopmost, setIsTopmost] = createSignal(true);
 
-  createEffect(
-    () => [isActive, ref],
-    () => {
-      if (!isActive) return undefined;
+  createMeasureEffect(
+    () => read(isActive),
+    (isActive2) => {
+      if (!isActive2) return undefined;
 
       const updateIsTopmost = () => {
-        setIsTopmost(checkIsTopmostBalanceBarModal(ref.current));
+        setIsTopmost(checkIsTopmostBalanceBarModal(read(ref)));
       };
 
       updateIsTopmost();

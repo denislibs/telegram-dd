@@ -1,43 +1,43 @@
-import { createMeasureEffect } from 'frameact';
+import { type Accessor, createMeasureEffect } from 'frameact';
 
+import { type MaybeAccessor, read } from '../util/accessors';
 import { hasActiveViewTransition } from './animations/useViewTransition';
 
 const BACKDROP_CLASSNAME = 'backdrop';
 
 // This effect implements closing menus by clicking outside of them
 // without adding extra elements to the DOM
-// TODO(codemod): useVirtualBackdrop: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useVirtualBackdrop(
-  isOpen: boolean,
-  containerRef: (el: HTMLElement) => void,
-  onClose?: () => void | undefined,
-  ignoreRightClick?: boolean,
-  excludedClosestSelector?: string,
+  isOpen: MaybeAccessor<boolean>,
+  containerRef: MaybeAccessor<HTMLElement | undefined>,
+  onClose?: Accessor<(() => void) | undefined>,
+  ignoreRightClick?: MaybeAccessor<boolean | undefined>,
+  excludedClosestSelector?: MaybeAccessor<string | undefined>,
 ) {
   createMeasureEffect(
-    () => [excludedClosestSelector, ignoreRightClick, isOpen, containerRef, onClose],
-    () => {
-      if (!isOpen || !onClose) {
+    () => [read(excludedClosestSelector), read(ignoreRightClick), read(isOpen), onClose?.()] as const,
+    ([excludedClosestSelector2, ignoreRightClick2, isOpen2, onClose2]) => {
+      if (!isOpen2 || !onClose2) {
         return undefined;
       }
 
       const handleEvent = (e: MouseEvent) => {
-        const container = containerRef.current;
+        const container = read(containerRef);
         const target = e.target as HTMLElement | null;
-        if (!container || !target || (ignoreRightClick && e.button === 2) || hasActiveViewTransition()) {
+        if (!container || !target || (ignoreRightClick2 && e.button === 2) || hasActiveViewTransition()) {
           return;
         }
 
         if (
           (!container.contains(e.target as Node | null) || target.classList.contains(BACKDROP_CLASSNAME)) &&
           !(
-            excludedClosestSelector &&
-            (target.matches(excludedClosestSelector) || target.closest(excludedClosestSelector))
+            excludedClosestSelector2 &&
+            (target.matches(excludedClosestSelector2) || target.closest(excludedClosestSelector2))
           )
         ) {
           e.preventDefault();
           e.stopPropagation();
-          onClose?.();
+          onClose2();
         }
       };
 

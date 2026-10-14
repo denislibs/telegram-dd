@@ -1,30 +1,31 @@
-import { createEffect, createSignal } from 'frameact';
+import { type Accessor, createEffect, createSignal } from 'frameact';
+
+import { type MaybeAccessor, read } from '../util/accessors';
 
 function useAsync<T>(
   fn: () => Promise<T>,
-  deps: unknown[],
+  deps: MaybeAccessor<unknown[]>,
   defaultValue: T,
 ): {
-  isLoading: boolean;
-  error: Error | undefined;
-  result: T;
+  isLoading: Accessor<boolean>;
+  error: Accessor<Error | undefined>;
+  result: Accessor<T>;
 };
 function useAsync<T>(
   fn: () => Promise<T>,
-  deps: unknown[],
+  deps: MaybeAccessor<unknown[]>,
 ): {
-  isLoading: boolean;
-  error: Error | undefined;
-  result: T | undefined;
+  isLoading: Accessor<boolean>;
+  error: Accessor<Error | undefined>;
+  result: Accessor<T | undefined>;
 };
-// TODO(codemod): useAsync: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-function useAsync<T>(fn: () => Promise<T>, deps: unknown[], defaultValue?: T) {
+// Deviation: `deps` is an array or an accessor of one; the effect re-runs when a tracked read in it changes.
+function useAsync<T>(fn: () => Promise<T>, deps: MaybeAccessor<unknown[]>, defaultValue?: T) {
   const [isLoading, setIsLoading] = createSignal<boolean>(false);
   const [error, setError] = createSignal<Error | undefined>(undefined);
   const [result, setResult] = createSignal<T | undefined>(defaultValue);
-  // TODO(codemod): useEffect without a dependency array ran after every render: name the tracked reads in the compute half
   createEffect(
-    () => undefined,
+    () => [...read(deps)],
     () => {
       setIsLoading(true);
       setError(undefined);
@@ -44,9 +45,7 @@ function useAsync<T>(fn: () => Promise<T>, deps: unknown[], defaultValue?: T) {
       return () => {
         wasCancelled = true;
       };
-      // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps
     },
-    deps,
   );
   return { isLoading, error, result };
 }

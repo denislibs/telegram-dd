@@ -1,13 +1,13 @@
-import { createEffect } from 'frameact';
+import { type Accessor, createMemo } from 'frameact';
 import { trackGlobal } from '../global';
 
 import type { ApiPeer, ApiTypePeerColor } from '../api/types';
 import type { CustomPeer, ThemeKey } from '../types';
 
 import { getPeerColorCollectibleColorCount, getPeerColorCount, getPeerColorKey } from '../global/helpers';
+import { type MaybeAccessor, read } from '../util/accessors';
 import buildStyle from '../util/buildStyle';
 import { generateColorVariations, generatePeerColorGradient } from '../util/theme';
-import useSyncEffect from './useSyncEffect';
 
 type PeerColorAttributes = {
   className?: string;
@@ -19,27 +19,25 @@ type PeerColorProperties = PeerColorAttributes & {
   giftEmojiId?: string;
 };
 
-// TODO(codemod): usePeerColor: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function usePeerColor({
-  peer,
-  color,
-  noUserColors,
-  shouldReset,
-  theme,
-}: {
-  peer?: ApiPeer | CustomPeer;
-  color?: ApiTypePeerColor;
-  noUserColors?: boolean;
-  shouldReset?: boolean;
-  theme: ThemeKey;
-}): PeerColorProperties {
-  let propertiesRef: PeerColorAttributes = {};
-  const realPeer = peer && !('isCustomPeer' in peer) ? peer : undefined;
+// Deviation: tt's `useSyncEffect` + ref is derived state here: the result is a memo.
+export default function usePeerColor(options: {
+  peer?: MaybeAccessor<ApiPeer | CustomPeer | undefined>;
+  color?: MaybeAccessor<ApiTypePeerColor | undefined>;
+  noUserColors?: MaybeAccessor<boolean | undefined>;
+  shouldReset?: MaybeAccessor<boolean | undefined>;
+  theme: MaybeAccessor<ThemeKey>;
+}): Accessor<PeerColorProperties> {
+  return createMemo(() => {
+    const peer = read(options.peer);
+    const color = read(options.color);
+    const noUserColors = read(options.noUserColors);
+    const shouldReset = read(options.shouldReset);
+    const theme = read(options.theme);
 
-  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
-  createEffect(
-    () => [noUserColors, shouldReset, theme, color, peer],
-    () => {
+    let propertiesRef: PeerColorAttributes = {};
+    const realPeer = peer && !('isCustomPeer' in peer) ? peer : undefined;
+
+    const updateProperties = () => {
       if (!peer) {
         if (!shouldReset) {
           propertiesRef = {};
@@ -97,15 +95,16 @@ export default function usePeerColor({
 
       const className = noUserColors || key === undefined ? colorCountClass : getPeerColorClass(key);
       propertiesRef = { className, style: undefined };
-    },
-  );
+    };
+    updateProperties();
 
-  return {
-    style: propertiesRef.style,
-    className: propertiesRef.className,
-    backgroundEmojiId: realPeer?.color?.backgroundEmojiId,
-    giftEmojiId: realPeer?.color?.type === 'collectible' ? realPeer.color.giftEmojiId : undefined,
-  };
+    return {
+      style: propertiesRef.style,
+      className: propertiesRef.className,
+      backgroundEmojiId: realPeer?.color?.backgroundEmojiId,
+      giftEmojiId: realPeer?.color?.type === 'collectible' ? realPeer.color.giftEmojiId : undefined,
+    };
+  });
 }
 
 export function getPeerColorClass(colorIndex: number) {

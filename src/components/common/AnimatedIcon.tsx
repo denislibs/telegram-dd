@@ -1,10 +1,9 @@
-import { createMemo, createSignal } from 'frameact';
+import { createSignal } from 'frameact';
 import { mergeProps, splitProps } from 'frameact/dom';
-import { createMediaTransition } from '../../lib/kit';
 
 import type { OwnProps as AnimatedStickerProps } from './AnimatedSticker';
 
-import buildClassName from '../../util/buildClassName';
+import { createMediaTransition } from '../../lib/kit';
 
 import useFlag from '../../hooks/useFlag';
 
@@ -18,6 +17,7 @@ function AnimatedIcon(rawProps: OwnProps) {
   const props = mergeProps({ size: DEFAULT_SIZE, play: true, noLoop: true }, rawProps) as OwnProps &
     Required<Pick<OwnProps, 'size' | 'play' | 'noLoop'>>;
   const [, otherProps] = splitProps(props, [
+    'ref',
     'size',
     'play',
     'noLoop',
@@ -28,17 +28,15 @@ function AnimatedIcon(rawProps: OwnProps) {
     'onClick',
   ]);
   const [isAnimationLoaded, markAnimationLoaded] = useFlag(false);
-  // TODO(codemod): useMediaTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element
-  const transitionClassNames = createMemo(() =>
-    createMediaTransition({ hasMediaData: () => Boolean(props.noTransition || isAnimationLoaded()) }),
-  );
+  // Deviation: the transition classes are written through the element ref (imperative class writes), not a class string.
+  const transition = createMediaTransition({ hasMediaData: () => Boolean(props.noTransition || isAnimationLoaded()) });
 
   const handleLoad = () => {
     markAnimationLoaded();
     props.onLoad?.();
   };
 
-  const [playKey, setPlayKey] = createSignal((() => String(Math.random()))());
+  const [playKey, setPlayKey] = createSignal(String(Math.random()));
 
   const handleClick = () => {
     if (props.play === true) {
@@ -50,13 +48,16 @@ function AnimatedIcon(rawProps: OwnProps) {
 
   return (
     <AnimatedSticker
-      className={buildClassName(props.className, transitionClassNames())}
+      ref={(el) => {
+        transition.ref(el);
+        props.ref?.(el);
+      }}
+      className={props.className}
       size={props.size}
       play={props.play === true ? playKey() : props.play}
       noLoop={props.noLoop}
       onClick={!props.nonInteractive ? handleClick : undefined}
       onLoad={handleLoad}
-
       {...otherProps}
     />
   );
