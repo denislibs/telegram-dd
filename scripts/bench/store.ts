@@ -15,7 +15,7 @@
 // reducer alone, tt's `deepDiff` (one multitab flush) and a model of tt's `updateContainers` (every mounted
 // container's mapStateToProps + shallow compare per setGlobal). Rows time the operation alone; the memos are pulled
 // afterwards, untimed ("recomputes" counts how many re-ran).
-import { createMemo, createRoot } from 'frameact';
+import { createMemo, createRoot, createSignal } from 'frameact';
 import { $TRACK, createStore, reconcile, type StoreArray, unwrap } from 'frameact/store';
 import { cpus } from 'node:os';
 
@@ -584,6 +584,55 @@ measure('reducer + setGlobal: addNewMessage end to end', ITERATIONS, () => {
   subs.pull();
   return { us: r.us, recomputes: subs.take(), writes: r.result.writes };
 });
+
+// N3: helpers that read `getGlobal()` inside row mappers — a version signal re-run on every write vs. the mirror
+// (tt inventory: getCanPostInChat, getPeerColorCount, getGroupStatus, getMessageTranscription (via renderMessageSummary
+// in the chat row), renderMessageSummaryHtml, sortChatIds, filterPeersByQuery, getCurrentMaxAccountCount)
+{
+  const [version, setVersion] = createSignal(0);
+  const rows = Object.keys(compat.getGlobal().chats.byId);
+  const helperV = (id: string) => (version(), !compat.getGlobal().chats.byId[id]?.isMuted); // committed copy + version
+  const helperP = (id: string) => !(compat.state as unknown as State).chats.byId[id]?.isMuted; // the mirror
+  let runsV = 0;
+  let runsP = 0;
+  const memosV: (() => unknown)[] = [];
+  const memosP: (() => unknown)[] = [];
+  createRoot(() => {
+    for (const id of rows) {
+      memosV.push(createMemo(() => (runsV++, helperV(id))));
+      memosP.push(createMemo(() => (runsP++, helperP(id))));
+    }
+  });
+  const pullAll = (memos: (() => unknown)[]) => {
+    for (const m of memos) m();
+  };
+  pullAll(memosV);
+  pullAll(memosP);
+  runsV = runsP = 0;
+  measure(`N3 version signal: ${rows.length} row mappers calling a getGlobal() helper, per new message`, 50, () => {
+    compat.setGlobal(addNewMessage(compat.getGlobal(), openChatId));
+    const t0 = performance.now();
+    setVersion((v) => v + 1);
+    pullAll(memosV);
+    const us = (performance.now() - t0) * 1000;
+    const r = runsV;
+    runsV = 0;
+    return { us, recomputes: r };
+  });
+  measure(
+    `N3 mirror in mapper context: ${rows.length} row mappers calling the same helper, per new message`,
+    50,
+    () => {
+      compat.setGlobal(addNewMessage(compat.getGlobal(), openChatId));
+      const t0 = performance.now();
+      pullAll(memosP);
+      const us = (performance.now() - t0) * 1000;
+      const r = runsP;
+      runsP = 0;
+      return { us, recomputes: r };
+    },
+  );
+}
 
 // the engine alternative: setState(reconcile(next)) at the root
 {

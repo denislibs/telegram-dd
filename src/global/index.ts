@@ -123,14 +123,45 @@ export function forceOnHeavyAnimationOnce() {
 
 // ---- getGlobal / setGlobal --------------------------------------------------------------------------------------
 
+// ---- the mapper context (N3) ------------------------------------------------------------------------------------
+
+let mapperDepth = 0;
+let mirrorReadsInMappers = 0;
+
+/**
+ * Run `fn` as a component's state mapper: inside it `getGlobal()` returns the tracked mirror instead of the committed
+ * copy, so a verbatim helper that reads `getGlobal()` (`getCanPostInChat`, `getPeerColorCount`,
+ * `getMessageTranscription`, `renderMessageSummary`, `sortChatIds`, …) subscribes the mapper to exactly the leaves it
+ * reads. tt re-ran every mapper on every `setGlobal`, which made those reads safe; a version signal would bring that
+ * cascade back for every row whose mapper touches such a helper. `withGlobal` and `useSelector` use this; a ported
+ * hook or effect that calls one of those helpers wraps the call the same way.
+ */
+export function trackGlobal<T>(fn: () => T): T {
+  mapperDepth++;
+  try {
+    return fn();
+  } finally {
+    mapperDepth--;
+  }
+}
+
+/** DEV: how many `getGlobal()` calls ran inside a mapper (the helpers to convert to an explicit `global` over time). */
+export function getMirrorReadsInMappers() {
+  return mirrorReadsInMappers;
+}
+
 /**
  * The committed global — tt's immutable global — as a shallow copy, for handlers, reducers, selectors called from
  * handlers, event handlers and anything that serialises or posts the state. The copy (0.2 µs) is what tt's DEBUG build
  * handed out; here it is handed out in production too, so `global.x = …; setGlobal(global)` (tt has a few) behaves
  * the same in both modes. In DEV the copy is stamped, so that `setGlobal` can detect a global taken before another
- * write (`forceOutdated` skips the check).
+ * write (`forceOutdated` skips the check). Inside a component's mapper (`trackGlobal`) it is the tracked mirror.
  */
 export function getGlobal<T extends GlobalState>(): T {
+  if (mapperDepth > 0) {
+    if (DEBUG) mirrorReadsInMappers++;
+    return trackedGlobal as unknown as T;
+  }
   if (DEBUG) {
     const copy = { ...currentGlobal, DEBUG_randomId: DEBUG_currentRandomId } as unknown as T;
     DEBUG_invalidateGlobalOnTickEnd();
@@ -272,13 +303,15 @@ export function withGlobal<OwnProps extends AnyLiteral, StateProps extends AnyLi
   const global = useGlobal();
   const mapped = createMemo<StateProps>(
     () => {
-      if (activationFn && !activationFn(global, ownProps, stickToFirst)) return last;
-      try {
-        last = mapStateToProps(global, ownProps);
-      } catch (err: any) {
-        handleError(err);
-      }
-      return last;
+      return trackGlobal(() => {
+        if (activationFn && !activationFn(global, ownProps, stickToFirst)) return last;
+        try {
+          last = mapStateToProps(global, ownProps);
+        } catch (err: any) {
+          handleError(err);
+        }
+        return last;
+      });
     },
     { equals: areRecordsShallowEqual },
   );

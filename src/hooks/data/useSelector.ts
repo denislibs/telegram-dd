@@ -1,5 +1,5 @@
 import { type Accessor, createMemo } from 'frameact';
-import { useGlobal } from '../../global';
+import { trackGlobal, useGlobal } from '../../global';
 
 import type { GlobalState } from '../../global/types';
 
@@ -17,7 +17,7 @@ type EqualityFn<T> = (oldValue: T, newValue: T) => boolean;
  */
 export function useSelectorSignal<T>(selector: Selector<T>): Accessor<T> {
   const global = useGlobal();
-  return createMemo(() => selector(global));
+  return createMemo(() => trackGlobal(() => selector(global)));
 }
 
 /**
@@ -29,7 +29,7 @@ function useSelector<T>(selector: Selector<T>): Accessor<T> {
 
 export function useSelectorSignalWithEquality<T>(selector: Selector<T>, equalityFn: EqualityFn<T>): Accessor<T> {
   const global = useGlobal();
-  return createMemo(() => selector(global), { equals: equalityFn });
+  return createMemo(() => trackGlobal(() => selector(global)), { equals: equalityFn });
 }
 
 export function useSelectorWithEquality<T>(selector: Selector<T>, equalityFn: EqualityFn<T>): Accessor<T> {

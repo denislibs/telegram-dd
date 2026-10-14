@@ -12,6 +12,7 @@ import { DEBUG } from '../config';
 import { MAIN_IDB_STORE } from '../util/browser/idb';
 import { getCurrentTabId } from '../util/establishMultitabRole';
 import { cloneDeep, pick } from '../util/iteratees';
+import useSelector from '../hooks/data/useSelector';
 import { updateTabState } from './reducers/tabs';
 import { selectTabState } from './selectors/tabs';
 import {
@@ -405,6 +406,59 @@ describe('C2: callbacks get the committed immutable global, so prevGlobal consum
     } finally {
       removeCallback(cb);
     }
+  });
+});
+
+describe('N3: a verbatim helper that reads getGlobal() inside a mapper is tracked', () => {
+  // `helpers/chats.ts` getCanPostInChat → selectIsChatRestricted(getGlobal(), …), called from MiddleColumn's mapper
+  const getCanPostInChat = (chatId: string) => !getGlobal().chats.byId[chatId]?.isRestricted;
+
+  it('withGlobal: the mapper re-runs when the leaves the helper read change, and only then', () => {
+    setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, byId: { a: chat('a'), b: chat('b') } } });
+    let mapperRuns = 0;
+    createRoot((dispose) => {
+      const props = withGlobal(
+        { chatId: 'a' },
+        (_global, { chatId }) => (mapperRuns++, { canPost: getCanPostInChat(chatId) }),
+      );
+      const canPost = createMemo(() => props.canPost);
+      expect(canPost()).toBe(true);
+      expect(mapperRuns).toBe(1);
+
+      setGlobal({
+        ...getGlobal(),
+        chats: { ...getGlobal().chats, byId: { ...getGlobal().chats.byId, a: { ...chat('a'), isRestricted: true } } },
+      });
+      expect(canPost()).toBe(false);
+      expect(mapperRuns).toBe(2);
+
+      // an unrelated write: the mapper does not run (no version signal, leaf tracking only)
+      setGlobal({ ...getGlobal(), isSyncing: true });
+      setGlobal({
+        ...getGlobal(),
+        chats: { ...getGlobal().chats, byId: { ...getGlobal().chats.byId, b: { ...chat('b'), isRestricted: true } } },
+      });
+      expect(canPost()).toBe(false);
+      expect(mapperRuns).toBe(2);
+      dispose();
+    });
+  });
+
+  it('useSelector: the same, through a selector that calls the helper', () => {
+    setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, byId: { a: chat('a') } } });
+    createRoot((dispose) => {
+      const canPost = useSelector(() => getCanPostInChat('a'));
+      expect(canPost()).toBe(true);
+      setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, byId: { a: { ...chat('a'), isRestricted: true } } } });
+      expect(canPost()).toBe(false);
+      dispose();
+    });
+  });
+
+  it('outside a mapper getGlobal() is the committed copy (stamped in DEV), as before', () => {
+    const g = getGlobal();
+    expect(unwrap(g)).toBe(g);
+    expect(() => setGlobal({ ...g, isSyncing: true })).not.toThrow();
   });
 });
 
