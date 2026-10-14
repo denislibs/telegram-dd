@@ -17,3 +17,11 @@ describe('the localization runtime (tt code over the bundled fallback pack)', ()
     expect(getTranslationFn()('NoSuchKeyInAnyPack' as 'AuthTitle')).toBe('NoSuchKeyInAnyPack');
   });
 });
+
+it('substitutes a variable literally: `$\'`, `$&` and `$$` in a value are not replacement patterns', async () => {
+  await initLocalization('en', false);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const lang = getTranslationFn();
+  expect(lang('UserTyping', { user: "$' and $& and $$ and $`" })).toBe("$' and $& and $$ and $` is typing");
+});
+
