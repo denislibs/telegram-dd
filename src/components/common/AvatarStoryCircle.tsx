@@ -9,6 +9,7 @@ import type { ThemeKey } from '../../types';
 import { selectPeerStories, selectTheme } from '../../global/selectors';
 import buildClassName from '../../util/buildClassName';
 import buildStyle from '../../util/buildStyle';
+import { depsOf } from '../../util/effectDeps';
 import { REM } from './helpers/mediaDimensions';
 
 import useDevicePixelRatio from '../../hooks/window/useDevicePixelRatio';
@@ -85,21 +86,23 @@ function AvatarStoryCircle(ownProps: OwnProps) {
   });
 
   createMutationEffect(
-    () =>
-      [
-        canvas(),
-        props.appTheme,
-        isCloseFriend(),
-        adaptedSize(),
-        values().read,
-        values().total,
-        props.withExtraGap,
-        props.extraGapPercent,
-        dpr(),
-        props.colors,
-        props.size,
-        strokeWidth(),
-      ] as const,
+    depsOf(
+      () =>
+        [
+          canvas(),
+          props.appTheme,
+          isCloseFriend(),
+          adaptedSize(),
+          values().read,
+          values().total,
+          props.withExtraGap,
+          props.extraGapPercent,
+          dpr(),
+          props.colors,
+          props.size,
+          strokeWidth(),
+        ] as const,
+    ),
     ([, appTheme2, , , , , withExtraGap2, extraGapPercent2, , colors2]) => {
       const canvasEl = canvas();
       if (!canvasEl) {

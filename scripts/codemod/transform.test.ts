@@ -255,7 +255,7 @@ describe('effects', () => {
     expectIncludes(code, 'onMount(() => { mount(); return () => unmount(); });');
     // an accessor dependency is received as a value by apply
     expectIncludes(code, 'createMeasureEffect(() => n(), (n2) => { const h = el.offsetHeight; use(h, n2); });');
-    expectIncludes(code, 'createMutationEffect(() => [props.isOpen, n()] as const, ([isOpen2, n2]) => {');
+    expectIncludes(code, 'createMutationEffect(depsOf(() => [props.isOpen, n()] as const), ([isOpen2, n2]) => {');
     expectIncludes(code, 'onDestroy(() => stop());');
     expectIncludes(code, 'onMount(() => once());');
     expect(report.hits).toMatchObject({ onMount: 2, onDestroy: 1, createMeasureEffect: 1, createMutationEffect: 1 });
@@ -388,6 +388,23 @@ describe('derived values and early returns', () => {
     expectIncludes(code, '</ul> </Show> </Show>');
     expectIncludes(code, "import { Show } from 'frameact/dom';");
     expect(report.todos).toEqual([]);
+  });
+});
+
+describe('effectDeps', () => {
+  it('an effect compute that returns an array compares by value; a single value and a wrapped compute stay', () => {
+    const { code } = run(
+      `const X = (props: { a: number; b: number }) => {
+  createEffect(() => [props.a, props.b], ([a, b]) => { go(a, b); });
+  createEffect(() => props.a, (a) => { one(a); });
+  createEffect(depsOf(() => [props.a, props.b]), ([a, b]) => { go(a, b); });
+  return <div />;
+};`,
+      ['effectDeps'],
+    );
+    expectIncludes(code, 'createEffect(depsOf(() => [props.a, props.b]), ([a, b]) => { go(a, b); });');
+    expectIncludes(code, 'createEffect(() => props.a, (a) => { one(a); });');
+    expectIncludes(code, 'createEffect(depsOf(() => [props.a, props.b]), ([a, b]) => { go(a, b); });');
   });
 });
 

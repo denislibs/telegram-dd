@@ -18,6 +18,7 @@ import { ensureTLottie, getTLottie } from '../../lib/tlottie/TLottie.async';
 import { IS_TAURI } from '../../util/browser/globalEnvironment';
 import buildClassName from '../../util/buildClassName';
 import buildStyle from '../../util/buildStyle';
+import { depsOf } from '../../util/effectDeps';
 import generateUniqueId from '../../util/generateUniqueId';
 import { isHeavyAnimatingInChain, watchHeavyAnimationInChain } from '../../util/heavyAnimationChain';
 
@@ -193,7 +194,13 @@ const AnimatedSticker = (props: OwnProps) => {
 
   // Deviation: `init` reads layout (`offsetWidth`), so this is a measure effect; `sharedCanvasCoords` is tracked by its fields.
   createMeasureEffect(
-    () => [props.tgsUrl, props.sharedCanvas, props.sharedCanvasCoords?.x, props.sharedCanvasCoords?.y, canInitialize()],
+    depsOf(() => [
+      props.tgsUrl,
+      props.sharedCanvas,
+      props.sharedCanvasCoords?.x,
+      props.sharedCanvasCoords?.y,
+      canInitialize(),
+    ]),
     () => {
       if (!canInitialize()) return;
       if (getTLottie()) {
@@ -208,14 +215,14 @@ const AnimatedSticker = (props: OwnProps) => {
   useSharedIntersectionObserver(() => props.sharedCanvas, throttledInit);
 
   createEffect(
-    () => [props.color, animation()],
+    depsOf(() => [props.color, animation()]),
     () => {
       animation()?.setColor(colorRef());
     },
   );
 
   createEffect(
-    () => [props.speed, animation()],
+    depsOf(() => [props.speed, animation()]),
     () => {
       const { speed } = live();
       if (typeof speed === 'number') {
@@ -260,7 +267,7 @@ const AnimatedSticker = (props: OwnProps) => {
   };
 
   createEffect(
-    () => [props.noLoop, animation()],
+    depsOf(() => [props.noLoop, animation()]),
     (_deps, prev) => {
       const [prevNoLoop] = prev ?? [];
       if (prevNoLoop !== undefined && live().noLoop !== prevNoLoop) {
@@ -271,7 +278,7 @@ const AnimatedSticker = (props: OwnProps) => {
 
   // Deviation: `sharedCanvasCoords` is compared by its fields (the object may be a new one with the same values).
   createEffect(
-    () => [props.sharedCanvasCoords?.x, props.sharedCanvasCoords?.y, viewId, animation()],
+    depsOf(() => [props.sharedCanvasCoords?.x, props.sharedCanvasCoords?.y, viewId, animation()]),
     ([x, y], prev) => {
       const [prevX, prevY] = prev ?? [];
       if (prevX !== undefined && (x !== prevX || y !== prevY)) {
@@ -281,7 +288,7 @@ const AnimatedSticker = (props: OwnProps) => {
   );
 
   createEffect(
-    () => [animation(), playKey(), props.noLoop, props.forceAlways, props.forceOnHeavyAnimation],
+    depsOf(() => [animation(), playKey(), props.noLoop, props.forceAlways, props.forceOnHeavyAnimation]),
     () => {
       if (!animation()) {
         return;
@@ -298,7 +305,7 @@ const AnimatedSticker = (props: OwnProps) => {
   );
 
   createEffect(
-    () => [animation(), props.tgsUrl, props.fitzModifier],
+    depsOf(() => [animation(), props.tgsUrl, props.fitzModifier]),
     () => {
       const currentAnimation = animation();
       if (currentAnimation) {

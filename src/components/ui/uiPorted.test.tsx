@@ -17,6 +17,7 @@ import Menu from './Menu';
 import MenuItem from './MenuItem';
 import Modal from './Modal';
 import Portal from './Portal';
+import RoundTimer from './RoundTimer';
 import Transition from './Transition';
 
 beforeAll(() => {
@@ -366,5 +367,36 @@ it('DropdownMenu withPortal: the dynamic position options reach the menu (anchor
   const menu = portals.querySelector('.Menu.in-portal')!;
   expect(menu).not.toBeNull();
   expect(menu.querySelector('.bubble')!.classList.contains('open')).toBe(true);
+  dispose();
+});
+
+it('RoundTimer: one step per second, onEnd once when the time is up (the effect deps are compared by value)', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+  const el = host();
+  const onEnd = vi.fn();
+  const dispose = render(() => <RoundTimer duration={5} onEnd={onEnd} />, el);
+  await flushMicrotasks();
+  flushSync();
+  await frame();
+  const offset = () => Number(el.querySelector('circle')!.getAttribute('stroke-dashoffset'));
+  const start = offset();
+  expect(onEnd).not.toHaveBeenCalled();
+
+  // tt: the first step happens at once (useInterval without noFirst), then one per second
+  vi.advanceTimersByTime(1000);
+  await flushMicrotasks();
+  flushSync();
+  expect(onEnd).not.toHaveBeenCalled();
+  expect(offset()).toBeGreaterThan(start);
+
+  vi.advanceTimersByTime(2000);
+  await flushMicrotasks();
+  flushSync();
+  expect(onEnd).not.toHaveBeenCalled();
+
+  vi.advanceTimersByTime(3000);
+  await flushMicrotasks();
+  flushSync();
+  expect(onEnd).toHaveBeenCalledTimes(1);
   dispose();
 });

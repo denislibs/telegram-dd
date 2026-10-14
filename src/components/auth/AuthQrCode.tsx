@@ -5,6 +5,7 @@ import type { GlobalState } from '../../global/types';
 
 import { createMediaTransition } from '../../lib/kit';
 import { selectSharedSettings } from '../../global/selectors/sharedState';
+import { depsOf } from '../../util/effectDeps';
 import { oldSetLanguage } from '../../util/oldLangProvider';
 import { createStyledQrCode } from '../../util/qrCode/buildStyledQrCode';
 import { LOCAL_TGS_URLS } from '../common/helpers/animatedAssets';
@@ -65,7 +66,7 @@ const AuthCode = () => {
   // Deviation: tt switched stricterdom off around the library (`disableStrict()` + a 50 ms timer); the library draws into
   // the container asynchronously, so the container is marked `data-stricterdom-ignore` instead (a third-party subtree).
   createMutationEffect(
-    () => [isConnected(), authQrCode(), isQrMounted(), qrCode()] as const,
+    depsOf(() => [isConnected(), authQrCode(), isQrMounted(), qrCode()] as const),
     ([isConnected2, authQrCode2, isQrMounted2, qrCode2]) => {
       if (!authQrCode2 || !qrCode2) {
         return () => {

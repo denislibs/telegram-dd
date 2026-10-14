@@ -1,6 +1,7 @@
 import { createEffect, createMeasureEffect, createSignal, frameMutation } from 'frameact';
 
 import { type MaybeAccessor, read } from '../../util/accessors';
+import { depsOf } from '../../util/effectDeps';
 import useResizeObserver from '../useResizeObserver';
 
 const UPDATE_DEBOUNCE = 50; // ms
@@ -33,7 +34,7 @@ export default function useStyleObserver(
   useResizeObserver(ref, updateValue, isDisabled);
 
   createEffect(
-    () => [read(debounce), read(isDisabled), read(property)] as const,
+    depsOf(() => [read(debounce), read(isDisabled), read(property)] as const),
     ([debounce2, isDisabled2, property2]) => {
       const el = read(ref);
       if (!el || isDisabled2) {
@@ -50,7 +51,7 @@ export default function useStyleObserver(
   );
 
   createMeasureEffect(
-    () => [read(isDisabled), read(property)] as const,
+    depsOf(() => [read(isDisabled), read(property)] as const),
     ([isDisabled2, property2]) => {
       const el = read(ref);
       if (!el) {

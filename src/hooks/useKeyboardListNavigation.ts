@@ -1,6 +1,7 @@
 import { createMeasureEffect, createSignal, requestMeasure, requestMutation } from 'frameact';
 
 import { type MaybeAccessor, read } from '../util/accessors';
+import { depsOf } from '../util/effectDeps';
 
 const useKeyboardListNavigation = (
   elementRef: MaybeAccessor<HTMLElement | undefined>,
@@ -12,7 +13,7 @@ const useKeyboardListNavigation = (
   const [focusedIndex, setFocusedIndex] = createSignal(-1);
 
   createMeasureEffect(
-    () => [read(isOpen), read(noCaptureFocus)] as const,
+    depsOf(() => [read(isOpen), read(noCaptureFocus)] as const),
     ([isOpen2, noCaptureFocus2]) => {
       setFocusedIndex(-1);
 

@@ -1,6 +1,7 @@
 import { createEffect } from 'frameact';
 
 import { type MaybeAccessor, read } from '../../util/accessors';
+import { depsOf } from '../../util/effectDeps';
 
 function useInterval(
   callback: NoneToVoidFunction,
@@ -8,7 +9,7 @@ function useInterval(
   noFirst: MaybeAccessor<boolean> = false,
 ) {
   createEffect(
-    () => [read(delay), read(noFirst)] as const,
+    depsOf(() => [read(delay), read(noFirst)] as const),
     ([delay2, noFirst2]) => {
       if (delay2 === undefined) {
         return undefined;

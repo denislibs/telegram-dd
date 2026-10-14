@@ -1,6 +1,7 @@
 import { createEffect, currentHeavyAnimationScope, requestMeasure } from 'frameact';
 
 import { type MaybeAccessor, read } from '../../../../util/accessors';
+import { depsOf } from '../../../../util/effectDeps';
 import { isHeavyAnimatingInChain, watchHeavyAnimationInChain } from '../../../../util/heavyAnimationChain';
 
 import usePriorityPlaybackCheck, { isPriorityPlaybackActive } from '../../../../hooks/usePriorityPlaybackCheck';
@@ -47,7 +48,7 @@ export default function useVideoAutoPause(
   };
 
   createEffect(
-    () => [read(canPlay), read(isPriority)] as const,
+    depsOf(() => [read(canPlay), read(isPriority)] as const),
     ([canPlay2, isPriority2]) => {
       if (canPlay2) {
         if (isPriority2 || !isFrozen()) {

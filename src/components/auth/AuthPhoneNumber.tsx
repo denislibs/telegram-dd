@@ -12,6 +12,7 @@ import type { ApiCountryCode } from '../../api/types';
 import type { GlobalState } from '../../global/types';
 
 import { IS_SAFARI, IS_TOUCH_ENV } from '../../util/browser/windowEnvironment';
+import { depsOf } from '../../util/effectDeps';
 import { preloadImage } from '../../util/files';
 import preloadFonts from '../../util/fonts';
 import { getAccountSlotUrl } from '../../util/multiaccount';
@@ -107,7 +108,7 @@ const AuthPhoneNumber = () => {
   );
 
   createEffect(
-    () => [isConnected(), nearestCountry()] as const,
+    depsOf(() => [isConnected(), nearestCountry()] as const),
     ([isConnected2, nearestCountry2]) => {
       if (isConnected2 && !nearestCountry2) {
         loadNearestCountry();
@@ -116,7 +117,7 @@ const AuthPhoneNumber = () => {
   );
 
   createEffect(
-    () => [isConnected(), props.language] as const,
+    depsOf(() => [isConnected(), props.language] as const),
     ([isConnected2, language2]) => {
       if (isConnected2) {
         loadCountryList({ langCode: language2 });
@@ -125,7 +126,7 @@ const AuthPhoneNumber = () => {
   );
 
   createEffect(
-    () => [country(), nearestCountry(), isTouched(), props.phoneCodeList] as const,
+    depsOf(() => [country(), nearestCountry(), isTouched(), props.phoneCodeList] as const),
     ([country2, nearestCountry2, isTouched2, phoneCodeList2]) => {
       if (nearestCountry2 && phoneCodeList2 && !country2 && !isTouched2) {
         setCountry(getCountryCodeByIso(phoneCodeList2, nearestCountry2));
@@ -165,7 +166,7 @@ const AuthPhoneNumber = () => {
   };
 
   createEffect(
-    () => [authPhoneNumber(), phoneNumber(), parseFullNumber] as const,
+    depsOf(() => [authPhoneNumber(), phoneNumber(), parseFullNumber] as const),
     ([authPhoneNumber2, phoneNumber2]) => {
       if (phoneNumber2 === undefined && authPhoneNumber2) {
         parseFullNumber(authPhoneNumber2);

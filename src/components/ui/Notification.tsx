@@ -9,6 +9,7 @@ import { ANIMATION_END_DELAY } from '../../config';
 import { createShowTransition } from '../../lib/kit';
 import buildClassName from '../../util/buildClassName';
 import captureEscKeyListener from '../../util/captureEscKeyListener';
+import { depsOf } from '../../util/effectDeps';
 import { REM } from '../common/helpers/mediaDimensions';
 import renderText from '../common/helpers/renderText';
 import { renderTextWithEntities } from '../common/helpers/renderTextWithEntities';
@@ -133,12 +134,12 @@ const Notification = (props: OwnProps) => {
   };
 
   createEffect(
-    () => [isOpen(), closeAndDismiss],
+    depsOf(() => [isOpen(), closeAndDismiss]),
     ([isOpened]) => (isOpened ? captureEscKeyListener(closeAndDismiss) : undefined),
   );
 
   createEffect(
-    () => [duration(), cacheBreaker()] as const,
+    depsOf(() => [duration(), cacheBreaker()] as const),
     ([delay]) => {
       timerRef = window.setTimeout(() => closeAndDismiss(true), delay);
 

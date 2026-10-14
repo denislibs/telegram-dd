@@ -15,6 +15,7 @@ import { createShowTransition } from '../../lib/kit';
 import buildClassName from '../../util/buildClassName';
 import captureKeyboardListeners from '../../util/captureKeyboardListeners';
 import { disableDirectTextInput, enableDirectTextInput } from '../../util/directInputManager';
+import { depsOf } from '../../util/effectDeps';
 import { countOpenModal } from '../../util/openModals';
 import trapFocus from '../../util/trapFocus';
 
@@ -158,17 +159,17 @@ const Modal = (props: OwnProps) => {
   };
 
   createEffect(
-    () => [props.isOpen, props.onClose, handleEnter] as const,
+    depsOf(() => [props.isOpen, props.onClose, handleEnter] as const),
     ([isOpen2, onClose2]) =>
       isOpen2 ? captureKeyboardListeners({ onEsc: onClose2, onEnter: handleEnter }) : undefined,
   );
   createEffect(
-    () => [props.isOpen, modalElement()] as const,
+    depsOf(() => [props.isOpen, modalElement()] as const),
     ([isOpen, element]) => (isOpen && element ? trapFocus(element) : undefined),
   );
 
   createMutationEffect(
-    () => [props.isNativeDialog, shouldRender(), modalElement()] as const,
+    depsOf(() => [props.isNativeDialog, shouldRender(), modalElement()] as const),
     ([isNativeDialog2, isRendered, element]) => {
       if (!isNativeDialog2 || !isRendered) {
         return undefined;
@@ -192,7 +193,7 @@ const Modal = (props: OwnProps) => {
   );
 
   createEffect(
-    () => [props.isNativeDialog, props.isOpen, props.onClose, shouldRender(), modalElement()] as const,
+    depsOf(() => [props.isNativeDialog, props.isOpen, props.onClose, shouldRender(), modalElement()] as const),
     ([isNativeDialog2, , , isRendered, element]) => {
       if (!isNativeDialog2 || !isRendered) {
         return undefined;

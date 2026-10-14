@@ -4,6 +4,7 @@ import type { RegularLangKey } from '../types/language';
 
 import { LANG_PACK } from '../config';
 import { type MaybeAccessor, read } from '../util/accessors';
+import { depsOf } from '../util/effectDeps';
 import { callApi } from '../api/gramjs';
 
 export default function useLangString(
@@ -27,7 +28,7 @@ export default function useLangString(
   };
 
   createEffect(
-    () => [read(key), read(langCode)],
+    depsOf(() => [read(key), read(langCode)]),
     () => {
       fetchLangString().then(setValue);
     },

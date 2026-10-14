@@ -1,6 +1,6 @@
 // AnimatedSticker under a Transition (its own heavy-animation scope) while a ROOT animation runs (Menu, Modal,
 // animateScroll): the sticker initialises when the chain is idle again and pauses for both kinds of animation.
-import { beginHeavyAnimation,flushSync } from 'frameact';
+import { beginHeavyAnimation, flushSync } from 'frameact';
 import { delegateEvents, render } from 'frameact/dom';
 import { disableStrict, enableStrict, setHandler, suppressStrict } from 'frameact/stricterdom';
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';

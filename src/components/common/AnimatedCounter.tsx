@@ -3,6 +3,7 @@ import { useGlobal } from '../../global';
 
 import { selectCanAnimateInterface } from '../../global/selectors';
 import buildClassName from '../../util/buildClassName';
+import { depsOf } from '../../util/effectDeps';
 import { throttleWithTickEnd } from '../../util/schedulers';
 
 import useLang from '../../hooks/useLang';
@@ -52,7 +53,7 @@ const AnimatedCounter = (props: OwnProps) => {
   });
 
   createEffect(
-    () => [animation().shouldAnimate, props.text],
+    depsOf(() => [animation().shouldAnimate, props.text]),
     () => {
       if (!animation().shouldAnimate) return undefined;
 

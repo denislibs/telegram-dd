@@ -9,6 +9,7 @@ import { attributesRule } from './attributes.ts';
 import { derivedRule } from './derived.ts';
 import { derivedHooksRule } from './derivedHooks.ts';
 import { earlyReturnRule } from './earlyReturn.ts';
+import { effectDepsRule } from './effectDeps.ts';
 import { effectsRule } from './effects.ts';
 import { hooksRule } from './hooks.ts';
 import { importsRule } from './imports.ts';
@@ -39,6 +40,7 @@ export const RULES: Rule[] = [
   derivedHooksRule,
   kitRule,
   effectsRule,
+  effectDepsRule,
   hooksRule,
   accessorReadsRule,
   derivedRule,

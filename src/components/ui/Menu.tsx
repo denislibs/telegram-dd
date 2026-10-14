@@ -7,6 +7,7 @@ import { createShowTransition } from '../../lib/kit';
 import { IS_BACKDROP_BLUR_SUPPORTED } from '../../util/browser/windowEnvironment';
 import buildClassName from '../../util/buildClassName';
 import captureEscKeyListener from '../../util/captureEscKeyListener';
+import { depsOf } from '../../util/effectDeps';
 import { preventMessageInputBlurWithBubbling } from '../middle/helpers/preventMessageInputBlur';
 
 import useAppLayout from '../../hooks/useAppLayout';
@@ -94,7 +95,7 @@ const Menu = (rawProps: OwnProps) => {
   );
 
   createEffect(
-    () => [props.isOpen, props.onClose] as const,
+    depsOf(() => [props.isOpen, props.onClose] as const),
     ([isOpen2, onClose2]) => (isOpen2 ? captureEscKeyListener(onClose2) : undefined),
   );
 
@@ -105,7 +106,7 @@ const Menu = (rawProps: OwnProps) => {
   });
 
   createEffect(
-    () => [props.isOpen],
+    depsOf(() => [props.isOpen]),
     ([isOpen2], prev) => {
       const [prevIsOpen] = prev ?? [];
       if (isOpen2 || (!isOpen2 && prevIsOpen === true)) {

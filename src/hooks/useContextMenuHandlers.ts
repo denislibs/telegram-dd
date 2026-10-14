@@ -6,6 +6,7 @@ import type { Signal } from '../util/signals';
 
 import { type MaybeAccessor, read } from '../util/accessors';
 import { IS_IOS, IS_PWA, IS_TOUCH_ENV } from '../util/browser/windowEnvironment';
+import { depsOf } from '../util/effectDeps';
 
 const LONG_TAP_DURATION_MS = 200;
 const IOS_PWA_CONTEXT_MENU_DELAY_MS = 100;
@@ -79,14 +80,16 @@ const useContextMenuHandlers = (
 
   // Support context menu on touch devices
   createEffect(
-    () =>
-      [
-        contextMenuAnchor(),
-        read(isMenuDisabled),
-        read(shouldDisableOnLongTap),
-        read(shouldDisableOnLink),
-        read(shouldDisablePropagation),
-      ] as const,
+    depsOf(
+      () =>
+        [
+          contextMenuAnchor(),
+          read(isMenuDisabled),
+          read(shouldDisableOnLongTap),
+          read(shouldDisableOnLink),
+          read(shouldDisablePropagation),
+        ] as const,
+    ),
     ([anchor, isMenuDisabled2, shouldDisableOnLongTap2, shouldDisableOnLink2, shouldDisablePropagation2]) => {
       if (isMenuDisabled2 || !IS_TOUCH_ENV || shouldDisableOnLongTap2 || (getIsReady && !getIsReady())) {
         return undefined;
