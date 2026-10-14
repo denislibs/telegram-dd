@@ -53,19 +53,19 @@ price is memory: the store's container copies add 15 % to the tt global (3.7 MB 
 
 `applyGlobal(prev, next)` compares the committed global with the next one and writes into the store at the same path:
 
-| Case                                                                             | Action                                                                | Why                                                                                                                           |
-| -------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `next[key] === prev[key]`                                                        | skip the whole branch                                                 | structural sharing: an untouched branch is the same reference                                                                 |
-| both **containers** (plain, unfrozen objects without an `id`; `byTabId[id]` too) | recurse: the store's copy of the container is merged key by key       | a change under a dictionary wakes only the readers of that key; the copy is private to the store, tt's object stays untouched |
-| a container where `prev` had none (new chat history, new tab, cold start)        | write `copyContainer(next[key])`: shallow copies down to the entities | the store needs an object it may mutate; entities and arrays inside are shared                                                |
-| an **entity** (plain object with an `id`) that changed                           | write `next[key]` by reference (replace)                              | tt's value semantics: the previous object is never written into; the readers of `byId[id]` re-run, as tt's container did      |
-| an entity that is a fresh copy but shallow-equal                                 | nothing                                                               | `replaceUsers` of 5k copies with 100 real changes is 100 writes, not 5000                                                     |
-| arrays, same length, every item `===`                                            | nothing                                                               | tt's `deepDiff` treats arrays as values; a rebuilt-but-equal `listIds` is no change                                           |
-| arrays otherwise                                                                 | write by reference                                                    | one notification to `For`/`$TRACK` readers; rows keep their references                                                        |
-| a key missing in `next`, or `next[key] === undefined`, in a container            | delete the key in the store's copy                                    | frameact deletes on `undefined`; an entity written whole keeps its own `undefined` keys (M2)                                  |
-| frozen objects, class instances, Dates                                           | values: written by reference, replaced                                | frameact never wraps them (M1: a frozen record is not descended into)                                                         |
-| a store proxy inside `next` (a component handed `props.chat` to an action)       | the raw object is written into `next` and the store                   | the committed global stays proxy-free (`structuredClone`, `postMessage` of the global work)                                   |
-| the DEV stamp `DEBUG_randomId` at the root                                       | never mirrored                                                        | tt's outdated-global detection, kept                                                                                          |
+| Case                                                                             | Action                                                                                                                                                                                                             | Why                                                                                                                                          |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `next[key] === prev[key]`                                                        | skip the whole branch                                                                                                                                                                                              | structural sharing: an untouched branch is the same reference                                                                                |
+| both **containers** (plain, unfrozen objects without an `id`; `byTabId[id]` too) | recurse: the store's copy of the container is merged key by key                                                                                                                                                    | a change under a dictionary wakes only the readers of that key; the copy is private to the store, tt's object stays untouched                |
+| a container where `prev` had none (new chat history, new tab, cold start)        | write `copyContainer(next[key])`: shallow copies down to the entities                                                                                                                                              | the store needs an object it may mutate; entities and arrays inside are shared                                                               |
+| an **entity** (plain object with an `id`) that changed                           | write `next[key]` by reference (replace)                                                                                                                                                                           | tt's value semantics: the previous object is never written into; the readers of `byId[id]` re-run, as tt's container did                     |
+| an entity that is a fresh copy but shallow-equal                                 | nothing                                                                                                                                                                                                            | `replaceUsers` of 5k copies with 100 real changes is 100 writes, not 5000                                                                    |
+| arrays, same length, every item `===`                                            | nothing                                                                                                                                                                                                            | tt's `deepDiff` treats arrays as values; a rebuilt-but-equal `listIds` is no change                                                          |
+| arrays otherwise                                                                 | write by reference                                                                                                                                                                                                 | one notification to `For`/`$TRACK` readers; rows keep their references                                                                       |
+| a key missing in `next`, or `next[key] === undefined`, in a container            | delete the key in the store's copy                                                                                                                                                                                 | frameact deletes on `undefined`; an entity written whole keeps its own `undefined` keys (M2)                                                 |
+| frozen objects, class instances, Dates                                           | values: written by reference, replaced                                                                                                                                                                             | frameact never wraps them (M1: a frozen record is not descended into)                                                                        |
+| a store proxy inside `next` (a component handed `props.chat` to an action)       | an entity proxy → its raw tt object; a **container** proxy or a store-owned copy → a fresh plain copy, written into `next` too; one level deep inside arrays and entities as well (a DEV scan reports deeper ones) | the committed global stays proxy-free and never references the store's private copies (N1: `GiftInfoModal → openGiftUpgradeModal({ gift })`) |
+| the DEV stamp `DEBUG_randomId` at the root                                       | never mirrored                                                                                                                                                                                                     | tt's outdated-global detection, kept                                                                                                         |
 
 Cost: O(sum of key counts of the containers on changed paths) + O(length of compared arrays), never O(state). tt's
 reducer already paid a spread of every one of those containers, so the walk is bounded by the reducer that feeds it
@@ -77,9 +77,27 @@ Two things remain different from tt, both deliberate:
   reads `props.chat.*` in that row re-runs (the row's mapper re-runs because it read `byId[id]`). Other rows do not
   move. Per-field granularity exists for containers (tab state, settings, `byKey`) and is not needed for entities.
 - **A nested mutation of the committed global is invisible** (`global.stories.stateHash = …` in
-  `actions/api/stories.ts`, 4 lines): the mirror follows `prev → next` by identity. Root-level mutation after
-  `getGlobal()` (`init.ts`) is absorbed by the shallow copy. The 4 lines become `global = { ...global, stories: { …
-} }` with a `// Deviation:` note and an oxlint rule forbids the pattern (§10).
+  `actions/api/stories.ts`, 4 lines): the mirror follows `prev → next` by identity, and the divergence **persists**
+  until that very field changes again (a later legal write of the same slice compares against the already-mutated
+  `prev`). Root-level mutation after `getGlobal()` (`init.ts`) is absorbed by the shallow copy. The 4 lines become
+  `global = { ...global, stories: { … } }` with a `// Deviation:` note; `src/global/store/mutationGuard.test.ts` fails
+  the suite on the pattern (§10).
+- **Identity caches keyed by a container, inside a component** (N2): the store's container copies keep their identity
+  while their content changes, so tt's `util/memoized` (`selectors/wallet.ts`, `selectActionMessageBg`) and the two
+  WeakMaps of `selectors/audioPlayer.ts` would hit forever inside a mapper and skip the reads it tracks. `memoized`
+  computes every time for a store-proxy argument (one `// Deviation:` line, tested); the two WeakMaps get the same
+  guard when the file is imported. Caches keyed by an entity or an array work: those are new objects when changed. In
+  actions the caches see tt's objects and work as in tt.
+- **`getGlobal()` inside a mapper reads the mirror** (N3). tt re-ran every mapper on every `setGlobal`, so verbatim
+  helpers that call `getGlobal()` (`getCanPostInChat`, `getPeerColorCount`, `getGroupStatus`,
+  `getMessageTranscription` through `renderMessageSummary` in the chat row, `renderMessageSummaryHtml`, `sortChatIds`,
+  `filterPeersByQuery`, `getCurrentMaxAccountCount` — 9 helpers, called from ~30 component files) were always fresh.
+  `withGlobal` and `useSelector` run their mapper under `trackGlobal()`, where `getGlobal()` returns the tracked
+  mirror: the helper subscribes the mapper to the leaves it reads. Measured against a version signal that re-runs every
+  such mapper on every write (§4): 19 µs / 1 re-run vs 126 µs / 2 000 re-runs — before the mappers' own work and the
+  `getGlobal()` copies, i.e. tt's `updateContainers` cascade back. A ported hook or effect that calls one of the 9
+  helpers wraps the call in `trackGlobal(() => …)` (codemod rule 8); `getMirrorReadsInMappers()` (DEV) sizes the
+  eventual conversion of the helpers to an explicit `global`.
 
 ### 1.3 Outdated-global detection and the copy
 
@@ -147,22 +165,22 @@ the open chat (500), one `$TRACK` memo per list — 2 502 memos. Each row times 
 afterwards, untimed; "re-runs" counts the memos that re-ran). Apple M1 Pro, Node 24.3, 300 iterations, median; DEV
 numbers are within 5 %.
 
-| Scenario (tt-style reducer, then `setGlobal`)                                                | mirror walk                                | writes | memo re-runs | `setState(reconcile(next))` | what tt pays                                                                                       |
-| -------------------------------------------------------------------------------------------- | ------------------------------------------ | ------ | ------------ | --------------------------- | -------------------------------------------------------------------------------------------------- |
-| apiUpdate new message: `byId` +1, `listedIds`, `chat.unreadCount`, `lastMessageIds`, reorder | 0.65 ms                                    | 4      | 2 of 2 502   | 0.72 ms                     | reducer 1.31 ms; `updateContainers` 0.43 ms (2 500 mappers); `deepDiff` 1.23 ms per multitab flush |
-| same, chat without an open history                                                           | 0.64 ms                                    | 4      | 1            |                             |                                                                                                    |
-| edit one subscribed message (`content.text`, `isEdited`)                                     | 0.33 ms                                    | 1      | 1            |                             |                                                                                                    |
-| chat list reorder (new 2k-id array)                                                          | 0.029 ms                                   | 1      | 1            | 0.12 ms                     |                                                                                                    |
-| `updateTabState` (one field)                                                                 | 4.5 µs                                     | 1      | 0            |                             | `updateContainers` 0.39 ms (2 000 mappers read the tab)                                            |
-| `globalSearch`: a new query with 5 000 fresh results                                         | 0.55 ms                                    | 2      | 0            |                             | (`adopt` walks the new result objects: I6 / E3′)                                                   |
-| `globalSearch`: a keystroke that keeps the results array                                     | 4.5 µs                                     | 1      | 0            |                             |                                                                                                    |
-| `updateUsers`: 100 of 5k changed, rest shared                                                | 1.0 ms                                     | 100    | 0            | 1.06 ms                     |                                                                                                    |
-| `replaceUsers`: 5k fresh copies, 100 changed                                                 | 3.2 ms                                     | 100    | 0            |                             |                                                                                                    |
-| reducer + `setGlobal` end to end, new message                                                | 2.1 ms                                     |        |              |                             |                                                                                                    |
-| cold start: `setGlobal(cached global)`, 40k objects                                          | 8.7 ms                                     |        |              |                             | tt: a pointer swap, then every container maps                                                      |
-| cold start: `setGlobal(globalUpdate)` from the master, 350k objects                          | 92 ms                                      |        |              |                             | (21 ms of it is `copyContainer`; variant A would skip it)                                          |
-| `getGlobal()` copy of the root (107 keys)                                                    | 0.3 µs                                     |        |              |                             | the same copy in tt DEBUG                                                                          |
-| memory: tt global / + store mirror                                                           | 24.5 MB / +3.7 MB (8 218 container copies) |        |              |                             | variant A: +0                                                                                      |
+| Scenario (tt-style reducer, then `setGlobal`)                                                | mirror walk                                                                                   | writes | memo re-runs | `setState(reconcile(next))` | what tt pays                                                                                       |
+| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------ | ------------ | --------------------------- | -------------------------------------------------------------------------------------------------- |
+| apiUpdate new message: `byId` +1, `listedIds`, `chat.unreadCount`, `lastMessageIds`, reorder | 0.65 ms                                                                                       | 4      | 2 of 2 502   | 0.72 ms                     | reducer 1.31 ms; `updateContainers` 0.43 ms (2 500 mappers); `deepDiff` 1.23 ms per multitab flush |
+| same, chat without an open history                                                           | 0.64 ms                                                                                       | 4      | 1            |                             |                                                                                                    |
+| edit one subscribed message (`content.text`, `isEdited`)                                     | 0.33 ms                                                                                       | 1      | 1            |                             |                                                                                                    |
+| chat list reorder (new 2k-id array)                                                          | 0.029 ms                                                                                      | 1      | 1            | 0.12 ms                     |                                                                                                    |
+| `updateTabState` (one field)                                                                 | 4.5 µs                                                                                        | 1      | 0            |                             | `updateContainers` 0.39 ms (2 000 mappers read the tab)                                            |
+| `globalSearch`: a new query with 5 000 fresh results                                         | 0.55 ms                                                                                       | 2      | 0            |                             | (`adopt` walks the new result objects: I6 / E3′)                                                   |
+| `globalSearch`: a keystroke that keeps the results array                                     | 4.5 µs                                                                                        | 1      | 0            |                             |                                                                                                    |
+| `updateUsers`: 100 of 5k changed, rest shared                                                | 1.0 ms                                                                                        | 100    | 0            | 1.06 ms                     |                                                                                                    |
+| `replaceUsers`: 5k fresh copies, 100 changed                                                 | 3.2 ms                                                                                        | 100    | 0            |                             |                                                                                                    |
+| reducer + `setGlobal` end to end, new message                                                | 2.1 ms                                                                                        |        |              |                             |                                                                                                    |
+| cold start: `setGlobal(cached global)`, 40k objects                                          | 8.7 ms                                                                                        |        |              |                             | tt: a pointer swap, then every container maps                                                      |
+| cold start: `setGlobal(globalUpdate)` from the master, 350k objects                          | 92 ms                                                                                         |        |              |                             | (21 ms of it is `copyContainer`; variant A would skip it)                                          |
+| `getGlobal()` copy of the root (107 keys)                                                    | 0.3 µs                                                                                        |        |              |                             | the same copy in tt DEBUG                                                                          |
+| \1                                                                                           | N3: 2 000 row mappers calling a `getGlobal()` helper, per new message — mapper-context mirror | 19 µs  |              | 1                           |                                                                                                    | version signal: 126 µs, 2 000 re-runs (+0.3 µs copy each, + the mapper's work) |
 
 Reading it:
 
@@ -198,7 +216,9 @@ Mechanics (`src/global/index.ts`): the mapper runs in a `createMemo` over the mi
 getters) and notifies its readers only when the mapped record is not shallow-equal. As in tt's container: a throwing
 mapper is reported through `handleError` and the previous props stay; an inactive container (`activationFn`) is never
 mapped, the first run included; the result is `{ ...mapped, ...own }` — an own prop wins whenever its key is present,
-with `undefined` too (I3). `StateProps` has a default type argument, so tt's `withGlobal<OwnProps>(…)` compiles (I5).
+with `undefined` too (I3). Both type arguments are inferred when the call has none (the codemod drops tt's
+`<OwnProps>`); with an explicit `<OwnProps>` the state props default to `{}`, so `props.stateProp` is a compile error,
+never `any` (N4; `src/global/withGlobal.types.ts` is the checked contract).
 
 Granularity, stated honestly: an entity in the mapped record (`chat`) is a **new object when it changed** (tt
 semantics), so the mapper re-runs and every binding of that row that reads a state prop re-runs — tt's per-container
@@ -354,8 +374,10 @@ download progress, call UI, audio player time** — `live()` reads in those comp
   cascade) replaces tt's "Slow containers update".
 - **A write log in DEV**: `addCallback((global) => …)` with `deepDiff(prev, global)` is tt's own tool; a
   `window.__globalDiffLog` ring buffer behind `DEBUG_MORE` is a one-line addition when debugging a screen.
-- **Lint**: an oxlint `no-restricted-syntax` rule for `\bglobal(\.\w+){2,}\s*=` under `src/global` (nested mutation of
-  the committed global, §1.2); the codemod flags `getGlobal()` in JSX/memos.
+- **Nested-mutation guard**: oxlint 1.88 has no `no-restricted-syntax`, so `src/global/store/mutationGuard.test.ts`
+  scans `src/global/**` and `src/util/**` for `\bglobal(\.\w+){2,}\s*=` (a line marked `// Deviation` is exempt) and
+  fails `pnpm test`; the codemod flags `getGlobal()` in JSX/memos.
+- **`getMirrorReadsInMappers()`** (DEV): the count of `getGlobal()` reads made from mappers — the helpers to convert.
 - `window.getGlobal/setGlobal/getActions` in DEV as in tt.
 
 ## 11. What frameact lacks (engine follow-ups, clean-room in the frameact repo)
@@ -390,8 +412,9 @@ consumers nothing changes except imports; the known deviations are listed at the
    import { memo } from '../../lib/teact/teact'; // delete; `memo(X)` → `X`
    ```
 
-2. **`withGlobal` HOC → body call** (the mapper and the activation function are moved verbatim; the type argument may
-   stay — `StateProps` has a default)
+2. **`withGlobal` HOC → body call** (the mapper and the activation function are moved verbatim; **the type argument
+   is dropped** — with it, `StateProps` would default to `{}` and every state-prop read would fail to compile; without
+   it both types are inferred from `ownProps` and the mapper's return type)
 
    ```tsx
    // before
@@ -399,11 +422,13 @@ consumers nothing changes except imports; the known deviations are listed at the
    export default memo(withGlobal<OwnProps>(MAPPER, ACTIVATION?)(Comp));
    // after
    const Comp = (ownProps: OwnProps) => {
-     const props = withGlobal<OwnProps>(ownProps, MAPPER, ACTIVATION?);   // OwnProps & StateProps, getters
-     BODY with a → props.a, c → props.c, b → (props.b ?? 1)           // a destructuring default becomes `??`
+     const props = withGlobal(ownProps, MAPPER, ACTIVATION?);   // OwnProps & StateProps, getters
+     BODY with a → props.a, c → props.c, b → (props.b === undefined ? 1 : props.b)   // a destructuring default
    };
    export default Comp;
    ```
+
+   (`props.b ?? 1` is not the same: a destructuring default applies to `undefined` only, not to `null`.)
 
    If `BODY` already binds `props`, name the statement `p` and rewrite to `p.a`. `withGlobal(() => ({}))` (no mapper) →
    `withGlobal(ownProps, () => ({}))` or just `ownProps`. `Complete<StateProps>` stays. A mapper that destructures own
@@ -431,21 +456,30 @@ consumers nothing changes except imports; the known deviations are listed at the
    mutation of `global` (`global.a.b = …`, the `\bglobal(\.\w+){2,}\s*=` pattern) is flagged for a `// Deviation:`
    rewrite to a spread.
 
-7. **Identity-based memos** — `useMemo(() => f(x), [chat])` is rewritten to `createMemo(() => f(x))` because `useMemo`
-   does not exist, not because identity broke (an entity is a new object when it changed).
+7. **Identity-based memos and deps** — `useMemo(() => f(x), [chat])` is rewritten to `createMemo(() => f(x))` because
+   `useMemo` does not exist. An **entity** prop is a new object when it changed, so identity deps on entities were
+   sound; a **container** prop (a tab record, `settings`, an id-less record) keeps its identity while its content
+   changes, so a `useEffect`/`useMemo` whose deps list a container must become an effect/memo over the fields it
+   reads, never an identity comparison. The codemod flags deps whose type has no `id`.
 
-Known deviations in `src/global` after the port: `actions/api/stories.ts` (4 nested mutations), `hooks/useFolderManager.ts`
-(returns accessors), `global/index.ts` (the glue). Everything else: import lines only.
+8. **Helpers that read `getGlobal()`** (`getCanPostInChat`, `getPeerColorCount`, `getGroupStatus`,
+   `getMessageTranscription`/`renderMessageSummary`, `renderMessageSummaryHtml`, `sortChatIds`, `filterPeersByQuery`,
+   `getCurrentMaxAccountCount`) — inside `withGlobal`/`useSelector` mappers nothing to do (the mapper context tracks
+   them); a call from a ported hook, a `createMemo` or an effect is wrapped: `trackGlobal(() => getCanPostInChat(chat))`.
+
+Known deviations after the port: `actions/api/stories.ts` (4 nested mutations), `util/memoized.ts` (store-proxy
+bypass, 3 lines), `selectors/audioPlayer.ts` (2 WeakMap guards), `hooks/useFolderManager.ts` (returns accessors),
+`global/index.ts` (the glue). Everything else: import lines only.
 
 ## 13. Risks
 
-| Risk                                                                                             | Mitigation                                                                                                                                                                              |
-| ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A nested mutation of the committed global is invisible to the mirror                             | 4 known lines in `stories.ts` → spreads; the oxlint rule; the codemod flag                                                                                                              |
-| Memory: container copies (+15 % of the tt global on the bench state)                             | Entities (the bulk) are shared; measured 3.7 MB on 24.5 MB; the `tests/perf` leak cycle watches long sessions                                                                           |
-| `adopt` re-walks a large unread subtree when a record that references it is written (I6)         | The container rule keeps the hot cases off that path (4.5 µs per keystroke); E3′ removes the rest (0.55 ms per new result set today)                                                    |
-| Walk cost on very wide dictionaries (10k+ messages of one chat, 10k chats)                       | Bounded by the spreads tt already pays (0.5–0.6× of the reducer); `BENCH_CHATS=10000 BENCH_MESSAGES_PER_CHAT=5000 pnpm bench:store`; the opt-in is `reconcile(byId)` inside one reducer |
-| `forceOnHeavyAnimation` releases the readers of the written leaves, not every parked reader (M6) | Document; the 35 sites write what they want shown                                                                                                                                       |
-| A thrown exception in a handler is reported, not rethrown (M7)                                   | Document; tt's `handleError` still alerts in DEV                                                                                                                                        |
-| `undefined` deletes a container key (tt kept it)                                                 | Reads are identical; entities keep their own `undefined` keys; `in`/`Object.keys` consumers over the global are rare                                                                    |
-| Cold start of a full `globalUpdate` (92 ms once for a heavy account's new tab)                   | Measured once per tab open; E3 if a trace shows it; the cache-sized start is 9 ms                                                                                                       |
+| Risk                                                                                                              | Mitigation                                                                                                                                                                              |
+| ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A nested mutation of the committed global is invisible to the mirror (and stays so until the field changes again) | 4 known lines in `stories.ts` → spreads; `mutationGuard.test.ts`; the codemod flag                                                                                                      |
+| Memory: container copies (+15 % of the tt global on the bench state)                                              | Entities (the bulk) are shared; measured 3.7 MB on 24.5 MB; the `tests/perf` leak cycle watches long sessions                                                                           |
+| `adopt` re-walks a large unread subtree when a record that references it is written (I6)                          | The container rule keeps the hot cases off that path (4.5 µs per keystroke); E3′ removes the rest (0.55 ms per new result set today)                                                    |
+| Walk cost on very wide dictionaries (10k+ messages of one chat, 10k chats)                                        | Bounded by the spreads tt already pays (0.5–0.6× of the reducer); `BENCH_CHATS=10000 BENCH_MESSAGES_PER_CHAT=5000 pnpm bench:store`; the opt-in is `reconcile(byId)` inside one reducer |
+| `forceOnHeavyAnimation` releases the readers of the written leaves, not every parked reader (M6)                  | Document; the 35 sites write what they want shown                                                                                                                                       |
+| A thrown exception in a handler is reported, not rethrown (M7)                                                    | Document; tt's `handleError` still alerts in DEV                                                                                                                                        |
+| `undefined` deletes a container key (tt kept it)                                                                  | Reads are identical; entities keep their own `undefined` keys; `in`/`Object.keys` consumers over the global are rare                                                                    |
+| Cold start of a full `globalUpdate` (92 ms once for a heavy account's new tab)                                    | Measured once per tab open; E3 if a trace shows it; the cache-sized start is 9 ms                                                                                                       |
