@@ -66,9 +66,11 @@ const AuthCode = () => {
   // Deviation: tt switched stricterdom off around the library (`disableStrict()` + a 50 ms timer); the library draws into
   // the container asynchronously, so the container is marked `data-stricterdom-ignore` instead (a third-party subtree).
   createMutationEffect(
-    depsOf(() => [isConnected(), authQrCode(), isQrMounted(), qrCode()] as const),
-    ([isConnected2, authQrCode2, isQrMounted2, qrCode2]) => {
-      if (!authQrCode2 || !qrCode2) {
+    // Deviation: the token is the dependency, not the `qrCode` object: the store keeps an id-less container (`{ token,
+    // expires }`) as the same live proxy and merges a refreshed token into it, so the object never changes identity.
+    depsOf(() => [isConnected(), authQrCode()?.token, isQrMounted(), qrCode()] as const),
+    ([isConnected2, token2, isQrMounted2, qrCode2]) => {
+      if (!token2 || !qrCode2) {
         return () => {
           unmarkQrMounted();
         };
@@ -79,7 +81,7 @@ const AuthCode = () => {
       }
 
       const container = qrCodeRef;
-      const data = `${DATA_PREFIX}${authQrCode2.token}`;
+      const data = `${DATA_PREFIX}${token2}`;
 
       qrCode2.update({
         data,
