@@ -22,7 +22,10 @@
 //  - `undefined` deletes a key in a container (tt kept the key with `undefined`; `in`/`Object.keys` differ, reads do
 //    not). Frozen objects, class instances and Dates are values (replaced), as frameact treats them.
 //  - A store proxy inside `next` (a component handed `props.chat` to an action) is unwrapped: the committed global
-//    gets the raw object, so `structuredClone` / `postMessage` of the global keep working.
+//    gets the raw object, so `structuredClone` / `postMessage` of the global keep working. When that raw object is one
+//    of the store's own container copies (an id-less record such as `ApiSavedStarGift`), the committed global gets a
+//    fresh plain copy instead — the store's copy stays private, the next walk cannot reach the committed object through
+//    it. This is done one level deep inside entities and arrays a component hands over; a DEV scan reports deeper ones.
 import { unwrap } from 'frameact/store';
 
 import { isLiteralObject } from '../../util/iteratees';
@@ -49,6 +52,91 @@ export function isContainer(value: unknown, path: readonly PropertyKey[]): value
   return path.length === 2 && path[0] === 'byTabId';
 }
 
+/** The containers the store owns: the copies `copyContainer` made. They must never end up in the committed global. */
+const ownedCopies = new WeakSet<object>();
+
+/** @internal tests */
+export const isStoreOwned = (value: unknown): boolean =>
+  Boolean(value) && typeof value === 'object' && ownedCopies.has(value as object);
+
+let devChecks = false;
+/** DEV: scan values written by reference for store proxies / owned copies nested deeper than `sanitize` looks. */
+export function setDevChecks(enabled: boolean) {
+  devChecks = enabled;
+}
+
+/** A fresh tt-side copy of a store-owned container (nested owned containers copied too; entities and arrays shared). */
+function detach(owned: AnyLiteral, path: PropertyKey[]): AnyLiteral {
+  const copy: AnyLiteral = { ...owned };
+  const keys = Object.keys(copy);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    if (key === '__proto__') continue;
+    const child = copy[key];
+    if (child && typeof child === 'object') copy[key] = sanitize(child, path.concat(key));
+  }
+  return copy;
+}
+
+/**
+ * The tt-side value of something that may have come from a component: a store proxy becomes its raw object, a
+ * store-owned container copy becomes a fresh plain copy, and inside an array or an entity the same is done for the
+ * direct children (writing the fixed child back into that fresh array / object). Values that are tt's own objects
+ * come back unchanged, so the common case costs one `unwrap` and a `WeakSet` lookup.
+ */
+function sanitize(value: object, path: PropertyKey[]): object {
+  const raw = unwrap(value);
+  if (ownedCopies.has(raw)) return detach(raw, path);
+  if (Array.isArray(raw)) {
+    const items = raw as unknown[];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item && typeof item === 'object') {
+        const fixed = sanitize(item, path);
+        if (fixed !== item) items[i] = fixed;
+      }
+    }
+  } else if (isPlainObject(raw) && Object.hasOwn(raw, 'id') && !(path.length === 2 && path[0] === 'byTabId')) {
+    // an entity: one level (its own nested objects are tt's; a container proxy can only be a direct field)
+    const entity = raw;
+    const keys = Object.keys(entity);
+    for (let i = 0; i < keys.length; i++) {
+      const child = entity[keys[i]];
+      if (child && typeof child === 'object') {
+        const fixed = sanitizeShallow(child);
+        if (fixed !== child) entity[keys[i]] = fixed;
+      }
+    }
+  }
+  if (devChecks) devScan(raw, path, 0);
+  return raw;
+}
+
+/** A direct child of an entity: unwrap a proxy, detach an owned copy; no further descent. */
+function sanitizeShallow(child: object): object {
+  const raw = unwrap(child);
+  return ownedCopies.has(raw) ? detach(raw, []) : raw;
+}
+
+const DEV_SCAN_DEPTH = 4;
+function devScan(value: object, path: PropertyKey[], depth: number) {
+  if (depth > DEV_SCAN_DEPTH) return;
+  const values = Array.isArray(value) ? value : Object.values(value);
+  for (const v of values) {
+    if (!v || typeof v !== 'object') continue;
+    const raw = unwrap(v);
+    if (raw !== v || ownedCopies.has(raw)) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[global] a store proxy or a store-owned copy is nested ${depth + 2} levels deep inside a value written at ${path.join('.')}: ` +
+          'pass tt objects (or a copy) to actions, not nested props',
+      );
+      return;
+    }
+    devScan(raw, path, depth + 1);
+  }
+}
+
 /** The store's own copy of a container: shallow, with nested containers copied too; entities and arrays shared. */
 export function copyContainer(value: AnyLiteral, path: PropertyKey[]): AnyLiteral {
   const copy: AnyLiteral = { ...value };
@@ -58,12 +146,13 @@ export function copyContainer(value: AnyLiteral, path: PropertyKey[]): AnyLitera
     if (key === '__proto__') continue;
     let child = copy[key];
     if (child && typeof child === 'object') {
-      const raw = unwrap(child);
-      if (raw !== child) value[key] = child = raw; // a proxy from a component: the committed global gets the raw object
+      const fixed = sanitize(child, path.concat(key));
+      if (fixed !== child) value[key] = child = fixed; // the committed object gets the tt-side value too
       if (isContainer(child, path.concat(key))) child = copyContainer(child, path.concat(key));
       copy[key] = child;
     }
   }
+  ownedCopies.add(copy);
   return copy;
 }
 
@@ -114,8 +203,8 @@ export function applyContainer(
     if (isRoot && key === DEBUG_RANDOM_ID_KEY) continue;
     if (nv === pv) continue;
     if (nv && typeof nv === 'object') {
-      const raw = unwrap(nv);
-      if (raw !== nv) next[key] = nv = raw; // a proxy from a component: the committed global gets the raw object
+      const fixed = sanitize(nv, path.concat(key));
+      if (fixed !== nv) next[key] = nv = fixed; // a proxy / an owned copy from a component: the committed global gets a tt-side value
       if (nv === pv) continue;
     }
 

@@ -19,7 +19,7 @@ import { DEBUG } from '../config';
 import { areRecordsShallowEqual } from '../util/areShallowEqual';
 import { handleError } from '../util/handleError';
 import { throttleWithTickEnd } from '../util/schedulers';
-import { applyGlobal, type UntypedSetState } from './store/apply';
+import { applyGlobal, setDevChecks, type UntypedSetState } from './store/apply';
 
 export interface ActionOptions {
   forceOnHeavyAnimation?: boolean;
@@ -78,6 +78,7 @@ let currentGlobal = { isInited: false } as GlobalState;
 // The mirror. Its root object is permanent (`setGlobal` writes into it); it starts as a copy of the committed root.
 const [trackedGlobal, setStateTyped] = createStore<GlobalState>({ ...currentGlobal });
 const setState = setStateTyped as unknown as UntypedSetState;
+setDevChecks(DEBUG);
 
 // ---- DEV: outdated-global detection (tt's DEBUG_randomId) -------------------------------------------------------
 

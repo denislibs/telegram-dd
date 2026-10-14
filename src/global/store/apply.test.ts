@@ -314,6 +314,67 @@ describe('C1: tt value semantics hold for code that captured objects before setG
   });
 });
 
+describe('N1: a store-owned container copy never leaks into the committed global', () => {
+  it('GiftInfoModal → openGiftUpgradeModal({ gift }): the proxied id-less record is detached, later writes do not reach it', () => {
+    const { state, mirror, setGlobal, getGlobal } = setup();
+    const giftA = { slug: 'a', title: 'gift A' } as unknown as Chat; // ApiSavedStarGift has no `id`: a container copy in the store
+    setGlobal(updateTab(getGlobal(), { giftCraftModal: { gift1: giftA, gifts: [] } }));
+    const fromProps = state.byTabId[1].giftCraftModal!.gift1!; // what a component holds
+    expect(unwrap(fromProps)).not.toBe(giftA);
+
+    // the component calls an action with the proxy; the reducer stores it under another key
+    setGlobal(
+      updateTab(getGlobal(), { giftCraftModal: { ...getGlobal().byTabId[1].giftCraftModal!, gift2: fromProps } }),
+    );
+    const committedGift2 = getGlobal().byTabId[1].giftCraftModal!.gift2!;
+    expect(committedGift2).toEqual({ slug: 'a', title: 'gift A' });
+    expect(committedGift2).not.toBe(unwrap(fromProps)); // not the store's private copy
+
+    // gift1 changes: the store merges into its gift1 copy; gift2 must stay 'a' everywhere
+    setGlobal(
+      updateTab(getGlobal(), {
+        giftCraftModal: {
+          ...getGlobal().byTabId[1].giftCraftModal!,
+          gift1: { slug: 'b', title: 'gift B' } as unknown as Chat,
+        },
+      }),
+    );
+    expect((getGlobal().byTabId[1].giftCraftModal!.gift2 as AnyLiteral).slug).toBe('a');
+    expect((mirror.byTabId[1].giftCraftModal!.gift2 as AnyLiteral).slug).toBe('a');
+    expect(json(mirror)).toStrictEqual(json(getGlobal()));
+  });
+
+  it('the same through an array and through an entity field (one level), and a spread of a proxy record', () => {
+    const { state, mirror, setGlobal, getGlobal } = setup();
+    const record = { slug: 'a', title: 'A' } as unknown as Chat;
+    setGlobal(updateTab(getGlobal(), { giftCraftModal: { gift1: record, gifts: [] } }));
+    const proxied = state.byTabId[1].giftCraftModal!.gift1!;
+    setGlobal(
+      updateTab(getGlobal(), {
+        giftCraftModal: {
+          ...getGlobal().byTabId[1].giftCraftModal!,
+          gifts: [proxied], // array
+          gift2: { id: 'e', slot: proxied } as unknown as Chat, // entity with a proxied container field
+          oneTime: { ...proxied }, // a spread of the proxy (a new plain object)
+        },
+      }),
+    );
+    setGlobal(
+      updateTab(getGlobal(), {
+        giftCraftModal: {
+          ...getGlobal().byTabId[1].giftCraftModal!,
+          gift1: { slug: 'b', title: 'B' } as unknown as Chat,
+        },
+      }),
+    );
+    const modal = getGlobal().byTabId[1].giftCraftModal as AnyLiteral;
+    expect(modal.gifts[0].slug).toBe('a');
+    expect(modal.gift2.slot.slug).toBe('a');
+    expect(modal.oneTime.slug).toBe('a');
+    expect(json(mirror)).toStrictEqual(json(getGlobal()));
+  });
+});
+
 describe('M3 property: random nested tt-style updates keep the mirror equal to the committed global', () => {
   it('3000 steps over 30 globals, including type changes, id changes, explicit undefined and deletions', () => {
     let seed = 7;
