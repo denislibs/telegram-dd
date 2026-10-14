@@ -34,6 +34,7 @@ import {
 import { MAIN_IDB_STORE } from '../util/browser/idb';
 import { isUserId } from '../util/entities/ids';
 import { getOrderedIds } from '../util/folderManager';
+import { handleError } from '../util/handleError';
 import {
   compact, pick, pickTruthy, unique,
 } from '../util/iteratees';
@@ -160,18 +161,33 @@ export async function loadCache(initialState: GlobalState): Promise<GlobalState 
     return undefined;
   }
 
-  const cache = await readCache(initialState);
+  // Deviation: hardening. A cache that cannot be read (`{}`, an older shape, a damaged record) made tt throw here and
+  // leave a white screen on every reload; the cache is only a head start, so drop it and start from the initial state.
+  try {
+    const cache = await readCache(initialState);
 
-  if (cache.passcode.hasPasscode || hasStoredSession()) {
-    // Start resolving the wallpaper early without delaying the initial render
-    void prefetchCurrentWallpaperUrl(cache);
+    if (cache.passcode.hasPasscode || hasStoredSession()) {
+      // Start resolving the wallpaper early without delaying the initial render
+      void prefetchCurrentWallpaperUrl(cache);
 
-    return cache;
-  } else {
-    clearCaching();
+      return cache;
+    }
+  } catch (err) {
+    handleError(err as Error);
+    await dropCorruptedCache();
 
     return undefined;
   }
+
+  clearCaching();
+
+  return undefined;
+}
+
+// Deviation: hardening (see `loadCache`). The global cache of this account slot and the shared-state cache.
+export async function dropCorruptedCache() {
+  clearCaching();
+  await Promise.all([MAIN_IDB_STORE.del(getGlobalStateCacheKey(ACCOUNT_SLOT)), removeSharedStateFromCache()]);
 }
 
 export function setupCaching() {

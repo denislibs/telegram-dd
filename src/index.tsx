@@ -17,10 +17,10 @@ import { getActions, getGlobal } from './global';
 
 import { DEBUG } from './config';
 import { installStrictViolationRecorder } from './dev/stricterdomRecorder';
+import { initGlobalOrDropCache } from './global/safeInit';
 import { selectSharedSettings } from './global/selectors/sharedState';
 import { requestGlobal, subscribeToMultitabBroadcastChannel } from './util/browser/multitab';
 import { establishMultitabRole, subscribeToMasterChange } from './util/establishMultitabRole';
-import { initGlobal } from './util/init';
 import { initLocalization } from './util/localization';
 import { Bundles, loadBundle } from './util/moduleLoader';
 import { MULTITAB_STORAGE_KEY } from './util/multiaccount';
@@ -62,7 +62,7 @@ async function init() {
     }
   });
 
-  await initGlobal();
+  await initGlobalOrDropCache();
   getActions().init();
 
   // TODO(port): initAutolock() (passcode milestone)

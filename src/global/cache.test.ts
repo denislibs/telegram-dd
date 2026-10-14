@@ -24,6 +24,7 @@ import { buildBenchGlobal, medianMs } from './store/benchState';
 import { clearCaching, loadCache, serializeGlobal, setupCaching } from './cache';
 import { getGlobal, setGlobal, useGlobal } from './index';
 import { INITIAL_GLOBAL_STATE, INITIAL_TAB_STATE } from './initialState';
+import { initGlobalOrDropCache } from './safeInit';
 
 vi.mock('../util/sessions', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../util/sessions')>()),
@@ -88,6 +89,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   clearCaching();
   await MAIN_IDB_STORE.clear();
   setGlobal(
@@ -169,6 +171,49 @@ describe('cache.ts on the store: the real round trip', () => {
     const plain = (await MAIN_IDB_STORE.get<GlobalState>(CACHE_KEY))!;
     expect(plain.chats.byId).toEqual({});
     expect(plain.passcode.hasPasscode).toBe(true);
+  });
+});
+
+describe('a corrupted cache never blocks the start (appsec 2 and 6)', () => {
+  const put = (value: unknown) => MAIN_IDB_STORE.set(CACHE_KEY, value);
+
+  it('loadCache falls back to a fresh state when the cache is {} (tt throws and leaves a white screen)', async () => {
+    await put({});
+    await expect(loadCache(cloneDeep(INITIAL_GLOBAL_STATE))).resolves.toBeUndefined();
+    expect(await MAIN_IDB_STORE.get(CACHE_KEY)).toBeUndefined(); // the bad cache is dropped, not retried on every reload
+  });
+
+  /* eslint-disable no-null/no-null -- corrupted records written on purpose */
+  it.each([
+    ['null', null],
+    ['a string', 'garbage'],
+    ['no sharedState', { chats: {} }],
+    ['passcode: null', { sharedState: cloneDeep(INITIAL_GLOBAL_STATE).sharedState, passcode: null }],
+  ])('loadCache survives a cache that is %s', async (_name, value) => {
+    /* eslint-enable no-null/no-null */
+    await put(value);
+    // never throws (null is just an empty cache: the start goes on from the initial state)
+    await expect(loadCache(cloneDeep(INITIAL_GLOBAL_STATE))).resolves.not.toBeInstanceOf(Error);
+  });
+
+  it('a cyclic cache (structured clone keeps cycles) is dropped by initGlobalOrDropCache and the app starts fresh', async () => {
+    const cyclic = cloneDeep(INITIAL_GLOBAL_STATE) as any;
+    cyclic.settings.byKey.self = cyclic.settings; // refused by the mirror walk: a cycle
+    await put(cyclic);
+    // jsdom has no Web Locks; the passcode boot step takes one
+    vi.stubGlobal(
+      'navigator',
+      Object.create(navigator, { locks: { value: { request: (_n: string, cb: () => unknown) => cb() } } }),
+    );
+    setGlobal({ isInited: false } as GlobalState, { forceOutdated: true }); // as at boot: no byTabId yet
+    expect('byTabId' in getGlobal()).toBe(false);
+
+    await initGlobalOrDropCache();
+
+    expect('byTabId' in getGlobal()).toBe(true);
+    expect(await MAIN_IDB_STORE.get(CACHE_KEY)).toBeUndefined();
+    expect('self' in getGlobal().settings.byKey).toBe(false);
+    expect('self' in useGlobal().settings.byKey).toBe(false);
   });
 });
 
