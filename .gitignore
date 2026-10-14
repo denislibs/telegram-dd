@@ -5,3 +5,4 @@ dist
 # read-only reference clone of Ajaxy/telegram-tt (see README)
 /reference/
 .env.local
+/.worktrees/
