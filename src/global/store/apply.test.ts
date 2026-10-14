@@ -312,6 +312,38 @@ describe('appsec 2: a cyclic or absurdly deep value is refused with a clear erro
   });
 });
 
+describe('appsec 4: a sparse array with a huge length does not freeze the walk', () => {
+  const sparse = (length: number) => {
+    const array: unknown[] = [];
+    array.length = length;
+    array[3] = 'x';
+    return array;
+  };
+
+  it.each([1e8, 2 ** 32 - 1])('length %d is refused quickly with a clear error', (length) => {
+    const { setGlobal, getGlobal } = setup();
+    const started = performance.now();
+    expect(() => setGlobal({ ...getGlobal(), settings: { list: sparse(length) } } as unknown as State)).toThrow(
+      /\[global\] .*sparse/i,
+    );
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  it('the same value inside an entity-less list of ids, written over an existing array, is refused too', () => {
+    const { setGlobal, getGlobal } = setup();
+    expect(() =>
+      setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, listIds: { active: sparse(1e8) as string[] } } }),
+    ).toThrow(/sparse/i);
+  });
+
+  it('a long but dense array (600k ids) is a value like any other', () => {
+    const { setGlobal, getGlobal, mirror } = setup();
+    const ids = Array.from({ length: 600_000 }, (_, i) => String(i));
+    setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, listIds: { active: ids } } });
+    expect(mirror.chats.listIds.active).toHaveLength(600_000);
+  });
+});
+
 describe('C1: tt value semantics hold for code that captured objects before setGlobal', () => {
   it('a captured entity is a snapshot: changedFields detection (apiUpdaters/chats.ts updateChat) works', () => {
     const { setGlobal, getGlobal } = setup();

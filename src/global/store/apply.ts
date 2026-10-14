@@ -74,6 +74,19 @@ function assertDepth(depth: number, path: PropertyKey[]) {
   }
 }
 
+/**
+ * Arrays up to this length are scanned by index. A longer one must be dense: a sparse array (a forged structured clone
+ * with `length = 2 ** 32 - 1`) would make the index loops spin for minutes (appsec review, finding 4).
+ */
+const MAX_SCANNED_ARRAY = 500_000;
+function assertNotSparse(array: readonly unknown[], path: PropertyKey[]) {
+  if (array.length > MAX_SCANNED_ARRAY && Object.keys(array).length !== array.length) {
+    throw new Error(
+      `[global] the array at ${path.slice(0, 6).map(String).join('.')} is sparse (length ${array.length}); refused`,
+    );
+  }
+}
+
 let devChecks = false;
 /** DEV: scan values written by reference for store proxies / owned copies nested deeper than `sanitize` looks. */
 export function setDevChecks(enabled: boolean) {
@@ -107,6 +120,7 @@ function sanitize(value: object, path: PropertyKey[], depth = 0): object {
   if (Array.isArray(raw)) {
     leaf = true;
     const items = raw as unknown[];
+    assertNotSparse(items, path);
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       if (item && typeof item === 'object') {
