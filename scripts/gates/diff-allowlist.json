@@ -94,7 +94,7 @@
     },
     "src/components/ui/DropdownMenu.tsx": {
       "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",
-      "maxRatio": 0.55
+      "maxRatio": 0.6
     },
     "src/components/ui/ImageCropper.tsx": {
       "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",

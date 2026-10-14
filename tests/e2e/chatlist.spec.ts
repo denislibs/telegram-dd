@@ -1,9 +1,9 @@
 // The main shell and the chat list (the chat list slice): the logged-in state of the mocked client (tt's `default`
 // scenario: Saved Messages and the channel "aass") plus contacts that the test plays as the server with `apiUpdate`.
-import { expect, test } from './fixtures';
-import { openApp } from './authHelpers';
-
 import type { Page } from '@playwright/test';
+
+import { openApp } from './authHelpers';
+import { expect, test } from './fixtures';
 
 type TestWindow = {
   getActions: () => { apiUpdate: (update: Record<string, unknown>) => void };
@@ -67,7 +67,7 @@ async function patchMainThread(page: Page, chatId: string, patch: Record<string,
     ([id, threadPatch]) => {
       const { getGlobal, setGlobal } = window as unknown as TestWindow;
       const global = getGlobal();
-      const chatMessages = global.messages.byChatId[id as string];
+      const chatMessages = global.messages.byChatId[id];
       const thread = chatMessages.threadsById['-1'] ?? { localState: {} };
       setGlobal({
         ...global,
@@ -75,7 +75,7 @@ async function patchMainThread(page: Page, chatId: string, patch: Record<string,
           ...global.messages,
           byChatId: {
             ...global.messages.byChatId,
-            [id as string]: {
+            [id]: {
               ...chatMessages,
               threadsById: { ...chatMessages.threadsById, '-1': { ...thread, ...(threadPatch as object) } },
             },
