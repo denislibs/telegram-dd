@@ -106,13 +106,14 @@ Licenses as stated in telegram-tt's README; the rest are not stated there (check
 They enter tg-frameact only when added to `package.json`, and their notices travel with the packages. **TODO**: emit the
 license texts of bundled dependencies into the production build (tooling to be chosen with the dependency import).
 
-| Package                                                                                               | License (per telegram-tt's README)                                       |
-| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `fflate`, `emoji-data-ios` (emoji-data), `qr-code-styling`, `music-metadata`, `@tiptap/*`, `lowlight` | MIT                                                                      |
-| `@cryptography/aes` (spalt08/cryptography), `idb-keyval`                                              | Apache-2.0 (compatible with GPL-3.0)                                     |
-| `opus-recorder` (fork `Ajaxy/opus-recorder`; its `decoderWorker.min.wasm` is copied into the build)   | "Various Licenses" (upstream `LICENSE.md`): check                        |
-| `marked`                                                                                              | MIT (credited in the README; not in telegram-tt's `package.json`: check) |
-| `async-mutex`, `colorjs.io`, `lovely-chart`, `temml`, `tweetnacl`, `@tauri-apps/*`                    | not stated: check                                                        |
+| Package                                                                                               | License (per telegram-tt's README)                                             |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `fflate`, `emoji-data-ios` (emoji-data), `qr-code-styling`, `music-metadata`, `@tiptap/*`, `lowlight` | MIT                                                                            |
+| `idb-keyval`                                                                                          | Apache-2.0 (compatible with GPL-3.0)                                           |
+| `@cryptography/aes` (spalt08/cryptography)                                                            | GPL-3.0-or-later per its `package.json` (telegram-tt's README says Apache-2.0) |
+| `opus-recorder` (fork `Ajaxy/opus-recorder`; its `decoderWorker.min.wasm` is copied into the build)   | "Various Licenses" (upstream `LICENSE.md`): check                              |
+| `marked`                                                                                              | MIT (credited in the README; not in telegram-tt's `package.json`: check)       |
+| `async-mutex`, `colorjs.io`, `lovely-chart`, `temml`, `tweetnacl`, `@tauri-apps/*`                    | not stated: check                                                              |
 
 ## Trademarks and the Telegram API
 
