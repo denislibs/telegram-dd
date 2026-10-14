@@ -11,12 +11,13 @@
 //  - `useGlobal()` is the tracked view (the store proxy) for component bodies, JSX, memos and effects. `withGlobal`
 //    and `useSelector` read through it.
 import { createMemo, flushSync, getIsHeavyAnimating, rootScope } from 'frameact';
-import { afterActions, createStore, defineActions, ungated } from 'frameact/store';
+import { afterActions, createStore, defineActions, ungated, unwrap } from 'frameact/store';
 
 import type { ActionPayloads, GlobalState, RequiredActionPayloads, RequiredGlobalState } from './types';
 
-import { DEBUG } from '../config';
+import { DEBUG, DEBUG_MORE } from '../config';
 import { areRecordsShallowEqual } from '../util/areShallowEqual';
+import { deepDiff } from '../util/deepDiff';
 import { handleError } from '../util/handleError';
 import { throttleWithTickEnd } from '../util/schedulers';
 import { applyGlobal, setDevChecks, type UntypedSetState } from './store/apply';
@@ -121,6 +122,22 @@ export function forceOnHeavyAnimationOnce() {
   forceOnHeavyAnimation = true;
 }
 
+// DEV tool (docs/store-architecture.md §10): the last `deepDiff`s between consecutive callback runs, newest last, for
+// debugging "who changed that" in the console (`window.__globalDiffLog`).
+const DIFF_LOG_SIZE = 100;
+if (DEBUG_MORE) {
+  const diffLog: { time: number; diff: unknown }[] = [];
+  let prevLogged: GlobalState | undefined;
+  (window as any).__globalDiffLog = diffLog;
+  addCallback((global) => {
+    if (prevLogged) {
+      diffLog.push({ time: Date.now(), diff: deepDiff(prevLogged, global) });
+      if (diffLog.length > DIFF_LOG_SIZE) diffLog.shift();
+    }
+    prevLogged = global;
+  });
+}
+
 // ---- getGlobal / setGlobal --------------------------------------------------------------------------------------
 
 // ---- the mapper context (N3) ------------------------------------------------------------------------------------
@@ -197,8 +214,21 @@ export function setGlobal(newGlobal: GlobalState, options?: ActionOptions) {
   const prev = currentGlobal;
   currentGlobal = newGlobal;
   const apply = () => applyGlobal(setState, prev, newGlobal);
-  if (options?.forceOnHeavyAnimation || options?.forceSyncOnIOs) ungated(apply);
-  else apply();
+  try {
+    if (options?.forceOnHeavyAnimation || options?.forceSyncOnIOs) ungated(apply);
+    else apply();
+  } catch (error) {
+    // Atomic: a walk that throws (a value the glue refuses, a getter, a frozen object) must not leave `newGlobal`
+    // committed with a half-applied mirror — later walks diff from the committed global and would skip the unwritten
+    // branches for good. Back to `prev`, and the mirror is walked back to it (appsec review, finding 3).
+    currentGlobal = prev;
+    try {
+      applyGlobal(setState, unwrap(trackedGlobal), prev);
+    } catch (resyncError) {
+      handleError(resyncError as Error);
+    }
+    throw error;
+  }
 
   if (options?.forceSyncOnIOs) {
     forceOnHeavyAnimation = true;
@@ -222,14 +252,29 @@ const actions = {} as Record<string, (payload?: unknown, options?: ActionOptions
 function runHandlers(name: string, payload: unknown, options?: ActionOptions) {
   const pending: Promise<void>[] = [];
   const exec = () => {
-    for (const handler of actionHandlers[name]) {
-      const result = handler(getGlobal(), actions, payload);
-      if (!result) continue;
-      if (typeof (result as Promise<void>).then === 'function') {
-        pending.push(result as Promise<void>);
-        continue;
+    // An action called synchronously from a component's mapper must not get the mirror: `getGlobal()` below would be
+    // the tracked proxy, `{ ...global, x }` would put store containers into `setGlobal` and subscribe the mapper to
+    // every root key. The handler runs outside the mapper context (the caller is a pure mapper in tt too: a bug).
+    const outerMapperDepth = mapperDepth;
+    if (outerMapperDepth > 0) {
+      if (DEBUG) {
+        // eslint-disable-next-line no-console
+        console.error(`[global] Action "${name}" was called from a mapper; mappers must be pure.`);
       }
-      setGlobal(result as GlobalState, options);
+      mapperDepth = 0;
+    }
+    try {
+      for (const handler of actionHandlers[name]) {
+        const result = handler(getGlobal(), actions, payload);
+        if (!result) continue;
+        if (typeof (result as Promise<void>).then === 'function') {
+          pending.push(result as Promise<void>);
+          continue;
+        }
+        setGlobal(result as GlobalState, options);
+      }
+    } finally {
+      mapperDepth = outerMapperDepth;
     }
   };
   // The options cover the handler's synchronous writes (its returned global and any `setGlobal` it makes before an
@@ -272,7 +317,10 @@ type StickToFirstFn = (value: any) => boolean;
 type MapStateToProps<OwnProps, StateProps> = (global: GlobalState, ownProps: OwnProps) => StateProps;
 type ActivationFn<OwnProps> = (global: GlobalState, ownProps: OwnProps, stickToFirst: StickToFirstFn) => boolean;
 
-const EMPTY_PROPS = {} as AnyLiteral;
+// Frozen: it is the first value of every mapper memo and was the target of every props proxy — one mutable object
+// shared by all components (appsec review, finding 5).
+const EMPTY_PROPS = Object.freeze({}) as AnyLiteral;
+const readOnly = () => false; // a write through the props proxy: a TypeError in strict mode
 
 /**
  * The component-side replacement of tt's `withGlobal(mapStateToProps)(Component)` HOC, called in the component body:
@@ -319,17 +367,33 @@ export function withGlobal<OwnProps extends AnyLiteral, StateProps extends AnyLi
     { equals: areRecordsShallowEqual },
   );
   // `{ ...mappedProps, ...props }` of tt's container, with lazy getters: an own prop wins whenever its key is present.
-  return new Proxy(EMPTY_PROPS, {
-    get: (_target, key) => (key in ownProps ? ownProps[key as string] : mapped()[key as string]),
-    has: (_target, key) => key in ownProps || key in mapped(),
-    ownKeys: () => [...new Set([...Reflect.ownKeys(mapped()), ...Reflect.ownKeys(ownProps)])],
-    getOwnPropertyDescriptor: (_target, key) =>
-      key in ownProps || key in mapped()
-        ? {
-            configurable: true,
-            enumerable: true,
-            get: () => (key in ownProps ? ownProps[key as string] : mapped()[key as string]),
-          }
-        : undefined,
-  }) as OwnProps & StateProps;
+  // The target is a fresh object per component (a frozen target would break the `ownKeys` invariants of the traps).
+  return new Proxy(
+    {},
+    {
+      set: readOnly,
+      defineProperty: readOnly,
+      deleteProperty: readOnly,
+      setPrototypeOf: readOnly,
+      get: (_target, key) => (key in ownProps ? ownProps[key as string] : mapped()[key as string]),
+      has: (_target, key) => key in ownProps || key in mapped(),
+      ownKeys: () => [...new Set([...Reflect.ownKeys(mapped()), ...Reflect.ownKeys(ownProps)])],
+      getOwnPropertyDescriptor: (_target, key) =>
+        key in ownProps || key in mapped()
+          ? {
+              configurable: true,
+              enumerable: true,
+              get: () => (key in ownProps ? ownProps[key as string] : mapped()[key as string]),
+            }
+          : undefined,
+    },
+  ) as OwnProps & StateProps;
+}
+
+if (DEBUG) {
+  (window as any).getGlobal = getGlobal;
+  (window as any).setGlobal = setGlobal;
+  (window as any).getActions = getActions;
+  // Not in tt: the store mirror that components read (raw object), for the e2e checks of docs/quality-gates.md
+  (window as any).getMirror = () => unwrap(trackedGlobal);
 }

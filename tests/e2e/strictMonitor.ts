@@ -5,7 +5,18 @@ import type { Page } from '@playwright/test';
 export const DEFAULT_IGNORED_CONSOLE = [
   /GL Driver Message/, // headless Chromium software WebGL ("GPU stall due to ReadPixels")
   /\[vite\]/, // HMR client chatter
+  // DEV timing diagnostics: they fire on wall-clock thresholds (7 ms runs / store updates / API batches), so they are
+  // noise on a slow shared CI runner and say nothing about correctness. Performance is gated by `pnpm test:perf`
+  // (long tasks under CPU throttling, leaks) instead.
+  /\[frameact\/store\] Slow store update:/,
+  /\[frameact\] Slow (effect run|\w+ drain):/,
+  /\[API\] Slow updates processing:/,
 ];
+
+// Requests to the app origin that are expected to fail. The app boots the in-repo MockClient (APP_MOCKED_CLIENT=1) on
+// every page, and MockClient probes for an optional per-scenario `__invokeMiddlewares__/<scenario>` module; the dev
+// server answers 404 for a scenario without one and MockClient ignores it.
+export const DEFAULT_IGNORED_REQUESTS = [/\/__invokeMiddlewares__\//];
 
 export interface StrictOptions {
   /** Console messages (error / warning) that are allowed in this test. */
@@ -38,7 +49,7 @@ function matches(value: string, patterns: (string | RegExp)[]) {
  */
 export function createStrictMonitor(page: Page, appOrigin: string, options: Partial<StrictOptions> = {}) {
   const ignoreConsole = [...DEFAULT_IGNORED_CONSOLE, ...(options.ignoreConsole ?? [])];
-  const ignoreRequests = options.ignoreRequests ?? [];
+  const ignoreRequests = [...DEFAULT_IGNORED_REQUESTS, ...(options.ignoreRequests ?? [])];
   const problems: string[] = [];
   const isAppUrl = (url: string) => url.startsWith(appOrigin);
 

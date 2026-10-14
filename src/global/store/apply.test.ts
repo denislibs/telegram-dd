@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { omit } from '../../util/iteratees';
 import { applyGlobal, copyContainer, isContainer, setDevChecks, type UntypedSetState } from './apply';
+import { mulberry32 } from './prng';
 
 type Message = { id: number; chatId: string; text: string; content?: { text: { text: string } } };
 type Chat = { id: string; title: string; unread: number; photo?: { small: string } };
@@ -250,6 +251,149 @@ describe('applyGlobal: the store mirrors the committed tt global', () => {
   });
 });
 
+describe('appsec 1: keys that Object.prototype also has must not hide a deletion', () => {
+  it.each(['constructor', 'toString', 'hasOwnProperty', 'valueOf', 'isPrototypeOf'])(
+    'byId { a, b } -> { b, %s } in one setGlobal removes a from the mirror',
+    (inherited) => {
+      const { mirror, setGlobal, getGlobal } = setup();
+      const g = getGlobal();
+      setGlobal({
+        ...g,
+        chats: { ...g.chats, byId: { b: g.chats.byId.b, [inherited]: { id: inherited, title: 'x', unread: 0 } } },
+      });
+      expect(Object.hasOwn(getGlobal().chats.byId, 'a')).toBe(false);
+      expect(Object.hasOwn(mirror.chats.byId, 'a')).toBe(false);
+      expect(Object.hasOwn(mirror.chats.byId, inherited)).toBe(true);
+      // (toStrictEqual trips over an own `constructor` key, so compare the keys and the entities one by one)
+      expect(Object.keys(mirror.chats.byId).sort()).toEqual(Object.keys(getGlobal().chats.byId).sort());
+      expect(mirror.chats.byId.b).toBe(getGlobal().chats.byId.b);
+    },
+  );
+});
+
+describe('appsec 2: a cyclic or absurdly deep value is refused with a clear error, not a stack overflow', () => {
+  const REFUSED = /\[global\] .*(cycle|nested deeper)/i;
+  const withSettings = (g: State, value: unknown) => ({ ...g, settings: value }) as unknown as State;
+
+  it('a container that points back at itself (structured clone keeps cycles)', () => {
+    const { setGlobal, getGlobal } = setup();
+    const settings: AnyLiteral = { x: { y: 1 } };
+    settings.x.self = settings;
+    expect(() => setGlobal(withSettings(getGlobal(), settings))).toThrow(REFUSED);
+  });
+
+  it('a 10 000-deep chain of id-less objects', () => {
+    const { setGlobal, getGlobal } = setup();
+    let deep: AnyLiteral = { leaf: true };
+    for (let i = 0; i < 10_000; i++) deep = { next: deep };
+    expect(() => setGlobal(withSettings(getGlobal(), deep))).toThrow(REFUSED);
+  });
+
+  it('an array that contains itself, and a deep chain of arrays', () => {
+    const { setGlobal, getGlobal } = setup();
+    const cyclic: unknown[] = [];
+    cyclic.push(cyclic);
+    expect(() => setGlobal(withSettings(getGlobal(), { list: cyclic }))).toThrow(REFUSED);
+    let nested: unknown[] = [];
+    for (let i = 0; i < 10_000; i++) nested = [nested];
+    expect(() => setGlobal(withSettings(getGlobal(), { list: nested }))).toThrow(REFUSED);
+  });
+
+  it('copyContainer refuses too (the new-container branch)', () => {
+    const cyc: AnyLiteral = {};
+    cyc.self = cyc;
+    expect(() => copyContainer(cyc, ['settings'])).toThrow(REFUSED);
+  });
+
+  it('legitimately nested containers (a few levels, wide) pass', () => {
+    const { setGlobal, getGlobal, mirror } = setup();
+    setGlobal(withSettings(getGlobal(), { a: { b: { c: { d: { e: { f: { value: 1 } } } } } } }));
+    expect((mirror as AnyLiteral).settings.a.b.c.d.e.f.value).toBe(1);
+  });
+});
+
+describe('appsec 4: a sparse array with a huge length does not freeze the walk', () => {
+  const sparse = (length: number) => {
+    const array: unknown[] = [];
+    array.length = length;
+    array[3] = 'x';
+    return array;
+  };
+
+  it.each([1e8, 2 ** 32 - 1])('length %d is refused quickly with a clear error', (length) => {
+    const { setGlobal, getGlobal } = setup();
+    const started = performance.now();
+    expect(() => setGlobal({ ...getGlobal(), settings: { list: sparse(length) } } as unknown as State)).toThrow(
+      /\[global\] .*sparse/i,
+    );
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  it('the same value inside an entity-less list of ids, written over an existing array, is refused too', () => {
+    const { setGlobal, getGlobal } = setup();
+    expect(() =>
+      setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, listIds: { active: sparse(1e8) as string[] } } }),
+    ).toThrow(/sparse/i);
+  });
+
+  it('a long but dense array (600k ids) is a value like any other', () => {
+    const { setGlobal, getGlobal, mirror } = setup();
+    const ids = Array.from({ length: 600_000 }, (_, i) => String(i));
+    setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, listIds: { active: ids } } });
+    expect(mirror.chats.listIds.active).toHaveLength(600_000);
+  });
+});
+
+describe('ownership: what the store (frameact adopt) writes into tt objects', () => {
+  /** An object whose every write and deletion is recorded; reads pass through (so `adopt` can walk it). */
+  const watched = <T extends object>(target: T, log: string[], name: string): T =>
+    new Proxy(target, {
+      set(t, key, value) {
+        log.push(`${name}.${String(key)} = …`);
+        return Reflect.set(t, key, value);
+      },
+      deleteProperty(t, key) {
+        log.push(`delete ${name}.${String(key)}`);
+        return Reflect.deleteProperty(t, key);
+      },
+      defineProperty(t, key, descriptor) {
+        log.push(`define ${name}.${String(key)}`);
+        return Reflect.defineProperty(t, key, descriptor);
+      },
+    });
+
+  it('well-formed data: nothing is written into the objects handed to the store', () => {
+    const { setGlobal, getGlobal, mirror } = setup();
+    const log: string[] = [];
+    const photo = watched({ small: 'c.jpg', nested: { deep: [1, 2, { x: 1 }] } }, log, 'photo');
+    const entity = watched({ id: 'c', title: 'C', unread: 1, photo }, log, 'chat');
+    const list = watched(['a', 'b', 'c'], log, 'list');
+    const g = getGlobal();
+    setGlobal({
+      ...g,
+      chats: { ...g.chats, byId: { ...g.chats.byId, c: entity }, listIds: { active: list } },
+    });
+    expect(mirror.chats.byId.c).toBe(entity);
+    expect(log).toEqual([]);
+  });
+
+  it('forged data: the one observable write is the removal of an own __proto__ key — and nothing is polluted', () => {
+    const { setGlobal, getGlobal, mirror } = setup();
+    const forged = JSON.parse(
+      '{"id":"f","title":"F","unread":0,"__proto__":{"polluted":"yes"},"photo":{"__proto__":{"p":1}}}',
+    );
+    expect(Object.hasOwn(forged, '__proto__')).toBe(true);
+    const g = getGlobal();
+    setGlobal({ ...g, chats: { ...g.chats, byId: { ...g.chats.byId, f: forged } } });
+    // frameact's adopt strips it from the object the store was handed — i.e. from the committed tt object as well
+    expect(Object.hasOwn(forged, '__proto__')).toBe(false);
+    expect(Object.hasOwn(forged.photo, '__proto__')).toBe(false);
+    expect(mirror.chats.byId.f).toBe(forged);
+    expect(({} as AnyLiteral).polluted).toBeUndefined();
+    expect(Object.getPrototypeOf(forged)).toBe(Object.prototype);
+  });
+});
+
 describe('C1: tt value semantics hold for code that captured objects before setGlobal', () => {
   it('a captured entity is a snapshot: changedFields detection (apiUpdaters/chats.ts updateChat) works', () => {
     const { setGlobal, getGlobal } = setup();
@@ -413,12 +557,12 @@ describe('N1: a store-owned container copy never leaks into the committed global
 
 describe('M3 property: random nested tt-style updates keep the mirror equal to the committed global', () => {
   it('3000 steps over 30 globals, including type changes, id changes, explicit undefined and deletions', () => {
-    let seed = 7;
-    const rnd = (n: number) => {
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-      return seed % n;
-    };
+    const rnd = mulberry32(7);
     const ids = ['a', 'b', 'c', 'd'];
+    // coverage (review I1): every operation, every id and same-length array replacements are really exercised
+    const opCounts = new Array<number>(9).fill(0);
+    const usedIds = new Set<string>();
+    let sameLengthReplacements = 0;
     for (let round = 0; round < 30; round++) {
       const { mirror, setGlobal, getGlobal } = setup();
       const snapshots: string[] = [];
@@ -427,6 +571,8 @@ describe('M3 property: random nested tt-style updates keep the mirror equal to t
         const g = getGlobal();
         const id = ids[rnd(ids.length)];
         const op = rnd(9);
+        opCounts[op]++;
+        usedIds.add(id);
         let next: State;
         if (op === 0) {
           next = updateChat(g, id, { ...(g.chats.byId[id] ?? { id, title: id, unread: 0 }), unread: rnd(10) });
@@ -459,7 +605,16 @@ describe('M3 property: random nested tt-style updates keep the mirror equal to t
         } else {
           next = { ...g, chats: { ...g.chats, lastMessageIds: rnd(2) ? { all: { [id]: rnd(50) } } : undefined } };
         }
+        const listBefore = g.chats.listIds.active;
         setGlobal(next);
+        const listAfter = getGlobal().chats.listIds.active;
+        if (
+          listBefore !== listAfter &&
+          listBefore?.length === listAfter?.length &&
+          listBefore.join() !== listAfter.join()
+        ) {
+          sameLengthReplacements++;
+        }
         if (step % 25 === 0) {
           snapshots.push(JSON.stringify(getGlobal()));
           snapshotRefs.push(getGlobal());
@@ -469,5 +624,8 @@ describe('M3 property: random nested tt-style updates keep the mirror equal to t
       // earlier snapshots are untouched by later writes (tt value semantics)
       snapshotRefs.forEach((s, i) => expect(JSON.stringify(s)).toBe(snapshots[i]));
     }
+    opCounts.forEach((count) => expect(count).toBeGreaterThan(100));
+    expect(usedIds.size).toBe(ids.length);
+    expect(sameLengthReplacements).toBeGreaterThanOrEqual(1);
   });
 });

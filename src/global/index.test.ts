@@ -461,6 +461,42 @@ describe('N3: a verbatim helper that reads getGlobal() inside a mapper is tracke
     expect(unwrap(g)).toBe(g);
     expect(() => setGlobal({ ...g, isSyncing: true })).not.toThrow();
   });
+
+  it('an action called synchronously from a mapper does not get the mirror (review minor: mapperDepth guard)', () => {
+    const seen: GlobalState[] = [];
+    register('test:fromMapper', (global: GlobalState) => {
+      seen.push(global);
+      return { ...global, isSyncing: true };
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let mapperRuns = 0;
+    createRoot((dispose) => {
+      const props = withGlobal({}, () => {
+        mapperRuns++;
+        actions['test:fromMapper']();
+        return { ok: true };
+      });
+      expect(props.ok).toBe(true);
+      // the handler saw a plain committed copy, not the tracked proxy, and what it committed holds no store object
+      expect(seen).toHaveLength(1);
+      expect(unwrap(seen[0])).toBe(seen[0]);
+      expect(unwrap(getGlobal().chats)).toBe(getGlobal().chats);
+      expect(getGlobal().isSyncing).toBe(true);
+      // the mapper did not subscribe to every root key through the handler's spread: a write elsewhere leaves it alone
+      setGlobal({ ...getGlobal(), isUpdateAvailable: true } as GlobalState);
+      expect(props.ok).toBe(true);
+      expect(mapperRuns).toBe(1);
+      dispose();
+    });
+    if (DEBUG) expect(error).toHaveBeenCalledWith(expect.stringContaining('test:fromMapper'));
+    error.mockRestore();
+  });
+
+  it('outside a mapper getGlobal() is the committed copy (stamped in DEV), as before', () => {
+    const g = getGlobal();
+    expect(unwrap(g)).toBe(g);
+    expect(() => setGlobal({ ...g, isSyncing: true })).not.toThrow();
+  });
 });
 
 describe('I2: tt code that mutates the global it got from getGlobal() behaves the same in DEV and production', () => {
@@ -470,6 +506,66 @@ describe('I2: tt code that mutates the global it got from getGlobal() behaves th
     setGlobal(global);
     expect(useGlobal().isCacheApiSupported).toBe(true);
     expect(getGlobal().isCacheApiSupported).toBe(true);
+  });
+});
+
+describe('appsec 3: setGlobal is atomic — a walk that throws leaves the committed global and the mirror untouched', () => {
+  it('rolls the committed global back, resyncs the half-applied mirror and keeps working', () => {
+    setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, byId: { a: chat('a') } } });
+    const before = getGlobal().chats.byId;
+    const poisoned: AnyLiteral = { fine: 1 };
+    Object.defineProperty(poisoned, 'boom', {
+      enumerable: true,
+      get() {
+        throw new Error('boom');
+      },
+    });
+    // `chats` is walked first and written (a new chat), then `poisoned` throws inside the walk
+    const next = {
+      ...getGlobal(),
+      chats: { ...getGlobal().chats, byId: { a: chat('a'), b: chat('b') } },
+      poisoned,
+    } as unknown as GlobalState;
+
+    expect(() => setGlobal(next)).toThrow('boom');
+
+    expect(getGlobal().chats.byId).toBe(before); // committed: the previous one
+    expect('poisoned' in getGlobal()).toBe(false);
+    expect(useGlobal().chats.byId.b).toBeUndefined(); // mirror: the half-applied write is undone
+    expect('poisoned' in unwrap(useGlobal())).toBe(false);
+    expect(Object.keys(unwrap(useGlobal()).chats.byId)).toEqual(['a']);
+
+    // the next legal write is a plain diff against the (restored) committed global
+    setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, byId: { a: chat('a'), c: chat('c') } } });
+    expect(Object.keys(unwrap(useGlobal()).chats.byId).sort()).toEqual(['a', 'c']);
+    expect(getGlobal().chats.byId.c).toBeDefined();
+  });
+});
+
+describe('appsec 5: withGlobal props are read-only and never shared between components', () => {
+  it("a write to one inactive container's props neither works nor shows up in another one", () => {
+    createRoot((dispose) => {
+      const inactive = () =>
+        withGlobal(
+          {} as AnyLiteral,
+          () => ({ never: 1 }),
+          () => false,
+        );
+      const a = inactive();
+      const b = inactive();
+      expect(() => {
+        a.leaked = 'from A';
+      }).toThrow(TypeError);
+      expect(() => Object.defineProperty(a, 'leaked2', { value: 1 })).toThrow(TypeError);
+      expect(() => {
+        delete a.never;
+      }).toThrow(TypeError);
+      expect(b.leaked).toBeUndefined();
+      expect(b.leaked2).toBeUndefined();
+      expect(Object.keys(b)).toEqual([]);
+      expect(Object.keys(inactive())).toEqual([]);
+      dispose();
+    });
   });
 });
 

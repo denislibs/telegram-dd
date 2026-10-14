@@ -29,3 +29,18 @@ postcss.config.ts
 test-results
 playwright-report*
 tests/visual/__diff__
+
+# The state layer, ported verbatim (same reason: formatting would rewrite ~20% of the lines and every upstream sync
+# would stop being a plain copy; docs/plans/2026-10-14-store.md T1–T3)
+src/global/actions
+src/global/reducers
+src/global/selectors
+src/global/initialState.ts
+src/global/cache.ts
+src/global/init.ts
+src/global/intervals.ts
+src/global/openedChannelShortpoll.ts
+src/components/common/helpers/documentInfo.ts
+src/components/common/helpers/gifts.ts
+src/components/common/helpers/mediaDimensions.ts
+src/components/middle/helpers/calculateMiddleFooterTransforms.ts
