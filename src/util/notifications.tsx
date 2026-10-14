@@ -4,8 +4,17 @@
 // Copied (signatures) from telegram-tt src/util/notifications.tsx
 import type { ApiChat, ApiMessage, ApiPhoneCall, ApiUser } from '../api/types';
 
-export function requestPermission(): Promise<boolean> {
-  return Promise.resolve(false);
+// tt's web path (the Tauri branch is dropped: IS_TAURI is always false here). It must ask the browser: answering `false`
+// would make `updateWebNotificationSettings` persist `hasWebNotifications: false` (review m4).
+export async function requestPermission(): Promise<boolean> {
+  if (!('Notification' in window)) {
+    return false;
+  }
+  let permission = Notification.permission;
+  if (!['granted', 'denied'].includes(permission)) {
+    permission = await Notification.requestPermission();
+  }
+  return permission === 'granted';
 }
 
 export function subscribe() {
