@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "vite/client"]
+  },
+  "include": [
+    "src/@types/global.d.ts",
+    "dev",
+    "plugins",
+    "*.config.ts",
+    "src/lib/gramjs/tl/generateModules.ts",
+    "src/lib/gramjs/tl/types-generator"
+  ],
+  "exclude": ["src/vendor", "reference"]
+}
