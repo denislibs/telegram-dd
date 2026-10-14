@@ -25,6 +25,7 @@ pnpm gates:reference             # clone the reference at the baseline commit (C
 pnpm format                      # prettier --write
 pnpm test:e2e | test:a11y | test:perf | test:visual   # browser quality gates (docs/quality-gates.md); first: pnpm playwright:install
 pnpm framework:update            # move the submodule to frameact's latest main
+pnpm codemod <files|globs>       # teact → frameact rewrite of a tt component/hook (docs/codemod.md); --dry --report to preview
 pnpm bench:store                 # store compat-layer micro-benchmark (docs/store-architecture.md §4)
 ```
 
