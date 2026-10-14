@@ -1,4 +1,4 @@
-# tg-frameact
+# telegram-dd
 
 A Telegram web client on [frameact](https://github.com/denislibs/frameact): Telegram Web A
 ([telegram-tt](https://github.com/Ajaxy/telegram-tt)) ported from teact to frameact — fine-grained signals, one DOM commit
@@ -8,14 +8,14 @@ per frame, heavy-animation gating.
 > [`docs/porting-guide.md`](docs/porting-guide.md) for how telegram-tt code is ported.
 
 ```bash
-git clone --recurse-submodules <this repo> && cd tg-frameact
+git clone --recurse-submodules https://github.com/denislibs/telegram-dd.git && cd telegram-dd
 git clone --depth 1 https://github.com/Ajaxy/telegram-tt.git reference/telegram-tt
 pnpm install && pnpm dev
 ```
 
 ## Source code & GPL obligations
 
-tg-frameact is licensed **GPL-3.0-or-later** ([`LICENSE`](LICENSE)): it is a modified version of
+telegram-dd is licensed **GPL-3.0-or-later** ([`LICENSE`](LICENSE)): it is a modified version of
 [telegram-tt](https://github.com/Ajaxy/telegram-tt) (© Alexander Zinchuk and contributors). Attribution, the
 modification notice and the third-party inventory are in [`NOTICE.md`](NOTICE.md).
 

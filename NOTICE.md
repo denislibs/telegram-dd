@@ -1,11 +1,11 @@
 # NOTICE
 
-tg-frameact is a Telegram web client. It is a **modified version of Telegram Web A**
+telegram-dd is a Telegram web client. It is a **modified version of Telegram Web A**
 ([Ajaxy/telegram-tt](https://github.com/Ajaxy/telegram-tt)), ported from the teact framework to frameact.
 
 ## License of this work
 
-- tg-frameact as a whole is licensed under the **GNU General Public License, version 3 or (at your option) any later
+- telegram-dd as a whole is licensed under the **GNU General Public License, version 3 or (at your option) any later
   version** (GPL-3.0-or-later). The full text is in [`LICENSE`](LICENSE).
 - telegram-tt is © **Alexander Zinchuk and the telegram-tt contributors**, licensed GPL-3.0-or-later. (telegram-tt's
   `LICENSE` file is the bare GPL text with no copyright line; the holder above is the `author` field of its
@@ -15,7 +15,7 @@ tg-frameact is a Telegram web client. It is a **modified version of Telegram Web
 
 ### Modification notice (GPL-3.0 §5(a))
 
-Starting in October 2026, the tg-frameact contributors modified telegram-tt: its files are copied into this repository
+Starting in October 2026, the telegram-dd contributors modified telegram-tt: its files are copied into this repository
 under their original paths and adapted from teact (`src/lib/teact`, `src/lib/fasterdom`, TeactN global state) to
 frameact (signals, two-phase effects, store model B). The baseline is telegram-tt commit
 [`090e38f`](https://github.com/Ajaxy/telegram-tt/commit/090e38f1dffec3e0a9aefbec8159a9931fbeec8f) (version 12.0.46,
@@ -37,7 +37,7 @@ came from, and every change made after that. The file-header policy is in
 - **Assets**: images, SVG, animated stickers (`.tgs`), fonts, localization fallback strings (`src/assets`), and the
   static files under `public/` (icons, sounds, manifests).
 
-## What is original to tg-frameact
+## What is original to telegram-dd
 
 The teact → frameact adaptation of every ported file, the store glue that replaces TeactN (`src/global/index.ts` in
 this repository), the build and tooling configuration (Vite 8, TypeScript 7, oxlint, prettier), and the documentation
@@ -103,7 +103,7 @@ stated in the tree and must be verified upstream before a release; nothing here 
 ### npm dependencies used by telegram-tt
 
 Licenses as stated in telegram-tt's README; the rest are not stated there (check against each package's `LICENSE`).
-They enter tg-frameact only when added to `package.json`, and their notices travel with the packages. **TODO**: emit the
+They enter telegram-dd only when added to `package.json`, and their notices travel with the packages. **TODO**: emit the
 license texts of bundled dependencies into the production build (tooling to be chosen with the dependency import).
 
 | Package                                                                                               | License (per telegram-tt's README)                                             |
@@ -118,7 +118,7 @@ license texts of bundled dependencies into the production build (tooling to be c
 ## Trademarks and the Telegram API
 
 The GPL grants no trademark rights. "Telegram", the Telegram logo and the payment-provider logos belong to their owners;
-tg-frameact is an unofficial client and is not affiliated with Telegram. Use of the Telegram API is subject to
+telegram-dd is an unofficial client and is not affiliated with Telegram. Use of the Telegram API is subject to
 Telegram's API Terms of Service (<https://core.telegram.org/api/terms>; check its naming and branding requirements
 before a public release). Every build needs its own `api_id`/`api_hash` from <https://my.telegram.org>, kept in
 `.env.local` and never committed.
