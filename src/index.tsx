@@ -6,9 +6,6 @@ import { handleError } from './util/handleError';
 // to <body> at load time, which stricterdom would flag as a mutation outside an effect.
 import './util/browser/windowEnvironment';
 import './global/init';
-// What components/auth/Auth.tsx imports in telegram-tt: the actions needed before login (switchMultitabRole, initApi, ...).
-// TODO(port): move to the Auth component when it is ported.
-import './global/actions/initial';
 
 import { requestMutation } from 'frameact';
 import { render } from 'frameact/dom';
@@ -30,6 +27,9 @@ import { initPasscodeNavigation } from './util/passcode/navigation';
 import { onBeforeUnload } from './util/schedulers';
 
 import App from './components/App';
+
+import './assets/fonts/roboto.css';
+import './styles/index.scss';
 
 if (import.meta.env.DEV) {
   enableStrict();

@@ -24,7 +24,7 @@ const TrackingMonkey = (props: OwnProps) => {
   const [isFirstMonkeyLoaded, setIsFirstMonkeyLoaded] = createSignal(false);
   const { isMobile } = useAppLayout();
   const trackningFramesPerSymbol = createMemo(() => (TRACKING_END_FRAME - TRACKING_START_FRAME) / props.codeLength);
-  const stickerSize = isMobile ? STICKER_SIZE_AUTH_MOBILE : STICKER_SIZE_AUTH;
+  const stickerSize = () => (isMobile() ? STICKER_SIZE_AUTH_MOBILE : STICKER_SIZE_AUTH);
 
   const handleFirstMonkeyLoad = () => setIsFirstMonkeyLoaded(true);
 
@@ -49,14 +49,14 @@ const TrackingMonkey = (props: OwnProps) => {
     <div id="monkey" class={props.isBig ? 'big' : ''}>
       {!isFirstMonkeyLoaded() && <div class="monkey-preview" />}
       <AnimatedSticker
-        size={props.isBig ? STICKER_SIZE_TWO_FA : stickerSize}
+        size={props.isBig ? STICKER_SIZE_TWO_FA : stickerSize()}
         className={props.isTracking ? 'hidden' : undefined}
         tgsUrl={LOCAL_TGS_URLS.MonkeyIdle}
         play={!props.isTracking}
         onLoad={handleFirstMonkeyLoad}
       />
       <AnimatedSticker
-        size={props.isBig ? STICKER_SIZE_TWO_FA : stickerSize}
+        size={props.isBig ? STICKER_SIZE_TWO_FA : stickerSize()}
         className={!props.isTracking ? 'hidden' : 'shown'}
         tgsUrl={LOCAL_TGS_URLS.MonkeyTracking}
         playSegment={props.isTracking ? getTrackingFrames() : undefined}

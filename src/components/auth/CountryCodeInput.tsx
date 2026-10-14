@@ -1,4 +1,4 @@
-import { createEffect, createSignal } from 'frameact';
+import { createMemo, createSignal } from 'frameact';
 import { For } from 'frameact/dom';
 import { withGlobal } from '../../global';
 import type { GlobalState } from '../../global/types';
@@ -41,23 +41,13 @@ const CountryCodeInput = (ownProps: OwnProps) => {
   let inputRef!: HTMLInputElement;
 
   const [filter, setFilter] = createSignal<string | undefined>(undefined);
-  const [filteredList, setFilteredList] = createSignal<ApiCountryCode[]>([]);
+  // Deviation: tt kept `filteredList` in state, refreshed on every filter change and (useSyncEffect) when the country
+  // list first arrives; a memo over both is the same value without the sync effect.
+  const filteredList = createMemo(() => getFilteredList(props.phoneCodeList, filter()));
 
   const updateFilter = (filterValue?: string) => {
     setFilter(filterValue);
-    setFilteredList(getFilteredList(props.phoneCodeList, filterValue));
   };
-
-  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
-  createEffect(
-    () => [props.phoneCodeList, filter()],
-    (_deps, prev) => {
-      const [prevPhoneCodeList] = prev ?? [];
-      if (!prevPhoneCodeList?.length && props.phoneCodeList.length) {
-        setFilteredList(getFilteredList(props.phoneCodeList, filter()));
-      }
-    },
-  );
 
   const handleChange = (country: ApiCountryCode) => {
     props.onChange(country);
@@ -82,9 +72,9 @@ const CountryCodeInput = (ownProps: OwnProps) => {
     updateFilter(target.value);
   };
 
-  const CodeInput: FC<{ onTrigger: () => void; isOpen?: boolean }> = ({ onTrigger, isOpen }) => {
+  const CodeInput = (trigger: { onTrigger: () => void; isOpen?: boolean }) => {
     const handleTrigger = () => {
-      if (isOpen) {
+      if (trigger.isOpen) {
         return;
       }
 
@@ -92,7 +82,7 @@ const CountryCodeInput = (ownProps: OwnProps) => {
         inputRef!.select();
       }, SELECT_TIMEOUT);
 
-      onTrigger();
+      trigger.onTrigger();
 
       const formEl = document.getElementById('auth-phone-number-form')!;
       formEl.scrollTo({ top: formEl.scrollHeight, behavior: 'smooth' });
@@ -103,20 +93,22 @@ const CountryCodeInput = (ownProps: OwnProps) => {
       handleTrigger();
     };
 
-    const emoji = props.value && IS_EMOJI_SUPPORTED && isoToEmoji(props.value.iso2);
-    const name = props.value?.name || props.value?.defaultName || '';
-    const inputValue = filter() ?? [emoji, name].filter(Boolean).join(' ');
+    const inputValue = () => {
+      const emoji = props.value && IS_EMOJI_SUPPORTED && isoToEmoji(props.value.iso2);
+      const name = props.value?.name || props.value?.defaultName || '';
+      return filter() ?? [emoji, name].filter(Boolean).join(' ');
+    };
 
     return (
       <div class={buildClassName('input-group', props.value && 'touched')}>
         <input
           ref={inputRef}
-          class={buildClassName('form-control', isOpen && 'focus')}
+          class={buildClassName('form-control', trigger.isOpen && 'focus')}
           type="text"
           id={props.id}
-          value={inputValue}
-          autoComplete="off"
-          spellCheck={IS_TAURI ? false : undefined}
+          use:value={inputValue}
+          autocomplete="off"
+          spellcheck={IS_TAURI ? false : undefined}
           onClick={handleTrigger}
           onFocus={handleTrigger}
           onInput={handleCodeInput}
@@ -126,7 +118,7 @@ const CountryCodeInput = (ownProps: OwnProps) => {
         {props.isLoading ? (
           <Spinner color="black" />
         ) : (
-          <i onClick={handleTrigger} class={buildClassName('css-icon-down', isOpen && 'open')} />
+          <i onClick={handleTrigger} class={buildClassName('css-icon-down', trigger.isOpen && 'open')} />
         )}
       </div>
     );
@@ -135,10 +127,9 @@ const CountryCodeInput = (ownProps: OwnProps) => {
   return (
     <DropdownMenu className="CountryCodeInput" trigger={CodeInput}>
       <For each={filteredList()} keyed={(country) => `${country.iso2}-${country.countryCode}`}>
-        {(country: ApiCountryCode) => (
+        {(country) => (
           <MenuItem
             className={props.value && country().iso2 === props.value.iso2 ? 'selected' : ''}
-
             onClick={() => handleChange(country())}
           >
             <span class="country-flag">{renderText(isoToEmoji(country().iso2), ['hq_emoji'])}</span>

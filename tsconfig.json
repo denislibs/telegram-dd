@@ -19,6 +19,7 @@
     "noEmit": true,
     "jsx": "preserve",
     "jsxImportSource": "frameact",
+    "paths": { "qr-code-styling": ["./src/@types/qr-code-styling"] },
     "types": ["dom-chromium-ai", "dom-view-transitions", "vite/client"]
   },
   "include": ["src"],

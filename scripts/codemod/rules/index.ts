@@ -5,12 +5,14 @@
 import type { Ctx } from '../context.ts';
 
 import { accessorReadsRule } from './accessorReads.ts';
+import { attributesRule } from './attributes.ts';
 import { derivedRule } from './derived.ts';
 import { derivedHooksRule } from './derivedHooks.ts';
 import { earlyReturnRule } from './earlyReturn.ts';
 import { effectsRule } from './effects.ts';
 import { hooksRule } from './hooks.ts';
 import { importsRule } from './imports.ts';
+import { inputEventsRule } from './inputEvents.ts';
 import { jsxRule } from './jsx.ts';
 import { kitRule } from './kit.ts';
 import { moduleLoaderRule } from './moduleLoader.ts';
@@ -43,5 +45,7 @@ export const RULES: Rule[] = [
   trackGlobalRule,
   earlyReturnRule,
   jsxRule,
+  inputEventsRule,
+  attributesRule,
   importsRule,
 ];

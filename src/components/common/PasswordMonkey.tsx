@@ -24,7 +24,7 @@ const PasswordMonkey = (props: OwnProps) => {
   const [isPeekShown, markPeekShown] = useFlag(false);
   const { isMobile } = useAppLayout();
 
-  const stikerSize = isMobile ? STICKER_SIZE_AUTH_MOBILE : STICKER_SIZE_AUTH;
+  const stikerSize = () => (isMobile() ? STICKER_SIZE_AUTH_MOBILE : STICKER_SIZE_AUTH);
 
   useTimeout(markPeekShown, PEEK_MONKEY_SHOW_DELAY);
   const handleFirstMonkeyLoad = markFirstMonkeyLoaded;
@@ -33,7 +33,7 @@ const PasswordMonkey = (props: OwnProps) => {
     <div id="monkey" class={props.isBig ? 'big' : ''}>
       {!isFirstMonkeyLoaded() && <div class="monkey-preview" />}
       <AnimatedSticker
-        size={props.isBig ? STICKER_SIZE_TWO_FA : stikerSize}
+        size={props.isBig ? STICKER_SIZE_TWO_FA : stikerSize()}
         className={isPeekShown() ? 'hidden' : 'shown'}
         tgsUrl={LOCAL_TGS_URLS.MonkeyClose}
         playSegment={SEGMENT_COVER_EYES}
@@ -41,7 +41,7 @@ const PasswordMonkey = (props: OwnProps) => {
         onLoad={handleFirstMonkeyLoad}
       />
       <AnimatedSticker
-        size={props.isBig ? STICKER_SIZE_TWO_FA : stikerSize}
+        size={props.isBig ? STICKER_SIZE_TWO_FA : stikerSize()}
         className={isPeekShown() ? 'shown' : 'hidden'}
         tgsUrl={LOCAL_TGS_URLS.MonkeyPeek}
         playSegment={props.isPasswordVisible ? SEGMENT_UNCOVER_EYE : SEGMENT_COVER_EYE}

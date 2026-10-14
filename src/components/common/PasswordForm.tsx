@@ -47,7 +47,7 @@ const PasswordForm = (rawProps: OwnProps) => {
   const { isMobile } = useAppLayout();
   const [password, setPassword] = createSignal('');
   const [canSubmit, setCanSubmit] = createSignal(false);
-  const focusDelayTimeoutMs = isMobile ? 550 : 400;
+  const focusDelayTimeoutMs = isMobile() ? 550 : 400;
 
   createEffect(
     () => props.shouldResetValue,
@@ -107,11 +107,11 @@ const PasswordForm = (rawProps: OwnProps) => {
   }
 
   function renderFakeInput() {
-    return <input type="password" id="prevent_autofill" autoComplete="off" class="visually-hidden" tabIndex={-2} />;
+    return <input type="password" id="prevent_autofill" autocomplete="off" class="visually-hidden" tabIndex={-2} />;
   }
 
   return (
-    <form class={props.className} action="" onSubmit={props.onSubmit ? handleSubmit : stopEvent} autoComplete="off">
+    <form class={props.className} action="" onSubmit={props.onSubmit ? handleSubmit : stopEvent} autocomplete="off">
       <div
         class={buildClassName('input-group password-input', password() && 'touched', props.error && 'error')}
         dir={lang.isRtl ? 'rtl' : undefined}
@@ -122,16 +122,16 @@ const PasswordForm = (rawProps: OwnProps) => {
           class="form-control"
           type={props.isPasswordVisible ? 'text' : 'password'}
           id="sign-in-password"
-          value={password() || ''}
-          autoComplete={
+          use:value={() => password() || ''}
+          autocomplete={
             props.shouldOfferPasskey
               ? 'one-time-code webauthn'
               : props.shouldDisablePasswordManager
                 ? 'one-time-code'
                 : 'current-password'
           }
-          spellCheck={IS_TAURI ? false : undefined}
-          onChange={onPasswordChange}
+          spellcheck={IS_TAURI ? false : undefined}
+          onInput={onPasswordChange}
           maxLength={256}
           dir="auto"
         />

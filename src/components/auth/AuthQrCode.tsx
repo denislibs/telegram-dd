@@ -1,15 +1,12 @@
 import { createMemo, createMutationEffect } from 'frameact';
-import { enableStrict } from 'frameact/stricterdom';
+import { disableStrict, enableStrict } from 'frameact/stricterdom';
 import { getActions, withGlobal } from '../../global';
 import { createMediaTransition } from '../../lib/kit';
 
 import type { GlobalState } from '../../global/types';
 
 import { STRICTERDOM_ENABLED } from '../../config';
-// TODO(codemod): still imported from teact: disableStrict
-import { disableStrict } from '../../lib/fasterdom/stricterdom';
 import { selectSharedSettings } from '../../global/selectors/sharedState';
-import buildClassName from '../../util/buildClassName';
 import { oldSetLanguage } from '../../util/oldLangProvider';
 import { createStyledQrCode } from '../../util/qrCode/buildStyledQrCode';
 import { LOCAL_TGS_URLS } from '../common/helpers/animatedAssets';
@@ -66,12 +63,11 @@ const AuthCode = () => {
     [],
   );
 
-  // TODO(codemod): useMediaTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element
-  const transitionClassNames = createMemo(() => createMediaTransition({ hasMediaData: () => Boolean(isQrMounted()) }));
+  const { ref: qrInnerRef } = createMediaTransition({ hasMediaData: () => Boolean(isQrMounted()) });
 
   createMutationEffect(
-    () => [isConnected(), authQrCode(), isQrMounted(), qrCode],
-    ([isConnected, authQrCode, isQrMounted]) => {
+    () => [isConnected(), authQrCode(), isQrMounted(), qrCode()] as const,
+    ([isConnected, authQrCode, isQrMounted, qrCode]) => {
       if (!authQrCode || !qrCode) {
         return () => {
           unmarkQrMounted();
@@ -146,7 +142,7 @@ const AuthCode = () => {
       )}
       <div class="auth-form qr">
         <div class="qr-outer">
-          <div class={buildClassName('qr-inner', transitionClassNames())}>
+          <div ref={qrInnerRef} class="qr-inner">
             <div class="qr-container" ref={qrCodeRef} style={`width: ${QR_SIZE}px; height: ${QR_SIZE}px`} />
             <AnimatedIcon
               tgsUrl={LOCAL_TGS_URLS.QrPlane}
@@ -184,9 +180,9 @@ const AuthCode = () => {
             {lang('LoginPasskey')}
           </Button>
         )}
-        {suggestedLanguage && suggestedLanguage !== props.language && continueText && (
+        {suggestedLanguage && suggestedLanguage !== props.language && continueText() && (
           <Button className="auth-button" isText isLoading={isLoading()} onClick={handleLangChange}>
-            {continueText}
+            {continueText()}
           </Button>
         )}
       </div>

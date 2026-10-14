@@ -24,7 +24,7 @@ const AuthPassword = () => {
   const lang = useLang();
   const [showPassword, setShowPassword] = createSignal(false);
 
-  const handleChangePasswordVisibility = (isVisible) => {
+  const handleChangePasswordVisibility = (isVisible: boolean) => {
     setShowPassword(isVisible);
   };
 
@@ -40,7 +40,7 @@ const AuthPassword = () => {
         <p class="note">{lang('LoginEnterPasswordDescription')}</p>
         <PasswordForm
           onClearError={clearAuthErrorKey}
-          error={errorKey() && lang.withRegular(errorKey())}
+          error={errorKey() && lang.withRegular(errorKey()!)}
           hint={hint()}
           isLoading={isLoading()}
           isPasswordVisible={showPassword()}

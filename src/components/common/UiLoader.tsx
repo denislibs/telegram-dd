@@ -1,4 +1,5 @@
 import { createMemo, onMount } from 'frameact';
+import { Show } from 'frameact/dom';
 
 import { getActions, getGlobal, withGlobal } from '../../global';
 import { createShowTransition } from '../../lib/kit';
@@ -110,8 +111,7 @@ const UiLoader = (ownProps: OwnProps) => {
 
   const [isReady, markReady] = useFlag();
   const isReloading = createMemo(() => isReady() && props.uiReadyState === 0);
-  // TODO(codemod): useShowTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element (transitionClassNames/hasOpenClass are gone)
-  const { shouldRender: shouldRenderMask, transitionClassNames } = createShowTransition({
+  const { shouldRender: shouldRenderMask, ref: maskRef } = createShowTransition({
     isOpen: () => !isReady() || isReloading(),
     noMountTransition: true,
     className: 'fast',
@@ -157,8 +157,8 @@ const UiLoader = (ownProps: OwnProps) => {
   return (
     <>
       {props.children}
-      {shouldRenderMask() && (isReloading() || !props.shouldSkipHistoryAnimations) && Boolean(props.page) && (
-        <div class={buildClassName(styles.mask, isReloading() && styles.outgoing, transitionClassNames)}>
+      <Show when={shouldRenderMask() && (isReloading() || !props.shouldSkipHistoryAnimations) && Boolean(props.page)}>
+        <div ref={maskRef} class={buildClassName(styles.mask, isReloading() && styles.outgoing)}>
           {props.page === 'main' ? (
             <div class={buildClassName(styles.main, props.isFoldersSidebarShown && styles.foldersSidebarVisible)}>
               {props.isFoldersSidebarShown && <div class={styles.foldersSidebar} />}
@@ -175,7 +175,7 @@ const UiLoader = (ownProps: OwnProps) => {
             <div class={styles.blank} />
           )}
         </div>
-      )}
+      </Show>
     </>
   );
 };

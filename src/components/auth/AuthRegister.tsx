@@ -49,8 +49,9 @@ const AuthRegister = () => {
 
     signUp({ firstName: firstName(), lastName: lastName() });
 
-    if (croppedFile()) {
-      uploadProfilePhoto({ file: croppedFile() });
+    const file = croppedFile();
+    if (file) {
+      uploadProfilePhoto({ file });
     }
   }
 
@@ -66,7 +67,7 @@ const AuthRegister = () => {
             label={lang('LoginRegisterFirstNamePlaceholder')}
             onChange={handleFirstNameChange}
             value={firstName()}
-            error={errorKey() && lang.withRegular(errorKey())}
+            error={errorKey() && lang.withRegular(errorKey()!)}
             autoComplete="given-name"
           />
           <InputText

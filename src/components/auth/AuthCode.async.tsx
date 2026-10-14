@@ -4,7 +4,9 @@ import { Bundles, loadBundle } from '../../util/moduleLoader';
 
 import Loading from '../ui/Loading';
 
-const AuthCode = lazy(() => loadBundle(Bundles.Auth).then((m) => ({ default: m.AuthCode })));
+const AuthCode = lazy<Record<string, never>>(() => loadBundle(Bundles.Auth).then((m) => ({ default: m.AuthCode })), {
+  placeholder: () => <Loading />,
+});
 
 const AuthCodeAsync = () => {
   return <AuthCode />;

@@ -32,12 +32,14 @@ const HOOKS: Record<string, { facade: Facade | 'auto'; prevDeps: boolean; sync?:
   useSyncEffectWithPrevDeps: { facade: 'auto', prevDeps: true, sync: true },
 };
 
-function depsText(ctx: Ctx, deps: t.ArrayExpression, keepArray: boolean): string {
+function depsText(ctx: Ctx, deps: t.ArrayExpression, keepArray: boolean, asConst: boolean): string {
   const elements = deps.elements.filter(Boolean) as t.Node[];
   if (!keepArray && elements.length === 1 && elements[0].type !== 'SpreadElement') {
     return ctx.textWithParens(elements[0]);
   }
-  return ctx.text(deps);
+  // A tuple, so that the destructured parameter of the apply half keeps the type of each dependency (an array literal
+  // of mixed types widens to a union array).
+  return asConst && elements.length > 1 ? `${ctx.text(deps)} as const` : ctx.text(deps);
 }
 
 /**
@@ -180,7 +182,7 @@ export const effectsRule: Rule = {
         const owner = path.findParent((p) => kindsByFn.has(p.node));
         const shadowed = shadowedDeps(deps, owner ? kindsByFn.get(owner.node) : undefined);
         const keepArray = Boolean(prevParam) || Boolean(shadowed && (shadowed.length > 1 || deps.elements.length > 1));
-        ctx.insertBefore(fnNode.start!, `() => ${depsText(ctx, deps, keepArray)}, `);
+        ctx.insertBefore(fnNode.start!, `() => ${depsText(ctx, deps, keepArray, Boolean(shadowed) && !prevParam)}, `);
         ctx.remove(fnNode.end!, args[args.length - 1].end!);
         if (shadowed && isFunctionNode(fnNode) && !prevParam) {
           const arrow = fnNode as t.ArrowFunctionExpression | t.FunctionExpression;

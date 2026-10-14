@@ -19,13 +19,13 @@ type OwnProps = {
   character?: string;
   hasPremiumBadge?: boolean;
   ref?: (el: HTMLElement) => void;
-  onClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
+  onClick?: (e: React.MouseEvent<HTMLElement>) => void;
 };
 
 const Icon = (props: OwnProps) => {
   return (
-    <Show when={!props.hasPremiumBadge} fallback={<IconWithPremiumBadge {...props} />}>
-      {renderIcon(props)}
+    <Show when={props.hasPremiumBadge} fallback={renderIcon(props)}>
+      <IconWithPremiumBadge {...props} />
     </Show>
   );
 };
@@ -33,23 +33,20 @@ const Icon = (props: OwnProps) => {
 const IconWithPremiumBadge = (props: OwnProps) => {
   const isCurrentUserPremium = useSelector(selectIsCurrentUserPremium);
 
-  return renderIcon(props, !isCurrentUserPremium());
+  return renderIcon(props, () => !isCurrentUserPremium());
 };
 
-function renderIcon(
-  { name, ref, className, style, role, ariaLabel, character, onClick }: OwnProps,
-  hasPremiumBadge?: boolean,
-) {
+function renderIcon(props: OwnProps, hasPremiumBadge?: () => boolean) {
   return (
     <i
-      ref={ref}
-      class={buildClassName(`icon icon-${name}`, className, hasPremiumBadge && styles.hasPremiumBadge)}
-      style={style}
-      aria-hidden={!ariaLabel}
-      aria-label={ariaLabel}
-      data-char={character}
-      role={role}
-      onClick={onClick}
+      ref={props.ref}
+      class={buildClassName(`icon icon-${props.name}`, props.className, hasPremiumBadge?.() && styles.hasPremiumBadge)}
+      style={props.style}
+      aria-hidden={!props.ariaLabel}
+      aria-label={props.ariaLabel}
+      data-char={props.character}
+      role={props.role}
+      onClick={(e) => props.onClick?.(e)}
     />
   );
 }

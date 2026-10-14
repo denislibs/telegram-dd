@@ -255,7 +255,7 @@ describe('effects', () => {
     expectIncludes(code, 'onMount(() => { mount(); return () => unmount(); });');
     // an accessor dependency is received as a value by apply
     expectIncludes(code, 'createMeasureEffect(() => n(), (n) => { const h = el.offsetHeight; use(h, n); });');
-    expectIncludes(code, 'createMutationEffect(() => [props.isOpen, n()], ([, n]) => {');
+    expectIncludes(code, 'createMutationEffect(() => [props.isOpen, n()] as const, ([, n]) => {');
     expectIncludes(code, 'onDestroy(() => stop());');
     expectIncludes(code, 'onMount(() => once());');
     expect(report.hits).toMatchObject({ onMount: 2, onDestroy: 1, createMeasureEffect: 1, createMutationEffect: 1 });
@@ -391,6 +391,37 @@ describe('derived values and early returns', () => {
   });
 });
 
+describe('inputEvents', () => {
+  it('onChange on an intrinsic non-select element → onInput; select and components keep it', () => {
+    const { code } = run(
+      `const X = (props: { onChange: () => void }) => (
+  <form>
+    <input type="text" onChange={props.onChange} />
+    <textarea onChange={props.onChange} />
+    <select onChange={props.onChange} />
+    <Foo onChange={props.onChange} />
+  </form>
+);`,
+      ['inputEvents'],
+    );
+    expectIncludes(code, '<input type="text" onInput={props.onChange} />');
+    expectIncludes(code, '<textarea onInput={props.onChange} />');
+    expectIncludes(code, '<select onChange={props.onChange} />');
+    expectIncludes(code, '<Foo onChange={props.onChange} />');
+  });
+});
+
+describe('attributes', () => {
+  it('camelCase DOM attributes → HTML names on intrinsic elements only', () => {
+    const { code } = run(
+      `const X = () => <form><input autoComplete="off" spellCheck={false} /><Foo autoComplete="x" /></form>;`,
+      ['attributes'],
+    );
+    expectIncludes(code, '<input autocomplete="off" spellcheck={false} />');
+    expectIncludes(code, '<Foo autoComplete="x" />');
+  });
+});
+
 describe('jsx', () => {
   it('className → class on elements only; reactive .map → <For> (keyed when the row had key=)', () => {
     const { code } = run(
@@ -501,12 +532,29 @@ export default CalendarModalAsync;`,
     );
     expectIncludes(
       code,
-      'const CalendarModal = lazy(() => loadBundle(Bundles.Extra).then((m) => ({ default: m.CalendarModal })));',
+      'const CalendarModal = lazy<OwnProps>(() => loadBundle(Bundles.Extra).then((m) => ({ default: m.CalendarModal })));',
     );
     expectIncludes(code, '<Show when={props.isOpen}> <CalendarModal {...props} /> </Show>');
     expectIncludes(code, "import { Bundles, loadBundle } from '../../util/moduleLoader';");
     expect(code).not.toContain('useModuleLoader');
     expect(report.todos).toEqual([]);
+  });
+
+  it('keeps the loading fallback as the placeholder and types a propless wrapper', () => {
+    const { code } = run(
+      `import { Bundles } from '../../util/moduleLoader';
+import useModuleLoader from '../../hooks/useModuleLoader';
+import Loading from '../ui/Loading';
+const AuthCodeAsync = () => {
+  const AuthCode = useModuleLoader(Bundles.Auth, 'AuthCode');
+  return AuthCode ? <AuthCode /> : <Loading />;
+};
+export default AuthCodeAsync;`,
+    );
+    expectIncludes(
+      code,
+      'const AuthCode = lazy<Record<string, never>>(() => loadBundle(Bundles.Auth).then((m) => ({ default: m.AuthCode })), { placeholder: () => <Loading /> });',
+    );
   });
 });
 

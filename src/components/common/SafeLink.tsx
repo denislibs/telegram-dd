@@ -68,19 +68,21 @@ const SafeLink = (rawProps: OwnProps) => {
 
   return (
     <Show when={props.url}>
-      <a
-        href={ensureProtocol(props.url)}
-        title={getUnicodeUrl(props.url)}
-        target={IS_TAURI ? '_self' : '_blank'}
-        rel="noopener noreferrer"
-        class={classNames()}
-        onClick={handleClick}
-        onAuxClick={handleClick}
-        dir={props.isRtl ? 'rtl' : 'auto'}
-        data-entity-type={props.entityType}
-      >
-        {content()}
-      </a>
+      {(url) => (
+        <a
+          href={ensureProtocol(url())}
+          title={getUnicodeUrl(url())}
+          target={IS_TAURI ? '_self' : '_blank'}
+          rel="noopener noreferrer"
+          class={classNames()}
+          onClick={handleClick}
+          onAuxClick={handleClick}
+          dir={props.isRtl ? 'rtl' : 'auto'}
+          data-entity-type={props.entityType}
+        >
+          {content()}
+        </a>
+      )}
     </Show>
   );
 };

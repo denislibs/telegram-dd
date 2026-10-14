@@ -50,20 +50,20 @@ const Auth = () => {
     { skipUndefined: true },
   );
 
-  function getScreen() {
-    switch (renderingAuthState()) {
-      case 'authorizationStateWaitCode':
+  // Deviation: every slide renders the screen of its own key (framework guide section 6), so the outgoing slide keeps
+  // its content while it fades out; tt re-rendered one `getScreen()` from the previous auth state (`currentOrPrev`).
+  function renderScreen(key: number) {
+    switch (key) {
+      case 0:
         return <AuthCode />;
-      case 'authorizationStateWaitPassword':
+      case 1:
         return <AuthPassword />;
-      case 'authorizationStateWaitRegistration':
+      case 2:
         return <AuthRegister />;
-      case 'authorizationStateWaitPhoneNumber':
+      case 3:
         return <AuthPhoneNumber />;
-      case 'authorizationStateWaitQrCode':
-        return <AuthQrCode />;
       default:
-        return isMobile ? <AuthPhoneNumber /> : <AuthQrCode />;
+        return <AuthQrCode />;
     }
   }
 
@@ -85,14 +85,13 @@ const Auth = () => {
   }
 
   return (
-    // TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6)
     <Transition
       activeKey={getActiveKey()}
       name="fade"
       className="Auth"
       data-tauri-drag-region={IS_TAURI && IS_MAC_OS ? true : undefined}
     >
-      {getScreen()}
+      {(slide) => renderScreen(slide.key)}
     </Transition>
   );
 };

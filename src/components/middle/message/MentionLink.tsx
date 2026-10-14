@@ -26,7 +26,7 @@ const MentionLink = (ownProps: OwnProps) => {
   const { isMobile } = useAppLayout();
 
   const handleClick = () => {
-    if (isMobile) {
+    if (isMobile()) {
       setShouldCloseRightColumn({
         value: true,
       });

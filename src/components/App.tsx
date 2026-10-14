@@ -1,4 +1,5 @@
-import { createEffect, createMutationEffect, onMount, previous } from 'frameact';
+import { createEffect, createMemo, createMutationEffect, onMount, previous } from 'frameact';
+import { forceMutation } from 'frameact/stricterdom';
 import { withGlobal } from '../global';
 
 import type { GlobalState } from '../global/types';
@@ -6,7 +7,6 @@ import type { ThemeKey } from '../types';
 import type { UiLoaderPage } from './common/UiLoader';
 
 import { DARK_THEME_BG_COLOR, INACTIVE_MARKER, LIGHT_THEME_BG_COLOR, PAGE_TITLE, PAGE_TITLE_TAURI } from '../config';
-import { forceMutation } from '../lib/fasterdom/stricterdom.ts';
 import { selectActionMessageBg, selectTabState, selectTheme, selectThemeValues } from '../global/selectors';
 import { IS_TAURI } from '../util/browser/globalEnvironment';
 import { IS_INSTALL_PROMPT_SUPPORTED, PLATFORM_ENV } from '../util/browser/windowEnvironment';
@@ -23,7 +23,6 @@ import { updateSizes } from '../util/windowSize';
 import useTauriDrag from '../hooks/tauri/useTauriDrag';
 import useAppLayout from '../hooks/useAppLayout';
 import useFileHoverOpen, { FILE_HOVER_OPEN_SELECTOR, hasFiles } from '../hooks/useFileHoverOpen';
-import { useSignalEffect } from '../hooks/useSignalEffect';
 import { getIsInBackground } from '../hooks/window/useBackgroundMode';
 
 import Auth from './auth/Auth';
@@ -125,65 +124,73 @@ const App = () => {
 
   // return <Test />;
 
-  let activeKey: AppScreens;
-  let page: UiLoaderPage | undefined;
+  // Deviation: tt computed `activeKey` and `page` on every render; a component runs once, so they are one memo.
+  const screen = createMemo(
+    () => {
+      let activeKey: AppScreens;
+      let page: UiLoaderPage | undefined;
 
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (props.inactiveReason) {
-    activeKey = AppScreens.inactive;
-  } else if (props.isScreenLocked) {
-    page = 'lock';
-    activeKey = AppScreens.lock;
-  } else if (props.authState) {
-    switch (props.authState) {
-      case 'authorizationStateWaitPhoneNumber':
-        page = 'authPhoneNumber';
-        activeKey = AppScreens.auth;
-        break;
-      case 'authorizationStateWaitCode':
-        page = 'authCode';
-        activeKey = AppScreens.auth;
-        break;
-      case 'authorizationStateWaitPassword':
-        page = 'authPassword';
-        activeKey = AppScreens.auth;
-        break;
-      case 'authorizationStateWaitRegistration':
-        activeKey = AppScreens.auth;
-        break;
-      case 'authorizationStateWaitQrCode':
-        page = 'authQrCode';
-        activeKey = AppScreens.auth;
-        break;
-      case 'authorizationStateClosed':
-      case 'authorizationStateClosing':
-      case 'authorizationStateLoggingOut':
-      case 'authorizationStateReady':
+      if (props.inactiveReason) {
+        activeKey = AppScreens.inactive;
+      } else if (props.isScreenLocked) {
+        page = 'lock';
+        activeKey = AppScreens.lock;
+      } else if (props.authState) {
+        switch (props.authState) {
+          case 'authorizationStateWaitPhoneNumber':
+            page = 'authPhoneNumber';
+            activeKey = AppScreens.auth;
+            break;
+          case 'authorizationStateWaitCode':
+            page = 'authCode';
+            activeKey = AppScreens.auth;
+            break;
+          case 'authorizationStateWaitPassword':
+            page = 'authPassword';
+            activeKey = AppScreens.auth;
+            break;
+          case 'authorizationStateWaitRegistration':
+            activeKey = AppScreens.auth;
+            break;
+          case 'authorizationStateWaitQrCode':
+            page = 'authQrCode';
+            activeKey = AppScreens.auth;
+            break;
+          case 'authorizationStateClosed':
+          case 'authorizationStateClosing':
+          case 'authorizationStateLoggingOut':
+          case 'authorizationStateReady':
+            page = 'main';
+            activeKey = AppScreens.main;
+            break;
+        }
+      } else if (hasStoredSession()) {
         page = 'main';
         activeKey = AppScreens.main;
-        break;
-    }
-  } else if (hasStoredSession()) {
-    page = 'main';
-    activeKey = AppScreens.main;
-  } else if (props.hasPasscode) {
-    activeKey = AppScreens.lock;
-  } else {
-    page = isMobileOs ? 'authPhoneNumber' : 'authQrCode';
-    activeKey = AppScreens.auth;
-  }
+      } else if (props.hasPasscode) {
+        activeKey = AppScreens.lock;
+      } else {
+        page = isMobileOs ? 'authPhoneNumber' : 'authQrCode';
+        activeKey = AppScreens.auth;
+      }
 
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (
-    activeKey !== AppScreens.lock &&
-    activeKey !== AppScreens.inactive &&
-    activeKey !== AppScreens.main &&
-    getPendingWebLogin() &&
-    !props.hasWebAuthTokenFailed
-  ) {
-    page = 'main';
-    activeKey = AppScreens.main;
-  }
+      if (
+        activeKey !== AppScreens.lock &&
+        activeKey !== AppScreens.inactive &&
+        activeKey !== AppScreens.main &&
+        getPendingWebLogin() &&
+        !props.hasWebAuthTokenFailed
+      ) {
+        page = 'main';
+        activeKey = AppScreens.main;
+      }
+
+      return { activeKey: activeKey!, page };
+    },
+    { equals: (a, b) => a.activeKey === b.activeKey && a.page === b.page },
+  );
+  const activeKey = () => screen().activeKey;
+  const page = () => screen().page;
 
   onMount(() => {
     updateSizes();
@@ -200,14 +207,14 @@ const App = () => {
     },
   );
 
-  const prevActiveKey = previous(() => activeKey);
+  const prevActiveKey = previous(activeKey);
 
-  function renderContent() {
-    switch (activeKey) {
+  function renderContent(key: AppScreens) {
+    switch (key) {
       case AppScreens.auth:
         return <Auth />;
       case AppScreens.main:
-        return <Main isMobile={isMobile} />;
+        return <Main isMobile={isMobile()} />;
       case AppScreens.lock:
         return <LockScreen isLocked={props.isScreenLocked} />;
       case AppScreens.inactive:
@@ -244,35 +251,38 @@ const App = () => {
     },
   );
 
-  const getIsInBackgroundLocal = getIsInBackground;
-  // TODO(codemod): useSignalEffect: createEffect(compute, apply) with the signal reads in compute
-  useSignalEffect(() => {
-    // Mutation forced to avoid RAF throttling in background
-    forceMutation(
-      () => {
-        document.body.classList.toggle('in-background', getIsInBackgroundLocal());
-      },
-      document.body,
-      true,
-    );
-  }, [getIsInBackgroundLocal]);
+  // Deviation: `useSignalEffect` is a subscription started on mount (the first run happens in the measure phase, as in tt).
+  onMount(() => {
+    const toggleInBackground = () => {
+      // Mutation forced to avoid RAF throttling in background
+      forceMutation(
+        () => {
+          document.body.classList.toggle('in-background', getIsInBackground());
+        },
+        document.body,
+        true,
+      );
+    };
+    toggleInBackground();
+
+    return getIsInBackground.subscribe(toggleInBackground);
+  });
 
   return (
-    <UiLoader page={page} isMobile={isMobile}>
-      {/* TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6) */}
+    <UiLoader page={page()} isMobile={isMobile()}>
       <Transition
         name="fade"
-        activeKey={activeKey}
+        activeKey={activeKey()}
         shouldCleanup
         className={buildClassName(
           'full-height',
-          (activeKey === AppScreens.auth || prevActiveKey() === AppScreens.auth) && 'is-auth',
+          (activeKey() === AppScreens.auth || prevActiveKey() === AppScreens.auth) && 'is-auth',
         )}
         renderCount={TRANSITION_RENDER_COUNT}
       >
-        {renderContent}
+        {(slide) => renderContent(slide.key)}
       </Transition>
-      {activeKey === AppScreens.auth && props.isTestServer && <div class="test-server-badge">Test server</div>}
+      {activeKey() === AppScreens.auth && props.isTestServer && <div class="test-server-badge">Test server</div>}
       <Notifications />
     </UiLoader>
   );

@@ -110,12 +110,14 @@ const AuthCode = () => {
           })}
         </p>
         <InputText
-          ref={inputRef}
+          ref={(el) => {
+            inputRef = el;
+          }}
           id="sign-in-code"
           label={lang('Code')}
           onInput={onCodeChange}
           value={code()}
-          error={errorKey() && lang.withRegular(errorKey())}
+          error={errorKey() && lang.withRegular(errorKey()!)}
           autoComplete="off"
           inputMode="numeric"
         />

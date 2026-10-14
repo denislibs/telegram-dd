@@ -1,4 +1,11 @@
-import { createEffect, createMemo, createMutationEffect, createSignal, requestMeasure } from 'frameact';
+import {
+  createEffect,
+  createMeasureEffect,
+  createMemo,
+  createMutationEffect,
+  createSignal,
+  requestMeasure,
+} from 'frameact';
 import { getActions, withGlobal } from '../../global';
 
 import type { ApiCountryCode } from '../../api/types';
@@ -85,12 +92,14 @@ const AuthPhoneNumber = () => {
       ),
   );
 
-  const fullNumber = createMemo(() => (country() ? `+${country().countryCode} ${phoneNumber() || ''}` : phoneNumber()));
-  const canSubmit = createMemo(() => fullNumber() && fullNumber().replace(/[^\d]+/g, '').length >= MIN_NUMBER_LENGTH);
+  const fullNumber = createMemo(() =>
+    country() ? `+${country()!.countryCode} ${phoneNumber() || ''}` : phoneNumber(),
+  );
+  const canSubmit = createMemo(() => fullNumber() && fullNumber()!.replace(/[^\d]+/g, '').length >= MIN_NUMBER_LENGTH);
 
-  createEffect(
+  createMeasureEffect(
     () => country(),
-    (country) => {
+    () => {
       if (!IS_TOUCH_ENV) {
         inputRef!.focus();
       }
@@ -98,7 +107,7 @@ const AuthPhoneNumber = () => {
   );
 
   createEffect(
-    () => [isConnected(), nearestCountry()],
+    () => [isConnected(), nearestCountry()] as const,
     ([isConnected, nearestCountry]) => {
       if (isConnected && !nearestCountry) {
         loadNearestCountry();
@@ -107,7 +116,7 @@ const AuthPhoneNumber = () => {
   );
 
   createEffect(
-    () => [isConnected(), props.language],
+    () => [isConnected(), props.language] as const,
     ([isConnected]) => {
       if (isConnected) {
         loadCountryList({ langCode: props.language });
@@ -116,7 +125,7 @@ const AuthPhoneNumber = () => {
   );
 
   createEffect(
-    () => [country(), nearestCountry(), isTouched(), props.phoneCodeList],
+    () => [country(), nearestCountry(), isTouched(), props.phoneCodeList] as const,
     ([country, nearestCountry, isTouched]) => {
       if (nearestCountry && props.phoneCodeList && !country && !isTouched) {
         setCountry(getCountryCodeByIso(props.phoneCodeList, nearestCountry));
@@ -134,12 +143,12 @@ const AuthPhoneNumber = () => {
     // Any phone numbers should be allowed, in some cases ignoring formatting
     const selectedCountry =
       !country() ||
-      (suggestedCountry && suggestedCountry.iso2 !== country().iso2) ||
+      (suggestedCountry && suggestedCountry.iso2 !== country()!.iso2) ||
       (!suggestedCountry && newFullNumber.length)
         ? suggestedCountry
         : country();
 
-    if (!country() || !selectedCountry || (selectedCountry && selectedCountry.iso2 !== country().iso2)) {
+    if (!country() || !selectedCountry || (selectedCountry && selectedCountry.iso2 !== country()!.iso2)) {
       setCountry(selectedCountry);
     }
     setPhoneNumber(formatPhoneNumber(newFullNumber, selectedCountry));
@@ -156,7 +165,7 @@ const AuthPhoneNumber = () => {
   };
 
   createEffect(
-    () => [authPhoneNumber(), phoneNumber(), parseFullNumber],
+    () => [authPhoneNumber(), phoneNumber(), parseFullNumber] as const,
     ([authPhoneNumber, phoneNumber]) => {
       if (phoneNumber === undefined && authPhoneNumber) {
         parseFullNumber(authPhoneNumber);
@@ -213,9 +222,9 @@ const AuthPhoneNumber = () => {
       IS_SAFARI &&
       country() &&
       fullNumber() !== undefined &&
-      value.length - fullNumber().length > 1 &&
+      value.length - fullNumber()!.length > 1 &&
       !isJustPastedRef;
-    parseFullNumber(shouldFixSafariAutoComplete ? `${country().countryCode} ${value}` : value);
+    parseFullNumber(shouldFixSafariAutoComplete ? `${country()!.countryCode} ${value}` : value);
   };
 
   const handleKeepSessionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -236,7 +245,7 @@ const AuthPhoneNumber = () => {
     }
 
     if (canSubmit()) {
-      setAuthPhoneNumber({ phoneNumber: fullNumber() });
+      setAuthPhoneNumber({ phoneNumber: fullNumber()! });
     }
   }
 
@@ -274,11 +283,13 @@ const AuthPhoneNumber = () => {
             onChange={handleCountryChange}
           />
           <InputText
-            ref={inputRef}
+            ref={(el) => {
+              inputRef = el;
+            }}
             id="sign-in-phone-number"
             label={lang('LoginPhonePlaceholder')}
             value={fullNumber()}
-            error={errorKey() && lang.withRegular(errorKey())}
+            error={errorKey() && lang.withRegular(errorKey()!)}
             inputMode="tel"
             onChange={handlePhoneNumberChange}
             onPaste={IS_SAFARI ? handlePaste : undefined}
@@ -307,9 +318,9 @@ const AuthPhoneNumber = () => {
               {lang('LoginPasskey')}
             </Button>
           )}
-          {suggestedLanguage && suggestedLanguage !== props.language && continueText && (
+          {suggestedLanguage && suggestedLanguage !== props.language && continueText() && (
             <Button className="auth-button" isText isLoading={isLoading()} onClick={handleLangChange}>
-              {continueText}
+              {continueText()}
             </Button>
           )}
         </form>
