@@ -38,7 +38,8 @@ const Switcher = (rawProps: OwnProps) => {
         type="checkbox"
         id={props.id}
         name={props.name}
-        value={props.value}
+        // Deviation: `value` of a native input is `use:value` (as in Checkbox); undefined is the empty string.
+        use:value={() => props.value}
         use:checked={() => props.checked}
         disabled={props.disabled}
         onInput={handleChange}

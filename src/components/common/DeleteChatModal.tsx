@@ -1,8 +1,8 @@
 import { createMemo } from 'frameact';
 import { getActions, withGlobal } from '../../global';
-import type { GlobalState } from '../../global/types';
 
 import type { ApiChat } from '../../api/types';
+import type { GlobalState } from '../../global/types';
 
 import {
   getChatTitle,

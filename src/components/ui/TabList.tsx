@@ -1,11 +1,13 @@
-import { createEffect, createMemo, createSignal } from 'frameact';
+import { type Accessor, createMeasureEffect, createMemo, createSignal } from 'frameact';
 import { For, Show } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
-import { depsOf } from '../../util/effectDeps';
 
+import type { ApiMessageEntityCustomEmoji } from '../../api/types';
 import type { IAnchorPosition } from '../../types';
 import type { MenuItemContextAction } from './ListItem';
 import type { TabWithProperties } from './SquareTabList';
+
+import { depsOf } from '../../util/effectDeps';
 
 export type { TabWithProperties };
 
@@ -45,24 +47,21 @@ type OwnProps = {
 };
 
 const TabList = (props: OwnProps) => {
-  let containerRef!: HTMLDivElement;
-  let clipPathContainerRef!: HTMLDivElement;
+  // Deviation: the container refs are signals, so that the hooks (and the effects below) that read them pick the
+  // elements up when the list is shown (the whole list is rendered only while there are tabs).
+  const [containerRef, setContainerRef] = createSignal<HTMLDivElement | undefined>(undefined);
+  const [clipPathContainerRef, setClipPathContainerRef] = createSignal<HTMLDivElement | undefined>(undefined);
   const [clipPath, setClipPath] = createSignal<string>('');
   const [isMenuOpen, openMenu, closeMenu] = useFlag();
   const [menuAnchor, setMenuAnchor] = createSignal<IAnchorPosition | undefined>(undefined);
   const [menuTabIndex, setMenuTabIndex] = createSignal<number | undefined>(undefined);
-  let menuTargetRef!: HTMLElement;
+  let menuTargetRef: HTMLElement | undefined;
 
-  useHorizontalScroll(
-    () => containerRef,
-    () => !props.tabs.length,
-    true,
-  );
+  useHorizontalScroll(containerRef, () => !props.tabs.length, true);
 
-  const updateClipPath = () => {
-    const clipPathContainer = clipPathContainerRef;
-    const activeTabEl =
-      props.activeTab >= 0 && (clipPathContainer?.childNodes[props.activeTab] as HTMLElement | undefined);
+  const updateClipPath = (activeTab: number) => {
+    const clipPathContainer = clipPathContainerRef();
+    const activeTabEl = activeTab >= 0 && (clipPathContainer?.childNodes[activeTab] as HTMLElement | undefined);
 
     if (clipPathContainer && activeTabEl && clipPathContainer.offsetWidth > 0) {
       const { offsetLeft, offsetWidth } = activeTabEl;
@@ -71,31 +70,33 @@ const TabList = (props: OwnProps) => {
       const right = (((containerWidth - (offsetLeft + offsetWidth)) / containerWidth) * 100).toFixed(1);
 
       setClipPath(`inset(0.25rem ${right}% 0.25rem ${left}% round var(--tab-radius))`);
-    } else if (props.activeTab < 0) {
+    } else if (activeTab < 0) {
       setClipPath('inset(0 100% 0 100%)');
     }
   };
 
-  createEffect(
-    depsOf(() => [props.activeTab, props.tabs] as const),
-    ([activeTab2, tabs2]) => {
-      updateClipPath();
+  // Reads layout (offsets), hence a measure effect.
+  createMeasureEffect(
+    depsOf(() => [props.activeTab, props.tabs, clipPathContainerRef()] as const),
+    ([activeTab2]) => {
+      updateClipPath(activeTab2);
     },
   );
 
-  useResizeObserver(() => clipPathContainerRef, updateClipPath);
-
-  useScrollToActiveTab(
-    () => containerRef,
-    () => props.activeTab,
+  useResizeObserver(
+    clipPathContainerRef,
+    () => updateClipPath(props.activeTab),
+    () => !clipPathContainerRef(),
   );
+
+  useScrollToActiveTab(containerRef, () => props.activeTab);
 
   const handleTabClick = (index: number) => {
     props.onSwitchTab(index);
   };
 
   const handleFileHoverOpen = (index: number, e: Event) => {
-    handleFileHoverOpenEvent(e, () => props.onFileHoverOpen!(index));
+    handleFileHoverOpenEvent(e, () => props.onFileHoverOpen?.(index));
   };
 
   const handleContextMenu = (index: number, e: React.MouseEvent) => {
@@ -118,16 +119,25 @@ const TabList = (props: OwnProps) => {
   };
 
   const getTriggerElement = () => menuTargetRef;
-  const getRootElement = () => containerRef;
-  const getMenuElement = () => containerRef?.querySelector<HTMLElement>('.TabList-context-menu .bubble');
+  const getRootElement = () => containerRef();
+  const getMenuElement = () => containerRef()?.querySelector<HTMLElement>('.TabList-context-menu .bubble');
   const getLayout = () => ({ withPortal: true });
 
-  const hasContextActions = createMemo(() => props.tabs.some((tab) => tab.contextActions?.length));
+  // Deviation: a row is keyed by `tab.id` (tt: `tab.id ?? index`); a tab without an id is keyed by the object itself.
+  const getTabKey = (tab: TabWithProperties) => tab.id ?? tab;
 
-  const renderTab = (tab: TabWithProperties, index: number) => {
-    const customEmojiId =
-      tab.customEmojiDocumentId || (typeof tab.emoticon === 'object' ? tab.emoticon.documentId : undefined);
-    const stringEmoticon = typeof tab.emoticon === 'string' ? tab.emoticon : undefined;
+  const renderTab = (tab: Accessor<TabWithProperties>, index: Accessor<number>) => {
+    const customEmojiId = () =>
+      tab().customEmojiDocumentId ||
+      (typeof tab().emoticon === 'object' ? (tab().emoticon as ApiMessageEntityCustomEmoji).documentId : undefined);
+    const stringEmoticon = () => {
+      const emoticon = tab().emoticon;
+      return typeof emoticon === 'string' ? emoticon : undefined;
+    };
+    const renderTitle = () => {
+      const title = tab().title;
+      return typeof title === 'string' ? renderText(title) : title;
+    };
 
     return (
       <div
@@ -137,30 +147,30 @@ const TabList = (props: OwnProps) => {
           props.itemAlignment === 'vertical' && styles.vertical,
           props.stretched && styles.stretched,
         )}
-        onClick={() => handleTabClick(index)}
+        onClick={() => handleTabClick(index())}
         data-file-hover-open={props.onFileHoverOpen ? true : undefined}
-        onFileHoverOpen={props.onFileHoverOpen ? (e) => handleFileHoverOpen(index, e) : undefined}
-        onContextMenu={hasContextActions() ? (e) => handleContextMenu(index, e) : undefined}
+        on:filehoveropen={(e: Event) => handleFileHoverOpen(index(), e)}
+        onContextMenu={(e) => handleContextMenu(index(), e)}
       >
-        {stringEmoticon && <span class={styles.tabEmoji}>{stringEmoticon}</span>}
-        {customEmojiId && (
-          <CustomEmoji documentId={customEmojiId} className={styles.tabEmoji} size={EMOJI_SIZE} shouldNotLoop />
+        {stringEmoticon() && <span class={styles.tabEmoji}>{stringEmoticon()}</span>}
+        {customEmojiId() && (
+          <CustomEmoji documentId={customEmojiId()!} className={styles.tabEmoji} size={EMOJI_SIZE} shouldNotLoop />
         )}
-        {tab.icon && <Icon name={tab.icon} className={styles.tabIcon} />}
-        {typeof tab.title === 'string' ? renderText(tab.title) : tab.title}
-        {props.renderExtra?.(tab, index)}
-        {tab.isBlocked && <Icon name="lock-filled" className={styles.lockIcon} />}
+        {tab().icon && <Icon name={tab().icon!} className={styles.tabIcon} />}
+        {renderTitle()}
+        {props.renderExtra?.(tab(), index())}
+        {tab().isBlocked && <Icon name="lock-filled" className={styles.lockIcon} />}
       </div>
     );
   };
 
   const contextActions = createMemo(() =>
-    menuTabIndex() !== undefined ? props.tabs[menuTabIndex()]?.contextActions : undefined,
+    menuTabIndex() !== undefined ? props.tabs[menuTabIndex()!]?.contextActions : undefined,
   );
 
-  const tabListElement = (
+  const renderTabListElement = () => (
     <div
-      ref={containerRef}
+      ref={(el) => setContainerRef(el)}
       class={buildClassName(
         'TabList',
         styles.container,
@@ -171,10 +181,12 @@ const TabList = (props: OwnProps) => {
         clipPath() && styles.ready,
       )}
     >
-      {props.tabs.map(renderTab)}
+      <For each={props.tabs} keyed={getTabKey}>
+        {renderTab}
+      </For>
 
       <div
-        ref={clipPathContainerRef}
+        ref={(el) => setClipPathContainerRef(el)}
         class={buildClassName(
           styles.activeIndicator,
           props.centered && styles.centered,
@@ -184,47 +196,46 @@ const TabList = (props: OwnProps) => {
         style={clipPath() ? `clip-path: ${clipPath()}` : undefined}
         aria-hidden
       >
-        {props.tabs.map(renderTab)}
+        <For each={props.tabs} keyed={getTabKey}>
+          {renderTab}
+        </For>
       </div>
     </div>
   );
 
-  const menuElement = createMemo(
-    () =>
-      contextActions() &&
-      menuAnchor() !== undefined && (
-        <Menu
-          isOpen={isMenuOpen()}
-          anchor={menuAnchor()}
-          getTriggerElement={getTriggerElement}
-          getRootElement={getRootElement}
-          getMenuElement={getMenuElement}
-          getLayout={getLayout}
-          className="TabList-context-menu"
-          autoClose
-          onClose={handleMenuClose}
-          onCloseAnimationEnd={handleMenuHide}
-          withPortal
-        >
-          <For each={contextActions()}>
-            {(action: MenuItemContextAction) =>
-              'isSeparator' in action ? (
-                // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show>
-                <MenuSeparator key={action.key || `separator-${contextActions().indexOf(action)}`} />
-              ) : (
-                <MenuItem
-                  icon={action.icon}
-                  destructive={action.destructive}
-                  disabled={!action.handler}
-                  onClick={action.handler}
-                >
-                  {renderText(action.title)}
-                </MenuItem>
-              )
-            }
-          </For>
-        </Menu>
-      ),
+  const renderMenuElement = () => (
+    <Show when={contextActions() && menuAnchor() !== undefined}>
+      <Menu
+        isOpen={isMenuOpen()}
+        anchor={menuAnchor()}
+        getTriggerElement={getTriggerElement}
+        getRootElement={getRootElement}
+        getMenuElement={getMenuElement}
+        getLayout={getLayout}
+        className="TabList-context-menu"
+        autoClose
+        onClose={handleMenuClose}
+        onCloseAnimationEnd={handleMenuHide}
+        withPortal
+      >
+        <For each={contextActions()}>
+          {(action: MenuItemContextAction) =>
+            'isSeparator' in action ? (
+              <MenuSeparator />
+            ) : (
+              <MenuItem
+                icon={action.icon}
+                destructive={action.destructive}
+                disabled={!action.handler}
+                onClick={action.handler}
+              >
+                {renderText(action.title)}
+              </MenuItem>
+            )
+          }
+        </For>
+      </Menu>
+    </Show>
   );
 
   return (
@@ -233,14 +244,14 @@ const TabList = (props: OwnProps) => {
         when={props.withFadeMask}
         fallback={
           <>
-            {tabListElement}
-            {menuElement()}
+            {renderTabListElement()}
+            {renderMenuElement()}
           </>
         }
       >
         <>
-          <div class={buildClassName(styles.fadeMaskWrapper, props.fadeMaskClassName)}>{tabListElement}</div>
-          {menuElement()}
+          <div class={buildClassName(styles.fadeMaskWrapper, props.fadeMaskClassName)}>{renderTabListElement()}</div>
+          {renderMenuElement()}
         </>
       </Show>
     </Show>

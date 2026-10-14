@@ -1,8 +1,6 @@
-import { createEffect, createMemo } from 'frameact';
+import { createEffect, createMemo, frameMutation } from 'frameact';
 import { Show } from 'frameact/dom';
 import { getActions, withGlobal } from '../../../global';
-import { depsOf } from '../../../util/effectDeps';
-import { createShowTransition } from '../../../lib/kit';
 
 import type {
   ApiChat,
@@ -14,11 +12,13 @@ import type {
   ApiUserStatus,
 } from '../../../api/types';
 import type { GlobalState } from '../../../global/types';
+import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 import type { ChatAnimationTypes } from './hooks';
 import { MAIN_THREAD_ID } from '../../../api/types';
 import { StoryViewerOrigin, type TopicsInfo } from '../../../types';
 
 import { ALL_FOLDER_ID, UNMUTE_TIMESTAMP } from '../../../config';
+import { createShowTransition } from '../../../lib/kit';
 import { getPeerColorKey, groupStatefulContent, isChatCommunity, isUserOnline } from '../../../global/helpers';
 import { getIsChatMuted } from '../../../global/helpers/notifications';
 import {
@@ -43,6 +43,7 @@ import { selectDraft, selectThreadLocalStateParam } from '../../../global/select
 import { IS_OPEN_IN_NEW_TAB_SUPPORTED } from '../../../util/browser/windowEnvironment';
 import buildClassName from '../../../util/buildClassName';
 import { formatCountdown } from '../../../util/dates/oldDateFormat';
+import { depsOf } from '../../../util/effectDeps';
 import { isUserId } from '../../../util/entities/ids';
 import { getChatFolderIds } from '../../../util/folderManager';
 import { createLocationHash } from '../../../util/routing';
@@ -146,17 +147,15 @@ const Chat = (ownProps: OwnProps) => {
 
   // The row itself acts on the same fast-click phase, so a plain `onClick` here
   // would let the chat open first and delay the panel
-  const fastClickResult = createMemo(() =>
-    useFastClick((e: React.MouseEvent<HTMLDivElement>) => {
+  const { handleClick: handleChevronClick, handleMouseDown: handleChevronMouseDown } = useFastClick(
+    (e: React.MouseEvent<HTMLDivElement>) => {
       e.preventDefault();
       e.stopPropagation();
       if (props.chat?.linkedCommunityId) {
         openCommunityPanel({ communityId: props.chat.linkedCommunityId });
       }
-    }),
+    },
   );
-  const handleChevronClick = () => fastClickResult().handleClick;
-  const handleChevronMouseDown = () => fastClickResult().handleMouseDown;
 
   const { isMobile } = useAppLayout();
   const [isDeleteModalOpen, openDeleteModal, closeDeleteModal] = useFlag();
@@ -166,22 +165,21 @@ const Chat = (ownProps: OwnProps) => {
   const [shouldRenderMuteModal, markRenderMuteModal, unmarkRenderMuteModal] = useFlag();
   const [shouldRenderChatFolderModal, markRenderChatFolderModal, unmarkRenderChatFolderModal] = useFlag();
 
-  const source = createMemo(() => props.chat || {});
-  const isForum = () => source().isForum;
-  const isForumAsMessages = () => source().isForumAsMessages;
-  const isMonoforum = () => source().isMonoforum;
+  const isForum = () => props.chat?.isForum;
+  const isForumAsMessages = () => props.chat?.isForumAsMessages;
+  const isMonoforum = () => props.chat?.isMonoforum;
   const isCommunity = createMemo(() => Boolean(props.chat && isChatCommunity(props.chat)));
 
   const listedTopicIds = createMemo(() => props.topicsInfo?.listedTopicIds);
   const shouldForceNonForumView = createMemo(
-    () => props.chat?.isBotForum && listedTopicIds() && !listedTopicIds().length,
+    () => props.chat?.isBotForum && listedTopicIds() && !listedTopicIds()!.length,
   );
 
-  const source2 = createMemo(() => useCommunityMembers(() => props.communityFullInfo?.linkedPeers) || {});
-  const communityMembers = () => source2().members;
-  const communityUnreadCount = () => source2().unreadCount;
+  const communityData = useCommunityMembers(() => props.communityFullInfo?.linkedPeers);
+  const communityMembers = () => communityData()?.members;
+  const communityUnreadCount = () => communityData()?.unreadCount;
   const lastMessageChatId = () =>
-    source2().lastMessageChatId === undefined ? props.chatId : source2().lastMessageChatId;
+    communityData()?.lastMessageChatId === undefined ? props.chatId : communityData()!.lastMessageChatId;
 
   const lastMessageInfoSelector = (global: GlobalState) =>
     selectChatLastMessageInfo(global, {
@@ -190,18 +188,16 @@ const Chat = (ownProps: OwnProps) => {
       isSavedDialog: props.isSavedDialog,
       previewMessageId: props.previewMessageId,
     });
-  const {
-    lastMessage,
-    lastMessageId,
-    lastMessageSender,
-    lastMessageOutgoingStatus,
-    lastMessageTopic,
-    lastMessageStory,
-  } = useShallowSelector(lastMessageInfoSelector);
+  const lastMessageInfo = useShallowSelector(lastMessageInfoSelector);
+  const lastMessage = () => lastMessageInfo().lastMessage;
+  const lastMessageId = () => lastMessageInfo().lastMessageId;
+  const lastMessageSender = () => lastMessageInfo().lastMessageSender;
+  const lastMessageOutgoingStatus = () => lastMessageInfo().lastMessageOutgoingStatus;
+  const lastMessageTopic = () => lastMessageInfo().lastMessageTopic;
+  const lastMessageStory = () => lastMessageInfo().lastMessageStory;
 
   useEnsureMessage(() => (props.isSavedDialog ? props.currentUserId : lastMessageChatId()), lastMessageId, lastMessage);
 
-  // TODO(codemod): dependency on a container (chatFoldersById) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
   const tagFolderIds = createMemo(() => {
     const chatFolderIdsSet = new Set(props.chatFolderIds);
 
@@ -221,32 +217,28 @@ const Chat = (ownProps: OwnProps) => {
   const isTagsMode = createMemo(() => props.areTagsEnabled && props.withTags);
   const shouldRenderTags = createMemo(() => isTagsMode() && Boolean(tagFolderIds()?.length));
 
-  const chatListEntryResult = createMemo(() =>
-    useChatListEntry({
-      chat: () => props.chat,
-      chatId: () => props.chatId,
-      lastMessage,
-      communityMembers: () => communityMembers(),
-      typingStatusByPeerId: () => props.typingStatusByPeerId,
-      draft: () => props.draft,
-      statefulMediaContent: groupStatefulContent({ story: lastMessageStory }),
-      lastMessageTopic,
-      lastMessageSender,
-      observeIntersection: () => props.observeIntersection,
-      animationType: () => props.animationType,
-      withInterfaceAnimations: () => props.withInterfaceAnimations,
-      orderDiff: () => props.orderDiff,
-      shiftDiff: () => props.shiftDiff,
-      isSavedDialog: () => props.isSavedDialog,
-      isPreview: () => props.isPreview,
-      onReorderAnimationEnd: props.onReorderAnimationEnd,
-      topicIds: () => listedTopicIds(),
-      hasTags: () => shouldRenderTags(),
-      shouldForceNonForumView: () => shouldForceNonForumView(),
-    }),
-  );
-  const renderSubtitle = () => chatListEntryResult().renderSubtitle;
-  const ref = () => chatListEntryResult().ref;
+  const { renderSubtitle, ref, element } = useChatListEntry({
+    chat: () => props.chat,
+    chatId: () => props.chatId,
+    lastMessage,
+    communityMembers,
+    typingStatusByPeerId: () => props.typingStatusByPeerId,
+    draft: () => props.draft,
+    statefulMediaContent: () => groupStatefulContent({ story: lastMessageStory() }),
+    lastMessageTopic,
+    lastMessageSender,
+    observeIntersection: () => props.observeIntersection,
+    animationType: () => props.animationType,
+    withInterfaceAnimations: () => props.withInterfaceAnimations,
+    orderDiff: () => props.orderDiff,
+    shiftDiff: () => props.shiftDiff,
+    isSavedDialog: () => props.isSavedDialog,
+    isPreview: () => props.isPreview,
+    onReorderAnimationEnd: () => props.onReorderAnimationEnd,
+    topicIds: listedTopicIds,
+    hasTags: shouldRenderTags,
+    shouldForceNonForumView,
+  });
 
   const getIsForumPanelClosed = useSelectorSignal(selectIsForumPanelClosed);
 
@@ -256,9 +248,9 @@ const Chat = (ownProps: OwnProps) => {
       return false;
     }
 
-    const noForumTopicPanel = (isMobile && isForumAsMessages()) || shouldForceNonForumView();
+    const noForumTopicPanel = (isMobile() && isForumAsMessages()) || shouldForceNonForumView();
 
-    if (isMobile) {
+    if (isMobile()) {
       setShouldCloseRightColumn({ value: true });
     }
 
@@ -273,7 +265,7 @@ const Chat = (ownProps: OwnProps) => {
     if (props.isSavedDialog) {
       openSavedDialog({ chatId: props.chatId, noForumTopicPanel: true }, { forceOnHeavyAnimation: true });
 
-      if (isMobile) {
+      if (isMobile()) {
         toggleChatInfo({ force: false });
       }
       return false;
@@ -359,55 +351,76 @@ const Chat = (ownProps: OwnProps) => {
     reportMessages({ chatId: props.chat.id, messageIds: [] });
   };
 
-  const contextActions = useChatContextActions({
-    chat: () => props.chat,
-    user: () => props.user,
+  const contextActions = useChatContextActions(() => ({
+    chat: props.chat,
+    user: props.user,
     handleDelete,
     handleMute,
     handleUnmute,
     handleChatFolderChange,
     handleReport,
-    folderId: () => props.folderId,
-    isPinned: () => props.isPinned,
-    isMuted: () => props.isMuted,
-    canChangeFolder: () => props.canChangeFolder,
-    isSavedDialog: () => props.isSavedDialog,
-    currentUserId: () => props.currentUserId,
-    isPreview: () => props.isPreview,
-    isInCommunityPanel: () => props.isInCommunityPanel,
-    topicIds: () => listedTopicIds(),
-  });
+    folderId: props.folderId,
+    isPinned: props.isPinned,
+    isMuted: props.isMuted,
+    canChangeFolder: props.canChangeFolder,
+    isSavedDialog: props.isSavedDialog,
+    currentUserId: props.currentUserId,
+    isPreview: props.isPreview,
+    isInCommunityPanel: props.isInCommunityPanel,
+    topicIds: listedTopicIds(),
+  }));
 
-  const isIntersecting = useIsIntersecting(
-    () => ref(),
-    () => (props.chat ? props.observeIntersection : undefined),
-  );
+  const isIntersecting = useIsIntersecting(element, () => (props.chat ? props.observeIntersection : undefined));
 
   // Load the forum topics to display unread count badge
-  // TODO(codemod): dependency on a container (topicsInfo) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)
+  // Deviation: `topicsInfo` is a store container (its identity stays while its fields change), so the effect depends
+  // on what it checks: its presence and `isCache`.
   createEffect(
-    depsOf(() => [props.chatId, props.topicsInfo, props.isSynced, isForum(), isIntersecting] as const),
-    ([chatId2, topicsInfo2, isSynced2, isForum2]) => {
-      if (isIntersecting && isForum2 && isSynced2 && (!topicsInfo2 || topicsInfo2.isCache)) {
+    depsOf(
+      () =>
+        [
+          props.chatId,
+          Boolean(props.topicsInfo),
+          props.topicsInfo?.isCache,
+          props.isSynced,
+          isForum(),
+          isIntersecting(),
+        ] as const,
+    ),
+    ([chatId2, hasTopicsInfo, isCache, isSynced2, isForum2, isIntersecting2]) => {
+      if (isIntersecting2 && isForum2 && isSynced2 && (!hasTopicsInfo || isCache)) {
         loadTopics({ chatId: chatId2 });
       }
     },
   );
 
   // Refresh visible community members, including details restored from cache
-  // TODO(codemod): dependency on a container (communityFullInfo) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)
+  // Deviation: as above, for `communityFullInfo`.
   createEffect(
-    depsOf(() => [props.chatId, props.communityFullInfo, props.isSynced, isCommunity(), isIntersecting] as const),
-    ([chatId2, communityFullInfo2, isSynced2, isCommunity2]) => {
-      if (isIntersecting && isCommunity2 && isSynced2 && (!communityFullInfo2 || communityFullInfo2.isCache)) {
+    depsOf(
+      () =>
+        [
+          props.chatId,
+          Boolean(props.communityFullInfo),
+          props.communityFullInfo?.isCache,
+          props.isSynced,
+          isCommunity(),
+          isIntersecting(),
+        ] as const,
+    ),
+    ([chatId2, hasCommunityFullInfo, isCache, isSynced2, isCommunity2, isIntersecting2]) => {
+      if (isIntersecting2 && isCommunity2 && isSynced2 && (!hasCommunityFullInfo || isCache)) {
         loadFullCommunity({ communityId: chatId2 });
       }
     },
   );
 
   const isOnline = createMemo(() => props.user && props.userStatus && isUserOnline(props.user, props.userStatus));
-  // TODO(codemod): useShowTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element (transitionClassNames/hasOpenClass are gone)
-  const { hasShownClass: isAvatarOnlineShown } = createShowTransition({ isOpen: () => isOnline() });
+  // Deviation: `hasShownClass` of `useShowTransitionDeprecated` is `shouldRender` of the kit's transition.
+  const { shouldRender: isAvatarOnlineShown } = createShowTransition({
+    isOpen: () => Boolean(isOnline()),
+    noMountTransition: true,
+  });
 
   const href = createMemo(() => {
     if (!IS_OPEN_IN_NEW_TAB_SUPPORTED) return undefined;
@@ -424,21 +437,21 @@ const Chat = (ownProps: OwnProps) => {
   const peer = createMemo(() => props.user || props.chat);
   const avatarPeer = createMemo(() => (isMonoforum() ? props.monoforumChannel : peer()));
   const historyTtlText = createMemo(() =>
-    props.chat.ttlPeriod && !props.isSavedDialog ? formatCountdown(lang, props.chat.ttlPeriod) : undefined,
+    props.chat?.ttlPeriod && !props.isSavedDialog ? formatCountdown(lang, props.chat.ttlPeriod) : undefined,
   );
   const autoDeleteInfoText = createMemo(() =>
     historyTtlText() ? lang('AutoDeleteSetInfo', { time: historyTtlText() }) : undefined,
   );
   const shouldShowAutoDeleteBadge = createMemo(
-    () => !isAvatarOnlineShown && !props.chat.subscriptionUntil && Boolean(autoDeleteInfoText()),
+    () => !isAvatarOnlineShown() && !props.chat?.subscriptionUntil && Boolean(autoDeleteInfoText()),
   );
   const avatarColorClassName = createMemo(() =>
     shouldShowAutoDeleteBadge() ? getPeerColorClass(getPeerColorKey(avatarPeer(), true)!) : undefined,
   );
-  const hasActiveCall = createMemo(() => Boolean(props.chat.isCallActive && props.chat.isCallNotEmpty));
+  const hasActiveCall = createMemo(() => Boolean(props.chat?.isCallActive && props.chat.isCallNotEmpty));
   const hasAvatarCornerBadge = createMemo(
     () =>
-      isAvatarOnlineShown || Boolean(props.chat.subscriptionUntil) || shouldShowAutoDeleteBadge() || hasActiveCall(),
+      isAvatarOnlineShown() || Boolean(props.chat?.subscriptionUntil) || shouldShowAutoDeleteBadge() || hasActiveCall(),
   );
 
   const chatClassName = createMemo(() =>
@@ -455,19 +468,38 @@ const Chat = (ownProps: OwnProps) => {
     ),
   );
 
+  // Deviation: `top` is written by an effect instead of the `style` prop. The animation effect of `useChatListEntry`
+  // writes `transform`/`opacity` on the same element, and a string `style` rewrite (`cssText`) would drop them when
+  // the row moves; tt's render came before its layout effect, here the two effects have no fixed order.
+  createEffect(
+    () => props.offsetTop,
+    (offsetTop) => {
+      const element2 = element();
+      if (!element2) return;
+
+      if (offsetTop !== undefined) {
+        element2.style.top = `${offsetTop}px`;
+      } else {
+        element2.style.removeProperty('top');
+      }
+    },
+    frameMutation,
+  );
+
+  // Deviation: the row is always the root (a `ManualFor` row is one DOM node); an absent chat renders it empty,
+  // where tt rendered nothing.
   return (
-    <Show when={props.chat}>
-      <ListItem
-        ref={ref()}
-        className={chatClassName()}
-        href={href()}
-        style={props.offsetTop !== undefined ? `top: ${props.offsetTop}px` : undefined}
-        ripple={!isForum() && !isMobile}
-        contextActions={contextActions}
-        withPortalForMenu
-        onClick={handleClick}
-        onFileHoverOpen={openChatEntry}
-      >
+    <ListItem
+      ref={ref}
+      className={chatClassName()}
+      href={href()}
+      ripple={!isForum() && !isMobile()}
+      contextActions={contextActions()}
+      withPortalForMenu
+      onClick={handleClick}
+      onFileHoverOpen={openChatEntry}
+    >
+      <Show when={props.chat}>
         <div class={buildClassName('status', 'status-clickable')}>
           <div class="avatar-wrapper">
             <Avatar
@@ -477,21 +509,23 @@ const Chat = (ownProps: OwnProps) => {
               size={props.isPreview ? 'medium' : 'large'}
               asMessageBubble={isMonoforum()}
               withStory={!props.user?.isSelf && !isMonoforum()}
-              withStoryGap={isAvatarOnlineShown || Boolean(props.chat.subscriptionUntil) || shouldShowAutoDeleteBadge()}
+              withStoryGap={
+                isAvatarOnlineShown() || Boolean(props.chat?.subscriptionUntil) || shouldShowAutoDeleteBadge()
+              }
               storyGapPercent={shouldShowAutoDeleteBadge() ? AUTO_DELETE_STORY_GAP_PERCENT : undefined}
               storyViewerOrigin={StoryViewerOrigin.ChatList}
               storyViewerMode="single-peer"
             />
             <div class="avatar-badge-wrapper">
               <div
-                class={buildClassName('avatar-online', 'avatar-badge', isAvatarOnlineShown && 'avatar-online-shown')}
+                class={buildClassName('avatar-online', 'avatar-badge', isAvatarOnlineShown() && 'avatar-online-shown')}
               />
-              {!isAvatarOnlineShown && Boolean(props.chat.subscriptionUntil) && (
+              {!isAvatarOnlineShown() && Boolean(props.chat?.subscriptionUntil) && (
                 <StarIcon type="gold" className="avatar-badge avatar-subscription" size="adaptive" />
               )}
               {shouldShowAutoDeleteBadge() && (
                 <AutoDeleteIcon
-                  period={props.chat.ttlPeriod!}
+                  period={props.chat!.ttlPeriod!}
                   peer={avatarPeer()!}
                   className={buildClassName('avatar-badge', avatarColorClassName())}
                   ariaLabel={autoDeleteInfoText()}
@@ -499,22 +533,22 @@ const Chat = (ownProps: OwnProps) => {
               )}
             </div>
             <ChatBadge
-              chat={props.chat}
+              chat={props.chat!}
               isMuted={props.isMuted}
               shouldShowOnlyMostImportant
-              forceHidden={getIsForumPanelClosed}
+              forceHidden={getIsForumPanelClosed()}
               forceUnreadCount={communityUnreadCount()}
               isSelected={props.isSelected}
               isOnAvatar
             />
-            {!props.noCommunityChevron && !hasAvatarCornerBadge() && Boolean(props.chat.linkedCommunityId) && (
+            {!props.noCommunityChevron && !hasAvatarCornerBadge() && Boolean(props.chat?.linkedCommunityId) && (
               <div
                 class="avatar-community-chevron"
                 role="button"
                 tabIndex={0}
                 aria-label={lang('CommunityOpenPanel')}
-                onClick={handleChevronClick()}
-                onMouseDown={handleChevronMouseDown()}
+                onClick={handleChevronClick}
+                onMouseDown={handleChevronMouseDown}
               >
                 <Icon name="down" />
               </div>
@@ -522,7 +556,7 @@ const Chat = (ownProps: OwnProps) => {
           </div>
           {hasActiveCall() && (
             <ChatCallStatus
-              isMobile={isMobile}
+              isMobile={isMobile()}
               isSelected={props.isSelected}
               isActive={props.withInterfaceAnimations}
             />
@@ -542,19 +576,19 @@ const Chat = (ownProps: OwnProps) => {
             />
             {props.isMuted && !props.isSavedDialog && <Icon name="muted" />}
             <div class="separator" />
-            {lastMessage && (
+            {lastMessage() && (
               <LastMessageMeta
-                message={lastMessage}
-                outgoingStatus={!props.isSavedDialog ? lastMessageOutgoingStatus : undefined}
+                message={lastMessage()!}
+                outgoingStatus={!props.isSavedDialog ? lastMessageOutgoingStatus() : undefined}
                 draftDate={props.draft?.date}
               />
             )}
           </div>
           <div class="subtitle">
-            {renderSubtitle()()}
+            {renderSubtitle()}
             {!props.isPreview && (
               <ChatBadge
-                chat={props.chat}
+                chat={props.chat!}
                 isPinned={props.isPinned}
                 isMuted={props.isMuted}
                 isSavedDialog={props.isSavedDialog}
@@ -579,7 +613,7 @@ const Chat = (ownProps: OwnProps) => {
             isOpen={isDeleteModalOpen()}
             onClose={closeDeleteModal}
             onCloseAnimationEnd={unmarkRenderDeleteModal}
-            chat={props.chat}
+            chat={props.chat!}
             isSavedDialog={props.isSavedDialog}
           />
         )}
@@ -599,8 +633,8 @@ const Chat = (ownProps: OwnProps) => {
             chatId={props.chatId}
           />
         )}
-      </ListItem>
-    </Show>
+      </Show>
+    </ListItem>
   );
 };
 

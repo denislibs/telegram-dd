@@ -1,7 +1,8 @@
 import { getActions, withGlobal } from '../../../global';
-import type { GlobalState } from '../../../global/types';
 
 import type { ApiChatFolder, ApiSticker } from '../../../api/types';
+import type { GlobalState } from '../../../global/types';
+import type { FolderEditDispatch } from '../../../hooks/reducers/useFoldersReducer';
 import { SettingsScreens } from '../../../types';
 
 import { selectAnimatedEmoji, selectChatFolder } from '../../../global/selectors';
@@ -50,7 +51,7 @@ const EmptyFolder = (ownProps: OwnProps) => {
         {lang(props.chatFolder ? 'ChatList.EmptyChatListFilterText' : 'Chat.EmptyChat')}
       </p>
       {props.chatFolder && (
-        <Button ripple={!isMobile} fluid pill iconName="settings" onClick={handleEditFolder} isRtl={lang.isRtl}>
+        <Button ripple={!isMobile()} fluid pill iconName="settings" onClick={handleEditFolder} isRtl={lang.isRtl}>
           <div class={styles.buttonText}>{lang('ChatList.EmptyChatListEditFilter')}</div>
         </Button>
       )}

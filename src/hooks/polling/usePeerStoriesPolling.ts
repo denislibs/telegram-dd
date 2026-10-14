@@ -5,6 +5,7 @@ import type { ApiChat, ApiUser } from '../../api/types';
 
 import { isChatChannel, isUserBot } from '../../global/helpers';
 import { selectIsChatRestricted, selectPeer, selectUserStatus } from '../../global/selectors';
+import { type MaybeAccessor, read } from '../../util/accessors';
 import { isUserId } from '../../util/entities/ids';
 import { throttle } from '../../util/schedulers';
 
@@ -33,16 +34,17 @@ const loadFromQueue = throttle(() => {
   }
 }, REQUEST_THROTTLE);
 
-// TODO(codemod): usePeerStoriesPolling: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function usePeerStoriesPolling(ids?: string[]) {
+export default function usePeerStoriesPolling(ids?: MaybeAccessor<string[] | undefined>) {
+  // The global is read untracked on purpose (tt: `useMemo` with the dependency `[ids]`): the memos follow the list, not
+  // every change of a peer.
   const peers = createMemo(() => {
-    // TODO(codemod): getGlobal() in a memo / JSX is a one-time read: use useGlobal() (store contract §12.4)
     const global = getGlobal();
-    return ids?.map((id) => selectPeer(global, id)).filter(Boolean);
+    return read(ids)
+      ?.map((id) => selectPeer(global, id))
+      .filter(Boolean);
   });
 
   const pollablePeerIds = createMemo(() => {
-    // TODO(codemod): getGlobal() in a memo / JSX is a one-time read: use useGlobal() (store contract §12.4)
     const global = getGlobal();
     return peers()
       ?.filter((peer) => {

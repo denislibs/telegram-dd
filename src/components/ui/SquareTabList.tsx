@@ -1,4 +1,4 @@
-import { createMemo, previous } from 'frameact';
+import { createSignal, previous } from 'frameact';
 import { For } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
 
@@ -40,23 +40,21 @@ type OwnProps = {
 };
 
 const SquareTabList = (props: OwnProps) => {
-  let internalRef!: HTMLDivElement;
-  // TODO(codemod): "internalRef" was a ref object passed as a value: pass an accessor (() => internalRef) or a callback ref
-  const containerRef = createMemo(() => props.ref || internalRef);
+  const [containerRef, setContainerRef] = createSignal<HTMLDivElement | undefined>(undefined);
   const previousActiveTab = previous(() => props.activeTab);
 
   const lang = useLang();
 
-  useHorizontalScroll(() => containerRef(), undefined, true);
-  useScrollToActiveTab(
-    () => containerRef(),
-    () => props.activeTab,
-  );
+  useHorizontalScroll(containerRef, undefined, true);
+  useScrollToActiveTab(containerRef, () => props.activeTab);
 
   return (
     <div
       class={buildClassName('SquareTabList', 'no-scrollbar', props.className)}
-      ref={containerRef()}
+      ref={(el) => {
+        setContainerRef(el);
+        props.ref?.(el);
+      }}
       dir={lang.isRtl ? 'rtl' : undefined}
     >
       <For each={props.tabs} keyed={(tab) => tab.id}>

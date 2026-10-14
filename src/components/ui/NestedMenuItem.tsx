@@ -1,11 +1,11 @@
 import { createEffect, createSignal, onDestroy, requestMeasure } from 'frameact';
 import type { JSX } from 'frameact/jsx-runtime';
-import { depsOf } from '../../util/effectDeps';
 
 import type { IAnchorPosition } from '../../types';
 import type { IconName } from '../../types/icons';
 
 import buildClassName from '../../util/buildClassName';
+import { depsOf } from '../../util/effectDeps';
 import { REM } from '../common/helpers/mediaDimensions';
 
 import useFlag from '../../hooks/useFlag';
@@ -52,7 +52,7 @@ const NestedMenuItem = (props: OwnProps) => {
   });
 
   const [submenuAnchor, setSubmenuAnchor] = createSignal<IAnchorPosition | undefined>(undefined);
-  const { isResizing } = useWindowSize();
+  const windowSize = useWindowSize();
 
   const updateAnchor = () => {
     requestMeasure(() => {
@@ -71,7 +71,7 @@ const NestedMenuItem = (props: OwnProps) => {
   };
 
   createEffect(
-    depsOf(() => [isSubmenuOpen(), lang.isRtl, updateAnchor, isResizing()] as const),
+    depsOf(() => [isSubmenuOpen(), lang.isRtl, updateAnchor, windowSize().isResizing] as const),
     ([isSubmenuOpen2, , , isResizing2]) => {
       if (isSubmenuOpen2 && !isResizing2) {
         updateAnchor();

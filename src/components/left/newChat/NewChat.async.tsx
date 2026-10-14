@@ -1,7 +1,6 @@
 // FOUNDATION STUB: the new chat / new channel screens (telegram-tt src/components/left/newChat/NewChat.async.tsx) is ported with a later slice. It keeps tt's props so that
 // the callers compile; it renders nothing.
-import type { LeftColumnContent } from '../../../types';
-import type { AnimationLevel } from '../../../types';
+import type { AnimationLevel, LeftColumnContent } from '../../../types';
 
 export type OwnProps = {
   isActive: boolean;

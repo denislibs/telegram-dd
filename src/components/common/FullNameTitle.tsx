@@ -78,7 +78,10 @@ const FullNameTitle = (props: OwnProps) => {
   const canShowEmojiStatus = createMemo(() => props.withEmojiStatus && !props.isSavedMessages);
   const emojiStatus = createMemo((): ApiEmojiStatusType | undefined => {
     const customEmojiStatusId = customPeer()?.emojiStatusId;
-    return realPeer()?.emojiStatus || (customEmojiStatusId ? { type: 'regular', documentId: customEmojiStatusId } : undefined);
+    return (
+      realPeer()?.emojiStatus ||
+      (customEmojiStatusId ? { type: 'regular', documentId: customEmojiStatusId } : undefined)
+    );
   });
 
   const handleTitleClick = (e: MouseEvent) => {
@@ -128,7 +131,7 @@ const FullNameTitle = (props: OwnProps) => {
     >
       {botVerificationIconId() && (
         <CustomEmoji
-          documentId={botVerificationIconId()}
+          documentId={botVerificationIconId()!}
           size={props.emojiStatusSize}
           loopLimit={!props.noLoopLimit ? EMOJI_STATUS_LOOP_LIMIT : undefined}
           observeIntersectionForLoading={props.observeIntersection}

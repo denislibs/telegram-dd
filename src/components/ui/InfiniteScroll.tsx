@@ -7,8 +7,9 @@
 // positioned list in `<div style="position: relative">` with `teactFastList`; here the owner of the list renders that
 // wrapper itself (the rows of a `<ManualFor>` must be the sole content of their slot, which a wrapper component that
 // receives them as `children` would flatten away). `noFastList` and `cacheBuster` are accepted and ignored.
+import { LoadMoreDirection } from '../../types';
+
 import { InfiniteScroll as KitInfiniteScroll } from '../../lib/kit';
-import type { LoadMoreDirection } from '../../types';
 
 export type OwnProps = {
   ref?: (el: HTMLDivElement) => void;
@@ -48,12 +49,15 @@ const InfiniteScroll = (props: OwnProps) => {
       noScrollRestoreOnTop={props.noScrollRestoreOnTop}
       scrollContainer={props.scrollContainerClosest}
       onLoadMore={(args) =>
-        props.onLoadMore?.({ direction: args.direction as LoadMoreDirection, noScroll: args.noScroll })
+        props.onLoadMore?.({
+          direction: args.direction === 'backwards' ? LoadMoreDirection.Backwards : LoadMoreDirection.Forwards,
+          noScroll: args.noScroll,
+        })
       }
-      onScroll={(e) => props.onScroll?.(e)}
-      onWheel={(e) => props.onWheel?.(e)}
-      onClick={(e) => props.onClick?.(e)}
-      onKeyDown={(e) => props.onKeyDown?.(e)}
+      onScroll={(e: Event) => props.onScroll?.(e)}
+      onWheel={(e: WheelEvent) => props.onWheel?.(e)}
+      onClick={(e: MouseEvent) => props.onClick?.(e)}
+      onKeyDown={(e: KeyboardEvent) => props.onKeyDown?.(e)}
     >
       {props.beforeChildren}
       {props.children}

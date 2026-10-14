@@ -1,7 +1,6 @@
 import { createEffect } from 'frameact';
 
 import { type MaybeAccessor, read } from '../util/accessors';
-
 import { createCallbackManager } from '../util/callbacks';
 import { getHotkeyMatcher } from '../util/parseHotkey';
 

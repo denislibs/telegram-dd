@@ -1,11 +1,11 @@
 import { createEffect, createMemo, createSignal, untrack } from 'frameact';
 import { getActions } from '../global';
-import { type MaybeAccessor, read } from '../util/accessors';
-import { depsOf } from '../util/effectDeps';
 
 import type { ThemeKey } from '../types';
 import type { WallpaperStorageSource } from '../util/wallpaperStorage';
 
+import { type MaybeAccessor, read } from '../util/accessors';
+import { depsOf } from '../util/effectDeps';
 import { getDefaultPatternColor, RESET_WALLPAPER_SETTINGS } from '../util/wallpaper';
 import { acquireWallpaperUrl, getResolvedWallpaperUrl } from '../util/wallpaperStorage';
 

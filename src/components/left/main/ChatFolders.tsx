@@ -1,13 +1,14 @@
-import { createEffect, createMemo, onMount } from 'frameact';
+import { createEffect, createMeasureEffect, createMemo, onMount } from 'frameact';
 import { getActions, withGlobal } from '../../../global';
-import { depsOf } from '../../../util/effectDeps';
-import { createShowTransition } from '../../../lib/kit';
 
 import type { ApiChatFolder, ApiChatlistExportedInvite } from '../../../api/types';
 import type { GlobalState } from '../../../global/types';
+import type { FolderEditDispatch } from '../../../hooks/reducers/useFoldersReducer';
+import type { TransitionSlide } from '../../../lib/kit';
 import type { AnimationLevel } from '../../../types';
 
 import { ALL_FOLDER_ID } from '../../../config';
+import { createShowTransition } from '../../../lib/kit';
 import { selectTabState } from '../../../global/selectors';
 import { selectCurrentLimit } from '../../../global/selectors/limits';
 import { selectSharedSettings } from '../../../global/selectors/sharedState';
@@ -15,6 +16,7 @@ import { IS_TOUCH_ENV } from '../../../util/browser/windowEnvironment';
 import buildClassName from '../../../util/buildClassName';
 import captureEscKeyListener from '../../../util/captureEscKeyListener';
 import { captureEvents, SwipeDirection } from '../../../util/captureEvents';
+import { depsOf } from '../../../util/effectDeps';
 import { resolveTransitionName } from '../../../util/resolveTransitionName';
 
 import useFolderTabs from '../../../hooks/useFolderTabs';
@@ -58,6 +60,7 @@ const ChatFolders = (ownProps: OwnProps) => {
   const { loadChatFolders, setActiveChatFolder, openChat } = getActions();
 
   let transitionRef!: HTMLDivElement;
+  let rootRef!: HTMLDivElement;
 
   const lang = useLang();
 
@@ -67,9 +70,10 @@ const ChatFolders = (ownProps: OwnProps) => {
     loadChatFolders();
   });
 
-  createEffect(
-    depsOf(() => [props.activeChatFolder, updateScrollState] as const),
-    ([activeChatFolder2]) => {
+  // Reads the scroll geometry of the active list.
+  createMeasureEffect(
+    () => props.activeChatFolder,
+    () => {
       const activeList = transitionRef?.querySelector<HTMLElement>('.chat-list.Transition_slide-active');
       updateScrollState(activeList ?? undefined);
     },
@@ -78,39 +82,32 @@ const ChatFolders = (ownProps: OwnProps) => {
   const {
     ref,
     shouldRender: shouldRenderStoryRibbon,
-    isClosing: getIsStoryRibbonClosing,
+    isClosing: isStoryRibbonClosing,
   } = createShowTransition({
     isOpen: () => props.isStoryRibbonShown,
     className: false,
   });
-  const isStoryRibbonClosing = createMemo(getIsStoryRibbonClosing);
 
   const scrollToTop = () => {
-    // TODO(codemod): ref is a callback ref now: keep the element in a let assigned from ref={(el) => { ref(el); element = el; }}
-    const activeList = ref.current?.querySelector<HTMLElement>('#LeftColumn .chat-list.Transition_slide-active');
+    const activeList = rootRef.querySelector<HTMLElement>('#LeftColumn .chat-list.Transition_slide-active');
     activeList?.scrollTo({
       top: 0,
       behavior: 'smooth',
     });
   };
 
-  const folderTabsResult = createMemo(() =>
-    useFolderTabs({
-      sidebarMode: false,
-      noEmoticons: true,
-      orderedFolderIds: () => props.orderedFolderIds,
-      chatFoldersById: () => props.chatFoldersById,
-      maxFolders: () => props.maxFolders,
-      maxChatLists: () => props.maxChatLists,
-      folderInvitesById: () => props.folderInvitesById,
-      maxFolderInvites: () => props.maxFolderInvites,
-    }),
-  );
-  const displayedFolders = () => folderTabsResult().displayedFolders;
-  const folderTabs = () => folderTabsResult().folderTabs;
+  const { displayedFolders, folderTabs } = useFolderTabs({
+    sidebarMode: false,
+    noEmoticons: true,
+    orderedFolderIds: () => props.orderedFolderIds,
+    chatFoldersById: () => props.chatFoldersById,
+    maxFolders: () => props.maxFolders,
+    maxChatLists: () => props.maxChatLists,
+    folderInvitesById: () => props.folderInvitesById,
+    maxFolderInvites: () => props.maxFolderInvites,
+  });
 
   const allChatsFolderIndex = createMemo(() => displayedFolders()?.findIndex((folder) => folder.id === ALL_FOLDER_ID));
-  const isInAllChatsFolder = createMemo(() => allChatsFolderIndex() === props.activeChatFolder);
   const isInFirstFolder = createMemo(() => FIRST_FOLDER_INDEX === props.activeChatFolder);
 
   const openFolder = (index: number) => {
@@ -130,7 +127,7 @@ const ChatFolders = (ownProps: OwnProps) => {
 
   // Prevent `activeTab` pointing at non-existing folder after update
   createEffect(
-    depsOf(() => [props.activeChatFolder, folderTabs(), setActiveChatFolder] as const),
+    depsOf(() => [props.activeChatFolder, folderTabs()] as const),
     ([activeChatFolder2, folderTabs2]) => {
       if (!folderTabs2?.length) {
         return;
@@ -143,13 +140,13 @@ const ChatFolders = (ownProps: OwnProps) => {
   );
 
   createEffect(
-    depsOf(() => [props.activeChatFolder, folderTabs(), props.isForumPanelOpen, setActiveChatFolder] as const),
+    depsOf(() => [props.activeChatFolder, folderTabs(), props.isForumPanelOpen] as const),
     ([activeChatFolder2, folderTabs2, isForumPanelOpen2]) => {
       if (!IS_TOUCH_ENV || !folderTabs2?.length || isForumPanelOpen2) {
         return undefined;
       }
 
-      return captureEvents(transitionRef!, {
+      return captureEvents(transitionRef, {
         selectorToPreventScroll: '.chat-list',
         onSwipe: (e, direction) => {
           if (direction === SwipeDirection.Left) {
@@ -172,15 +169,13 @@ const ChatFolders = (ownProps: OwnProps) => {
     },
   );
 
-  let isNotInFirstFolderRef;
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  isNotInFirstFolderRef = !isInFirstFolder();
+  // `isInFirstFolder` is a memo, so reading it in the apply and in the handler is "the value of the latest render"
   createEffect(
-    depsOf(() => [props.activeChatFolder, setActiveChatFolder] as const),
-    ([activeChatFolder2]) =>
-      isNotInFirstFolderRef
+    () => props.activeChatFolder,
+    () =>
+      !isInFirstFolder()
         ? captureEscKeyListener(() => {
-            if (isNotInFirstFolderRef) {
+            if (!isInFirstFolder()) {
               setActiveChatFolder({ activeChatFolder: FIRST_FOLDER_INDEX });
             }
           })
@@ -193,7 +188,7 @@ const ChatFolders = (ownProps: OwnProps) => {
   });
 
   createEffect(
-    depsOf(() => [props.currentUserId, folderTabs(), openChat, setActiveChatFolder] as const),
+    depsOf(() => [props.currentUserId, folderTabs()] as const),
     ([currentUserId2, folderTabs2]) => {
       const handleKeyDown = (e: KeyboardEvent) => {
         if (e.ctrlKey && e.shiftKey && e.code.startsWith('Digit') && folderTabs2) {
@@ -226,17 +221,22 @@ const ChatFolders = (ownProps: OwnProps) => {
     noMountTransition: true,
   });
 
-  function renderCurrentTab(isActive: boolean) {
-    const activeFolder = Object.values(props.chatFoldersById).find(
-      ({ id }) => id === folderTabs()![props.activeChatFolder].id,
-    );
-    const isFolder = activeFolder && !isInAllChatsFolder();
+  // Deviation: a slide renders the folder of its own key. In tt `render` is the function of the last render in which
+  // the key was active (the closure keeps that render's folder); the kit calls the render function once per slide.
+  const renderTab = (slide: TransitionSlide) => {
+    const activeFolder = createMemo(() => {
+      const folderId = folderTabs()?.[slide.key]?.id;
+      if (folderId === undefined) return undefined;
+
+      return Object.values(props.chatFoldersById).find(({ id }) => id === folderId);
+    });
+    const isFolder = createMemo(() => Boolean(activeFolder()) && allChatsFolderIndex() !== slide.key);
 
     return (
       <ChatList
-        folderType={isFolder ? 'folder' : 'all'}
-        folderId={isFolder ? activeFolder.id : undefined}
-        isActive={isActive}
+        folderType={isFolder() ? 'folder' : 'all'}
+        folderId={isFolder() ? activeFolder()!.id : undefined}
+        isActive={slide.isActive()}
         isForumPanelOpen={props.isForumPanelOpen}
         foldersDispatch={props.foldersDispatch}
         isMainList
@@ -248,14 +248,20 @@ const ChatFolders = (ownProps: OwnProps) => {
         onScroll={handleScroll}
       />
     );
-  }
+  };
 
-  const hasFolders = createMemo(() => folderTabs() && folderTabs().length > 1);
+  const hasFolders = createMemo(() => {
+    const tabs = folderTabs();
+    return Boolean(tabs && tabs.length > 1);
+  });
   const shouldRenderFolders = createMemo(() => hasFolders() && !props.isFoldersSidebarShown);
 
   return (
     <div
-      ref={ref}
+      ref={(el) => {
+        rootRef = el;
+        ref(el);
+      }}
       class={buildClassName(
         'ChatFolders',
         shouldRenderStoryRibbon() && 'with-story-ribbon',
@@ -267,12 +273,12 @@ const ChatFolders = (ownProps: OwnProps) => {
         class={buildClassName(
           'ChatFolders-content',
           shouldRenderFolders() && 'with-tabs',
-          !shouldRenderFolders() && !isAtBeginning && 'scrolled',
+          !shouldRenderFolders() && !isAtBeginning() && 'scrolled',
         )}
       >
         {shouldRenderFolders() ? (
           <ChatFolderTabList
-            tabs={folderTabs()}
+            tabs={folderTabs()!}
             activeTab={props.activeChatFolder}
             onSwitchTab={handleSwitchTab}
             onFileHoverOpen={openFolder}
@@ -280,9 +286,10 @@ const ChatFolders = (ownProps: OwnProps) => {
         ) : shouldRenderPlaceholder() ? (
           <div ref={placeholderRef} class="tabs-placeholder" />
         ) : undefined}
-        {/* TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6) */}
         <Transition
-          ref={transitionRef}
+          ref={(el) => {
+            transitionRef = el;
+          }}
           name={resolveTransitionName(
             'slideOptimized',
             props.animationLevel,
@@ -290,9 +297,9 @@ const ChatFolders = (ownProps: OwnProps) => {
             lang.isRtl,
           )}
           activeKey={props.activeChatFolder}
-          renderCount={hasFolders() ? folderTabs().length : undefined}
+          renderCount={hasFolders() ? folderTabs()!.length : undefined}
         >
-          {renderCurrentTab}
+          {renderTab}
         </Transition>
       </div>
     </div>

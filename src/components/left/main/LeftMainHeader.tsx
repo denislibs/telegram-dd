@@ -1,7 +1,6 @@
 import { createEffect, createMemo, frozenWhile } from 'frameact';
 import type { JSX } from 'frameact/jsx-runtime';
 import { getActions, withGlobal } from '../../../global';
-import { depsOf } from '../../../util/effectDeps';
 
 import type { GlobalState } from '../../../global/types';
 import type { ThemeKey } from '../../../types';
@@ -21,6 +20,7 @@ import { IS_APP, IS_MAC_OS } from '../../../util/browser/windowEnvironment';
 import buildClassName from '../../../util/buildClassName';
 import captureEscKeyListener from '../../../util/captureEscKeyListener';
 import { formatDateToString } from '../../../util/dates/oldDateFormat';
+import { depsOf } from '../../../util/effectDeps';
 
 import useAppLayout from '../../../hooks/useAppLayout';
 import useConnectionStatus from '../../../hooks/useConnectionStatus';
@@ -148,14 +148,20 @@ const LeftMainHeader = (ownProps: OwnProps) => {
       size="smaller"
       color="translucent"
       className={buildClassName(triggerProps.isOpen && 'active')}
-      onClick={() => (isSearchButton() ? handleForumSearchClick() : hasMenu() ? triggerProps.onTrigger() : props.onReset())}
+      onClick={() =>
+        isSearchButton() ? handleForumSearchClick() : hasMenu() ? triggerProps.onTrigger() : props.onReset()
+      }
       ariaLabel={hasMenu() ? lang('AriaLabelOpenMenu') : lang('AriaLabelBackChatList')}
     >
       {isSearchButton() ? (
         <Icon name="search" />
       ) : (
         <div
-          class={buildClassName('animated-menu-icon', !hasMenu() && 'state-back', props.shouldSkipTransition && 'no-animation')}
+          class={buildClassName(
+            'animated-menu-icon',
+            !hasMenu() && 'state-back',
+            props.shouldSkipTransition && 'no-animation',
+          )}
         />
       )}
     </Button>
@@ -292,7 +298,7 @@ const LeftMainHeader = (ownProps: OwnProps) => {
         )}
         <ShowTransition isOpen={connectionStatusPosition() === 'overlay'} isCustom className="connection-state-wrapper">
           <ConnectionStatusOverlay
-            connectionStatus={overlayConnectionStatus()!}
+            connectionStatus={overlayConnectionStatus()}
             connectionStatusText={overlayConnectionStatusText()!}
             onClick={toggleConnectionStatus}
           />

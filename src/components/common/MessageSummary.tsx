@@ -1,10 +1,9 @@
 import { createMemo } from 'frameact';
 import { withGlobal } from '../../global';
-import type { GlobalState } from '../../global/types';
-
-import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 
 import type { ApiFormattedText, ApiMessage, ApiMessagePoll, ApiTypeStory, ApiWebPage } from '../../api/types';
+import type { GlobalState } from '../../global/types';
+import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 
 import { extractMessageText, getMessagePollId, groupStatefulContent, isActionMessage } from '../../global/helpers';
 import {

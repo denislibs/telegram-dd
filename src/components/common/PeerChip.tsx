@@ -1,8 +1,8 @@
 import { createMemo } from 'frameact';
 import { withGlobal } from '../../global';
-import type { GlobalState } from '../../global/types';
 
 import type { ApiPeer } from '../../api/types';
+import type { GlobalState } from '../../global/types';
 import type { CustomPeer, ThemeKey } from '../../types';
 import type { IconName } from '../../types/icons';
 
@@ -95,17 +95,17 @@ const PeerChip = <T,>(ownProps: OwnProps<T>) => {
 
   const titleElement = (
     <>
-      {hasIconAndTitle() ? (
-        props.title
-      ) : hasAnyPeer() ? (
-        props.title || (
-          <FullNameTitle
-            peer={anyPeer()!}
-            isSavedMessages={props.isSavedMessages}
-            withEmojiStatus={props.withEmojiStatus}
-          />
-        )
-      ) : undefined}
+      {hasIconAndTitle()
+        ? props.title
+        : hasAnyPeer()
+          ? props.title || (
+              <FullNameTitle
+                peer={anyPeer()!}
+                isSavedMessages={props.isSavedMessages}
+                withEmojiStatus={props.withEmojiStatus}
+              />
+            )
+          : undefined}
     </>
   );
 
@@ -176,4 +176,4 @@ const mapStateToProps = (
   };
 };
 
-export default PeerChip as <T>(props: OwnProps<T>) => ReturnType<typeof PeerChip<T>>;
+export default PeerChip;

@@ -1,10 +1,10 @@
 import { createEffect, createMemo, createSignal, frameMutation, onDestroy, requestMutation } from 'frameact';
 import type { JSX } from 'frameact/jsx-runtime';
-import { depsOf } from '../../util/effectDeps';
 
 import type { ApiFormattedText } from '../../api/types';
 
 import buildClassName from '../../util/buildClassName';
+import { depsOf } from '../../util/effectDeps';
 import { LOCAL_TGS_PREVIEW_URLS, LOCAL_TGS_URLS } from './helpers/animatedAssets';
 import { REM } from './helpers/mediaDimensions';
 
@@ -48,6 +48,7 @@ function getRunningProgress(animation: Animation | undefined, baseProgress: numb
 }
 
 const TypingWrapper = (props: OwnProps) => {
+  // The initial values below are one-time snapshots, as tt's `useRef(initial)` / `useState(initial)`
   const fullText = createMemo(() => props.formattedText.text);
   const initialRevealedLength = createMemo(() => (props.noInitialAnimation ? fullText().length : 0));
 

@@ -1,21 +1,29 @@
-import { createEffect, createMemo, onMount, previous, requestNextMutation } from 'frameact';
-import { depsOf } from '../../../../util/effectDeps';
+import { createMemo, createSignal, onMount, requestNextMutation } from 'frameact';
 
+import { type MaybeAccessor, read } from '../../../../util/accessors';
 import { mapValues } from '../../../../util/iteratees';
 import { useChatAnimationType } from './useChatAnimationType';
 
-import useForceUpdate from '../../../../hooks/useForceUpdate';
-
 const EMPTY_ORDER_DIFF = {};
 
-// TODO(codemod): useOrderDiff: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function useOrderDiff(orderedIds: (string | number)[] | undefined, topOffset: number, key?: string) {
+// Deviation: a hook runs once. The parameters are `MaybeAccessor`s and the result holds accessors (`orderDiffById`,
+// `shiftDiff`, `getAnimationType`; `onReorderAnimationEnd` is a function). tt computed the diff during render
+// (`useSyncEffect`) from the previous render's values; here memos do (they are lazy: the chat rows read them), the
+// "previous" values are `let`s updated at the end of each run and tt's `forceUpdate` is a version signal bumped by
+// `onReorderAnimationEnd`. tt reset the diff and the shift on the next render of the list, whatever caused it; here
+// they last until the animation ends (a bump of the version re-runs the memos with nothing changed, which resets them).
+export default function useOrderDiff(
+  orderedIds: MaybeAccessor<(string | number)[] | undefined>,
+  topOffset: MaybeAccessor<number>,
+  key?: MaybeAccessor<string | undefined>,
+) {
   const orderById = createMemo(() => {
-    if (!orderedIds) {
+    const orderedIds2 = read(orderedIds);
+    if (!orderedIds2) {
       return undefined;
     }
 
-    return orderedIds.reduce(
+    return orderedIds2.reduce(
       (acc, id, i) => {
         acc[id] = i;
         return acc;
@@ -24,53 +32,70 @@ export default function useOrderDiff(orderedIds: (string | number)[] | undefined
     );
   });
 
-  const prevOrderById = previous(() => orderById());
-  const prevChatId = previous(() => key);
-  const prevTopOffset = previous(() => topOffset);
-  let isInitialRenderRef = true;
+  let prevOrderById: Record<string, number> | undefined;
+  let prevChatId: string | undefined;
+  let prevTopOffset: number | undefined;
+  let isInitialRender = true;
 
   onMount(() => {
     requestNextMutation(() => {
-      isInitialRenderRef = false;
+      isInitialRender = false;
     });
   });
 
   let orderDiffByIdRef: Record<string | number, number> = EMPTY_ORDER_DIFF;
-  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
-  const forceUpdate = useForceUpdate();
+  let shiftDiffRef = 0;
+  const [version, setVersion] = createSignal(0); // tt's `forceUpdate`
 
   const onReorderAnimationEnd = () => {
-    if (orderDiffByIdRef === EMPTY_ORDER_DIFF) return;
+    if (orderDiffByIdRef === EMPTY_ORDER_DIFF && !shiftDiffRef) return;
 
     orderDiffByIdRef = EMPTY_ORDER_DIFF;
-    forceUpdate();
+    setVersion((value) => value + 1);
   };
 
-  const shiftDiff = createMemo(() => (prevTopOffset() !== undefined ? topOffset - prevTopOffset() : 0));
+  const shiftDiff = createMemo(() => {
+    version();
+    const topOffset2 = read(topOffset);
+    shiftDiffRef = prevTopOffset !== undefined ? topOffset2 - prevTopOffset : 0;
+    prevTopOffset = topOffset2;
 
-  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
-  createEffect(
-    depsOf(() => [key, orderById(), prevChatId(), prevOrderById(), topOffset] as const),
-    ([, orderById2, prevChatId2, prevOrderById2]) => {
-      if (!orderById2 || !prevOrderById2 || key !== prevChatId2 || prevOrderById2 === orderById2) {
-        orderDiffByIdRef = EMPTY_ORDER_DIFF;
-        return;
-      }
+    return shiftDiffRef;
+  });
 
-      const diff = mapValues(orderById2, (order, id) => {
-        return prevOrderById2[id] !== undefined ? order - prevOrderById2[id] : -Infinity;
-      });
+  // `useSyncEffect`
+  const orderDiffById = createMemo(() => {
+    version();
+    const key2 = read(key);
+    const orderById2 = orderById();
+    const prevOrderById2 = prevOrderById;
+    const prevChatId2 = prevChatId;
+    prevOrderById = orderById2;
+    prevChatId = key2;
 
-      const hasChanges = Object.values(diff).some((value) => value !== 0);
-      orderDiffByIdRef = hasChanges ? diff : EMPTY_ORDER_DIFF;
-    },
+    if (!orderById2 || !prevOrderById2 || key2 !== prevChatId2 || prevOrderById2 === orderById2) {
+      orderDiffByIdRef = EMPTY_ORDER_DIFF;
+      return orderDiffByIdRef;
+    }
+
+    const diff = mapValues(orderById2, (order, id) => {
+      return prevOrderById2[id] !== undefined ? order - prevOrderById2[id] : -Infinity;
+    });
+
+    const hasChanges = Object.values(diff).some((value) => value !== 0);
+    orderDiffByIdRef = hasChanges ? diff : EMPTY_ORDER_DIFF;
+    return orderDiffByIdRef;
+  });
+
+  const getAnimationType = useChatAnimationType(
+    orderDiffById,
+    () => isInitialRender,
+    () => Boolean(shiftDiff()),
   );
 
-  const getAnimationType = useChatAnimationType(orderDiffByIdRef, isInitialRenderRef, Boolean(shiftDiff()));
-
   return {
-    orderDiffById: orderDiffByIdRef,
-    shiftDiff: shiftDiff(),
+    orderDiffById,
+    shiftDiff,
     getAnimationType,
     onReorderAnimationEnd,
   };

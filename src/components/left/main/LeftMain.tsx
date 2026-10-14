@@ -1,12 +1,12 @@
 import type { Update } from '@tauri-apps/plugin-updater';
 import { createEffect, createMemo, createSignal, onMount } from 'frameact';
 import { getActions } from '../../../global';
-import { createShowTransition } from '../../../lib/kit';
 
 import type { FolderEditDispatch } from '../../../hooks/reducers/useFoldersReducer';
 import { LeftColumnContent } from '../../../types';
 
 import { DEBUG } from '../../../config';
+import { createShowTransition } from '../../../lib/kit';
 import { selectCommunityPanelId } from '../../../global/selectors';
 import { IS_TAURI } from '../../../util/browser/globalEnvironment';
 import { IS_TOUCH_ENV } from '../../../util/browser/windowEnvironment';
@@ -201,7 +201,7 @@ const LeftMain = (props: OwnProps) => {
         wrapExceptionKey={LeftColumnContent.ChatList}
       >
         {(slide) => {
-          switch (slide.key) {
+          switch (slide.key as LeftColumnContent) {
             case LeftColumnContent.ChatList:
               return (
                 <ChatFolders

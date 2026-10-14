@@ -174,9 +174,10 @@ const useChatContextActions = (params: MaybeAccessor<Params>, isInSearch = false
           handler: togglePinned,
         };
 
-    const actionDelete = deleteTitle()
+    const deleteTitle2 = deleteTitle();
+    const actionDelete = deleteTitle2
       ? ({
-          title: deleteTitle(),
+          title: deleteTitle2,
           icon: 'delete',
           destructive: true,
           handler: handleDelete,

@@ -25,7 +25,7 @@ function AnimatedIconFromSticker(props: OwnProps) {
   );
   const tgsUrl = useMedia(
     () => localMediaHash(),
-    () => props.noLoad,
+    () => Boolean(props.noLoad),
   );
 
   return (

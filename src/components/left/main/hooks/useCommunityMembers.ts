@@ -5,8 +5,8 @@ import type { GlobalState } from '../../../../global/types';
 
 import { getCommunityPeerDate, getIsCommunityPeerJoined } from '../../../../global/helpers';
 import { selectChat, selectChatLastMessage, selectIsChatUnread } from '../../../../global/selectors';
-
 import { type MaybeAccessor, read } from '../../../../util/accessors';
+
 import { useShallowSelector } from '../../../../hooks/data/useSelector';
 
 export type CommunityMember = {

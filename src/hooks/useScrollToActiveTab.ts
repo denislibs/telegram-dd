@@ -1,8 +1,8 @@
 import { createMeasureEffect } from 'frameact';
-import { type MaybeAccessor, read } from '../util/accessors';
-import { depsOf } from '../util/effectDeps';
 
+import { type MaybeAccessor, read } from '../util/accessors';
 import animateHorizontalScroll from '../util/animateHorizontalScroll';
+import { depsOf } from '../util/effectDeps';
 
 const TAB_SCROLL_THRESHOLD_PX = 16;
 const SCROLL_DURATION = 300;

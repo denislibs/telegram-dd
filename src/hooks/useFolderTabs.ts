@@ -1,6 +1,5 @@
 import { createMemo } from 'frameact';
-import type { JSX } from 'frameact/jsx-runtime';
-import { getActions, getGlobal } from '../global';
+import { getActions, trackGlobal, useGlobal } from '../global';
 
 import type { MenuItemContextAction } from '../components/ui/ListItem';
 import type { TabWithProperties } from '../components/ui/SquareTabList';
@@ -15,12 +14,12 @@ import { SettingsScreens } from '../types';
 
 import { ALL_FOLDER_ID } from '../config';
 import { selectCanShareFolder } from '../global/selectors';
+import { type MaybeAccessor, read } from '../util/accessors';
 import { MEMO_EMPTY_ARRAY } from '../util/memo';
 import { renderTextWithEntities } from '../components/common/helpers/renderTextWithEntities';
 import useAppLayout from './useAppLayout';
 import { useFolderManagerForUnreadChatsByFolder, useFolderManagerForUnreadCounters } from './useFolderManager';
 import useLang from './useLang';
-import useLastCallback from './useLastCallback';
 
 type FolderNameOptions = {
   text: string;
@@ -29,32 +28,34 @@ type FolderNameOptions = {
   emojiSize?: number;
 };
 
+// Deviation: the reactive parameters are `MaybeAccessor`s (a hook runs once); `isReadOnly` selects the shape of the
+// parameters and stays a plain value.
 type Params = {
-  sidebarMode: boolean;
-  orderedFolderIds?: number[];
-  chatFoldersById: Record<number, ApiChatFolder>;
-  maxFolders: number;
-  noEmoticons?: boolean;
+  sidebarMode: MaybeAccessor<boolean>;
+  orderedFolderIds?: MaybeAccessor<number[] | undefined>;
+  chatFoldersById: MaybeAccessor<Record<number, ApiChatFolder>>;
+  maxFolders: MaybeAccessor<number>;
+  noEmoticons?: MaybeAccessor<boolean | undefined>;
 } & (
   | {
       isReadOnly?: false;
-      maxChatLists: number;
-      folderInvitesById: Record<number, ApiChatlistExportedInvite[]>;
-      maxFolderInvites: number;
+      maxChatLists: MaybeAccessor<number>;
+      folderInvitesById: MaybeAccessor<Record<number, ApiChatlistExportedInvite[]>>;
+      maxFolderInvites: MaybeAccessor<number>;
     }
   | {
       isReadOnly: true;
     }
 );
 
-// TODO(codemod): useFolderTabs: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 const useFolderTabs = (params: Params) => {
-  const { sidebarMode, orderedFolderIds, chatFoldersById, maxFolders, noEmoticons, isReadOnly } = params;
+  const { isReadOnly } = params;
 
   const { maxChatLists, folderInvitesById, maxFolderInvites } = !isReadOnly ? params : {};
 
   const lang = useLang();
   const { isMobile } = useAppLayout();
+  const global = useGlobal();
 
   const {
     openShareChatFolderModal,
@@ -66,10 +67,13 @@ const useFolderTabs = (params: Params) => {
     setSharedSettingOption,
   } = getActions();
 
-  const allChatsFolder: ApiChatFolder = createMemo(() => {
+  const allChatsFolder = createMemo<ApiChatFolder>(() => {
     return {
       id: ALL_FOLDER_ID,
-      title: { text: orderedFolderIds?.[0] === ALL_FOLDER_ID ? lang('FilterAllChatsShort') : lang('FilterAllChats') },
+      title: {
+        text:
+          read(params.orderedFolderIds)?.[0] === ALL_FOLDER_ID ? lang('FilterAllChatsShort') : lang('FilterAllChats'),
+      },
       includedChatIds: MEMO_EMPTY_ARRAY,
       excludedChatIds: MEMO_EMPTY_ARRAY,
       emoticon: '💬',
@@ -77,11 +81,14 @@ const useFolderTabs = (params: Params) => {
   });
 
   const displayedFolders = createMemo(() => {
+    const orderedFolderIds = read(params.orderedFolderIds);
+    const chatFoldersById = read(params.chatFoldersById);
+
     return orderedFolderIds
       ? orderedFolderIds
           .map((id) => {
             if (id === ALL_FOLDER_ID) {
-              return allChatsFolder;
+              return allChatsFolder();
             }
 
             return chatFoldersById[id] || {};
@@ -92,7 +99,7 @@ const useFolderTabs = (params: Params) => {
 
   const folderUnreadChatsCountersById = useFolderManagerForUnreadChatsByFolder();
   const handleReadAllChats = (folderId: number) => {
-    const unreadChatIds = folderUnreadChatsCountersById[folderId];
+    const unreadChatIds = folderUnreadChatsCountersById()[folderId];
     if (!unreadChatIds?.length) return;
 
     unreadChatIds.forEach((chatId) => {
@@ -102,15 +109,22 @@ const useFolderTabs = (params: Params) => {
 
   const folderCountersById = useFolderManagerForUnreadCounters();
   const folderTabs = createMemo(() => {
-    if (!displayedFolders() || !displayedFolders().length) {
+    const folders = displayedFolders();
+    if (!folders || !folders.length) {
       return undefined;
     }
 
-    return displayedFolders().map((folder, i) => {
+    const maxFolders = read(params.maxFolders);
+    const sidebarMode = read(params.sidebarMode);
+    const noEmoticons = read(params.noEmoticons);
+    const unreadChatsByFolderId = folderUnreadChatsCountersById();
+    const countersById = folderCountersById();
+    const isMobile2 = isMobile();
+
+    return folders.map((folder, i) => {
       const { id, title } = folder;
       const isBlocked = id !== ALL_FOLDER_ID && i > maxFolders - 1;
-      // TODO(codemod): getGlobal() in a memo / JSX is a one-time read: use useGlobal() (store contract §12.4)
-      const canShareFolder = selectCanShareFolder(getGlobal(), id);
+      const canShareFolder = trackGlobal(() => selectCanShareFolder(global, id));
       const contextActions: MenuItemContextAction[] = [];
 
       if (!isReadOnly) {
@@ -119,11 +133,11 @@ const useFolderTabs = (params: Params) => {
             title: lang('FilterShare'),
             icon: 'link',
             handler: () => {
-              const chatListCount = Object.values(chatFoldersById).reduce(
+              const chatListCount = Object.values(read(params.chatFoldersById)).reduce(
                 (acc, el) => acc + (el.isChatList ? 1 : 0),
                 0,
               );
-              if (chatListCount >= maxChatLists! && !folder.isChatList) {
+              if (chatListCount >= read(maxChatLists!) && !folder.isChatList) {
                 openLimitReachedModal({
                   limit: 'chatlistJoined',
                 });
@@ -131,7 +145,7 @@ const useFolderTabs = (params: Params) => {
               }
 
               // Greater amount can be after premium downgrade
-              if (folderInvitesById![id]?.length >= maxFolderInvites!) {
+              if (read(folderInvitesById!)[id]?.length >= read(maxFolderInvites!)) {
                 openLimitReachedModal({
                   limit: 'chatlistInvites',
                 });
@@ -154,7 +168,7 @@ const useFolderTabs = (params: Params) => {
             },
           });
 
-          if (folderUnreadChatsCountersById[id]?.length) {
+          if (unreadChatsByFolderId[id]?.length) {
             contextActions.push({
               title: lang('ChatListMarkAllAsRead'),
               icon: 'readchats',
@@ -170,7 +184,7 @@ const useFolderTabs = (params: Params) => {
             },
           });
 
-          if (folderUnreadChatsCountersById[id]?.length) {
+          if (unreadChatsByFolderId[id]?.length) {
             contextActions.push({
               title: lang('ChatListMarkAllAsRead'),
               icon: 'readchats',
@@ -188,7 +202,7 @@ const useFolderTabs = (params: Params) => {
           });
         }
 
-        if (!isMobile) {
+        if (!isMobile2) {
           contextActions.push({
             isSeparator: true,
           });
@@ -231,13 +245,15 @@ const useFolderTabs = (params: Params) => {
         }
       }
 
-      const folderName: JSX.Element[] | string = renderTextWithEntities(folderNameOptions);
+      // Deviation: a function, so that every place that renders the title (TabList renders each tab twice) creates its
+      // own nodes: a JSX node can sit in one place only.
+      const folderName = () => renderTextWithEntities(folderNameOptions);
 
       return {
         id,
         title: folderName,
-        badgeCount: folderCountersById[id]?.chatsCount,
-        isBadgeActive: Boolean(folderCountersById[id]?.notificationsCount),
+        badgeCount: countersById[id]?.chatsCount,
+        isBadgeActive: Boolean(countersById[id]?.notificationsCount),
         isBlocked,
         contextActions: contextActions.length ? contextActions : undefined,
         emoticon: noEmoticons ? undefined : folderIcon,

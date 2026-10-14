@@ -2,8 +2,8 @@ import { createMemo } from 'frameact';
 
 import type { GlobalState } from '../global/types';
 import type { LangFn } from '../util/localization';
-import { type MaybeAccessor, read } from '../util/accessors';
 
+import { type MaybeAccessor, read } from '../util/accessors';
 import useBrowserOnline from './window/useBrowserOnline';
 
 export enum ConnectionStatus {

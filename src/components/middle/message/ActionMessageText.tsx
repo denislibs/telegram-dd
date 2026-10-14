@@ -1,9 +1,9 @@
 import { createMemo } from 'frameact';
 import type { JSX } from 'frameact/jsx-runtime';
 import { getActions, useGlobal, withGlobal } from '../../../global';
-import type { GlobalState } from '../../../global/types';
 
 import type { ApiChat, ApiMessage, ApiPeer } from '../../../api/types';
+import type { GlobalState } from '../../../global/types';
 
 import {
   GENERAL_TOPIC_ID,

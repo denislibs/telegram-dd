@@ -1,12 +1,12 @@
-import { createMeasureEffect, createMemo, createMutationEffect, requestForcedReflow, requestMutation } from 'frameact';
+import { createEffect, createMeasureEffect, frameMutation, requestForcedReflow, requestMutation } from 'frameact';
 import { For } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
-import { depsOf } from '../../util/effectDeps';
 
 import type { MenuItemContextAction } from './ListItem';
 
 import { MouseButton } from '../../util/browser/windowEnvironment';
 import buildClassName from '../../util/buildClassName';
+import { depsOf } from '../../util/effectDeps';
 import forceReflow from '../../util/forceReflow';
 import renderText from '../common/helpers/renderText';
 
@@ -43,7 +43,8 @@ const classNames = {
 const Tab = (props: OwnProps) => {
   let tabRef!: HTMLDivElement;
 
-  createMutationEffect(
+  // Written in the mutate phase after the refs are assigned (createMutationEffect applies before them).
+  createEffect(
     depsOf(() => [props.isActive, props.previousActiveTab] as const),
     ([isActive2, previousActiveTab2]) => {
       // Set initial active state
@@ -51,6 +52,7 @@ const Tab = (props: OwnProps) => {
         tabRef.classList.add(classNames.active);
       }
     },
+    frameMutation,
   );
 
   createMeasureEffect(
@@ -60,7 +62,7 @@ const Tab = (props: OwnProps) => {
         return;
       }
 
-      const tabEl = tabRef!;
+      const tabEl = tabRef;
       const prevTabEl = tabEl.parentElement!.children[previousActiveTab2];
       if (!prevTabEl) {
         // The number of tabs in the parent component has decreased. It is necessary to add the active tab class name.
@@ -99,47 +101,43 @@ const Tab = (props: OwnProps) => {
     },
   );
 
-  const contextMenuHandlersResult = createMemo(() =>
-    useContextMenuHandlers(
-      () => tabRef,
-      () => !props.contextActions,
-    ),
+  const {
+    contextMenuAnchor,
+    handleContextMenu,
+    handleBeforeContextMenu,
+    handleContextMenuClose,
+    handleContextMenuHide,
+    isContextMenuOpen,
+  } = useContextMenuHandlers(
+    () => tabRef,
+    () => !props.contextActions,
   );
-  const contextMenuAnchor = () => contextMenuHandlersResult().contextMenuAnchor;
-  const handleContextMenu = () => contextMenuHandlersResult().handleContextMenu;
-  const handleBeforeContextMenu = () => contextMenuHandlersResult().handleBeforeContextMenu;
-  const handleContextMenuClose = () => contextMenuHandlersResult().handleContextMenuClose;
-  const handleContextMenuHide = () => contextMenuHandlersResult().handleContextMenuHide;
-  const isContextMenuOpen = () => contextMenuHandlersResult().isContextMenuOpen;
 
-  const fastClickResult = createMemo(() =>
-    useFastClick((e: React.MouseEvent<HTMLDivElement>) => {
-      if (props.contextActions && (e.button === MouseButton.Secondary || !props.onClick)) {
-        handleBeforeContextMenu()(e);
-      }
+  const { handleClick, handleMouseDown } = useFastClick((e: React.MouseEvent<HTMLDivElement>) => {
+    if (props.contextActions && (e.button === MouseButton.Secondary || !props.onClick)) {
+      handleBeforeContextMenu(e);
+    }
 
-      if (e.type === 'mousedown' && e.button !== MouseButton.Main) {
-        return;
-      }
+    if (e.type === 'mousedown' && e.button !== MouseButton.Main) {
+      return;
+    }
 
-      props.onClick?.(props.clickArg!);
-    }),
-  );
-  const handleClick = () => fastClickResult().handleClick;
-  const handleMouseDown = () => fastClickResult().handleMouseDown;
+    props.onClick?.(props.clickArg!);
+  });
 
   const getTriggerElement = () => tabRef;
   const getRootElement = () =>
-    props.contextRootElementSelector ? tabRef!.closest(props.contextRootElementSelector) : document.body;
-  const getMenuElement = () => document.querySelector('#portals')!.querySelector('.Tab-context-menu .bubble');
+    props.contextRootElementSelector ? tabRef.closest<HTMLElement>(props.contextRootElementSelector) : document.body;
+  const getMenuElement = () =>
+    document.querySelector('#portals')!.querySelector<HTMLElement>('.Tab-context-menu .bubble');
   const getLayout = () => ({ withPortal: true });
 
   return (
     <div
       class={buildClassName('Tab', props.onClick && 'Tab--interactive', props.className)}
-      onClick={handleClick()}
-      onMouseDown={handleMouseDown()}
-      onContextMenu={handleContextMenu()}
+      onClick={handleClick}
+      onMouseDown={handleMouseDown}
+      onContextMenu={handleContextMenu}
       ref={tabRef}
     >
       {props.icon}
@@ -162,8 +160,8 @@ const Tab = (props: OwnProps) => {
           getLayout={getLayout}
           className="Tab-context-menu"
           autoClose
-          onClose={handleContextMenuClose()}
-          onCloseAnimationEnd={handleContextMenuHide()}
+          onClose={handleContextMenuClose}
+          onCloseAnimationEnd={handleContextMenuHide}
           withPortal
         >
           <For each={props.contextActions}>

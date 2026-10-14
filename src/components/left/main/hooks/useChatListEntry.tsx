@@ -1,6 +1,5 @@
-import { createMemo, createMutationEffect, requestMutation } from 'frameact';
+import { type Accessor, createEffect, createMemo, frameMutation, requestMutation } from 'frameact';
 import { getActions } from '../../../../global';
-import { depsOf } from '../../../../util/effectDeps';
 
 import type {
   ApiChat,
@@ -11,6 +10,7 @@ import type {
   ApiTypingStatus,
   StatefulMediaContent,
 } from '../../../../api/types';
+import type { ObserveFn } from '../../../../hooks/useIntersectionObserver';
 import type { CommunityMember } from './useCommunityMembers';
 
 import { CHAT_HEIGHT_PX } from '../../../../config';
@@ -24,6 +24,7 @@ import {
 import { getMessageSenderName } from '../../../../global/helpers/peers';
 import { waitStartingTransitionsEnd } from '../../../../util/animations/waitTransitionEnd';
 import buildClassName from '../../../../util/buildClassName';
+import { depsOf } from '../../../../util/effectDeps';
 import { isUserId } from '../../../../util/entities/ids';
 import renderText from '../../../common/helpers/renderText';
 import { renderTextWithEntities } from '../../../common/helpers/renderTextWithEntities';
@@ -54,30 +55,7 @@ function getLatestTypingStatusTimestamp(typingStatusByPeerId?: Record<string, Ap
   return timestamps.length ? Math.max(...timestamps) : undefined;
 }
 
-// TODO(codemod): useChatListEntry: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function useChatListEntry({
-  chat,
-  topicIds,
-  lastMessage,
-  communityMembers,
-  statefulMediaContent,
-  chatId,
-  typingStatusByPeerId,
-  draft,
-  lastMessageTopic,
-  lastMessageSender,
-  observeIntersection,
-  animationType,
-  orderDiff,
-  shiftDiff,
-  withInterfaceAnimations,
-  isTopic,
-  isSavedDialog,
-  isPreview,
-  hasTags,
-  shouldForceNonForumView,
-  onReorderAnimationEnd,
-}: {
+type Params = {
   chat?: ApiChat;
   topicIds?: number[];
   lastMessage?: ApiMessage;
@@ -100,14 +78,24 @@ export default function useChatListEntry({
   withInterfaceAnimations?: boolean;
   shouldForceNonForumView?: boolean;
   onReorderAnimationEnd?: NoneToVoidFunction;
-}) {
+};
+
+// Deviation: a frameact hook runs once, so every parameter is an accessor (`() => props.x`; `isTopic` may be left out)
+// and the hook returns the render function of tt (its JSX binds the accessors, so it needs no re-render), a callback
+// `ref` for the row element and `element` (the row element, for hooks that take a ref accessor).
+export default function useChatListEntry(
+  params: { [K in keyof Omit<Params, 'isTopic'>]-?: Accessor<Params[K]> } & { isTopic?: Accessor<boolean | undefined> },
+) {
   const { openChat } = getActions();
 
   const lang = useLang();
-  let ref!: HTMLDivElement;
+  let ref: HTMLDivElement | undefined;
+
+  const p = params;
+  const isTopic = () => p.isTopic?.();
 
   const communityItems = createMemo(() =>
-    communityMembers?.map(({ id, title, peer, isUnread }) => ({
+    p.communityMembers()?.map(({ id, title, peer, isUnread }) => ({
       key: id,
       title,
       isUnread,
@@ -125,123 +113,169 @@ export default function useChatListEntry({
     return true;
   };
 
-  const storyData = lastMessage?.content.storyData;
-  const shouldTryLoadingStory = statefulMediaContent && !statefulMediaContent.story;
+  const storyData = () => p.lastMessage()?.content.storyData;
+  const shouldTryLoadingStory = () => p.statefulMediaContent() && !p.statefulMediaContent()!.story;
 
-  useEnsureStory(shouldTryLoadingStory ? storyData?.peerId : undefined, storyData?.id, statefulMediaContent?.story);
+  useEnsureStory(
+    () => (shouldTryLoadingStory() ? storyData()?.peerId : undefined),
+    () => storyData()?.id,
+    () => p.statefulMediaContent()?.story,
+  );
 
-  const mediaContent = statefulMediaContent?.story || lastMessage;
-  const mediaHasPreview = mediaContent && !getMessageSticker(mediaContent);
+  const mediaContent = createMemo(() => p.statefulMediaContent()?.story || p.lastMessage());
+  const mediaHasPreview = createMemo(() => Boolean(mediaContent() && !getMessageSticker(mediaContent()!)));
 
   const thumbDataUri = useThumbnail(mediaContent);
 
-  const mediaThumbnail = mediaHasPreview ? thumbDataUri : undefined;
+  const mediaThumbnail = () => (mediaHasPreview() ? thumbDataUri() : undefined);
   const mediaHash = useMessageMediaHash(mediaContent, 'micro');
-  const mediaBlobUrl = useMedia(mediaHasPreview ? mediaHash : undefined);
-  const isRoundVideo = Boolean(lastMessage && getMessageRoundVideo(lastMessage));
+  const mediaBlobUrl = useMedia(() => (mediaHasPreview() ? mediaHash() : undefined));
+  const isRoundVideo = createMemo(() => Boolean(p.lastMessage() && getMessageRoundVideo(p.lastMessage()!)));
 
-  const renderLastMessageOrTyping = () => {
+  // What `renderLastMessageOrTyping` shows; the memo only changes when the kind of the content does
+  const lastMessageKind = createMemo(() => {
+    const lastMessage = p.lastMessage();
+    const typingStatusByPeerId = p.typingStatusByPeerId();
     const latestTypingStatusTimestamp = getLatestTypingStatusTimestamp(typingStatusByPeerId);
 
     if (
-      !isSavedDialog &&
-      !isPreview &&
+      !p.isSavedDialog() &&
+      !p.isPreview() &&
       typingStatusByPeerId &&
       lastMessage &&
       latestTypingStatusTimestamp &&
       latestTypingStatusTimestamp > lastMessage.date
     ) {
-      return <TypingStatus typingStatusByPeerId={typingStatusByPeerId} isPrivate={isUserId(chatId)} />;
+      return 'typing';
     }
 
-    const isDraftReplyToTopic = draft && draft.replyInfo?.replyToMsgId === lastMessageTopic?.id;
+    const draft = p.draft();
+    const isDraftReplyToTopic = draft && draft.replyInfo?.replyToMsgId === p.lastMessageTopic()?.id;
     const isEmptyLocalReply = draft?.replyInfo && !draft.text && draft.isLocal;
 
     const canDisplayDraft =
-      !chat?.isForum &&
-      !isSavedDialog &&
-      !isPreview &&
+      !p.chat()?.isForum &&
+      !p.isSavedDialog() &&
+      !p.isPreview() &&
       draft &&
       !isEmptyLocalReply &&
-      (!isTopic || !isDraftReplyToTopic);
+      (!isTopic() || !isDraftReplyToTopic);
 
     if (canDisplayDraft) {
-      return (
-        <p class="last-message" dir={lang.isRtl ? 'auto' : 'ltr'}>
-          <span class="draft">{lang('ChatDraftPrefix')}</span>
-          <span class="last-message-summary" dir="auto">
-            {renderTextWithEntities({
-              text: draft.text?.text || '',
-              entities: draft.text?.entities,
-              asPreview: true,
-              withTranslucentThumbs: true,
-            })}
-          </span>
-        </p>
-      );
+      return 'draft';
     }
 
     if (!lastMessage) {
       return undefined;
     }
 
-    // A community previews a message from its member chat
-    const senderChatId = chat && isChatCommunity(chat) ? lastMessage.chatId : chatId;
-    const senderName = lastMessageSender ? getMessageSenderName(lang, senderChatId, lastMessageSender) : undefined;
+    return 'message';
+  });
 
-    return (
-      <p class="last-message shared-canvas-container" dir={lang.isRtl ? 'auto' : 'ltr'}>
-        {senderName && (
-          <>
-            <span class="sender-name">{renderText(senderName)}</span>
-            <span class="colon">:</span>
-          </>
-        )}
-        {!isSavedDialog && lastMessage.forwardInfo && <Icon name="share-filled" className="chat-prefix-icon" />}
-        {lastMessage.replyInfo?.type === 'story' && <Icon name="story-reply" className="chat-prefix-icon" />}
-        <span class="last-message-summary" dir="auto">
-          {renderSummary(lastMessage, observeIntersection, mediaBlobUrl || mediaThumbnail, isRoundVideo)}
-        </span>
-      </p>
-    );
-  };
+  const senderName = createMemo(() => {
+    const lastMessage = p.lastMessage();
+    const lastMessageSender = p.lastMessageSender();
+    if (!lastMessage || !lastMessageSender) return undefined;
+
+    // A community previews a message from its member chat
+    const chat = p.chat();
+    const senderChatId = chat && isChatCommunity(chat) ? lastMessage.chatId : p.chatId();
+    return getMessageSenderName(lang, senderChatId, lastMessageSender);
+  });
+
+  // Returns bindings, not a snapshot: it is evaluated once per row and the content follows the accessors
+  const renderLastMessageOrTyping = () => (
+    <>
+      {lastMessageKind() === 'typing' && (
+        <TypingStatus typingStatusByPeerId={p.typingStatusByPeerId()!} isPrivate={isUserId(p.chatId())} />
+      )}
+      {lastMessageKind() === 'draft' && (
+        <p class="last-message" dir={lang.isRtl ? 'auto' : 'ltr'}>
+          <span class="draft">{lang('ChatDraftPrefix')}</span>
+          <span class="last-message-summary" dir="auto">
+            {renderTextWithEntities({
+              text: p.draft()?.text?.text || '',
+              entities: p.draft()?.text?.entities,
+              asPreview: true,
+              withTranslucentThumbs: true,
+            })}
+          </span>
+        </p>
+      )}
+      {lastMessageKind() === 'message' && (
+        <p class="last-message shared-canvas-container" dir={lang.isRtl ? 'auto' : 'ltr'}>
+          {senderName() && (
+            <>
+              <span class="sender-name">{renderText(senderName())}</span>
+              <span class="colon">:</span>
+            </>
+          )}
+          {!p.isSavedDialog() && p.lastMessage()?.forwardInfo && (
+            <Icon name="share-filled" className="chat-prefix-icon" />
+          )}
+          {p.lastMessage()?.replyInfo?.type === 'story' && <Icon name="story-reply" className="chat-prefix-icon" />}
+          <span class="last-message-summary" dir="auto">
+            {renderSummary(
+              () => p.lastMessage()!,
+              p.observeIntersection,
+              () => mediaBlobUrl() || mediaThumbnail(),
+              isRoundVideo,
+            )}
+          </span>
+        </p>
+      )}
+    </>
+  );
+
+  const isCommunity = createMemo(() => Boolean(p.chat() && isChatCommunity(p.chat()!)));
+  const shouldRenderAsForum = createMemo(() =>
+    Boolean(p.chat()?.isForum && !isTopic() && !p.shouldForceNonForumView()),
+  );
 
   function renderSubtitle() {
-    if (chat && isChatCommunity(chat)) {
-      return (
-        <ChatGroupedLastMessage
-          items={communityItems()}
-          hasTags={hasTags}
-          renderLastMessage={renderLastMessageOrTyping}
-          onMainItemClick={handleCommunityMemberClick}
-        />
-      );
-    }
-
-    const shouldRenderAsForum = chat?.isForum && !isTopic && !shouldForceNonForumView;
-    if (shouldRenderAsForum) {
-      return (
-        <ChatForumLastMessage
-          chat={chat}
-          renderLastMessage={renderLastMessageOrTyping}
-          observeIntersection={observeIntersection}
-          topicIds={topicIds}
-          hasTags={hasTags}
-        />
-      );
-    }
-
-    return renderLastMessageOrTyping();
+    return (
+      <>
+        {isCommunity() ? (
+          <ChatGroupedLastMessage
+            items={communityItems()}
+            hasTags={p.hasTags()}
+            renderLastMessage={renderLastMessageOrTyping}
+            onMainItemClick={handleCommunityMemberClick}
+          />
+        ) : shouldRenderAsForum() ? (
+          <ChatForumLastMessage
+            chat={p.chat()!}
+            renderLastMessage={renderLastMessageOrTyping}
+            observeIntersection={p.observeIntersection()}
+            topicIds={p.topicIds()}
+            hasTags={p.hasTags()}
+          />
+        ) : (
+          renderLastMessageOrTyping()
+        )}
+      </>
+    );
   }
 
   // Sets animation excess values when `orderDiff` changes and then resets excess values to animate
-  createMutationEffect(
-    depsOf(() => [withInterfaceAnimations, orderDiff, shiftDiff, animationType, onReorderAnimationEnd]),
-    () => {
+  // Deviation: a frame effect in the mutate phase instead of `createMutationEffect`, which applies before the row's
+  // `ref` is assigned; the first apply comes with the first mutate phase after the row is created.
+  createEffect(
+    depsOf(
+      () =>
+        [
+          p.withInterfaceAnimations(),
+          p.orderDiff(),
+          p.shiftDiff(),
+          p.animationType(),
+          p.onReorderAnimationEnd(),
+        ] as const,
+    ),
+    ([withInterfaceAnimations, orderDiff, shiftDiff, animationType, onReorderAnimationEnd]) => {
       const element = ref;
 
       if (!withInterfaceAnimations || !element) {
-        return;
+        return undefined;
       }
 
       let isCancelled = false;
@@ -300,48 +334,61 @@ export default function useChatListEntry({
       }
 
       if (animationType === ChatAnimationTypes.None) {
-        return;
+        return undefined;
       }
 
       return () => {
         isCancelled = true;
       };
     },
+    frameMutation,
   );
 
   return {
     renderSubtitle,
-    // TODO(codemod): "ref" was a ref object passed as a value: pass an accessor (() => ref) or a callback ref
-    ref,
+    ref: (element: HTMLDivElement) => {
+      ref = element;
+    },
+    element: () => ref,
   };
 }
 
-function renderSummary(message: ApiMessage, observeIntersection?: ObserveFn, blobUrl?: string, isRoundVideo?: boolean) {
-  const messageSummary = (
+function renderSummary(
+  message: Accessor<ApiMessage>,
+  observeIntersection: Accessor<ObserveFn | undefined>,
+  blobUrl: Accessor<string | undefined>,
+  isRoundVideo: Accessor<boolean>,
+) {
+  const messageSummary = () => (
     <MessageSummary
-      message={message}
-      noEmoji={Boolean(blobUrl)}
-      observeIntersectionForLoading={observeIntersection}
+      message={message()}
+      noEmoji={Boolean(blobUrl())}
+      observeIntersectionForLoading={observeIntersection()}
       inChatList
     />
   );
-
-  if (!blobUrl) {
-    return messageSummary;
-  }
-
-  const isSpoiler = getMessageIsSpoiler(message);
+  const hasBlobUrl = createMemo(() => Boolean(blobUrl()));
 
   return (
-    <span class="media-preview">
-      <img
-        src={blobUrl}
-        alt=""
-        class={buildClassName('media-preview--image', isRoundVideo && 'round', isSpoiler && 'media-preview-spoiler')}
-        draggable={false}
-      />
-      {getMessageVideo(message) && <Icon name="play" />}
-      {messageSummary}
-    </span>
+    <>
+      {hasBlobUrl() ? (
+        <span class="media-preview">
+          <img
+            src={blobUrl()}
+            alt=""
+            class={buildClassName(
+              'media-preview--image',
+              isRoundVideo() && 'round',
+              getMessageIsSpoiler(message()) && 'media-preview-spoiler',
+            )}
+            draggable={false}
+          />
+          {getMessageVideo(message()) && <Icon name="play" />}
+          {messageSummary()}
+        </span>
+      ) : (
+        messageSummary()
+      )}
+    </>
   );
 }

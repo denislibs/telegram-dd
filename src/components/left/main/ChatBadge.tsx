@@ -68,9 +68,8 @@ const ChatBadge = (props: OwnProps) => {
     return selectTopicsInfo(global, props.chat.id);
   };
   const topicsInfo = useShallowSelector(topicsInfoSelector);
-  const source2 = createMemo(() => topicsInfo() || {});
-  const listedTopicIds = () => source2().listedTopicIds;
-  const topicsById = () => source2().topicsById;
+  const listedTopicIds = () => topicsInfo()?.listedTopicIds;
+  const topicsById = () => topicsInfo()?.topicsById;
 
   const topicsReadStateSelector = (global: GlobalState) => {
     return buildCollectionByCallback(listedTopicIds() || [], (tId) => [
@@ -83,21 +82,21 @@ const ChatBadge = (props: OwnProps) => {
   const isTopicUnopened = createMemo(() => Boolean(!props.isPinned && props.topic && !props.wasTopicOpened));
   const isForum = createMemo(() => props.chat.isForum && !props.topic);
   const topicsWithUnreadIds = createMemo(() =>
-    isForum() && listedTopicIds() ? listedTopicIds().filter((tId) => topicsReadStates()[tId]?.unreadCount) : undefined,
+    isForum() && listedTopicIds() ? listedTopicIds()!.filter((tId) => topicsReadStates()[tId]?.unreadCount) : undefined,
   );
   const topicsWithUnreadMentionsIds = createMemo(() =>
     isForum() && listedTopicIds()
-      ? listedTopicIds().filter((tId) => topicsReadStates()[tId]?.unreadMentionsCount)
+      ? listedTopicIds()!.filter((tId) => topicsReadStates()[tId]?.unreadMentionsCount)
       : undefined,
   );
   const topicsWithUnreadPollVotesIds = createMemo(() =>
     isForum() && listedTopicIds()
-      ? listedTopicIds().filter((tId) => topicsReadStates()[tId]?.unreadPollVotesCount)
+      ? listedTopicIds()!.filter((tId) => topicsReadStates()[tId]?.unreadPollVotesCount)
       : undefined,
   );
   const topicsWithUnreadReactionsIds = createMemo(() =>
     isForum() && listedTopicIds()
-      ? listedTopicIds().filter((tId) => topicsReadStates()[tId]?.unreadReactionsCount)
+      ? listedTopicIds()!.filter((tId) => topicsReadStates()[tId]?.unreadReactionsCount)
       : undefined,
   );
   const topicsWithStatefulUnreadIds = createMemo(() => {
@@ -137,10 +136,10 @@ const ChatBadge = (props: OwnProps) => {
     }
 
     if (props.isMuted) {
-      return topicsWithStatefulUnreadIds().some((tId) => topicsById()?.[tId]?.notifySettings.mutedUntil === 0);
+      return topicsWithStatefulUnreadIds()!.some((tId) => topicsById()?.[tId]?.notifySettings.mutedUntil === 0);
     }
 
-    const isEveryUnreadMuted = topicsWithStatefulUnreadIds().every((tId) => {
+    const isEveryUnreadMuted = topicsWithStatefulUnreadIds()!.every((tId) => {
       const mutedUntil = topicsById()?.[tId]?.notifySettings.mutedUntil;
       return mutedUntil && mutedUntil > getServerTime();
     });

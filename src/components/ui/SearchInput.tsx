@@ -1,10 +1,10 @@
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import { createMeasureEffect } from 'frameact';
+import { createMeasureEffect, untrack } from 'frameact';
 import { mergeProps } from 'frameact/dom';
-import { depsOf } from '../../util/effectDeps';
 
 import { IS_TAURI } from '../../util/browser/globalEnvironment';
 import buildClassName from '../../util/buildClassName';
+import { depsOf } from '../../util/effectDeps';
 
 import useFlag from '../../hooks/useFlag';
 import useInputFocusOnOpen from '../../hooks/useInputFocusOnOpen';
@@ -58,7 +58,7 @@ const SearchInput = (rawProps: OwnProps) => {
   const props = mergeProps({ isLoading: false }, rawProps) as OwnProps & Required<Pick<OwnProps, 'isLoading'>>;
   let inputRef!: HTMLInputElement;
 
-  const [isInputFocused, markInputFocused, unmarkInputFocused] = useFlag(props.focused);
+  const [isInputFocused, markInputFocused, unmarkInputFocused] = useFlag(untrack(() => props.focused)); // the initial value only, as in tt
 
   useInputFocusOnOpen(
     () => inputRef,

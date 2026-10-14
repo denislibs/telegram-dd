@@ -1,7 +1,7 @@
 import { Show } from 'frameact/dom';
 
-import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 import type { ApiTopic } from '../../api/types';
+import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 
 import CustomEmoji from './CustomEmoji';
 import TopicDefaultIcon from './TopicDefaultIcon';

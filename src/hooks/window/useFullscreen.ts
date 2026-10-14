@@ -1,7 +1,6 @@
 import { type Accessor, createSignal, onMount } from 'frameact';
 
 import { type MaybeAccessor, read } from '../../util/accessors';
-
 import { IS_TAURI } from '../../util/browser/globalEnvironment';
 import { IS_IOS } from '../../util/browser/windowEnvironment';
 

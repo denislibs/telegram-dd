@@ -1,9 +1,9 @@
 import { createMeasureEffect, createMemo, createSignal, requestMeasure, requestMutation } from 'frameact';
 import { For } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
-import { depsOf } from '../../util/effectDeps';
 
 import buildClassName from '../../util/buildClassName';
+import { depsOf } from '../../util/effectDeps';
 import { REM } from './helpers/mediaDimensions';
 import renderText from './helpers/renderText';
 

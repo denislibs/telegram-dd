@@ -1,11 +1,11 @@
 import { createEffect, createMemo, createSignal, onMount, requestMeasure } from 'frameact';
 import { mergeProps } from 'frameact/dom';
 import { getGlobal } from '../../global';
-import { depsOf } from '../../util/effectDeps';
 
 import { selectCanAnimateInterface } from '../../global/selectors';
 import buildClassName from '../../util/buildClassName';
 import buildStyle from '../../util/buildStyle';
+import { depsOf } from '../../util/effectDeps';
 
 import useResizeObserver from '../../hooks/useResizeObserver';
 
@@ -135,7 +135,7 @@ const Marquee = (rawProps: OwnProps) => {
 
   createEffect(
     depsOf(() => [props.children, measureOverflow] as const),
-    ([children2]) => {
+    () => {
       if (restartAnimationFrameRef) {
         cancelAnimationFrame(restartAnimationFrameRef);
         restartAnimationFrameRef = undefined;
@@ -148,13 +148,16 @@ const Marquee = (rawProps: OwnProps) => {
     },
   );
 
-  onMount(() => {
-    if (!isOverflowing() || distance()) {
-      return;
-    }
+  createEffect(
+    depsOf(() => [distance(), isOverflowing()] as const),
+    ([distance2, isOverflowing2]) => {
+      if (!isOverflowing2 || distance2) {
+        return;
+      }
 
-    measureOverflow();
-  });
+      measureOverflow();
+    },
+  );
 
   onMount(() => {
     return () => {

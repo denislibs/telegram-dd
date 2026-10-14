@@ -1,9 +1,10 @@
 import { createEffect } from 'frameact';
 import { getActions } from '../global';
-import { type MaybeAccessor, read } from '../util/accessors';
-import { depsOf } from '../util/effectDeps';
 
 import type { ApiMessage } from '../api/types';
+
+import { type MaybeAccessor, read } from '../util/accessors';
+import { depsOf } from '../util/effectDeps';
 
 export default function useEnsureMessage(
   chatId: MaybeAccessor<string>,

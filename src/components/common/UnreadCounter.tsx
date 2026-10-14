@@ -1,9 +1,9 @@
 import { createEffect, createMemo } from 'frameact';
 import { Show } from 'frameact/dom';
-import { depsOf } from '../../util/effectDeps';
 
 import { ALL_FOLDER_ID } from '../../config';
 import { updateAppBadge } from '../../util/appBadge';
+import { depsOf } from '../../util/effectDeps';
 import { formatIntegerCompact } from '../../util/textFormat';
 
 import { useFolderManagerForUnreadCounters } from '../../hooks/useFolderManager';

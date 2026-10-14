@@ -25,7 +25,7 @@ const GiftEffectWrapper = (props: OwnProps) => {
       ref={(node) => props.ref?.(node)}
       class={buildClassName(styles.root, props.className)}
       style={buildStyle(props.glowColor && `--glow-color: ${props.glowColor}`, props.style)}
-      onClick={(e) => props.onClick?.(e)}
+      onClick={() => props.onClick?.()}
     >
       {props.withSparkles && (
         <Sparkles

@@ -1,10 +1,10 @@
 import { createEffect, createMemo } from 'frameact';
 import { getActions } from '../global';
-import { type MaybeAccessor, read } from '../util/accessors';
-import { depsOf } from '../util/effectDeps';
 
 import type { ApiTypeStory } from '../api/types';
 
+import { type MaybeAccessor, read } from '../util/accessors';
+import { depsOf } from '../util/effectDeps';
 import { throttle } from '../util/schedulers';
 
 const THROTTLE_THRESHOLD_MS = 200;

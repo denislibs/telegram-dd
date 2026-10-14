@@ -1,6 +1,5 @@
-import { createEffect, createMemo } from 'frameact';
-import { getActions, getGlobal } from '../../../global';
-import { depsOf } from '../../../util/effectDeps';
+import { createMemo, onCleanup } from 'frameact';
+import { getActions, useGlobal } from '../../../global';
 
 import type { GlobalState } from '../../../global/types';
 import type { CustomPeer } from '../../../types';
@@ -53,55 +52,61 @@ const Archive = (props: OwnProps) => {
 
   let ref!: HTMLDivElement;
 
+  const global = useGlobal();
   const animationLevel = useSelector(selectAnimationLevel);
+  // The initial value only (tt: `useRef(initial)`).
   let shouldAnimateRef = animationLevel() !== ANIMATION_LEVEL_MIN;
   const lang = useLang();
 
-  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
-  createEffect(
-    depsOf(() => [props.animationType, animationLevel()] as const),
-    ([animationType2, animationLevel2]) => {
-      if (animationLevel2 === ANIMATION_LEVEL_MIN) {
-        shouldAnimateRef = false;
-        return undefined;
-      }
+  // `useSyncEffect`: runs when the animation type or level changes, before the class below is computed; the timers
+  // and the transition listener are its cleanup. It returns the flag so that a change notifies the class binding.
+  const syncShouldAnimate = createMemo(() => {
+    const animationType = props.animationType;
 
-      if (animationType2 !== ChatAnimationTypes.None) {
-        shouldAnimateRef = true;
-        return undefined;
-      }
+    if (animationLevel() === ANIMATION_LEVEL_MIN) {
+      shouldAnimateRef = false;
+      return shouldAnimateRef;
+    }
 
-      // Keep animation alive slightly longer to avoid jumps
-      const timeout = setTimeout(() => {
-        shouldAnimateRef = false;
-      }, ANIMATION_RESET_DELAY);
+    if (animationType !== ChatAnimationTypes.None) {
+      shouldAnimateRef = true;
+      return shouldAnimateRef;
+    }
 
-      const element = ref;
-      if (element) {
-        waitForTransitionEnd(
-          element,
-          () => {
-            shouldAnimateRef = false;
-          },
-          'transform',
-        );
-      }
+    // Keep animation alive slightly longer to avoid jumps
+    const timeout = setTimeout(() => {
+      shouldAnimateRef = false;
+    }, ANIMATION_RESET_DELAY);
+    onCleanup(() => clearTimeout(timeout));
 
-      return () => clearTimeout(timeout);
-    },
-  );
+    const element = ref;
+    if (element) {
+      waitForTransitionEnd(
+        element,
+        () => {
+          shouldAnimateRef = false;
+        },
+        'transform',
+      );
+    }
+
+    return shouldAnimateRef;
+  });
+  // As in tt, the flag is read when the class is computed (it is a ref there: a timer changes it silently).
+  const getShouldAnimate = () => {
+    syncShouldAnimate();
+    return shouldAnimateRef;
+  };
 
   const orderedChatIds = useFolderManagerForOrderedIds(ARCHIVED_FOLDER_ID);
   const unreadCounters = useFolderManagerForUnreadCounters();
-  const archiveUnreadCount = unreadCounters[ARCHIVED_FOLDER_ID]?.chatsCount;
+  const archiveUnreadCount = createMemo(() => unreadCounters()[ARCHIVED_FOLDER_ID]?.chatsCount);
 
   const previewItems = createMemo(() => {
-    if (!orderedChatIds?.length) return lang('Loading');
+    const orderedChatIds2 = orderedChatIds();
+    if (!orderedChatIds2?.length) return lang('Loading');
 
-    // TODO(codemod): getGlobal() in a memo / JSX is a one-time read: use useGlobal() (store contract §12.4)
-    const global = getGlobal();
-
-    return orderedChatIds.slice(0, PREVIEW_SLICE).map((chatId, i, arr) => {
+    return orderedChatIds2.slice(0, PREVIEW_SLICE).map((chatId, i, arr) => {
       const isLast = i === arr.length - 1;
       const chat = selectChat(global, chatId);
       const readState = selectThreadReadState(global, chatId, MAIN_THREAD_ID);
@@ -113,7 +118,7 @@ const Archive = (props: OwnProps) => {
 
       return (
         <>
-          <span class={buildClassName(styles.chat, archiveUnreadCount && readState?.unreadCount && styles.unread)}>
+          <span class={buildClassName(styles.chat, archiveUnreadCount() && readState?.unreadCount && styles.unread)}>
             {renderText(title)}
           </span>
           {isLast ? '' : ', '}
@@ -166,7 +171,7 @@ const Archive = (props: OwnProps) => {
           </div>
           <Badge
             className={styles.unreadCount}
-            text={archiveUnreadCount ? formatIntegerCompact(lang, archiveUnreadCount) : undefined}
+            text={archiveUnreadCount() ? formatIntegerCompact(lang, archiveUnreadCount()!) : undefined}
           />
         </div>
       </div>
@@ -191,7 +196,7 @@ const Archive = (props: OwnProps) => {
             <div class={buildClassName('status', styles.chatsPreview)}>{previewItems()}</div>
             <Badge
               className={styles.unreadCount}
-              text={archiveUnreadCount ? formatIntegerCompact(lang, archiveUnreadCount) : undefined}
+              text={archiveUnreadCount() ? formatIntegerCompact(lang, archiveUnreadCount()!) : undefined}
             />
           </div>
         </div>
@@ -201,14 +206,16 @@ const Archive = (props: OwnProps) => {
 
   return (
     <ListItem
-      ref={ref}
+      ref={(el) => {
+        ref = el;
+      }}
       onClick={props.onClick}
       onFileHoverOpen={props.onClick}
       className={buildClassName(
         styles.root,
         props.archiveSettings.isMinimized && styles.minimized,
         props.isFoldersSidebarShown && props.archiveSettings.isMinimized && styles.noMarginTop,
-        !shouldAnimateRef && styles.noAnimation,
+        !getShouldAnimate() && styles.noAnimation,
         props.offsetTop && styles.noMarginTop,
         'chat-item-clickable',
         'chat-item-archive',

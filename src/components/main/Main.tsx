@@ -6,17 +6,15 @@ import {
   createMemo,
   createSignal,
   onFullyIdle,
-  onMount,
   requestNextMutation,
 } from 'frameact';
 import { getActions, getGlobal, withGlobal } from '../../global';
-import { depsOf } from '../../util/effectDeps';
-import { createShowTransition } from '../../lib/kit';
 
 import type { ApiStarGiftAuctionState } from '../../api/types';
 import type { GlobalState } from '../../global/types';
 
 import { BASE_EMOJI_KEYWORD_LANG, DEBUG, FOLDERS_POSITION_LEFT, INACTIVE_MARKER } from '../../config';
+import { createShowTransition } from '../../lib/kit';
 import {
   selectAreFoldersPresent,
   selectCanAnimateInterface,
@@ -37,6 +35,7 @@ import { IS_ANDROID, IS_MAC_OS } from '../../util/browser/windowEnvironment';
 import buildClassName from '../../util/buildClassName';
 import { waitForTransitionEnd } from '../../util/cssAnimationEndListeners';
 import { processDeepLink } from '../../util/deeplink';
+import { depsOf } from '../../util/effectDeps';
 import { Bundles, loadBundle } from '../../util/moduleLoader';
 import { parseInitialLocationHash, parseLocationHash } from '../../util/routing';
 import updateIcon from '../../util/updateIcon';
@@ -180,7 +179,6 @@ const Main = (ownProps: OwnProps) => {
     () => (props.isSynced ? EDITOR_BUNDLE_LOADING_DELAY_MS : undefined),
   );
 
-  let containerRef!: HTMLDivElement;
   let leftColumnRef!: HTMLDivElement;
 
   const { isDesktop } = useAppLayout();
@@ -568,7 +566,6 @@ const Main = (ownProps: OwnProps) => {
   return (
     <Wallpaper
       containerRef={(el) => {
-        containerRef = el;
         leftColumnTransition.ref(el);
         rightColumnTransition.ref(el);
       }}

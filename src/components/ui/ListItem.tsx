@@ -51,7 +51,7 @@ interface OwnProps {
   buttonClassName?: string;
   className?: string;
   style?: string;
-  children: React.ReactNode;
+  children: JSX.Element;
   disabled?: boolean;
   allowDisabledClick?: boolean;
   ripple?: boolean;
@@ -81,7 +81,7 @@ const ListItem = (props: OwnProps) => {
   let containerRef!: HTMLDivElement;
   let menuRef!: HTMLDivElement;
   const [isTouched, markIsTouched, unmarkIsTouched] = useFlag();
-  const handleFileHoverOpen = useFileHoverOpenHandler(props.onFileHoverOpen);
+  const handleFileHoverOpen = useFileHoverOpenHandler(() => props.onFileHoverOpen?.());
 
   const {
     isContextMenuOpen,
@@ -96,7 +96,7 @@ const ListItem = (props: OwnProps) => {
   );
 
   const getTriggerElement = () => containerRef;
-  const getRootElement = () => containerRef!.closest('.custom-scroll');
+  const getRootElement = () => containerRef.closest<HTMLElement>('.custom-scroll');
   const getMenuElement = () => menuRef;
   const getLayout = () => ({ withPortal: props.withPortalForMenu });
 
@@ -139,8 +139,9 @@ const ListItem = (props: OwnProps) => {
         (props.disabled && !props.allowDisabledClick) ||
         e.button !== 0 ||
         (!props.onSecondaryIconClick && !props.contextActions)
-      )
+      ) {
         return;
+      }
 
       e.stopPropagation();
 
@@ -192,28 +193,36 @@ const ListItem = (props: OwnProps) => {
 
   return (
     <div
-      ref={containerRef}
+      ref={(el) => {
+        containerRef = el;
+        props.ref?.(el);
+      }}
       class={fullClassName()}
       dir={lang.isRtl ? 'rtl' : undefined}
       style={props.style}
       onMouseDown={(e) => props.onMouseDown?.(e)}
       data-file-hover-open={props.onFileHoverOpen ? true : undefined}
-      onFileHoverOpen={props.onFileHoverOpen ? handleFileHoverOpen : undefined}
+      on:filehoveropen={handleFileHoverOpen}
     >
-      {/* TODO(codemod): <ButtonElementTag> is a reactive value now: render it with <Dynamic component={ButtonElementTag()}> */}
-      <ButtonElementTag
-        className={buildClassName('ListItem-button', isTouched() && 'active', props.buttonClassName)}
+      <Dynamic
+        component={props.href ? 'a' : 'div'}
+        class={buildClassName('ListItem-button', isTouched() && 'active', props.buttonClassName)}
         role={!props.isStatic && !props.href ? 'button' : undefined}
         href={props.href}
-        // @ts-expect-error TS requires specific types for refs
-        ref={props.buttonRef}
+        ref={(el: HTMLDivElement | HTMLAnchorElement) => props.buttonRef?.(el)}
         rel={props.href ? 'noopener noreferrer' : undefined}
-        tabIndex={!props.isStatic ? 0 : undefined}
-        onClick={!props.inactive && IS_TOUCH_ENV ? handleClick : handleClickEvent}
-        onMouseDown={handleMouseDown}
-        onContextMenu={
-          props.onContextMenu || (!props.inactive && props.contextActions ? handleContextMenu() : undefined)
+        tabindex={!props.isStatic ? 0 : undefined}
+        onClick={(e: React.MouseEvent<HTMLElement>) =>
+          (!props.inactive && IS_TOUCH_ENV ? handleClick : handleClickEvent)(e)
         }
+        onMouseDown={handleMouseDown}
+        onContextMenu={(e: React.MouseEvent<HTMLElement>) => {
+          if (props.onContextMenu) {
+            props.onContextMenu(e);
+          } else if (!props.inactive && props.contextActions) {
+            handleContextMenu(e);
+          }
+        }}
         aria-disabled={props.disabled || undefined}
       >
         {!props.disabled && !props.inactive && props.ripple && <RippleEffect />}
@@ -237,16 +246,18 @@ const ListItem = (props: OwnProps) => {
             round
             color="translucent"
             size="smaller"
-            onClick={handleSecondaryIconClick()}
-            onMouseDown={handleSecondaryIconMouseDown()}
+            onClick={handleSecondaryIconClick}
+            onMouseDown={handleSecondaryIconMouseDown}
             iconName={props.secondaryIcon}
           />
         )}
         {props.rightElement}
-      </ButtonElementTag>
+      </Dynamic>
       {props.contextActions && contextMenuAnchor() !== undefined && (
         <Menu
-          ref={menuRef}
+          ref={(el) => {
+            menuRef = el;
+          }}
           isOpen={isContextMenuOpen()}
           anchor={contextMenuAnchor()}
           getTriggerElement={getTriggerElement}
@@ -255,8 +266,8 @@ const ListItem = (props: OwnProps) => {
           getLayout={getLayout}
           className="ListItem-context-menu with-menu-transitions"
           autoClose
-          onClose={handleContextMenuClose()}
-          onCloseAnimationEnd={handleContextMenuHide()}
+          onClose={handleContextMenuClose}
+          onCloseAnimationEnd={handleContextMenuHide}
           withPortal={props.withPortalForMenu}
           bubbleClassName={props.menuBubbleClassName}
         >

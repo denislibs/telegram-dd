@@ -1,7 +1,6 @@
 import { createEffect, createMemo, createSignal, onMount } from 'frameact';
 import { Show } from 'frameact/dom';
 import { getActions, withGlobal } from '../../global';
-import { depsOf } from '../../util/effectDeps';
 
 import type { GlobalState } from '../../global/types';
 import type { FoldersActions } from '../../hooks/reducers/useFoldersReducer';
@@ -20,6 +19,7 @@ import {
 import { selectSharedSettings } from '../../global/selectors/sharedState';
 import { IS_APP, IS_FIREFOX, IS_MAC_OS, IS_TOUCH_ENV } from '../../util/browser/windowEnvironment';
 import captureEscKeyListener from '../../util/captureEscKeyListener';
+import { depsOf } from '../../util/effectDeps';
 import { resolveTransitionName } from '../../util/resolveTransitionName';
 import { captureControlledSwipe } from '../../util/swipeController';
 import { isComposerHasSelection } from '../middle/composer/helpers/selection';

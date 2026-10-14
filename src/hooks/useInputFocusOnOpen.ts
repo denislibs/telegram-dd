@@ -1,8 +1,8 @@
 import { createEffect, requestMeasure } from 'frameact';
-import { type MaybeAccessor, read } from '../util/accessors';
-import { depsOf } from '../util/effectDeps';
 
+import { type MaybeAccessor, read } from '../util/accessors';
 import { IS_TOUCH_ENV } from '../util/browser/windowEnvironment';
+import { depsOf } from '../util/effectDeps';
 import focusNoScroll from '../util/focusNoScroll';
 
 const MODAL_HIDE_DELAY_MS = 300;

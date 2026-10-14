@@ -1,8 +1,8 @@
 import { splitProps } from 'frameact/dom';
-import { createMediaTransition } from '../../lib/kit';
 
 import type { OwnProps as AnimatedIconProps } from './AnimatedIcon';
 
+import { createMediaTransition } from '../../lib/kit';
 import buildClassName from '../../util/buildClassName';
 import buildStyle from '../../util/buildStyle';
 

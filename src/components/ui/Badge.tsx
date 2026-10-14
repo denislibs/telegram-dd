@@ -1,3 +1,5 @@
+import { currentOrPrev } from 'frameact';
+
 import buildClassName from '../../util/buildClassName';
 
 import AnimatedCounter from '../common/AnimatedCounter';
@@ -12,6 +14,10 @@ type OwnProps = {
 };
 
 const Badge = (props: OwnProps) => {
+  // Deviation: tt's ShowTransition keeps the previous children while it closes; here the children are live, so the
+  // text is kept until the badge has faded out.
+  const text = currentOrPrev(() => props.text || undefined);
+
   return (
     <ShowTransition
       className={buildClassName(
@@ -21,7 +27,7 @@ const Badge = (props: OwnProps) => {
       )}
       isOpen={Boolean(props.text)}
     >
-      {props.text && <AnimatedCounter text={props.text} />}
+      {text() && <AnimatedCounter text={text()!} />}
     </ShowTransition>
   );
 };

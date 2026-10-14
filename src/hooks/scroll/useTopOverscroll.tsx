@@ -1,9 +1,8 @@
 import { createEffect, createSignal, requestMutation } from 'frameact';
-import { depsOf } from '../../util/effectDeps';
 
+import { type MaybeAccessor, read } from '../../util/accessors';
+import { depsOf } from '../../util/effectDeps';
 import stopEvent from '../../util/stopEvent';
-import useEffectWithPrevDeps from '../useEffectWithPrevDeps';
-import useLastCallback from '../useLastCallback';
 
 type State = 'overscroll' | 'animating' | 'normal';
 
@@ -31,7 +30,8 @@ const initialActiveScrollContext: ActiveScrollContext = {
   timeout: undefined,
 };
 
-// TODO(codemod): useTopOverscroll: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: a hook runs once. `containerRef`, `isOverscrolled` and `isDisabled` are `MaybeAccessor`s; the container is
+// read when an effect applies or an event fires (not tracked), and `onOverscroll` / `onReset` are read once.
 export default function useTopOverscroll({
   containerRef,
   isOverscrolled,
@@ -39,11 +39,11 @@ export default function useTopOverscroll({
   onOverscroll,
   onReset,
 }: {
-  containerRef: (el: HTMLDivElement) => void;
-  isOverscrolled?: boolean;
+  containerRef: MaybeAccessor<HTMLDivElement | undefined>;
+  isOverscrolled?: MaybeAccessor<boolean | undefined>;
   onOverscroll?: AnyToVoidFunction;
   onReset?: AnyToVoidFunction;
-  isDisabled?: boolean;
+  isDisabled?: MaybeAccessor<boolean | undefined>;
 }) {
   const [getState, setState] = createSignal<State>('normal');
   let activeScrollRef: ActiveScrollContext = { ...initialActiveScrollContext };
@@ -72,14 +72,14 @@ export default function useTopOverscroll({
   };
 
   const handleWheel = (e: WheelEvent) => {
-    const container = containerRef.current;
+    const container = read(containerRef);
     if (!container || e.defaultPrevented) {
       return;
     }
 
     const { deltaY } = e;
     const { scrollTop } = container;
-    const state = getState()();
+    const state = getState();
 
     const activeScroll = activeScrollRef;
     const lastAverageDelta = activeScroll.lastAverageDelta;
@@ -134,11 +134,11 @@ export default function useTopOverscroll({
   };
 
   const handleTouchStart = (e: TouchEvent) => {
-    const container = containerRef.current;
+    const container = read(containerRef);
     if (!container || e.touches.length !== 1) return;
 
     const { scrollTop } = container;
-    const state = getState()();
+    const state = getState();
 
     // Register touch start position when at top or in overscroll state
     if (scrollTop === 0 || state === 'overscroll') {
@@ -147,12 +147,12 @@ export default function useTopOverscroll({
   };
 
   const handleTouchMove = (e: TouchEvent) => {
-    const container = containerRef.current;
+    const container = read(containerRef);
     const startY = touchStartYRef;
     if (!container || startY === undefined || e.touches.length !== 1) return;
 
     const { scrollTop } = container;
-    const state = getState()();
+    const state = getState();
     const currentY = e.touches[0].clientY;
     const deltaY = currentY - startY;
 
@@ -180,10 +180,10 @@ export default function useTopOverscroll({
   };
 
   createEffect(
-    depsOf(() => [containerRef, isDisabled]),
-    () => {
-      const container = containerRef.current;
-      if (isDisabled || !container) return;
+    () => read(isDisabled),
+    (isDisabled2) => {
+      const container = read(containerRef);
+      if (isDisabled2 || !container) return undefined;
       requestMutation(() => {
         container.classList.add(OVERSCROLL_CONTAINER_CLASS);
       });
@@ -197,12 +197,12 @@ export default function useTopOverscroll({
   );
 
   createEffect(
-    depsOf(() => [containerRef, isDisabled, getState()] as const),
-    ([, , getState2]) => {
-      const container = containerRef.current;
-      if (isDisabled || !container) return;
+    depsOf(() => [read(isDisabled), getState()] as const),
+    ([isDisabled2, state2]) => {
+      const container = read(containerRef);
+      if (isDisabled2 || !container) return undefined;
       requestMutation(() => {
-        container.classList.toggle(NO_TOUCH_CONTAINER_CLASS, getState2() !== 'normal');
+        container.classList.toggle(NO_TOUCH_CONTAINER_CLASS, state2 !== 'normal');
       });
 
       return () => {
@@ -213,31 +213,28 @@ export default function useTopOverscroll({
     },
   );
 
+  // tt: `useEffectWithPrevDeps` over `[isOverscrolled, getState, setState]`; `apply` gets the previous value.
   createEffect(
-    depsOf(() => [isOverscrolled, getState(), setState]),
-    (_deps, prev) => {
-      const [prevIsOverscrolled] = prev ?? [];
-      if (prevIsOverscrolled === isOverscrolled) return;
-      if (!isOverscrolled && getState()() === 'animating') {
+    () => read(isOverscrolled),
+    (isOverscrolled2, prevIsOverscrolled) => {
+      if (prevIsOverscrolled === isOverscrolled2) return;
+      if (!isOverscrolled2 && getState() === 'animating') {
         return; // We're animating towards this state
       }
 
-      setState(isOverscrolled ? 'overscroll' : 'normal');
+      setState(isOverscrolled2 ? 'overscroll' : 'normal');
     },
   );
 
   createEffect(
-    depsOf(
-      () =>
-        [containerRef, handleWheel, handleTouchStart, handleTouchMove, handleTouchEnd, getState(), isDisabled] as const,
-    ),
-    ([, , , , , getState2]) => {
-      const container = containerRef.current;
-      if (isDisabled || !container) {
+    depsOf(() => [read(isDisabled), getState()] as const),
+    ([isDisabled2, state2]) => {
+      const container = read(containerRef);
+      if (isDisabled2 || !container) {
         return undefined;
       }
 
-      container.addEventListener('wheel', handleWheel, { passive: getState2() === 'normal' });
+      container.addEventListener('wheel', handleWheel, { passive: state2 === 'normal' });
       container.addEventListener('touchstart', handleTouchStart, { passive: true });
       container.addEventListener('touchmove', handleTouchMove, { passive: true });
       container.addEventListener('touchend', handleTouchEnd, { passive: true });

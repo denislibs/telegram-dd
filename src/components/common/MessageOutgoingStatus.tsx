@@ -20,15 +20,18 @@ const MessageOutgoingStatus = (props: OwnProps) => {
   return (
     <div class="MessageOutgoingStatus">
       <Transition name="reveal" activeKey={Keys[props.status]}>
-        {(slide) =>
-          slide.key === Keys.failed ? (
+        {(slide) => {
+          // Each slide renders the status of its own key, so the outgoing slide keeps showing the previous one
+          const status = Keys[slide.key] as ApiMessageOutgoingStatus;
+
+          return status === 'failed' ? (
             <div class="MessageOutgoingStatus--failed">
               <Icon name="message-failed" />
             </div>
           ) : (
-            <Icon name={slide.key === Keys.succeeded ? 'check' : `message-${Keys[slide.key] as 'pending' | 'read'}`} />
-          )
-        }
+            <Icon name={status === 'succeeded' ? 'check' : `message-${status}`} />
+          );
+        }}
       </Transition>
     </div>
   );

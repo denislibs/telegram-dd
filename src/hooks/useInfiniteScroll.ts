@@ -1,25 +1,27 @@
-import { createMemo, previous } from 'frameact';
+import { type Accessor, createMemo, createSignal } from 'frameact';
 
 import { LoadMoreDirection } from '../types';
 
+import { type MaybeAccessor, read } from '../util/accessors';
 import { areSortedArraysEqual } from '../util/iteratees';
-import useForceUpdate from './useForceUpdate';
-import useLastCallback from './useLastCallback';
-import usePreviousDeprecated from './usePreviousDeprecated';
 
 type GetMore = (args: { direction: LoadMoreDirection; noScroll?: boolean }) => void;
 type LoadMoreBackwards = (args: { offsetId?: string | number }) => void;
 
 const DEFAULT_LIST_SLICE = 30;
 
-// TODO(codemod): useInfiniteScroll: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: ported in place as an app primitive. The reactive arguments are `MaybeAccessor`s and the hook returns
+// `[viewportIds, getMore, offset]` as accessors. tt computed the slice during render; here a memo does, with tt's
+// refs as plain `let`s mutated inside it (the teact `previous*` values are `let`s updated at the end of each run, and
+// `forceUpdate` is a version signal that `getMore` bumps). The memo is lazy: `getMore` reads it first.
+// `getMore` is always defined (tt returned `[listIds]` without it while disabled); it does nothing then.
 const useInfiniteScroll = <ListId extends string | number>(
   loadMoreBackwards?: LoadMoreBackwards,
-  listIds?: ListId[],
-  isDisabled = false,
-  listSlice = DEFAULT_LIST_SLICE,
-  initialOffsetId?: ListId,
-): [ListId[]?, GetMore?, number?] => {
+  listIds?: MaybeAccessor<ListId[] | undefined>,
+  isDisabled: MaybeAccessor<boolean> = false,
+  listSlice: MaybeAccessor<number> = DEFAULT_LIST_SLICE,
+  initialOffsetId?: MaybeAccessor<ListId | undefined>,
+): [Accessor<ListId[] | undefined>, GetMore, Accessor<number | undefined>] => {
   let requestParamsRef:
     | {
         direction?: LoadMoreDirection;
@@ -28,63 +30,80 @@ const useInfiniteScroll = <ListId extends string | number>(
     | undefined;
 
   let currentStateRef: { viewportIds: ListId[]; isOnTop: boolean; offset: number } | undefined;
-  if (!currentStateRef && listIds && !isDisabled) {
-    const { newViewportIds, newIsOnTop, fromOffset } = getViewportSlice(
-      listIds,
-      LoadMoreDirection.Forwards,
-      listSlice,
-      initialOffsetId !== undefined && listIds.includes(initialOffsetId) ? initialOffsetId : listIds[0],
-    );
-    currentStateRef = { viewportIds: newViewportIds, isOnTop: newIsOnTop, offset: fromOffset };
-  }
 
-  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
-  const forceUpdate = useForceUpdate();
+  let prevListIds: ListId[] | undefined;
+  let prevIsDisabled: boolean | undefined;
+  let prevInitialOffsetId: ListId | undefined;
 
-  if (isDisabled) {
-    requestParamsRef = {};
-  }
+  const [version, setVersion] = createSignal(0);
 
-  const prevListIds = previous(() => listIds);
-  const prevIsDisabled = previous(() => isDisabled);
-  const prevInitialOffsetId = previous(() => initialOffsetId);
-  const hasInitialOffsetChanged = createMemo(() => initialOffsetId !== prevInitialOffsetId());
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (
-    listIds &&
-    !isDisabled &&
-    (listIds !== prevListIds() || isDisabled !== prevIsDisabled() || hasInitialOffsetChanged())
-  ) {
-    const { viewportIds, isOnTop } = currentStateRef || {};
-    const shouldAnchorToInitial =
-      initialOffsetId !== undefined &&
-      listIds.includes(initialOffsetId) &&
-      (hasInitialOffsetChanged() || isDisabled !== prevIsDisabled());
-    const currentMiddleId = viewportIds && !isOnTop ? viewportIds[Math.round(viewportIds.length / 2)] : undefined;
-    const defaultOffsetId = shouldAnchorToInitial
-      ? initialOffsetId
-      : currentMiddleId && listIds.includes(currentMiddleId)
-        ? currentMiddleId
-        : listIds[0];
-    const { offsetId = defaultOffsetId, direction = LoadMoreDirection.Forwards } = shouldAnchorToInitial
-      ? {}
-      : requestParamsRef || {};
-    const currentSlice =
-      viewportIds && direction === LoadMoreDirection.Forwards && offsetId === listIds[0]
-        ? Math.max(listSlice, viewportIds.length)
-        : listSlice;
-    const { newViewportIds, newIsOnTop, fromOffset } = getViewportSlice(listIds, direction, currentSlice, offsetId);
+  const state = createMemo(() => {
+    version(); // `forceUpdate`
+    const listIds2 = read(listIds);
+    const isDisabled2 = read(isDisabled);
+    const listSlice2 = read(listSlice);
+    const initialOffsetId2 = read(initialOffsetId);
 
-    requestParamsRef = {};
-
-    if (!viewportIds || !areSortedArraysEqual(viewportIds, newViewportIds)) {
+    if (!currentStateRef && listIds2 && !isDisabled2) {
+      const { newViewportIds, newIsOnTop, fromOffset } = getViewportSlice(
+        listIds2,
+        LoadMoreDirection.Forwards,
+        listSlice2,
+        initialOffsetId2 !== undefined && listIds2.includes(initialOffsetId2) ? initialOffsetId2 : listIds2[0],
+      );
       currentStateRef = { viewportIds: newViewportIds, isOnTop: newIsOnTop, offset: fromOffset };
     }
-  } else if (!listIds) {
-    currentStateRef = undefined;
-  }
+
+    if (isDisabled2) {
+      requestParamsRef = {};
+    }
+
+    const hasInitialOffsetChanged = initialOffsetId2 !== prevInitialOffsetId;
+    if (
+      listIds2 &&
+      !isDisabled2 &&
+      (listIds2 !== prevListIds || isDisabled2 !== prevIsDisabled || hasInitialOffsetChanged)
+    ) {
+      const { viewportIds, isOnTop } = currentStateRef || {};
+      const shouldAnchorToInitial =
+        initialOffsetId2 !== undefined &&
+        listIds2.includes(initialOffsetId2) &&
+        (hasInitialOffsetChanged || isDisabled2 !== prevIsDisabled);
+      const currentMiddleId = viewportIds && !isOnTop ? viewportIds[Math.round(viewportIds.length / 2)] : undefined;
+      const defaultOffsetId = shouldAnchorToInitial
+        ? initialOffsetId2
+        : currentMiddleId && listIds2.includes(currentMiddleId)
+          ? currentMiddleId
+          : listIds2[0];
+      const { offsetId = defaultOffsetId, direction = LoadMoreDirection.Forwards } = shouldAnchorToInitial
+        ? {}
+        : requestParamsRef || {};
+      const currentSlice =
+        viewportIds && direction === LoadMoreDirection.Forwards && offsetId === listIds2[0]
+          ? Math.max(listSlice2, viewportIds.length)
+          : listSlice2;
+      const { newViewportIds, newIsOnTop, fromOffset } = getViewportSlice(listIds2, direction, currentSlice, offsetId);
+
+      requestParamsRef = {};
+
+      if (!viewportIds || !areSortedArraysEqual(viewportIds, newViewportIds)) {
+        currentStateRef = { viewportIds: newViewportIds, isOnTop: newIsOnTop, offset: fromOffset };
+      }
+    } else if (!listIds2) {
+      currentStateRef = undefined;
+    }
+
+    prevListIds = listIds2;
+    prevIsDisabled = isDisabled2;
+    prevInitialOffsetId = initialOffsetId2;
+
+    return currentStateRef;
+  });
 
   const getMore: GetMore = ({ direction, noScroll }: { direction: LoadMoreDirection; noScroll?: boolean }) => {
+    if (read(isDisabled)) return;
+
+    state(); // bring `currentStateRef` up to date with the arguments
     const { viewportIds } = currentStateRef || {};
 
     const offsetId = viewportIds
@@ -93,7 +112,8 @@ const useInfiniteScroll = <ListId extends string | number>(
         : viewportIds[0]
       : undefined;
 
-    if (!listIds) {
+    const listIds2 = read(listIds);
+    if (!listIds2) {
       if (loadMoreBackwards) {
         loadMoreBackwards({ offsetId });
       }
@@ -102,15 +122,15 @@ const useInfiniteScroll = <ListId extends string | number>(
     }
 
     const { newViewportIds, areSomeLocal, areAllLocal, newIsOnTop, fromOffset } = getViewportSlice(
-      listIds,
+      listIds2,
       direction,
-      listSlice,
+      read(listSlice),
       offsetId,
     );
 
     if (areSomeLocal && !(viewportIds && areSortedArraysEqual(viewportIds, newViewportIds))) {
       currentStateRef = { viewportIds: newViewportIds, isOnTop: newIsOnTop, offset: fromOffset };
-      forceUpdate();
+      setVersion((value) => value + 1);
     }
 
     if (!areAllLocal && loadMoreBackwards) {
@@ -122,7 +142,16 @@ const useInfiniteScroll = <ListId extends string | number>(
     }
   };
 
-  return isDisabled ? [listIds] : [currentStateRef?.viewportIds, getMore, currentStateRef?.offset];
+  const viewportIds = createMemo(() => {
+    const state2 = state();
+    return read(isDisabled) ? read(listIds) : state2?.viewportIds;
+  });
+  const offset = createMemo(() => {
+    const state2 = state();
+    return read(isDisabled) ? undefined : state2?.offset;
+  });
+
+  return [viewportIds, getMore, offset];
 };
 
 function getViewportSlice<ListId extends string | number>(

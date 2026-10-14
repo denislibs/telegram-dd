@@ -2,8 +2,8 @@ import { createMemo } from 'frameact';
 import { Show } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
 import { withGlobal } from '../../global';
-import type { GlobalState } from '../../global/types';
 
+import type { GlobalState } from '../../global/types';
 import type { IThemeSettings, ThemeKey } from '../../types';
 
 import { selectPerformanceSettingsValue, selectTheme, selectThemeValues } from '../../global/selectors';
