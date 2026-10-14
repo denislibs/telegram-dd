@@ -19,6 +19,7 @@ import { addMessages, deleteChatMessages, updateChatMessage, updateListedIds } f
 import { updateTabState } from '../reducers/tabs';
 import { replaceTabThreadParam } from '../reducers/threads';
 import { updateUser, updateUsers } from '../reducers/users';
+import { mulberry32 } from './prng';
 
 const tabId = getCurrentTabId();
 
@@ -68,12 +69,22 @@ describe('T1 property: random real reducers keep the store mirror equal to the c
   beforeEach(reset);
 
   it('the mirror equals the committed global after every step; earlier snapshots are never mutated', () => {
-    let seed = 20261014;
-    const rnd = (n: number) => {
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-      return seed % n;
-    };
+    const rnd = mulberry32(20261014);
     const chatIds = ['100', '101', '102', '103'];
+    // coverage: the test must keep exercising what it claims to (review I1: a degenerate PRNG once hid all of it)
+    const touchedChats = new Set<string>();
+    const touchedMessages = new Set<number>();
+    let sameLengthArrayReplacements = 0;
+    let deletions = 0;
+    const lists = (g: GlobalState) => {
+      const result: Record<string, readonly unknown[] | undefined> = { listIds: g.chats.listIds.active };
+      Object.entries(g.byTabId[tabId].tabThreads ?? {}).forEach(([chatKey, threads]) =>
+        Object.entries(threads).forEach(([thread, value]) => (result[`${chatKey}/${thread}`] = value.viewportIds)),
+      );
+      return result;
+    };
+    const messageCount = (g: GlobalState) =>
+      Object.values(g.messages.byChatId).reduce((sum, c) => sum + Object.keys(c.byId).length, 0);
     const userIds = ['1', '2', '3'];
     let counter = 0;
 
@@ -150,7 +161,19 @@ describe('T1 property: random real reducers keep the store mirror equal to the c
             next = updateUsers(global, { [userId]: user(userId, { lastName: `L${counter++}` }) });
         }
 
+        touchedChats.add(chatId);
+        touchedMessages.add(messageId);
+        const listsBefore = lists(global);
+        const messagesBefore = messageCount(global);
         setGlobal(next, { forceOutdated: true });
+        const listsAfter = lists(getGlobal());
+        Object.entries(listsAfter).forEach(([key, after]) => {
+          const before = listsBefore[key];
+          if (before && after && before !== after && before.length === after.length && json(before) !== json(after)) {
+            sameLengthArrayReplacements++;
+          }
+        });
+        if (messageCount(getGlobal()) < messagesBefore) deletions++;
 
         if (step % 30 === 0) {
           snapshots.push({ ref: committed(), text: json(committed()) });
@@ -164,5 +187,10 @@ describe('T1 property: random real reducers keep the store mirror equal to the c
       expect(Object.keys(getGlobal().messages.byChatId).length).toBeGreaterThan(0);
       expect(Object.keys(getGlobal().users.byId).length).toBeGreaterThan(0);
     }
+
+    expect(touchedChats.size).toBeGreaterThanOrEqual(3);
+    expect(touchedMessages.size).toBeGreaterThanOrEqual(4);
+    expect(sameLengthArrayReplacements).toBeGreaterThanOrEqual(1);
+    expect(deletions).toBeGreaterThanOrEqual(1);
   });
 });

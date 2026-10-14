@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { omit } from '../../util/iteratees';
 import { applyGlobal, copyContainer, isContainer, setDevChecks, type UntypedSetState } from './apply';
+import { mulberry32 } from './prng';
 
 type Message = { id: number; chatId: string; text: string; content?: { text: { text: string } } };
 type Chat = { id: string; title: string; unread: number; photo?: { small: string } };
@@ -413,12 +414,12 @@ describe('N1: a store-owned container copy never leaks into the committed global
 
 describe('M3 property: random nested tt-style updates keep the mirror equal to the committed global', () => {
   it('3000 steps over 30 globals, including type changes, id changes, explicit undefined and deletions', () => {
-    let seed = 7;
-    const rnd = (n: number) => {
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-      return seed % n;
-    };
+    const rnd = mulberry32(7);
     const ids = ['a', 'b', 'c', 'd'];
+    // coverage (review I1): every operation, every id and same-length array replacements are really exercised
+    const opCounts = new Array<number>(9).fill(0);
+    const usedIds = new Set<string>();
+    let sameLengthReplacements = 0;
     for (let round = 0; round < 30; round++) {
       const { mirror, setGlobal, getGlobal } = setup();
       const snapshots: string[] = [];
@@ -427,6 +428,8 @@ describe('M3 property: random nested tt-style updates keep the mirror equal to t
         const g = getGlobal();
         const id = ids[rnd(ids.length)];
         const op = rnd(9);
+        opCounts[op]++;
+        usedIds.add(id);
         let next: State;
         if (op === 0) {
           next = updateChat(g, id, { ...(g.chats.byId[id] ?? { id, title: id, unread: 0 }), unread: rnd(10) });
@@ -459,7 +462,16 @@ describe('M3 property: random nested tt-style updates keep the mirror equal to t
         } else {
           next = { ...g, chats: { ...g.chats, lastMessageIds: rnd(2) ? { all: { [id]: rnd(50) } } : undefined } };
         }
+        const listBefore = g.chats.listIds.active;
         setGlobal(next);
+        const listAfter = getGlobal().chats.listIds.active;
+        if (
+          listBefore !== listAfter &&
+          listBefore?.length === listAfter?.length &&
+          listBefore.join() !== listAfter.join()
+        ) {
+          sameLengthReplacements++;
+        }
         if (step % 25 === 0) {
           snapshots.push(JSON.stringify(getGlobal()));
           snapshotRefs.push(getGlobal());
@@ -469,5 +481,8 @@ describe('M3 property: random nested tt-style updates keep the mirror equal to t
       // earlier snapshots are untouched by later writes (tt value semantics)
       snapshotRefs.forEach((s, i) => expect(JSON.stringify(s)).toBe(snapshots[i]));
     }
+    opCounts.forEach((count) => expect(count).toBeGreaterThan(100));
+    expect(usedIds.size).toBe(ids.length);
+    expect(sameLengthReplacements).toBeGreaterThanOrEqual(1);
   });
 });
