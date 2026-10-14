@@ -15,6 +15,7 @@ import { getActions, getGlobal } from './global';
 import { DEBUG } from './config';
 import { installStrictViolationRecorder } from './dev/stricterdomRecorder';
 import { initGlobalOrDropCache } from './global/safeInit';
+import { installControlledInputListeners } from './lib/kit/controlledInputs';
 import { selectSharedSettings } from './global/selectors/sharedState';
 import { requestGlobal, subscribeToMultitabBroadcastChannel } from './util/browser/multitab';
 import { establishMultitabRole, subscribeToMasterChange } from './util/establishMultitabRole';
@@ -88,6 +89,7 @@ async function init() {
 
   requestMutation(() => {
     // TODO(port): updateWebmanifest(), betterView()
+    installControlledInputListeners();
     render(() => <App />, document.getElementById('root')!);
   });
 
