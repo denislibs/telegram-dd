@@ -284,6 +284,13 @@
         "typescript/prefer-promise-reject-errors": "off",
         "typescript/unbound-method": "off"
       }
+    },
+    {
+      // Node CLI scripts (the quality gates in scripts/gates) print their report with console.log.
+      "files": ["scripts/**"],
+      "rules": {
+        "no-console": "off"
+      }
     }
   ]
 }

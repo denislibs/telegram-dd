@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Script quality gates (docs/quality-gates.md, "Script gates"): `pnpm check` runs oxlint, prettier, tsc, the diff /
+  # tt-tests / license gates, the build and the bundle budgets; then the unit tests.
+  gates:
+    name: gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # gates:diff, gates:tests and gates:upstream compare with telegram-tt at the baseline recorded in NOTICE.md.
+      - name: Clone the telegram-tt reference at the base commit
+        run: pnpm gates:reference
+
+      - name: Check (lint, format, types, gates, build, bundle budgets)
+        run: pnpm check
+
+      - name: Test
+        run: pnpm test
+
+      # A report, never a blocker: which ported files changed in upstream telegram-tt since the base commit.
+      - name: Upstream drift (report)
+        continue-on-error: true
+        run: pnpm gates:upstream --remote

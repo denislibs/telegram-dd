@@ -1,0 +1,10 @@
+{
+  "files": {
+    "src/components/App.tsx": {
+      "reason": "Placeholder app shell (a frameact counter) until the real App is ported in the auth/chat-list milestones (porting guide 7.1); remove the entry then."
+    },
+    "src/index.tsx": {
+      "reason": "Entry point rewritten for frameact: render(), enableStrict(), no teact/fasterdom bootstrap, no TeactN init. Keep tt's early side-effect imports."
+    }
+  }
+}

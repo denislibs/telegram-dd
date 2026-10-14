@@ -1,0 +1,35 @@
+{
+  "allowed": {
+    "MIT": "Permissive; GPL-2.0 and GPL-3.0 compatible.",
+    "ISC": "Permissive (MIT-equivalent); GPL compatible.",
+    "BSD-2-Clause": "Permissive; GPL compatible.",
+    "BSD-3-Clause": "Permissive, with the no-endorsement clause; GPL compatible.",
+    "0BSD": "Public-domain-equivalent permissive license; GPL compatible.",
+    "Apache-2.0": "GPL-3.0 compatible (its patent terms are why it is not GPL-2.0 compatible; the app is GPL-3.0-or-later).",
+    "CC0-1.0": "Public-domain dedication; GPL compatible.",
+    "Unlicense": "Public-domain dedication; GPL compatible.",
+    "MPL-2.0": "Weak copyleft; section 3.3 allows combining with GPL code, the MPL files stay MPL.",
+    "LGPL-2.1-only": "Section 3 lets a recipient convert it to GPL-2.0-or-later, so it combines with GPL-3.0-or-later.",
+    "LGPL-2.1-or-later": "Combines with GPL-3.0-or-later.",
+    "LGPL-3.0-only": "Combines with GPL-3.0 (LGPL-3.0 is GPL-3.0 plus extra permissions).",
+    "LGPL-3.0-or-later": "Combines with GPL-3.0 (LGPL-3.0 is GPL-3.0 plus extra permissions).",
+    "GPL-2.0-or-later": "The 'or later' option lets the combined work be GPL-3.0.",
+    "GPL-3.0-only": "Same license as this app.",
+    "GPL-3.0-or-later": "Same license as this app.",
+    "Python-2.0": "Permissive, FSF-listed as GPL compatible.",
+    "BlueOak-1.0.0": "Permissive (MIT-like) with a patent grant; GPL-3.0 compatible.",
+    "CC-BY-4.0": "Attribution license for data and content only (for example caniuse-lite), not for code; keep the attribution in NOTICE.md / the build when such data ships.",
+    "Zlib": "Permissive; FSF-listed as GPL compatible.",
+    "MIT-0": "MIT without the attribution requirement; GPL compatible.",
+    "BSL-1.0": "Boost license, permissive; FSF-listed as GPL compatible.",
+    "Artistic-2.0": "FSF-listed as GPL compatible.",
+    "WTFPL": "FSF-listed as GPL compatible."
+  },
+  "notAllowedNotes": {
+    "GPL-2.0-only": "Not compatible with GPL-3.0-or-later (no 'or later' option).",
+    "AGPL-3.0": "Adds a network-use clause to the whole combined work; needs a deliberate exception.",
+    "CC-BY-SA-*, CC-BY-NC-*, CC-BY-ND-*": "Not GPL compatible (or not free).",
+    "SSPL-1.0, BUSL-*, Elastic-*, Commons-Clause": "Source-available, not free software.",
+    "UNLICENSED, proprietary, 'SEE LICENSE IN …', Unknown": "No grant we can verify."
+  }
+}

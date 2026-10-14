@@ -19,7 +19,9 @@ git submodule update --init      # first checkout: fetch the framework
 git clone --depth 1 https://github.com/Ajaxy/telegram-tt.git reference/telegram-tt   # first checkout: the reference
 pnpm install
 pnpm dev                         # Vite dev server on http://localhost:1234 (stricterdom on)
-pnpm check                       # oxlint + prettier --check + tsc + vite build
+pnpm check                       # oxlint + prettier --check + tsc + script gates + vite build + bundle budgets
+pnpm gates                       # all script gates: diff vs the reference, upstream drift, tt tests, size, licenses
+pnpm gates:reference             # clone the reference at the baseline commit (CI, fresh checkouts)
 pnpm format                      # prettier --write
 pnpm framework:update            # move the submodule to frameact's latest main
 ```
@@ -37,6 +39,10 @@ Toolchain: Vite 8, TypeScript 7 (native `tsc`), oxlint, prettier, pnpm 10, Node 
   (hooks → primitives table, props are getters — never destructure props, two-phase effects, phases, `<ManualFor>` for
   `teactFastList`, store model B instead of `withGlobal`). Framework API for app code:
   `src/vendor/frameact/docs/llms-full.md`.
+- **Quality gates**: `pnpm check` also runs the script gates ([`docs/quality-gates.md`](docs/quality-gates.md#script-gates)):
+  a ported file may not drift more than 40% (non-import lines) from its telegram-tt counterpart unless it is allowlisted
+  with a reason; tt's unit tests are copied with the code they test; bundle sizes stay within `scripts/gates/size-budget.json`;
+  production dependencies are GPL-3.0-or-later compatible and `NOTICE.md` lists every vendored `src/lib` entry.
 - **Frame phases**: layout reads only in measure / forced-reflow effects or event handlers, DOM writes only in mutate.
   The dev server runs with `enableStrict()`: a stricterdom violation in the console is a bug to fix, not to suppress.
 - **Animations**: use `frameact/kit` (`Transition`, `ShowTransition`, `InfiniteScroll`, `createScrollAnchor`) with tt's
