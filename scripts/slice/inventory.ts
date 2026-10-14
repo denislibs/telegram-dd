@@ -10,6 +10,7 @@
 // real port is still ahead), the teact/fasterdom internals (replaced by frameact), hooks that frameact has a primitive
 // for, packages, and the `--stop` files (another slice).
 import { parse } from '@babel/parser';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix, relative } from 'node:path';
 import { globSync } from 'tinyglobby';
@@ -75,7 +76,10 @@ const KIT_ADAPTERS = new Set([
   'src/components/ui/Portal.ts',
 ]);
 
-const args = parseArgs(process.argv.slice(2), ['root', 'stop', 'out']);
+const args = parseArgs(process.argv.slice(2), ['root', 'stop', 'out', 'base']);
+// `--base <rev>`: judge "already in src/" against that commit instead of the working tree (the report is made from
+// the tree before the slice was imported).
+const baseRev = args.values.get('base');
 const roots = collectMulti('--root');
 const stops = new Set(collectMulti('--stop'));
 const outFile = args.values.get('out');
@@ -243,6 +247,22 @@ const ourPackages = new Set<string>(
   }),
 );
 
+function readOurs(path: string): string | undefined {
+  if (baseRev) {
+    try {
+      return execFileSync('git', ['show', `${baseRev}:${path}`], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        maxBuffer: 64 * 1024 * 1024,
+      });
+    } catch {
+      return undefined;
+    }
+  }
+  return isFile(join(ROOT, path)) ? readFileSync(join(ROOT, path), 'utf8') : undefined;
+}
+
 function classify(path: string, source: string): { status: Status; descend: boolean; note: string } {
   const base = posix.basename(path).replace(/\.[^.]+$/, '');
   if (stops.has(path)) return { status: 'deferred (other slice)', descend: false, note: 'stops the walk' };
@@ -259,9 +279,9 @@ function classify(path: string, source: string): { status: Status; descend: bool
       note: 'framework primitive (porting guide §4.2); call sites change',
     };
   }
-  const ours = join(ROOT, path);
-  if (isFile(ours)) {
-    const stub = /FOUNDATION STUB/.test(readFileSync(ours, 'utf8').split('\n').slice(0, 12).join('\n'));
+  const ourSource = readOurs(path);
+  if (ourSource !== undefined) {
+    const stub = /FOUNDATION STUB/.test(ourSource.split('\n').slice(0, 12).join('\n'));
     if (stub) return { status: 'stub to replace', descend: true, note: 'FOUNDATION STUB in src/' };
     return { status: 'already ported', descend: false, note: '' };
   }
@@ -301,6 +321,10 @@ while (queue.length) {
   const specs: { spec: string; style: boolean }[] = [];
   if (/\.(?:tsx?|jsx?)$/.test(path)) {
     for (const spec of scriptDeps(path, source)) specs.push({ spec, style: false });
+    // Workers and wasm: `new URL('./x.worker.ts', import.meta.url)`.
+    for (const m of source.matchAll(/new URL\(\s*['"]([^'"]+)['"]\s*,\s*import\.meta\.url/g)) {
+      specs.push({ spec: m[1], style: false });
+    }
     // `*.async.tsx`: useModuleLoader(Bundles.Auth, 'AuthCode') -> src/bundles/auth.ts
     for (const m of /\.async\.tsx$/.test(path) ? source.matchAll(/Bundles\.(\w+)/g) : []) {
       const bundle = `src/bundles/${m[1][0].toLowerCase()}${m[1].slice(1)}.ts`;
