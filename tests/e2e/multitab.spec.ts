@@ -50,6 +50,10 @@ test('a chat written in tab A reaches tab B, and tab B does not echo it back', a
     )
     .toBe(true);
   const tabA = Object.keys(await tabsOf(pageA))[0];
+  // A is busy loading the main screen and its first sync right after it became the master: a second tab that boots in
+  // that window can win the election. The test is about the data flow, so tab B starts when A has settled.
+  await expect(pageA.locator('#LeftColumn .chat-list .ListItem').first()).toBeVisible();
+  await pageA.waitForTimeout(1500);
 
   // tab B boots next to it: it asks for the global (requestGlobal), A answers, B is not the master
   await pageB.goto('/');

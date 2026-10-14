@@ -5,13 +5,6 @@ import { openApp } from './authHelpers';
 
 import type { Page } from '@playwright/test';
 
-// The mocked client does not implement folders and the language pack: tt's own console noise, identical in tt.
-test.use({
-  strictOptions: {
-    ignoreConsole: [/Failed to fetch language/, /fetchChatFolders/, /findIndex/, /action "loadChatFolders" failed/],
-  },
-});
-
 type TestWindow = {
   getActions: () => { apiUpdate: (update: Record<string, unknown>) => void };
   getGlobal: () => Record<string, any>;
