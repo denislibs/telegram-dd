@@ -217,8 +217,9 @@ function taskAnalysis(events: TraceEvent[], pid: number, tid: number, startUs: n
     while (stack.length && stack[stack.length - 1].ts + stack[stack.length - 1].dur! <= event.ts) stack.pop();
     const parent = stack[stack.length - 1];
     selfOf.set(event, event.dur!);
-    if (parent)
+    if (parent) {
       selfOf.set(parent, (selfOf.get(parent) ?? 0) - Math.min(event.dur!, parent.ts + parent.dur! - event.ts));
+    }
     if (event.name === 'Layout' || event.name === 'UpdateLayoutTree') {
       const inScript = stack.some((outer) => categorize(outer.name) === 'script');
       if (event.name === 'Layout') {
