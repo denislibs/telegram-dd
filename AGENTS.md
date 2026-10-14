@@ -26,6 +26,7 @@ pnpm format                      # prettier --write
 pnpm test:e2e | test:a11y | test:perf | test:visual   # browser quality gates (docs/quality-gates.md); first: pnpm playwright:install
 pnpm framework:update            # move the submodule to frameact's latest main
 pnpm codemod <files|globs>       # teact → frameact rewrite of a tt component/hook (docs/codemod.md); --dry --report to preview
+pnpm bench:store                 # store compat-layer micro-benchmark (docs/store-architecture.md §4)
 ```
 
 Toolchain: Vite 8, TypeScript 7 (native `tsc`), oxlint, prettier, pnpm 10, Node >= 22.12.
@@ -33,7 +34,8 @@ Toolchain: Vite 8, TypeScript 7 (native `tsc`), oxlint, prettier, pnpm 10, Node 
 ## Porting rules
 
 - **App-level guide**: [`docs/porting-guide.md`](docs/porting-guide.md) (directory mapping, global state → store,
-  app-specific hooks, styles, workers, port order, per-file checklist, upstream tracking).
+  app-specific hooks, styles, workers, port order, per-file checklist, upstream tracking). The state layer's design,
+  measurements and codemod contract: [`docs/store-architecture.md`](docs/store-architecture.md).
 - **Port, don't rewrite.** Take components, styles (SCSS), animations, the custom GramJS (`src/lib/gramjs`), the API
   layer, utilities and dependencies from `reference/telegram-tt` and keep their structure and file names where it makes
   sense, so a diff against the reference stays readable. Change only what teact → frameact requires.
