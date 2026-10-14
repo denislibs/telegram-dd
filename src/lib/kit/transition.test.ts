@@ -608,3 +608,231 @@ it('nextKey: disposal disposes the pre-rendered slide', async () => {
   dispose();
   expect(new Set(gone)).toEqual(new Set([0, 1]));
 });
+
+// ---- slideOptimized / slideOptimizedRtl (tt `performSlideOptimized`) ----------
+
+function transitionEnd(el: Element) {
+  el.dispatchEvent(new Event('transitionend', { bubbles: true }));
+  vi.advanceTimersByTime(50);
+}
+
+const transformOf = (el: HTMLElement) => el.style.transform;
+
+it('slideOptimized: the active slide rests at translate3d(0, 0, 0) with no transition; a step moves inline transforms (no from/to/inactive classes), the `to` slide starts off screen', async () => {
+  const starts: string[] = [];
+  let slides: HTMLElement[] = [];
+  const { root, scope, setKey, log } = setup({
+    name: 'slideOptimized',
+    onStart: () => {
+      starts.push(slides.map(transformOf).join(' | ')); // the starting positions, before the forced reflow
+      log.push('start');
+    },
+  });
+  const log2 = log;
+  const t = root.firstElementChild as HTMLElement;
+  slides = slidesOf(t);
+  expect(classes(t)).toBe('Transition');
+  expect(slides.map(classes)).toEqual(['Transition_slide Transition_slide-active']);
+  expect(slides[0].style.transform).toBe('translate3d(0, 0, 0)');
+  expect(slides[0].style.transition).toBe('none');
+
+  setKey(1);
+  await frame();
+  slides = slidesOf(t);
+  const [s0, s1] = slides;
+  expect(classes(t)).toBe('Transition Transition-slideOptimized');
+  expect(scope.isAnimating.peek()).toBe(true);
+  expect(log2).toEqual(['start']);
+  // after the forced reflow of the same frame: the final positions with the stylesheet's transition
+  expect(classes(s0)).toBe('Transition_slide');
+  expect(transformOf(s0)).toBe('translate3d(-100%, 0, 0)');
+  expect(s0.style.transition).toBe('');
+  expect(classes(s1)).toBe('Transition_slide Transition_slide-active');
+  expect(transformOf(s1)).toBe('translate3d(0, 0, 0)');
+  expect(s1.style.transition).toBe('');
+  expect(t.textContent).toBe('0:from1:active');
+
+  s1.dispatchEvent(new Event('animationend', { bubbles: true })); // a keyframe end is not the end of this variant
+  vi.advanceTimersByTime(50);
+  await frame();
+  expect(scope.isAnimating.peek()).toBe(true);
+  transitionEnd(s0); // nor is the `from` slide's transition
+  await frame();
+  expect(scope.isAnimating.peek()).toBe(true);
+
+  transitionEnd(s1);
+  await frame();
+  expect(scope.isAnimating.peek()).toBe(false);
+  expect(classes(t)).toBe('Transition Transition-slideOptimized'); // the container keeps its class
+  expect(classes(s0)).toBe('Transition_slide');
+  expect(transformOf(s0)).toBe(''); // back to the stylesheet's scale(0)
+  expect(s0.style.transition).toBe('none');
+  expect(classes(s1)).toBe('Transition_slide Transition_slide-active');
+  expect(log2).toEqual(['start', 'stop']);
+  await frame();
+  expect(t.textContent).toBe('0:-1:active');
+});
+
+it('slideOptimized: the starting position of the `to` slide is +100% forwards and -100% backwards, the `from` slide leaves to the opposite side', async () => {
+  const starts: string[] = [];
+  let t!: HTMLElement;
+  const { root, setKey } = setup({
+    name: 'slideOptimized',
+    onStart: () => starts.push(slidesOf(t).map(transformOf).join(' | ')),
+  }, 1);
+  t = root.firstElementChild as HTMLElement;
+  setKey(2);
+  await frame();
+  expect(starts).toEqual(['translate3d(0, 0, 0) | translate3d(100%, 0, 0)']);
+  let [s1, s2] = slidesOf(t);
+  transitionEnd(s2);
+  await frame();
+  setKey(1);
+  await frame();
+  expect(starts[1]).toBe('translate3d(-100%, 0, 0) | translate3d(0, 0, 0)'); // keys 1, 2: `to` is slide 1
+  expect(classes(t)).toBe('Transition Transition-slideOptimizedBackwards');
+  [s1, s2] = slidesOf(t);
+  expect(transformOf(s2)).toBe('translate3d(100%, 0, 0)'); // backwards: `from` leaves to the right
+  expect(transformOf(s1)).toBe('translate3d(0, 0, 0)');
+});
+
+it('slideOptimizedRtl mirrors the direction (container class and positions)', async () => {
+  const starts: string[] = [];
+  let t!: HTMLElement;
+  const { root, setKey } = setup({
+    name: 'slideOptimizedRtl',
+    onStart: () => starts.push(slidesOf(t).map(transformOf).join(' | ')),
+  });
+  t = root.firstElementChild as HTMLElement;
+  setKey(1);
+  await frame();
+  expect(classes(t)).toBe('Transition Transition-slideOptimizedRtlBackwards'); // forwards by key = backwards in RTL
+  expect(starts).toEqual(['translate3d(0, 0, 0) | translate3d(-100%, 0, 0)']);
+  const [s0, s1] = slidesOf(t);
+  expect(transformOf(s0)).toBe('translate3d(100%, 0, 0)');
+  expect(transformOf(s1)).toBe('translate3d(0, 0, 0)');
+});
+
+it('slideOptimized without animations (disableAnimation): at once, the container class set, no heavy animation, no callbacks', async () => {
+  const { root, scope, setKey, log } = setup({ name: 'slideOptimized', disableAnimation: true });
+  const t = root.firstElementChild as HTMLElement;
+  setKey(1);
+  await frame();
+  const [s0, s1] = slidesOf(t);
+  expect(classes(t)).toBe('Transition Transition-slideOptimized');
+  expect(classes(s0)).toBe('Transition_slide');
+  expect(transformOf(s0)).toBe('');
+  expect(s0.style.transition).toBe('none');
+  expect(classes(s1)).toBe('Transition_slide Transition_slide-active');
+  expect(transformOf(s1)).toBe('translate3d(0, 0, 0)');
+  expect(s1.style.transition).toBe('none');
+  expect(scope.isAnimating.peek()).toBe(false);
+  expect(log).toEqual([]);
+});
+
+it('slideOptimized settles through the 1 s fallback when no transition runs; a step during a step supersedes it (stop, start)', async () => {
+  const { root, scope, setKey, log } = setup({ name: 'slideOptimized', isBlockingAnimation: true });
+  const t = root.firstElementChild as HTMLElement;
+  setKey(1);
+  await frame();
+  vi.advanceTimersByTime(1000);
+  await frame();
+  expect(scope.isAnimating.peek()).toBe(false);
+  expect(log).toEqual(['start', 'stop']);
+  setKey(2);
+  await frame();
+  setKey(3);
+  await frame();
+  expect(log).toEqual(['start', 'stop', 'start', 'stop', 'start']);
+  expect(scope.isBlockingAnimating.peek()).toBe(true);
+  transitionEnd(slidesOf(t)[0]); // the superseded step's own end only releases its heavy animation
+  await frame();
+  expect(scope.isBlockingAnimating.peek()).toBe(true);
+  transitionEnd(slidesOf(t).at(-1)!);
+  await frame();
+  expect(scope.isAnimating.peek()).toBe(false);
+  expect(log).toEqual(['start', 'stop', 'start', 'stop', 'start', 'stop']);
+  await frame();
+  expect(slidesOf(t).map((s) => s.textContent)).toEqual(['2:-', '3:active']);
+});
+
+it('slideOptimized: shouldRestoreHeight measures the active slide after the transition; shouldCleanup drops the rest', async () => {
+  const { root, setKey } = setup({ name: 'slideOptimized', shouldRestoreHeight: true, shouldCleanup: true });
+  const t = root.firstElementChild as HTMLElement;
+  setKey(1);
+  await frame();
+  const [, s1] = slidesOf(t);
+  sized(s1, 90);
+  transitionEnd(s1);
+  await frame();
+  await frame();
+  expect(t.style.height).toBe('90px');
+  expect(slidesOf(t)).toEqual([s1]);
+});
+
+it('slideOptimized: switching to or from an optimized name drops every slide but the active one and clears the container class and the inline transforms', async () => {
+  const [name, setName] = createSignal('slideOptimized');
+  const { root, setKey } = setup(
+    {
+      get name() {
+        return name();
+      },
+    },
+  );
+  const t = root.firstElementChild as HTMLElement;
+  setKey(1);
+  await frame();
+  transitionEnd(slidesOf(t)[1]);
+  await frame();
+  expect(slidesOf(t).length).toBe(2);
+  expect(classes(t)).toBe('Transition Transition-slideOptimized');
+
+  setName('slide'); // no key change
+  await frame();
+  const [only] = slidesOf(t);
+  expect(slidesOf(t).length).toBe(1);
+  expect(only.textContent).toBe('1:active');
+  expect(classes(t)).toBe('Transition');
+  expect(classes(only)).toBe('Transition_slide Transition_slide-active');
+  expect(only.style.transform).toBe('');
+
+  setKey(2); // now a keyframe step
+  await frame();
+  expect(classes(t)).toBe('Transition Transition-slide');
+  setName('slideOptimizedRtl'); // style switch together with a key change
+  setKey(3);
+  await frame();
+  expect(slidesOf(t).map((s) => s.textContent)).toEqual(['3:active']);
+  expect(classes(slidesOf(t)[0])).toBe('Transition_slide Transition_slide-active');
+});
+
+it('slideOptimized + nextKey: the pre-rendered slide has no state class (the container class hides it) and the step uses it', async () => {
+  const { root, setKey, rendered } = nextKeySetup({ name: 'slideOptimized' });
+  const t = root.firstElementChild as HTMLElement;
+  await frame();
+  const [s0, s1] = slidesOf(t);
+  expect(classes(t)).toBe('Transition Transition-slideOptimized');
+  expect(classes(s0)).toBe('Transition_slide Transition_slide-active');
+  expect(classes(s1)).toBe('Transition_slide');
+  setKey(1);
+  await frame();
+  expect(rendered).toEqual([0, 1]);
+  expect(slidesOf(t)[1]).toBe(s1);
+  expect(classes(s1)).toBe('Transition_slide Transition_slide-active');
+});
+
+it('slideOptimized: disposal mid-step releases the heavy animation and does nothing late', async () => {
+  const { root, scope, setKey, dispose, log } = setup({ name: 'slideOptimized', isBlockingAnimation: true });
+  const t = root.firstElementChild as HTMLElement;
+  setKey(1);
+  await frame();
+  expect(scope.isBlockingAnimating.peek()).toBe(true);
+  const [s0, s1] = slidesOf(t);
+  dispose();
+  expect(scope.isAnimating.peek()).toBe(false);
+  transitionEnd(s1);
+  vi.advanceTimersByTime(2000);
+  await frame();
+  expect(log).toEqual(['start']);
+  expect(transformOf(s0)).toBe('translate3d(-100%, 0, 0)'); // untouched
+});

@@ -2,15 +2,15 @@
 // stylesheet, so call sites keep `import Transition from '../ui/Transition'`. The kit owns the slide DOM (one
 // `Transition_slide` div per live key, always wrapped), the heavy-animation scope and the class contract.
 //
-// Mapped: ref, activeKey, name, direction, renderCount, shouldRestoreHeight, shouldCleanup, cleanupExceptionKey,
-// cleanupOnlyKey, id, className (-> class), slideClassName (-> slideClass), isBlockingAnimation, contentSelector,
-// restoreHeightKey, onStart, onStop, onScroll, onMouseDown, onWheel, data-tauri-drag-region, and the
-// `selectCanAnimateInterface` switch (-> disableAnimation).
+// Mapped: ref, activeKey, nextKey, name (including slideOptimized / slideOptimizedRtl), direction, renderCount,
+// shouldRestoreHeight, shouldCleanup, cleanupExceptionKey, cleanupOnlyKey, id, className (-> class), slideClassName
+// (-> slideClass), isBlockingAnimation, contentSelector, restoreHeightKey, onStart, onStop, onScroll, onMouseDown,
+// onWheel, data-tauri-drag-region, and the `selectCanAnimateInterface` switch (-> disableAnimation).
 // Children: a render function `(slide) => node` called once per slide; render by `slide.key` (framework guide section 6).
 // tt's `(isActive, isFrom, currentKey, activeKey)` arguments are `slide.isActive()`, `slide.isFrom()`, `slide.key`,
 // `slide.activeKey()`.
-// Not available (TODO(port) below): nextKey, withSwipeControl, slideOptimized / slideOptimizedRtl (rendered as slide /
-// slideRtl), shouldWrap / wrapExceptionKey (accepted and ignored: the kit always wraps each slide).
+// Not available (TODO(port) below): withSwipeControl, shouldWrap / wrapExceptionKey (accepted and ignored: the kit
+// always wraps each slide).
 import { createMemo } from 'frameact';
 import { splitProps } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
@@ -44,7 +44,6 @@ export type ChildrenFn = (slide: TransitionSlide) => JSX.Element;
 export type TransitionProps = {
   ref?: (el: HTMLDivElement) => void;
   activeKey: number;
-  // TODO(port): nextKey is not supported by the kit (tt pre-renders that slide).
   nextKey?: number;
   name: AnimationName;
   direction?: 'auto' | 'inverse' | 1 | -1;
@@ -88,15 +87,8 @@ const DISABLEABLE_ANIMATIONS = new Set<AnimationName>([
   'slideVerticalFade',
 ]);
 
-// TODO(port): the kit has no slideOptimized (inline-transform slide); the CSS of those names depends on that JS.
-const NAME_FALLBACKS: Partial<Record<AnimationName, AnimationName>> = {
-  slideOptimized: 'slide',
-  slideOptimizedRtl: 'slideRtl',
-};
-
 const Transition = (props: TransitionProps) => {
   const [, rest] = splitProps(props, [
-    'nextKey',
     'name',
     'className',
     'slideClassName',
@@ -114,7 +106,7 @@ const Transition = (props: TransitionProps) => {
   return (
     <KitTransition
       {...rest}
-      name={NAME_FALLBACKS[props.name] || props.name}
+      name={props.name}
       class={props.className}
       slideClass={props.slideClassName}
       disableAnimation={shouldDisableAnimation()}
