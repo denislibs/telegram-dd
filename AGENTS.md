@@ -45,8 +45,16 @@ Toolchain: Vite 8, TypeScript 7 (native `tsc`), oxlint, prettier, pnpm 10, Node 
   production dependencies are GPL-3.0-or-later compatible and `NOTICE.md` lists every vendored `src/lib` entry.
 - **Frame phases**: layout reads only in measure / forced-reflow effects or event handlers, DOM writes only in mutate.
   The dev server runs with `enableStrict()`: a stricterdom violation in the console is a bug to fix, not to suppress.
-- **Animations**: use `frameact/kit` (`Transition`, `ShowTransition`, `InfiniteScroll`, `createScrollAnchor`) with tt's
+- **Animations**: use `src/lib/kit` (`Transition`, `ShowTransition`, `InfiniteScroll`, `createScrollAnchor`; it replaces tt's
+  `components/ui/{Transition,ShowTransition,InfiniteScroll}.tsx` and `hooks/useShowTransition`, and imports only frameact's public API) with tt's
   class contracts and stylesheets; blocking animations go through heavy-animation scopes.
+
+## Frameact API boundary
+
+App code imports only frameact's public entries (`frameact`, `frameact/dom`, `frameact/scheduler`, `frameact/store`,
+`frameact/stricterdom`); never deep-import `src/vendor/frameact/src/...`. DOM natives for content-derived nodes come from
+`src/util/dom/natives.ts` (the app's own helper). If an engine capability is not public, send a frameact PR that exports
+it; until it lands keep a marked stand-in with a TODO (see `src/lib/kit/shape.ts`).
 
 ## Licensing
 
@@ -60,9 +68,9 @@ third-party inventory are in [`NOTICE.md`](NOTICE.md); the app-level porting gui
 - **Never move telegram-tt code into `src/vendor/frameact`.** The framework is MIT. Do not edit files under
   `src/vendor/frameact` in this repo.
 - **frameact gets only engine-level things**: reactivity, rendering and the DOM runtime, the scheduler and frame phases,
-  the store, stricterdom, and generic primitives tied to phases and animation gating (what `frameact/kit` already has:
-  `Transition`, `ShowTransition`, `InfiniteScroll`, scroll anchoring). Every app/UI component stays in `src/` and is
-  never upstreamed, even if it looks reusable (Button, Modal, Menu, Avatar, Loading, ListItem, Icon, the chat list, the
+  the store, stricterdom, and generic primitives tied to phases and animation gating (`onMount`, `previous`,
+  heavy-animation scopes). The UI kit (`Transition`, `ShowTransition`, `InfiniteScroll`, scroll anchoring) lives in the
+  app, in `src/lib/kit`. Every app/UI component stays in `src/` and is never upstreamed, even if it looks reusable (Button, Modal, Menu, Avatar, Loading, ListItem, Icon, the chat list, the
   message list, the composer).
 - When porting shows the framework seems to be missing something, ask: is it an engine concern (phases, reactivity,
   scheduling, DOM runtime, gating)? If yes, write it in the frameact repo clean-room (from behaviour and tests, without

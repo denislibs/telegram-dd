@@ -43,6 +43,12 @@ The teact → frameact adaptation of every ported file, the store glue that repl
 this repository), the build and tooling configuration (Vite 8, TypeScript 7, oxlint, prettier), and the documentation
 (`AGENTS.md`, `docs/`, this file). Original code is licensed GPL-3.0-or-later like the rest of the work.
 
+Original code moved in from frameact: the UI kit in `src/lib/kit` (`Transition`, `ShowTransition`, `InfiniteScroll`,
+`createScrollAnchor`, `waitForAnimationEnd`, with their tests and test helpers), moved from frameact (MIT, © 2026 Denis
+Maramygin) at commit `a3c2d7d` (`src/kit`, before frameact PR #16 removed it). It is clean-room code written from
+behaviour and tests, with no telegram-tt code; the files keep their provenance lines and are combined into this
+GPL-3.0-or-later work like the rest of the app. The app's own DOM helper `src/util/dom/natives.ts` is original too.
+
 ## frameact: a separately licensed component
 
 [frameact](https://github.com/denislibs/frameact) lives in `src/vendor/frameact` (a git submodule) and is licensed
