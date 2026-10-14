@@ -1,4 +1,8 @@
-import { createRoot, createSignal, flushSync } from 'frameact';
+import { createEffect, createMutationEffect, createRoot, createSignal, flushSync } from 'frameact';
+
+// Measured ≈ 1.1 (the instance is exactly that budget plus bookkeeping); one extra memo or effect per instance
+// pushes it to ≈ 1.4–1.6, and same-process noise stays well below 2.
+const RATIO_BOUND = 2;
 import { createComponent, insert } from 'frameact/dom';
 import { afterEach, expect, it, vi } from 'vitest';
 
@@ -234,22 +238,36 @@ it('disposal while closing or scheduled-open: no close callback, no state change
   expect(classes(el2)).toBe('opacity-transition fast shown not-open');
 });
 
-it('per-instance cost: creating an instance is a few microseconds (a regression bound; the measured numbers are in the clean-room report) (clean-room finding 7)', () => {
+it('per-instance cost: an instance costs about as much as its 2 signals + 2 effects (a regression bound relative to a same-process baseline) (clean-room finding 7)', () => {
   const [open] = createSignal(true);
   const make = () => createShowTransition({ isOpen: open, noMountTransition: true });
-  createRoot((d) => {
-    for (let i = 0; i < 500; i++) make(); // warm-up
-    d();
-  });
+  // The baseline is the instance's own budget built from public primitives: 2 signals, a tickEnd effect reading the
+  // input, a mutation effect. Comparing within one process cancels machine speed (a shared CI runner is several times
+  // slower than a laptop), so the bound can stay tight enough to catch an extra memo or effect per instance.
+  const baseline = () => {
+    const [a] = createSignal(0);
+    const [b] = createSignal(0);
+    createEffect(() => open() && a(), () => {});
+    createMutationEffect(() => b(), () => {});
+  };
+  const time = (fn: () => void, n: number) => {
+    const t0 = performance.now();
+    const dispose = createRoot((d) => {
+      for (let i = 0; i < n; i++) fn();
+      return d;
+    });
+    const t = performance.now() - t0;
+    dispose();
+    return t;
+  };
   const n = 2000;
-  const start = performance.now();
-  const dispose = createRoot((d) => {
-    for (let i = 0; i < n; i++) make();
-    return d;
-  });
-  const perInstanceUs = ((performance.now() - start) * 1000) / n;
-  dispose();
-  // ≈ 1.5 µs in jsdom (2 signal nodes, 1 tickEnd effect, 1 mutation effect); the bound is an order
-  // of magnitude up so that CI noise never trips it while an extra memo/effect per instance would show.
-  expect(perInstanceUs).toBeLessThan(25);
+  time(make, 500); // warm-up
+  time(baseline, 500);
+  let tMake = Infinity;
+  let tBase = Infinity;
+  for (let r = 0; r < 5; r++) {
+    tMake = Math.min(tMake, time(make, n));
+    tBase = Math.min(tBase, time(baseline, n));
+  }
+  expect(tMake / tBase).toBeLessThan(RATIO_BOUND);
 });
