@@ -134,9 +134,12 @@ const TabList = (props: OwnProps) => {
       const emoticon = tab().emoticon;
       return typeof emoticon === 'string' ? emoticon : undefined;
     };
+    // The title is read through a memo of its own: a tab object that is replaced with the same `title` (a badge changed)
+    // does not re-create the nodes of the title.
+    const title = createMemo(() => tab().title);
     const renderTitle = () => {
-      const title = tab().title;
-      return typeof title === 'string' ? renderText(title) : title;
+      const current = title();
+      return typeof current === 'string' ? renderText(current) : current;
     };
 
     return (

@@ -108,6 +108,19 @@ const useFolderTabs = (params: Params) => {
   };
 
   const folderCountersById = useFolderManagerForUnreadCounters();
+
+  // Deviation (M4): the tabs are rebuilt on every unread-counter change of any folder. tt's vdom diffed the nodes, here a
+  // rebuilt tab would re-create the nodes of its title (custom emoji restart) in every folder. So the title function of a
+  // folder is cached by what it renders, and an unchanged tab keeps its object: only the folder whose badge changed
+  // gets a new tab object, and its title is still the same function.
+  const titleCache = new Map<
+    number,
+    { folder: ApiChatFolder; sidebarMode: boolean; title: TabWithProperties['title'] }
+  >();
+  const tabCache = new Map<number, { key: readonly unknown[]; tab: TabWithProperties }>();
+  const isSameKey = (a: readonly unknown[], b: readonly unknown[]) =>
+    a.length === b.length && a.every((v, i) => v === b[i]);
+
   const folderTabs = createMemo(() => {
     const folders = displayedFolders();
     if (!folders || !folders.length) {
@@ -120,6 +133,15 @@ const useFolderTabs = (params: Params) => {
     const unreadChatsByFolderId = folderUnreadChatsCountersById();
     const countersById = folderCountersById();
     const isMobile2 = isMobile();
+    const langCode = lang.code; // a language change re-runs the memo and must rebuild the cached tabs
+
+    const ids = new Set(folders.map((folder) => folder.id));
+    for (const id of tabCache.keys()) {
+      if (!ids.has(id)) {
+        tabCache.delete(id);
+        titleCache.delete(id);
+      }
+    }
 
     return folders.map((folder, i) => {
       const { id, title } = folder;
@@ -246,19 +268,50 @@ const useFolderTabs = (params: Params) => {
       }
 
       // Deviation: a function, so that every place that renders the title (TabList renders each tab twice) creates its
-      // own nodes: a JSX node can sit in one place only.
-      const folderName = () => renderTextWithEntities(folderNameOptions);
+      // own nodes: a JSX node can sit in one place only. Cached per folder (see above).
+      let cachedTitle = titleCache.get(id);
+      if (!cachedTitle || cachedTitle.folder !== folder || cachedTitle.sidebarMode !== Boolean(sidebarMode)) {
+        cachedTitle = {
+          folder,
+          sidebarMode: Boolean(sidebarMode),
+          title: (() => renderTextWithEntities(folderNameOptions)) as TabWithProperties['title'],
+        };
+        titleCache.set(id, cachedTitle);
+      }
 
-      return {
+      const badgeCount = countersById[id]?.chatsCount;
+      const isBadgeActive = Boolean(countersById[id]?.notificationsCount);
+      const key = [
+        folder,
+        cachedTitle.title,
+        badgeCount,
+        isBadgeActive,
+        isBlocked,
+        canShareFolder,
+        Boolean(unreadChatsByFolderId[id]?.length),
+        isMobile2,
+        Boolean(noEmoticons),
+        langCode,
+        allChatsFolder(),
+      ] as const;
+      const cachedTab = tabCache.get(id);
+      if (cachedTab && isSameKey(cachedTab.key, key)) {
+        return cachedTab.tab;
+      }
+
+      const tab = {
         id,
-        title: folderName,
-        badgeCount: countersById[id]?.chatsCount,
-        isBadgeActive: Boolean(countersById[id]?.notificationsCount),
+        title: cachedTitle.title,
+        badgeCount,
+        isBadgeActive,
         isBlocked,
         contextActions: contextActions.length ? contextActions : undefined,
         emoticon: noEmoticons ? undefined : folderIcon,
         noTitleAnimations: folder.noTitleAnimations,
       } satisfies TabWithProperties;
+      tabCache.set(id, { key, tab });
+
+      return tab;
     });
   });
 
