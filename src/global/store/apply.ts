@@ -200,9 +200,11 @@ export function applyContainer(
     let nv = next[key];
     let pv = prev[key];
     let has = pv !== undefined;
-    if (!has) {
+    // `prev[key]` also finds inherited names (`constructor`, `toString`, `valueOf`, …): only an own key counts, or the
+    // deletion pass below would be skipped when such a key is added next to a removed one (appsec review, finding 1)
+    if (!has || typeof pv === 'function') {
       has = Object.hasOwn(prev, key);
-      pv = undefined;
+      pv = has ? prev[key] : undefined;
     }
     if (has) present++;
     if (isRoot && key === DEBUG_RANDOM_ID_KEY) continue;

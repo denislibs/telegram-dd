@@ -130,6 +130,7 @@ Low/Medium; стоит исправить до того, как через glue 
       `DEBUG_MORE = false`. `benchState.ts` импортируют только тесты. `enableStrict()` под `import.meta.env.DEV`.
 
 Проверено и чисто:
+
 - `__proto__` насквозь (`JSON.parse`-кэш с `__proto__` в корне, в контейнере и внутри entity → `setGlobal` из
   `src/global/index.ts`): `Object.prototype` чист, прототип корня mirror'а — `Object.prototype`, `useGlobal().rootPolluted`
   undefined. `copyContainer`/`detach` пропускают ключ, но spread оставляет его own, и его снимает `adopt`.

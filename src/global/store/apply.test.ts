@@ -251,6 +251,26 @@ describe('applyGlobal: the store mirrors the committed tt global', () => {
   });
 });
 
+describe('appsec 1: keys that Object.prototype also has must not hide a deletion', () => {
+  it.each(['constructor', 'toString', 'hasOwnProperty', 'valueOf', 'isPrototypeOf'])(
+    'byId { a, b } -> { b, %s } in one setGlobal removes a from the mirror',
+    (inherited) => {
+      const { mirror, setGlobal, getGlobal } = setup();
+      const g = getGlobal();
+      setGlobal({
+        ...g,
+        chats: { ...g.chats, byId: { b: g.chats.byId.b, [inherited]: { id: inherited, title: 'x', unread: 0 } } },
+      });
+      expect(Object.hasOwn(getGlobal().chats.byId, 'a')).toBe(false);
+      expect(Object.hasOwn(mirror.chats.byId, 'a')).toBe(false);
+      expect(Object.hasOwn(mirror.chats.byId, inherited)).toBe(true);
+      // (toStrictEqual trips over an own `constructor` key, so compare the keys and the entities one by one)
+      expect(Object.keys(mirror.chats.byId).sort()).toEqual(Object.keys(getGlobal().chats.byId).sort());
+      expect(mirror.chats.byId.b).toBe(getGlobal().chats.byId.b);
+    },
+  );
+});
+
 describe('C1: tt value semantics hold for code that captured objects before setGlobal', () => {
   it('a captured entity is a snapshot: changedFields detection (apiUpdaters/chats.ts updateChat) works', () => {
     const { setGlobal, getGlobal } = setup();
