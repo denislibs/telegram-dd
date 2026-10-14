@@ -31,6 +31,23 @@ test('console.error and console.warn are reported', async ({ page, baseURL }) =>
   ]);
 });
 
+test('DEV timing diagnostics are not gate failures (wall-clock noise on slow runners); other warnings still are', async ({
+  page,
+  baseURL,
+}) => {
+  const monitor = await openApp(page, baseURL!);
+  await page.evaluate(() => {
+    /* eslint-disable no-console */
+    console.warn('[frameact/store] Slow store update: 7.3 ms in apiUpdate');
+    console.warn('[frameact] Slow effect run: 12.3 ms in Message > span.children [mutate]');
+    console.warn('[frameact] Slow mutate drain: 18.0 ms, 240 effect runs');
+    console.warn('[API] Slow updates processing: 1 updates in 8.5 ms');
+    console.warn('[frameact/store] something else');
+    /* eslint-enable no-console */
+  });
+  expect(await monitor.problems()).toEqual([expect.stringContaining('console.warn: [frameact/store] something else')]);
+});
+
 test('uncaught page errors are reported', async ({ page, baseURL }) => {
   const monitor = await openApp(page, baseURL!);
   await page.evaluate(() => {

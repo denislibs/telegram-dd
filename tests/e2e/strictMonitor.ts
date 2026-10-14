@@ -5,10 +5,12 @@ import type { Page } from '@playwright/test';
 export const DEFAULT_IGNORED_CONSOLE = [
   /GL Driver Message/, // headless Chromium software WebGL ("GPU stall due to ReadPixels")
   /\[vite\]/, // HMR client chatter
-  // frameact's DEV timing hints ("Slow effect run: 9 ms", "Slow measure drain", "Slow store update") are wall-clock
-  // measurements: they fire on a cold dev server whenever the parallel workers compete for the CPU. Real jank is the
-  // job of the long-task gate (tests/perf/longTasks.ts), which runs on a production build.
-  /^\[frameact(?:\/store)?\] Slow /,
+  // DEV timing diagnostics: they fire on wall-clock thresholds (7 ms runs / store updates / API batches), so they are
+  // noise on a slow shared CI runner and say nothing about correctness. Performance is gated by `pnpm test:perf`
+  // (long tasks under CPU throttling, leaks) instead.
+  /\[frameact\/store\] Slow store update:/,
+  /\[frameact\] Slow (effect run|\w+ drain):/,
+  /\[API\] Slow updates processing:/,
 ];
 
 // Requests to the app origin that are expected to fail. The app boots the in-repo MockClient (APP_MOCKED_CLIENT=1) on
