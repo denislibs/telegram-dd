@@ -60,6 +60,18 @@ export default defineConfig(({ mode }): UserConfig => {
     assetsInclude: ['**/*.tgs'],
     optimizeDeps: {
       exclude: ['temml'],
+      // Dependencies of the API worker and of lazily imported modules are otherwise discovered while the page runs:
+      // the dev server then re-optimizes, answers 504 ("Outdated Optimize Dep") and reloads, which fails a cold e2e run.
+      include: [
+        '@cryptography/aes',
+        '@tauri-apps/api/core',
+        'async-mutex',
+        'colorjs.io/fn',
+        'fflate',
+        'idb-keyval',
+        'qr-code-styling',
+        'tweetnacl',
+      ],
     },
     define: {
       APP_VERSION: JSON.stringify(APP_VERSION),
