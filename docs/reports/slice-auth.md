@@ -47,9 +47,10 @@ signatures; the two adapters). The five largest: `Transition` 87 %, `Portal` 79 
 - **Hooks** take `MaybeAccessor<T>` for reactive values, element refs as `MaybeAccessor<El | undefined>` read inside
   applies, return accessors; `useForceUpdate`-style hooks are version signals; `useThrottledCallback`/`useDebouncedCallback`
   ignore `deps`.
-- **Transition** children are render functions keyed by `slide.key`; unsupported: `nextKey`, swipe control,
-  `slideOptimized` (rendered as `slide`), `shouldWrap`; `reveal`/`slideFadeAndroid` watch the new slide instead of the old
-  one (settles through the 1 s fallback). `Auth` and `App` render the screen of each slide's own key.
+- **Transition** children are render functions keyed by `slide.key`; unsupported: `shouldWrap` (the kit always wraps).
+  `nextKey`, swipe control, `slideOptimized` and the `reveal`/`slideFadeAndroid` slide selection were completed after this
+  slice (branch `port/transition`, see `src/lib/kit/transition.ts`). `Auth` and `App` render the screen of each slide's
+  own key.
 - **Modal**: scalar props are snapshotted while closing; children/header are live (callers whose content disappears with
   its data must keep it with `currentOrPrev`). `Button`/`Menu`/`InputText`/`Checkbox`: handlers are bound once, so
   render-time conditions moved into the callbacks; inputs are always controlled (`use:value`/`use:checked`).
@@ -138,8 +139,8 @@ blank in both because `APP_ENV=test` starts no media workers.)
 `util/notifications.tsx` (not reached by the auth screens). Removed: 7 (list in the Summary).
 
 Known gaps: `renderText`'s emoji `<img onLoad>` relies on a non-bubbling `load` event (delegated handlers do not see it;
-only without native emoji support); `Notification` shows `renderTextWithEntities` as plain text; `Transition`
-`reveal`/`slideFadeAndroid` direction; the allowlisted a11y findings above; `pnpm dev` has no country list without an API.
+only without native emoji support); `Notification` shows `renderTextWithEntities` as plain text; the allowlisted a11y
+findings above; `pnpm dev` has no country list without an API.
 
 <!-- inventory:start -->
 
