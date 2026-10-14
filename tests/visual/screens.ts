@@ -51,6 +51,41 @@ export const DEFAULT_SCENARIO = 'default';
 const TT_MAIN_READY = ['#LeftColumn .chat-list .ListItem', '#LeftColumn .SearchInput .Spinner'];
 const TT_MAIN_MASK = ['#LeftColumn .SearchInput .Spinner'];
 
+// The auth screens. Both apps boot logged in under the mocked client, so each target plays the server: after the mocked
+// API has settled (its sync writes whole-global snapshots that would undo the step) it feeds the same `apiUpdate` the
+// worker would send, then waits for the form of the screen and for the screen transition to finish.
+const MAIN_READY = ['#Main'];
+const authStep =
+  (authorizationState: string, form: string, extra: Record<string, unknown> = {}) =>
+  async (page: import('@playwright/test').Page) => {
+    await page.waitForTimeout(2500);
+    await page.evaluate(
+      ([state, fields]) => {
+        (window as unknown as { getActions: () => { apiUpdate: (update: unknown) => void } }).getActions().apiUpdate({
+          '@type': 'updateAuthorizationState',
+          authorizationState: state,
+          ...(fields as object),
+        });
+      },
+      [authorizationState, extra] as const,
+    );
+    await page.locator(form).waitFor();
+    await page.waitForTimeout(1500);
+  };
+const authScreen = (
+  name: string,
+  authorizationState: string,
+  form: string,
+  extra: Record<string, unknown> = {},
+  threshold = 0.0005,
+): VisualScreen => ({
+  name,
+  ported: true,
+  reference: { app: 'tt', path: '/', ready: MAIN_READY, prepare: authStep(authorizationState, form, extra) },
+  candidate: { app: 'ours', path: '/', ready: MAIN_READY, prepare: authStep(authorizationState, form, extra) },
+  threshold,
+});
+
 export const screens: VisualScreen[] = [
   // --- harness self-checks (real, run today) ------------------------------------------------------------------
   {
@@ -72,6 +107,15 @@ export const screens: VisualScreen[] = [
     threshold: 0.02,
     expect: 'differ',
   },
+
+  // --- ported screens ----------------------------------------------------------------------------------------------
+  authScreen('auth-phone-number', 'authorizationStateWaitPhoneNumber', '#auth-phone-number-form'),
+  authScreen('auth-code', 'authorizationStateWaitCode', '#auth-code-form', { isCodeViaApp: false }),
+  authScreen('auth-password', 'authorizationStateWaitPassword', '#auth-password-form', { hint: 'a hint' }),
+  authScreen('auth-registration', 'authorizationStateWaitRegistration', '#auth-registration-form'),
+  authScreen('auth-qr-code', 'authorizationStateWaitQrCode', '#auth-qr-form .qr-container svg', {
+    qrCode: { token: 'dGVzdC10b2tlbg', expires: 4102444800 },
+  }),
 
   // --- the port's to-do list (skipped until `ported: true`) -----------------------------------------------------
   {
