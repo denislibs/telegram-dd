@@ -1,6 +1,10 @@
-// Moved from frameact (MIT, © 2026 Denis Maramygin) at a3c2d7d (src/kit/transition.ts, before frameact PR #16 removed the kit).
-// Original frameact code (clean-room, written from the kit's behavioural spec): keyed slides with a
-// CSS animation between them, on telegram-tt's class contract (bring the stylesheet).
+// Ported from telegram-tt src/components/ui/Transition.tsx (GPL-3.0-or-later)
+// This file is GPL-3.0-or-later as a whole. It started as frameact's MIT kit (moved from frameact at a3c2d7d,
+// src/kit/transition.ts, before frameact PR #16 removed the kit; MIT, © 2026 Denis Maramygin; clean-room, written from
+// the kit's behavioural spec) and now also carries code ported from telegram-tt's Transition (GPL-3.0-or-later,
+// © Alexander Zinchuk and the telegram-tt contributors): the watched slide of reveal / slideFadeAndroid, nextKey
+// pre-rendering, the slideOptimized variant and the swipe-control hook (each noted in the model below).
+// Keyed slides with a CSS animation between them, on telegram-tt's class contract (bring the stylesheet).
 //
 // Model
 //   - One `<div class="Transition">` holds one `<div class="Transition_slide">` per live key, in
@@ -9,8 +13,9 @@
 //   - A STEP (`activeKey` changes) is one mutation effect: compute creates the missing slide on
 //     detached DOM; apply (mutate phase) writes the classes — container `Transition-${name}` or
 //     `Transition-${name}Backwards`, previous slide `-from`, new slide `-to`, the rest `-inactive` —
-//     begins a heavy animation on the scope, watches the `to` slide's own `animationend`, calls
-//     `onStart`. Which slides survive a step: `renderCount` / `shouldCleanup` keep every live slide;
+//     begins a heavy animation on the scope, watches the animated slide's own `animationend` (the `to` slide,
+//     except `reveal` and `slideFadeAndroid` going backwards: their only animation is on `from`, and with no `from`
+//     slide the step ends at once, as in tt), calls `onStart`. Which slides survive a step: `renderCount` / `shouldCleanup` keep every live slide;
 //     otherwise only {previous, active} (keep-alive).
 //   - The END arrives through `waitForAnimationEnd` and is applied in a mutation task: the heavy
 //     animation is released first, then (unless the step was superseded or the component disposed)
@@ -150,6 +155,11 @@ function callback(fn: (() => void) | undefined, what: string): void {
     // eslint-disable-next-line no-console
     console.error(`[frameact] <Transition> ${what} failed`, error);
   }
+}
+
+/** The animation names whose backwards variant animates `from` only (the stylesheet gives `to` no animation). */
+function animatesFromWhenBackwards(name: string): boolean {
+  return name === 'reveal' || name === 'slideFadeAndroid';
 }
 
 function isForwards(direction: TransitionDirection | undefined, fromKey: number, toKey: number): boolean {
@@ -362,11 +372,19 @@ export function Transition(props: TransitionProps): unknown {
     for (const record of slides) {
       setSlideState(record, record === next ? TO_SLIDE_CLASS_NAME : record === prev ? FROM_SLIDE_CLASS_NAME : INACTIVE_SLIDE_CLASS_NAME);
     }
-    setContainerAnimation(`${CONTAINER_CLASS_NAME}-${name}${isForwards(props.direction, prevKey, key) ? '' : 'Backwards'}`);
+    const isBackwards = !isForwards(props.direction, prevKey, key);
+    setContainerAnimation(`${CONTAINER_CLASS_NAME}-${name}${isBackwards ? 'Backwards' : ''}`);
     syncChildren();
     setFromKey(prevKey);
     step.endHeavyAnimation = scope.begin(Infinity, Boolean(props.isBlockingAnimation));
-    step.cancelWait = waitForAnimationEnd(next.el, () => requestMutation(() => finish(step)), { fallbackMs: ANIMATION_END_FALLBACK_MS });
+    // The slide the stylesheet animates: `to`, except the two names whose backwards variant animates `from` only
+    // (tt `watchedNode`). Without that slide nothing animates and the step ends at once.
+    const watched = isBackwards && animatesFromWhenBackwards(name) ? prev : next;
+    if (watched === undefined) {
+      requestMutation(() => finish(step));
+    } else {
+      step.cancelWait = waitForAnimationEnd(watched.el, () => requestMutation(() => finish(step)), { fallbackMs: ANIMATION_END_FALLBACK_MS });
+    }
     callback(props.onStart, 'onStart');
   }
 

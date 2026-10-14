@@ -163,6 +163,10 @@
     "src/hooks/useVideoCleanup.ts": {
       "reason": "Hook ported in place with accessor parameters and returns (porting guide 4.2): MaybeAccessor reads, a version signal instead of useForceUpdate and the createEffect(compute, apply) wrapper are most of the diff.",
       "maxRatio": 0.67
+    },
+    "src/lib/kit/transition.ts": {
+      "reason": "The kit's frameact-native Transition (moved from frameact, then extended with tt's nextKey, slideOptimized, watched-slide and swipe-control behaviour): a signals/effects/mutate-phase rewrite of tt's component with a different slide model (a record per key, classes written in one mutation effect), not a line-by-line port.",
+      "maxRatio": 0.95
     }
   }
 }

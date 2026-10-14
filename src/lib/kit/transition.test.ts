@@ -438,3 +438,69 @@ it('onStart / onStop are paired under supersede: every start gets exactly one st
   await frame();
   expect(log).toEqual(['start', 'stop', 'start', 'stop']);
 });
+
+// ---- slide selection of reveal / slideFadeAndroid (tt `watchedNode`) ----------
+
+it.each(['reveal', 'slideFadeAndroid'])(
+  '%s: forwards the `to` slide is watched, backwards the `from` slide (the stylesheet gives `to` no backwards animation)',
+  async (name) => {
+    const { root, scope, setKey, log } = setup({ name });
+    const t = root.firstElementChild as HTMLElement;
+    setKey(1);
+    await frame();
+    const [s0, s1] = slidesOf(t);
+    expect(classes(t)).toBe(`Transition Transition-${name}`);
+    animationEnd(s0); // `from` is not watched going forwards
+    await frame();
+    expect(scope.isAnimating.peek()).toBe(true);
+    animationEnd(s1);
+    await frame();
+    expect(scope.isAnimating.peek()).toBe(false);
+    expect(log).toEqual(['start', 'stop']);
+
+    setKey(0);
+    await frame();
+    const [b0, b1] = slidesOf(t);
+    expect(b0).toBe(s0);
+    expect(classes(t)).toBe(`Transition Transition-${name}Backwards`);
+    expect(classes(b0)).toBe('Transition_slide Transition_slide-to');
+    expect(classes(b1)).toBe('Transition_slide Transition_slide-from');
+    animationEnd(b0); // `to` has no animation going backwards: an event on it does not end the step
+    await frame();
+    expect(scope.isAnimating.peek()).toBe(true);
+    expect(classes(b1)).toBe('Transition_slide Transition_slide-from');
+    animationEnd(b1);
+    await frame();
+    expect(scope.isAnimating.peek()).toBe(false);
+    expect(classes(t)).toBe('Transition');
+    expect(classes(b0)).toBe('Transition_slide Transition_slide-active');
+    expect(classes(b1)).toBe('Transition_slide Transition_slide-inactive');
+    expect(log).toEqual(['start', 'stop', 'start', 'stop']);
+  },
+);
+
+it('backwards reveal settles on the `from` animationend, not through the 1 s fallback; other names still watch `to` backwards', async () => {
+  const { root, scope, setKey } = setup({ name: 'reveal' });
+  const t = root.firstElementChild as HTMLElement;
+  setKey(1);
+  await frame();
+  animationEnd(slidesOf(t)[1]);
+  await frame();
+  setKey(0);
+  await frame();
+  const [, from] = slidesOf(t);
+  vi.advanceTimersByTime(900);
+  expect(scope.isAnimating.peek()).toBe(true);
+  animationEnd(from);
+  await frame();
+  expect(scope.isAnimating.peek()).toBe(false);
+
+  const slide = setup({ name: 'slide' }, 1);
+  const s = slide.root.firstElementChild as HTMLElement;
+  slide.setKey(0);
+  await frame();
+  const [to] = slidesOf(s);
+  animationEnd(to); // backwards `slide` animates both: `to` is watched
+  await frame();
+  expect(slide.scope.isAnimating.peek()).toBe(false);
+});
