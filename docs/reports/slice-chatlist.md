@@ -131,6 +131,8 @@ reason): the mocked client does not implement the folder list (`fetchChatFolders
 timing hint of the folder manager ("Slow updateFolderManager: 10 ms"). The boot spec (`boot.spec.ts`) no longer expects `#Main` when `actions/all` fails to load (`Main` imports it, as in tt); it still proves that the app root renders and that the tab becomes the master. The multitab spec (`multitab.spec.ts`) waits for the first
 tab's main screen before it opens the second tab (the election raced the heavier boot).
 
+One flake seen once in a full e2e run on a cold dev server: `authMultiaccount.spec.ts` "a number that is not logged in anywhere starts the login" (`lazy: loading the component failed ... bundles/main.ts`, the test navigates while the Main chunk is still being fetched); it passed in 3 of 3 reruns.
+
 ## frameact engine gaps found (engine-only; to go to the frameact repo clean-room, not implemented here)
 
 1. **A `{...(cond ? { a, b } : undefined)}` spread on a component** fixes the key set of the props object at creation (a later
