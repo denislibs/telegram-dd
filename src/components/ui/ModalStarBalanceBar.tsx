@@ -1,11 +1,11 @@
 import { createMemo } from 'frameact';
 import { Show } from 'frameact/dom';
 import { getActions, withGlobal } from '../../global';
-import { createShowTransition } from '../../lib/kit';
-import type { GlobalState } from '../../global/types';
 
 import type { ApiStarsAmount, ApiTonAmount } from '../../api/types';
+import type { GlobalState } from '../../global/types';
 
+import { createShowTransition } from '../../lib/kit';
 import { formatStarsAmount } from '../../global/helpers/payments';
 import buildClassName from '../../util/buildClassName';
 import { convertTonFromNanos, convertTonToUsd, formatCurrencyAsString } from '../../util/formatCurrency';
@@ -30,8 +30,8 @@ export type StateProps = {
   tonUsdRate?: number;
 };
 
-function ModalStarBalanceBar() {
-  const props = withGlobal({}, mapStateToProps);
+function ModalStarBalanceBar(ownProps: OwnProps) {
+  const props = withGlobal(ownProps, mapStateToProps);
   const { openStarsBalanceModal } = getActions();
 
   const lang = useLang();
@@ -41,10 +41,14 @@ function ModalStarBalanceBar() {
 
   const { ref, shouldRender } = createShowTransition({
     isOpen: () => isOpen(),
-    onCloseAnimationEnd: props.onCloseAnimationEnd,
+    onCloseAnimationEnd: () => props.onCloseAnimationEnd?.(),
   });
 
-  const isTopmost = useIsTopmostBalanceBarModal(ref, () => Boolean(shouldRender() && currentBalance()));
+  let barElement: HTMLDivElement | undefined;
+  const isTopmost = useIsTopmostBalanceBarModal(
+    () => barElement,
+    () => Boolean(shouldRender() && currentBalance()),
+  );
 
   const handleGetMoreStars = () => {
     openStarsBalanceModal(isTonMode() ? { currency: 'TON' } : {});
@@ -52,13 +56,19 @@ function ModalStarBalanceBar() {
 
   return (
     <Show when={!(!shouldRender() || !currentBalance())}>
-      <div class={buildClassName(styles.root, !isTopmost && styles.hidden)} ref={ref}>
+      <div
+        class={buildClassName(styles.root, !isTopmost() && styles.hidden)}
+        ref={(el) => {
+          barElement = el;
+          ref(el);
+        }}
+      >
         <div>
           {isTonMode()
             ? lang(
                 'ModalStarsBalanceBarDescription',
                 {
-                  stars: formatTonAsIcon(lang, convertTonFromNanos(currentBalance().amount)),
+                  stars: formatTonAsIcon(lang, convertTonFromNanos(currentBalance()!.amount)),
                 },
                 {
                   withNodes: true,

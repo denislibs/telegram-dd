@@ -1,10 +1,17 @@
-import { beginHeavyAnimation, createEffect, createMemo, createMutationEffect, frozenWhile } from 'frameact';
+import {
+  beginHeavyAnimation,
+  createEffect,
+  createMemo,
+  createMutationEffect,
+  createSignal,
+  frozenWhile,
+} from 'frameact';
 import { Show } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
-import { createShowTransition } from '../../lib/kit';
 
 import type { TextPart } from '../../types';
 
+import { createShowTransition } from '../../lib/kit';
 import buildClassName from '../../util/buildClassName';
 import captureKeyboardListeners from '../../util/captureKeyboardListeners';
 import { disableDirectTextInput, enableDirectTextInput } from '../../util/directInputManager';
@@ -61,18 +68,38 @@ export type OwnProps = {
 const Modal = (props: OwnProps) => {
   const { ref: modalRef, shouldRender } = createShowTransition({
     isOpen: () => props.isOpen,
-    onCloseAnimationEnd: props.onCloseAnimationEnd,
+    onCloseAnimationEnd: () => props.onCloseAnimationEnd?.(),
   });
 
   const shouldFreeze = createMemo(() => !props.noFreezeOnClose && !props.isOpen);
+  // Deviation: `useFrozenProps(props, ...)` froze every prop. Here the scalar props are frozen through a snapshot; the
+  // node props (`header`, `children`, `dialogContent`, `moreMenuItems`, `headerRightToolBar`) are live JSX that is
+  // created once and stays mounted while closing, so they cannot be held back.
+  // TODO(port): callers whose content vanishes with its data on close must keep it with `currentOrPrev`.
   const frozen = frozenWhile(
-    () => props,
+    () => ({
+      title: props.title,
+      isLowStackPriority: props.isLowStackPriority,
+      className: props.className,
+      contentClassName: props.contentClassName,
+      headerClassName: props.headerClassName,
+      dialogClassName: props.dialogClassName,
+      isSlim: props.isSlim,
+      hasCloseButton: props.hasCloseButton,
+      hasAbsoluteCloseButton: props.hasAbsoluteCloseButton,
+      absoluteCloseButtonColor: props.absoluteCloseButtonColor,
+      isBackButton: props.isBackButton,
+      noBackdrop: props.noBackdrop,
+      style: props.style,
+      dialogStyle: props.dialogStyle,
+      withBalanceBar: props.withBalanceBar,
+      isCondensedHeader: props.isCondensedHeader,
+      currencyInBalanceBar: props.currencyInBalanceBar,
+    }),
     () => shouldFreeze(),
   );
   const title = () => frozen().title;
   const isLowStackPriority = () => frozen().isLowStackPriority;
-  const header = () => frozen().header;
-  const children = () => frozen().children;
   const className = () => frozen().className;
   const contentClassName = () => frozen().contentClassName;
   const headerClassName = () => frozen().headerClassName;
@@ -86,27 +113,21 @@ const Modal = (props: OwnProps) => {
   const noBackdrop = () => frozen().noBackdrop;
   const style = () => frozen().style;
   const dialogStyle = () => frozen().dialogStyle;
-  const dialogContent = () => frozen().dialogContent;
-  const moreMenuItems = () => frozen().moreMenuItems;
-  const headerToolBar = () => frozen().headerRightToolBar;
   const withBalanceBar = () => frozen().withBalanceBar;
   const isCondensedHeader = () => frozen().isCondensedHeader;
   const currencyInBalanceBar = () =>
     frozen().currencyInBalanceBar === undefined ? 'XTR' : frozen().currencyInBalanceBar;
 
-  let localDialogRef!: HTMLDivElement;
-  let moreButtonRef!: HTMLButtonElement;
-  let menuRef!: HTMLDivElement;
+  // A signal: the portal content is created after `shouldRender` flips, and the effects below wait for the element.
+  const [modalElement, setModalElement] = createSignal<HTMLElement | undefined>(undefined);
+  let localDialogRef: HTMLDivElement | undefined;
+  let moreButtonRef: HTMLButtonElement | undefined;
+  let menuRef: HTMLDivElement | undefined;
 
   const { isContextMenuOpen, contextMenuAnchor, handleContextMenu, handleContextMenuClose, handleContextMenuHide } =
     useContextMenuHandlers(() => moreButtonRef);
 
-  // TODO(codemod): "localDialogRef" was a ref object passed as a value: pass an accessor (() => localDialogRef) or a callback ref
-  const actualDialogRef = createMemo(() => props.dialogRef || localDialogRef);
-  const divModalRef = modalRef as (el: HTMLDivElement) => void;
-  const nativeDialogRef = modalRef as (el: HTMLDialogElement) => void;
-
-  const getRootElement = () => actualDialogRef().current;
+  const getRootElement = () => localDialogRef;
   const getTriggerElement = () => moreButtonRef;
   const getMenuElement = () => menuRef;
   const getLayout = () => ({ withPortal: true });
@@ -140,20 +161,19 @@ const Modal = (props: OwnProps) => {
     () => [props.isOpen, props.onClose, handleEnter],
     () => (props.isOpen ? captureKeyboardListeners({ onEsc: props.onClose, onEnter: handleEnter }) : undefined),
   );
-  // TODO(codemod): modalRef is a callback ref now: keep the element in a let assigned from ref={(el) => { modalRef(el); element = el; }}
   createEffect(
-    () => [props.isOpen, modalRef],
-    () => (props.isOpen && modalRef.current ? trapFocus(modalRef.current) : undefined),
+    () => [props.isOpen, modalElement()] as const,
+    ([isOpen, element]) => (isOpen && element ? trapFocus(element) : undefined),
   );
 
   createMutationEffect(
-    () => [props.isNativeDialog, nativeDialogRef, shouldRender()],
-    ([, , shouldRender]) => {
-      if (!props.isNativeDialog || !shouldRender) {
+    () => [props.isNativeDialog, shouldRender(), modalElement()] as const,
+    ([, isRendered, element]) => {
+      if (!props.isNativeDialog || !isRendered) {
         return undefined;
       }
 
-      const dialog = nativeDialogRef.current;
+      const dialog = element as HTMLDialogElement | undefined;
       if (!dialog) {
         return undefined;
       }
@@ -171,13 +191,13 @@ const Modal = (props: OwnProps) => {
   );
 
   createEffect(
-    () => [props.isNativeDialog, props.isOpen, nativeDialogRef, props.onClose, shouldRender()],
-    ([, , , , shouldRender]) => {
-      if (!props.isNativeDialog || !shouldRender) {
+    () => [props.isNativeDialog, props.isOpen, props.onClose, shouldRender(), modalElement()] as const,
+    ([, , , isRendered, element]) => {
+      if (!props.isNativeDialog || !isRendered) {
         return undefined;
       }
 
-      const dialog = nativeDialogRef.current;
+      const dialog = element as HTMLDialogElement | undefined;
       if (!dialog) {
         return undefined;
       }
@@ -200,18 +220,17 @@ const Modal = (props: OwnProps) => {
 
   useHistoryBack({
     isActive: () => props.isOpen,
-    onBack: props.onClose,
+    onBack: () => props.onClose(),
   });
 
   createMutationEffect(
-    () => [props.isOpen],
-    (_deps, prev) => {
-      const [prevIsOpen] = prev ?? [];
-      document.body.classList.toggle('has-open-dialog', Boolean(props.isOpen));
+    () => props.isOpen,
+    (isOpen, prevIsOpen) => {
+      document.body.classList.toggle('has-open-dialog', Boolean(isOpen));
 
-      const stopCounting = props.isOpen ? countOpenModal() : undefined;
+      const stopCounting = isOpen ? countOpenModal() : undefined;
 
-      if (props.isOpen || (!props.isOpen && prevIsOpen !== undefined)) {
+      if (isOpen || (!isOpen && prevIsOpen !== undefined)) {
         beginHeavyAnimation(ANIMATION_DURATION);
       }
 
@@ -225,8 +244,9 @@ const Modal = (props: OwnProps) => {
   const lang = useOldLang();
 
   function renderHeader() {
-    if (header()) {
-      return header();
+    const header = props.header;
+    if (header) {
+      return header;
     }
 
     const closeIconClassName = buildClassName('animated-close-icon', isBackButton() && 'state-back');
@@ -247,7 +267,7 @@ const Modal = (props: OwnProps) => {
     return title() ? (
       <div class={buildClassName('modal-header', headerClassName(), isCondensedHeader() && 'modal-header-condensed')}>
         {closeButton}
-        <div class="modal-title" autoFocus={!props.noTitleAutoFocus}>
+        <div class="modal-title" autofocus={!props.noTitleAutoFocus}>
           {title()}
         </div>
       </div>
@@ -273,15 +293,31 @@ const Modal = (props: OwnProps) => {
     return (
       <>
         <div class="modal-container">
-          <div class="modal-backdrop" onClick={!props.noBackdropClose ? props.onClose : undefined} />
-          {withBalanceBar() && <ModalStarBalanceBar isModalOpen={props.isOpen} currency={currencyInBalanceBar()} />}
-          <div class={modalDialogClassName()} ref={actualDialogRef()} style={dialogStyle()}>
+          <div
+            class="modal-backdrop"
+            onClick={() => {
+              if (!props.noBackdropClose) props.onClose();
+            }}
+          />
+          {withBalanceBar() && (
+            <ModalStarBalanceBar isModalOpen={props.isOpen || undefined} currency={currencyInBalanceBar()} />
+          )}
+          <div
+            class={modalDialogClassName()}
+            ref={(el) => {
+              localDialogRef = el;
+              props.dialogRef?.(el);
+            }}
+            style={dialogStyle()}
+          >
             {renderHeader()}
-            {headerToolBar()}
-            {Boolean(moreMenuItems()) && (
+            {props.headerRightToolBar}
+            {Boolean(props.moreMenuItems) && (
               <>
                 <Button
-                  ref={moreButtonRef}
+                  ref={(el) => {
+                    moreButtonRef = el as HTMLButtonElement;
+                  }}
                   className="modal-more-button"
                   round
                   color={absoluteCloseButtonColor()}
@@ -292,9 +328,11 @@ const Modal = (props: OwnProps) => {
                   onContextMenu={handleContextMenu}
                 />
                 <Menu
-                  ref={menuRef}
-                  isOpen={isContextMenuOpen}
-                  anchor={contextMenuAnchor}
+                  ref={(el) => {
+                    menuRef = el;
+                  }}
+                  isOpen={isContextMenuOpen()}
+                  anchor={contextMenuAnchor()}
                   autoClose
                   withPortal
                   positionX="right"
@@ -305,13 +343,13 @@ const Modal = (props: OwnProps) => {
                   getMenuElement={getMenuElement}
                   getLayout={getLayout}
                 >
-                  {moreMenuItems()}
+                  {props.moreMenuItems}
                 </Menu>
               </>
             )}
-            {dialogContent()}
+            {props.dialogContent}
             <div class={buildClassName('modal-content custom-scroll', contentClassName())} style={style()}>
-              {children()}
+              {props.children}
             </div>
           </div>
         </div>
@@ -323,11 +361,26 @@ const Modal = (props: OwnProps) => {
     <Show when={shouldRender()}>
       <Portal>
         {props.isNativeDialog ? (
-          <dialog ref={nativeDialogRef} class={fullClassName()} aria-modal="true">
+          <dialog
+            ref={(el) => {
+              setModalElement(el);
+              modalRef(el);
+            }}
+            class={fullClassName()}
+            aria-modal="true"
+          >
             {renderContent()}
           </dialog>
         ) : (
-          <div ref={divModalRef} class={fullClassName()} tabIndex={-1} role="dialog">
+          <div
+            ref={(el) => {
+              setModalElement(el);
+              modalRef(el);
+            }}
+            class={fullClassName()}
+            tabIndex={-1}
+            role="dialog"
+          >
             {renderContent()}
           </div>
         )}

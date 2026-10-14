@@ -14,10 +14,10 @@
 import { createMemo } from 'frameact';
 import { splitProps } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
-
 import { useGlobal } from '../../global';
-import { selectCanAnimateInterface } from '../../global/selectors';
+
 import { Transition as KitTransition, type TransitionSlide } from '../../lib/kit';
+import { selectCanAnimateInterface } from '../../global/selectors';
 
 import './Transition.scss';
 

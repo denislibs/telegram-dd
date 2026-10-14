@@ -1,5 +1,3 @@
-import { createMemo } from 'frameact';
-
 import useImageLoader from '../../hooks/useImageLoader';
 import useLang from '../../hooks/useLang';
 
@@ -19,9 +17,8 @@ const MIN_OUTPUT_SIZE = 256;
 
 const CropModal = (props: OwnProps) => {
   const lang = useLang();
-  const imageLoaderResult = createMemo(() => useImageLoader(() => props.file));
-  const image = () => imageLoaderResult().image;
-  const isOpen = createMemo(() => Boolean(props.file) && Boolean(image()));
+  const { image } = useImageLoader(() => props.file);
+  const isOpen = () => Boolean(props.file) && Boolean(image());
   return (
     <Modal
       isOpen={isOpen()}

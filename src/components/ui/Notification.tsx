@@ -1,11 +1,12 @@
 import { createEffect, createMemo, createSignal } from 'frameact';
+import { Show } from 'frameact/dom';
 import { getActions } from '../../global';
-import { createShowTransition } from '../../lib/kit';
 
 import type { ApiNotification } from '../../api/types';
 import { isLangFnParam } from '../../util/localization/types';
 
 import { ANIMATION_END_DELAY } from '../../config';
+import { createShowTransition } from '../../lib/kit';
 import buildClassName from '../../util/buildClassName';
 import captureEscKeyListener from '../../util/captureEscKeyListener';
 import { REM } from '../common/helpers/mediaDimensions';
@@ -53,7 +54,6 @@ const Notification = (props: OwnProps) => {
   const shouldShowTimer = () => props.notification.shouldShowTimer;
   const title = () => props.notification.title;
   const containerSelector = () => props.notification.containerSelector;
-  const isMessageLangFnParam = createMemo(() => isLangFnParam(message()));
 
   const [isOpen, setIsOpen] = createSignal(true);
 
@@ -72,20 +72,19 @@ const Notification = (props: OwnProps) => {
   // The dialog would take the toast away with it when it closes, so the toast moves to the regular portal
   createEffect(
     () => portalElement(),
-    (portalElement) => {
-      if (!portalElement) return undefined;
+    (dialog) => {
+      if (!dialog) return undefined;
 
       const handleDialogClose = () => setPortalElement(undefined);
-      portalElement.addEventListener('close', handleDialogClose);
+      dialog.addEventListener('close', handleDialogClose);
 
-      return () => portalElement.removeEventListener('close', handleDialogClose);
+      return () => dialog.removeEventListener('close', handleDialogClose);
     },
   );
 
   let actionActivationRef = false;
   let timerRef: number | undefined;
-  // TODO(codemod): useShowTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element (transitionClassNames/hasOpenClass are gone)
-  const { transitionClassNames } = createShowTransition({ isOpen: () => isOpen() });
+  const { ref: transitionRef } = createShowTransition({ isOpen: () => isOpen() });
 
   const handleDismiss = () => {
     actions.dismissNotification({ localId: localId() });
@@ -135,13 +134,13 @@ const Notification = (props: OwnProps) => {
 
   createEffect(
     () => [isOpen(), closeAndDismiss],
-    ([isOpen]) => (isOpen ? captureEscKeyListener(closeAndDismiss) : undefined),
+    ([isOpened]) => (isOpened ? captureEscKeyListener(closeAndDismiss) : undefined),
   );
 
   createEffect(
-    () => [duration(), cacheBreaker()],
-    ([duration, cacheBreaker]) => {
-      timerRef = window.setTimeout(() => closeAndDismiss(true), duration);
+    () => [duration(), cacheBreaker()] as const,
+    ([delay]) => {
+      timerRef = window.setTimeout(() => closeAndDismiss(true), delay);
 
       return () => {
         if (timerRef) {
@@ -169,52 +168,49 @@ const Notification = (props: OwnProps) => {
   };
 
   const renderedTitle = createMemo(() => {
-    if (!title()) return undefined;
-    if (isLangFnParam(title())) {
-      return lang.with(title());
+    const currentTitle = title();
+    if (!currentTitle) return undefined;
+    if (isLangFnParam(currentTitle)) {
+      return lang.with(currentTitle);
     }
 
-    return renderText(title(), ['simple_markdown', 'emoji', 'br', 'links']);
-    // @ts-expect-error -- Lang Parameters are too complex
+    return renderText(currentTitle, ['simple_markdown', 'emoji', 'br', 'links']);
   });
 
   const renderedMessage = createMemo(() => {
-    if (isMessageLangFnParam()) {
-      return lang.with(message());
+    const currentMessage = message();
+    if (isLangFnParam(currentMessage)) {
+      return lang.with(currentMessage);
     }
 
-    if (typeof message() === 'string') {
+    if (typeof currentMessage === 'string') {
       if (props.notification.messageEntities) {
         return renderTextWithEntities({
-          text: message(),
+          text: currentMessage,
           entities: props.notification.messageEntities,
         });
       }
-      return renderText(message(), ['simple_markdown', 'emoji', 'br', 'links']);
+      return renderText(currentMessage, ['simple_markdown', 'emoji', 'br', 'links']);
     }
 
-    return message();
-    // @ts-expect-error -- Lang Parameters are too complex
+    return currentMessage;
   });
 
   const renderedActionText = createMemo(() => {
-    if (!actionText()) return undefined;
-    if (isLangFnParam(actionText())) {
-      return lang.with(actionText());
+    const currentActionText = actionText();
+    if (!currentActionText) return undefined;
+    if (isLangFnParam(currentActionText)) {
+      return lang.with(currentActionText);
     }
 
-    return actionText();
+    return currentActionText;
   });
 
   const renderedIcon = createMemo(() => {
-    if (customEmojiIconId()) {
+    const documentId = customEmojiIconId();
+    if (documentId) {
       return (
-        <CustomEmoji
-          className="notification-emoji-icon"
-          forceAlways
-          size={CUSTOM_EMOJI_SIZE}
-          documentId={customEmojiIconId()}
-        />
+        <CustomEmoji className="notification-emoji-icon" forceAlways size={CUSTOM_EMOJI_SIZE} documentId={documentId} />
       );
     }
 
@@ -233,7 +229,8 @@ const Notification = (props: OwnProps) => {
       containerElement={portalElement()}
     >
       <div
-        class={buildClassName('Notification', transitionClassNames, className())}
+        ref={transitionRef}
+        class={buildClassName('Notification', className())}
         onClick={handleClick}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
@@ -249,8 +246,10 @@ const Notification = (props: OwnProps) => {
           </Button>
         )}
         {shouldShowTimer() && (
-          // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show>
-          <RoundTimer className="notification-timer" key={cacheBreaker()} duration={Math.ceil(duration() / 1000)} />
+          // Deviation: `key={cacheBreaker}` remounts the timer; a fresh array per `cacheBreaker` change is the key.
+          <Show when={[cacheBreaker()]} keyed>
+            {() => <RoundTimer className="notification-timer" duration={Math.ceil(duration() / 1000)} />}
+          </Show>
         )}
       </div>
     </Portal>

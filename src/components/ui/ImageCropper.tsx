@@ -34,10 +34,10 @@ const ImageCropper = (props: OwnProps) => {
   let lastMousePositionRef = { x: 0, y: 0 };
   let lastImagePositionRef = { x: 0, y: 0 };
 
-  const { width: windowWidth } = useWindowSize();
-  const previewContainerSize = Math.min(PREVIEW_SIZE, windowWidth - MODAL_INLINE_PADDING * 2);
+  const windowSize = useWindowSize();
+  const previewContainerSize = createMemo(() => Math.min(PREVIEW_SIZE, windowSize().width - MODAL_INLINE_PADDING * 2));
   const scaleFactor = createMemo(() =>
-    props.image ? Math.max(previewContainerSize / props.image.width, previewContainerSize / props.image.height) : 1,
+    props.image ? Math.max(previewContainerSize() / props.image.width, previewContainerSize() / props.image.height) : 1,
   );
   const zoomFactor = createMemo(() => (scaleFactor() * zoom()) / 100);
 
@@ -50,7 +50,7 @@ const ImageCropper = (props: OwnProps) => {
   });
 
   const clampPosition = (x: number, y: number, previewSize: { width: number; height: number }) => {
-    const radius = previewContainerSize / 2;
+    const radius = previewContainerSize() / 2;
     const imgHalfWidth = previewSize.width / 2;
     const imgHalfHeight = previewSize.height / 2;
 
@@ -110,7 +110,7 @@ const ImageCropper = (props: OwnProps) => {
   const handleCrop = () => {
     if (!props.image) return;
 
-    const cropSize = previewContainerSize / zoomFactor();
+    const cropSize = previewContainerSize() / zoomFactor();
     const cropX = props.image.width / 2 - cropSize / 2 - imagePosition().x / zoomFactor();
     const cropY = props.image.height / 2 - cropSize / 2 - imagePosition().y / zoomFactor();
 
@@ -126,8 +126,8 @@ const ImageCropper = (props: OwnProps) => {
     }, 'image/jpeg');
   };
 
-  const imageLeft = createMemo(() => (previewContainerSize - previewImageSize().width) / 2 + imagePosition().x);
-  const imageTop = createMemo(() => (previewContainerSize - previewImageSize().height) / 2 + imagePosition().y);
+  const imageLeft = createMemo(() => (previewContainerSize() - previewImageSize().width) / 2 + imagePosition().x);
+  const imageTop = createMemo(() => (previewContainerSize() - previewImageSize().height) / 2 + imagePosition().y);
   const backgroundImageStyle = createMemo(() =>
     buildStyle(
       `width: ${previewImageSize().width}px`,
@@ -148,51 +148,53 @@ const ImageCropper = (props: OwnProps) => {
 
   return (
     <Show when={props.image}>
-      <div>
-        <div
-          class={styles.previewContainer}
-          style={buildStyle(`width: ${previewContainerSize}px`, `height: ${previewContainerSize}px`)}
-        >
-          <img
-            src={props.image.src}
-            class={styles.backgroundImage}
-            style={backgroundImageStyle()}
-            draggable={false}
-            onMouseDown={startDrag}
-            onTouchStart={startDrag}
-            alt=""
-            role="presentation"
-          />
-          <div class={styles.previewMask} />
-          <div class={styles.cropArea}>
+      {(image) => (
+        <div>
+          <div
+            class={styles.previewContainer}
+            style={buildStyle(`width: ${previewContainerSize()}px`, `height: ${previewContainerSize()}px`)}
+          >
             <img
-              src={props.image.src}
-              class={styles.foregroundImage}
-              style={foregroundImageStyle()}
+              src={image().src}
+              class={styles.backgroundImage}
+              style={backgroundImageStyle()}
               draggable={false}
+              onMouseDown={startDrag}
+              onTouchStart={startDrag}
               alt=""
               role="presentation"
             />
+            <div class={styles.previewMask} />
+            <div class={styles.cropArea}>
+              <img
+                src={image().src}
+                class={styles.foregroundImage}
+                style={foregroundImageStyle()}
+                draggable={false}
+                alt=""
+                role="presentation"
+              />
+            </div>
+          </div>
+          <div class={styles.bottomControls}>
+            <RangeSlider
+              className={styles.zoomSlider}
+              min={MIN_ZOOM}
+              max={MAX_ZOOM}
+              value={zoom()}
+              onChange={handleZoomChange}
+            />
+            <Button
+              className={styles.confirmButton}
+              round
+              color="primary"
+              iconName="check"
+              onClick={handleCrop}
+              ariaLabel="Crop"
+            />
           </div>
         </div>
-        <div class={styles.bottomControls}>
-          <RangeSlider
-            className={styles.zoomSlider}
-            min={MIN_ZOOM}
-            max={MAX_ZOOM}
-            value={zoom()}
-            onChange={handleZoomChange}
-          />
-          <Button
-            className={styles.confirmButton}
-            round
-            color="primary"
-            iconName="check"
-            onClick={handleCrop}
-            ariaLabel="Crop"
-          />
-        </div>
-      </div>
+      )}
     </Show>
   );
 };

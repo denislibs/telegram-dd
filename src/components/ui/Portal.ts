@@ -31,7 +31,11 @@ const Portal = (props: OwnProps) => {
     // A new container adopts the content (frameact moves it with the mount).
     // Deviation: tt rendered nothing when the container is missing; frameact's Portal falls back to `document.body`.
     get mount() {
-      return props.containerElement || document.querySelector<HTMLDivElement>(props.containerSelector || '#portals') || undefined;
+      return (
+        props.containerElement ||
+        document.querySelector<HTMLDivElement>(props.containerSelector || '#portals') ||
+        undefined
+      );
     },
     children: element,
   });

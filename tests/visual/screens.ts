@@ -67,7 +67,7 @@ export const screens: VisualScreen[] = [
     name: 'harness-detects-difference',
     ported: true,
     reference: { app: 'tt', path: '/', ready: TT_MAIN_READY },
-    candidate: { app: 'ours', path: '/', ready: ['main h1'] },
+    candidate: { app: 'ours', path: '/', ready: ['#Main'] },
     mask: TT_MAIN_MASK,
     threshold: 0.02,
     expect: 'differ',

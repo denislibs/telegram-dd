@@ -1,14 +1,11 @@
 import { expect, test } from './fixtures';
 
 // Example: every ported screen adds a spec like this one next to it, using the strict fixture.
-test('the app shell renders and reacts to clicks', async ({ page }) => {
+// The mocked client boots logged in (util/init.ts), so the shell shows the main screen: a placeholder until the chat
+// list slice lands. The auth flow has its own spec (auth.spec.ts).
+test('the app shell renders the main placeholder in mocked mode', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Telegram on frameact' })).toBeVisible();
-
-  const counter = page.getByRole('button', { name: /clicks:/ });
-  await expect(counter).toHaveText('clicks: 0');
-  await counter.click();
-  await expect(counter).toHaveText('clicks: 1');
+  await expect(page.locator('#Main')).toBeVisible();
 });
 
 // The dev smoke of the ported API layer, against the in-repo MockClient (no Telegram backend, dummy api id/hash).

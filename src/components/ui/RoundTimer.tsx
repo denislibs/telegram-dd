@@ -23,12 +23,15 @@ const RoundTimer = (props: OwnProps) => {
   const [timeLeft, setTimeLeft] = createSignal(props.duration);
   const lang = useOldLang();
 
-  useInterval(() => setTimeLeft((prev) => prev - 1), timeLeft() > 0 ? UPDATE_FREQUENCY : undefined);
+  useInterval(
+    () => setTimeLeft((prev) => prev - 1),
+    () => (timeLeft() > 0 ? UPDATE_FREQUENCY : undefined),
+  );
 
   createEffect(
-    () => [timeLeft(), props.onEnd],
-    ([timeLeft]) => {
-      if (timeLeft <= 0) {
+    () => [timeLeft(), props.onEnd] as const,
+    ([currentTimeLeft]) => {
+      if (currentTimeLeft <= 0) {
         props.onEnd?.();
       }
     },

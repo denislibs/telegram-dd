@@ -85,7 +85,7 @@ const MenuItem = (rawProps: MenuItemProps) => {
       props.className,
       props.disabled && 'disabled',
       props.destructive && 'destructive',
-      !isTouchScreen && 'compact',
+      !isTouchScreen() && 'compact',
       props.withWrap && 'wrap',
       !props.icon && !props.customIcon && 'text-only',
     ),
@@ -116,7 +116,7 @@ const MenuItem = (rawProps: MenuItemProps) => {
           download={props.download}
           aria-label={props.ariaLabel}
           title={props.ariaLabel}
-          target={props.target || (props.href.startsWith(window.location.origin) || IS_TEST ? '_self' : '_blank')}
+          target={props.target || (props.href!.startsWith(window.location.origin) || IS_TEST ? '_self' : '_blank')}
           rel={props.rel}
           dir={lang.isRtl ? 'rtl' : undefined}
           onClick={props.onClick}

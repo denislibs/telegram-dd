@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createMutationEffect, onMount, previous } from 'frameact';
+import { createEffect, createMemo, createMutationEffect, onMount, previous, requestMutation } from 'frameact';
 import { forceMutation } from 'frameact/stricterdom';
 import { withGlobal } from '../global';
 
@@ -225,9 +225,12 @@ const App = () => {
   useTauriDrag();
   useFileHoverOpen();
 
+  // Deviation: `useLayoutEffect(…, [])` wrote the DOM during the commit; `onMount` is a measure-phase callback.
   onMount(() => {
-    document.body.classList.add(styles.bg);
-    document.documentElement.classList.remove('initial');
+    requestMutation(() => {
+      document.body.classList.add(styles.bg);
+      document.documentElement.classList.remove('initial');
+    });
   });
 
   createMutationEffect(

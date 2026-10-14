@@ -106,17 +106,10 @@ const Button = (rawProps: OwnProps) => {
     },
     rawProps,
   ) as OwnProps & Required<Pick<OwnProps, 'type' | 'size' | 'color' | 'noFastClick' | 'iconAlignment'>>;
-  let elementRef!: HTMLButtonElement | HTMLAnchorElement;
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (props.ref) {
-    // TODO(codemod): "elementRef" was a ref object and is reassigned here (a forwarded ref?): use a callback ref
-    elementRef = props.ref;
-  }
-
   const lang = useOldLang();
 
   const [isClicked, setIsClicked] = createSignal(false);
-  const handleFileHoverOpen = useFileHoverOpenHandler(props.onFileHoverOpen);
+  const handleFileHoverOpen = useFileHoverOpenHandler(() => props.onFileHoverOpen?.());
 
   const isNotInteractive = createMemo(() => props.disabled || props.nonInteractive);
 
@@ -221,21 +214,21 @@ const Button = (rawProps: OwnProps) => {
       when={!props.href}
       fallback={
         <a
-          ref={elementRef as HTMLAnchorElement}
+          ref={(el) => props.ref?.(el)}
           id={props.id}
           class={fullClassName()}
           href={props.href}
           title={props.ariaLabel}
           download={props.download}
           tabIndex={props.tabIndex}
-          autoFocus={props.autoFocus}
+          autofocus={props.autoFocus}
           dir={props.isRtl ? 'rtl' : undefined}
           aria-label={props.ariaLabel}
           aria-controls={props.ariaControls}
           style={props.style}
           onTransitionEnd={props.onTransitionEnd}
           data-file-hover-open={props.onFileHoverOpen ? true : undefined}
-          onFileHoverOpen={props.onFileHoverOpen ? handleFileHoverOpen : undefined}
+          on:filehoveropen={props.onFileHoverOpen ? handleFileHoverOpen : undefined}
           target="_blank"
           rel="noreferrer"
         >
@@ -244,22 +237,31 @@ const Button = (rawProps: OwnProps) => {
       }
     >
       <button
-        ref={elementRef as HTMLButtonElement}
+        ref={(el) => props.ref?.(el)}
         id={props.id}
         type={props.type}
         class={fullClassName()}
-        onClick={IS_TOUCH_ENV || props.noFastClick ? handleClick : undefined}
+        // Deviation: handlers are bound once, so tt's render-time conditions on the handlers below move into the callbacks.
+        onClick={(e) => {
+          if (IS_TOUCH_ENV || props.noFastClick) handleClick(e);
+        }}
         onContextMenu={props.onContextMenu}
         onMouseDown={handleMouseDown}
         onMouseUp={props.onMouseUp}
-        onMouseEnter={props.onMouseEnter && !isNotInteractive() ? props.onMouseEnter : undefined}
-        onMouseLeave={props.onMouseLeave && !isNotInteractive() ? props.onMouseLeave : undefined}
+        onMouseEnter={(e) => {
+          if (!isNotInteractive()) props.onMouseEnter?.(e);
+        }}
+        onMouseLeave={() => {
+          if (!isNotInteractive()) props.onMouseLeave?.();
+        }}
         onTransitionEnd={props.onTransitionEnd}
-        onFocus={props.onFocus && !isNotInteractive() ? props.onFocus : undefined}
+        onFocus={() => {
+          if (!isNotInteractive()) props.onFocus?.();
+        }}
         data-file-hover-open={props.onFileHoverOpen ? true : undefined}
-        onFileHoverOpen={props.onFileHoverOpen ? handleFileHoverOpen : undefined}
+        on:filehoveropen={props.onFileHoverOpen ? handleFileHoverOpen : undefined}
         disabled={props.disabled && !props.allowDisabledClick}
-        autoFocus={props.autoFocus}
+        autofocus={props.autoFocus}
         aria-label={props.ariaLabel}
         aria-controls={props.ariaControls}
         aria-haspopup={props.hasPopup}

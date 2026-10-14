@@ -45,6 +45,7 @@ type OwnProps = {
   nestedOptionList?: IRadioOption[];
   leftElement?: JSX.Element;
   values?: string[];
+  // Deviation: the input is always controlled (`use:checked`); the flag is accepted and ignored.
   teactExperimentControlled?: boolean;
   onChange?: (e: ChangeEvent<HTMLInputElement>, nestedOptionList?: IRadioOption[]) => void;
   onCheck?: (isChecked: boolean) => void;
@@ -123,7 +124,8 @@ const Checkbox = (props: OwnProps) => {
           use:checked={() => props.checked}
           disabled={props.disabled}
           tabIndex={props.tabIndex}
-          onChange={handleChange}
+          // Deviation: teact fired onChange on every `input` event; frameact's onChange is the native `change`.
+          onInput={handleChange}
           onClick={props.onClickLabel ? handleInputClick : undefined}
         />
         <div class={buildClassName('Checkbox-main', Boolean(props.leftElement) && 'Nested-avatar-list')}>

@@ -111,7 +111,7 @@ const RangeSlider = (rawProps: OwnProps) => {
           step={props.step}
           type="range"
           class="RangeSlider__input"
-          onChange={handleChange}
+          onInput={handleChange}
         />
         {props.options && (
           <div class="slider-options">

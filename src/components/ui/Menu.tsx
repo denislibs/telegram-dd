@@ -1,9 +1,9 @@
 import { beginHeavyAnimation, createEffect, createMemo } from 'frameact';
 import { mergeProps, Show, splitProps } from 'frameact/dom';
-import { createShowTransition } from '../../lib/kit';
 
 import type { MenuPositionOptions } from '../../hooks/useMenuPosition';
 
+import { createShowTransition } from '../../lib/kit';
 import { IS_BACKDROP_BLUR_SUPPORTED } from '../../util/browser/windowEnvironment';
 import buildClassName from '../../util/buildClassName';
 import captureEscKeyListener from '../../util/captureEscKeyListener';
@@ -78,17 +78,18 @@ const Menu = (rawProps: OwnProps) => {
 
   let containerRef!: HTMLDivElement;
 
-  const { ref: bubbleRef } = createShowTransition({
+  let bubbleElement: HTMLDivElement | undefined;
+  const getBubbleElement = () => bubbleElement;
+
+  const { ref: bubbleTransitionRef } = createShowTransition({
     isOpen: () => props.isOpen,
-    // TODO(codemod): ref option: hand the result `ref` to the element (ref={t.ref}) instead
-    ref: props.ref,
-    onCloseAnimationEnd: props.onCloseAnimationEnd,
+    onCloseAnimationEnd: () => props.onCloseAnimationEnd?.(),
   });
 
   useMenuPosition(
     () => props.isOpen,
     () => containerRef,
-    bubbleRef,
+    getBubbleElement,
     positionOptions,
   );
 
@@ -99,7 +100,7 @@ const Menu = (rawProps: OwnProps) => {
 
   useHistoryBack({
     isActive: () => props.isOpen,
-    onBack: props.onClose,
+    onBack: () => props.onClose(),
     shouldBeReplaced: true,
   });
 
@@ -114,7 +115,7 @@ const Menu = (rawProps: OwnProps) => {
   );
 
   const navigateWithKeyboard = useKeyboardListNavigation(
-    bubbleRef,
+    getBubbleElement,
     () => props.isOpen,
     undefined,
     '.MenuItem:not(.disabled), [role="menuitemradio"]:not(:disabled)',
@@ -167,7 +168,7 @@ const Menu = (rawProps: OwnProps) => {
       id={props.id}
       class={buildClassName(
         'Menu',
-        !props.noCompact && !isTouchScreen && 'compact',
+        !props.noCompact && !isTouchScreen() && 'compact',
         !IS_BACKDROP_BLUR_SUPPORTED && 'no-blur',
         props.withPortal && 'in-portal',
         props.className,
@@ -175,19 +176,33 @@ const Menu = (rawProps: OwnProps) => {
       aria-label={props.ariaLabel}
       aria-labelledby={props.ariaLabelledBy}
       role={props.ariaLabel || props.ariaLabelledBy ? 'menu' : undefined}
-      onKeyDown={props.isOpen ? handleKeyDown : undefined}
-      onMouseEnter={props.onMouseEnter}
-      onMouseLeave={props.isOpen ? props.onMouseLeave : undefined}
+      // Deviation: handlers are bound once, so tt's render-time `isOpen ? handler : undefined` moves into the callbacks.
+      onKeyDown={(e) => {
+        if (props.isOpen) handleKeyDown(e);
+      }}
+      onMouseEnter={(e) => props.onMouseEnter?.(e)}
+      onMouseLeave={(e) => {
+        if (props.isOpen) props.onMouseLeave?.(e);
+      }}
     >
       {props.isOpen && !props.nested && (
         // This only prevents click events triggering on underlying elements
         <div
           class="backdrop"
           onMouseDown={preventMessageInputBlurWithBubbling}
-          onMouseEnter={props.onMouseEnterBackdrop}
+          onMouseEnter={(e) => props.onMouseEnterBackdrop?.(e)}
         />
       )}
-      <div role="presentation" ref={bubbleRef} class={bubbleFullClassName()} onClick={handleClick}>
+      <div
+        role="presentation"
+        ref={(el) => {
+          bubbleElement = el;
+          bubbleTransitionRef(el);
+          props.ref?.(el);
+        }}
+        class={bubbleFullClassName()}
+        onClick={handleClick}
+      >
         {props.children}
         {props.footer && <div class="footer">{props.footer}</div>}
       </div>

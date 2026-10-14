@@ -1,5 +1,6 @@
 import { createMemo, createSignal } from 'frameact';
-import { mergeProps } from 'frameact/dom';
+import { Dynamic, mergeProps } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import type { IAnchorPosition } from '../../types';
 
@@ -8,10 +9,15 @@ import Menu from './Menu';
 
 import './DropdownMenu.scss';
 
+// Deviation: a component (a function of reactive props) instead of teact's FC called as a function: read
+// `props.isOpen` / `props.onTrigger` where used, never destructure them.
+type TriggerProps = { onTrigger: () => void; isOpen?: boolean };
+type TriggerComponent = (props: TriggerProps) => JSX.Element;
+
 type OwnProps = {
   className?: string;
   bubbleClassName?: string;
-  trigger?: FC<{ onTrigger: () => void; isOpen?: boolean }>;
+  trigger?: TriggerComponent;
   transformOriginX?: number;
   transformOriginY?: number;
   positionX?: 'left' | 'right';
@@ -31,7 +37,7 @@ type OwnProps = {
 const DropdownMenu = (rawProps: OwnProps) => {
   const props = mergeProps({ positionX: 'left', autoClose: true }, rawProps) as OwnProps &
     Required<Pick<OwnProps, 'positionX' | 'autoClose'>>;
-  let menuRef!: HTMLDivElement;
+  let menuRef: HTMLDivElement | undefined;
   let triggerRef!: HTMLDivElement;
   const [isOpen, setIsOpen] = createSignal(false);
   const [menuAnchor, setMenuAnchor] = createSignal<IAnchorPosition | undefined>(undefined);
@@ -71,17 +77,17 @@ const DropdownMenu = (rawProps: OwnProps) => {
     props.onClose?.();
   };
 
-  const triggerComponent: FC<{ onTrigger: () => void; isOpen?: boolean }> = createMemo(() => {
+  const triggerComponent = createMemo<TriggerComponent>(() => {
     if (props.trigger) return props.trigger;
 
-    return ({ onTrigger, isOpen: isMenuOpen }) => (
+    return (triggerProps) => (
       <Button
         round
         size="smaller"
         color="translucent"
-        className={isMenuOpen ? 'active' : ''}
+        className={triggerProps.isOpen ? 'active' : ''}
         iconName="more"
-        onClick={onTrigger}
+        onClick={triggerProps.onTrigger}
         ariaLabel="More actions"
       />
     );
@@ -99,10 +105,12 @@ const DropdownMenu = (rawProps: OwnProps) => {
       onKeyDown={handleKeyDown}
       onTransitionEnd={props.onTransitionEnd}
     >
-      {triggerComponent()({ onTrigger: toggleIsOpen, isOpen: isOpen() })}
+      <Dynamic component={triggerComponent()} onTrigger={toggleIsOpen} isOpen={isOpen()} />
 
       <Menu
-        ref={menuRef}
+        ref={(el) => {
+          menuRef = el;
+        }}
         isOpen={isOpen() || Boolean(props.forceOpen)}
         className={props.className || ''}
         bubbleClassName={props.bubbleClassName || ''}

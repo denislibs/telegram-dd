@@ -27,6 +27,7 @@ type OwnProps = {
   tabIndex?: number;
   title?: string;
   autoFocus?: boolean;
+  // Deviation: the input is always controlled (`use:value`); the flag is accepted and ignored.
   teactExperimentControlled?: boolean;
   noMargin?: boolean;
   inputMode?: 'text' | 'none' | 'tel' | 'url' | 'email' | 'numeric' | 'decimal' | 'search';
@@ -59,7 +60,7 @@ const InputText = (rawProps: OwnProps) => {
   return (
     <div class={fullClassName()} dir={lang.isRtl ? 'rtl' : undefined}>
       <input
-        ref={props.ref}
+        ref={(el) => props.ref?.(el)}
         class="form-control"
         type="text"
         id={props.id}
@@ -68,13 +69,16 @@ const InputText = (rawProps: OwnProps) => {
         tabIndex={props.tabIndex}
         placeholder={props.placeholder}
         maxLength={props.maxLength}
-        autoComplete={props.autoComplete}
-        spellCheck={IS_TAURI ? false : undefined}
+        autocomplete={props.autoComplete}
+        spellcheck={IS_TAURI ? false : undefined}
         inputMode={props.inputMode}
         disabled={props.disabled}
         readOnly={props.readOnly}
-        onChange={props.onChange}
-        onInput={props.onInput}
+        // Deviation: teact fired onChange on every `input` event; frameact's onChange is the native `change`.
+        onInput={(e) => {
+          props.onChange?.(e);
+          props.onInput?.(e);
+        }}
         onKeyPress={props.onKeyPress}
         onKeyDown={props.onKeyDown}
         onBlur={props.onBlur}
@@ -82,9 +86,9 @@ const InputText = (rawProps: OwnProps) => {
         aria-label={labelText()}
         title={props.title}
         onClick={props.onClick}
-        autoFocus={props.autoFocus}
+        autofocus={props.autoFocus}
       />
-      {labelText() && <label htmlFor={props.id}>{labelText()}</label>}
+      {labelText() && <label for={props.id}>{labelText()}</label>}
       {(props.maxLengthIndicator || (props.hasLengthIndicator && props.maxLength !== undefined)) && (
         <div class="max-length-indicator">
           <AnimatedCounter

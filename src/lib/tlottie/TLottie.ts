@@ -39,6 +39,14 @@ const LOW_PRIORITY_CACHE_MODULO = 0;
 const CANVAS_CLASS = 'tlottie-canvas';
 
 const workers = launchMediaWorkers().map(({ connector }) => connector);
+
+// Deviation: with APP_ENV=test `launchMediaWorkers()` starts no workers, and tt's TLottie throws on its first request
+// (an unhandled rejection that fails the strict e2e gate on every screen with an animation). An inert worker keeps the
+// animation blank instead.
+const INERT_WORKER = { request: () => new Promise<never>(() => {}) };
+function getWorker(index: number) {
+  return workers[index] || INERT_WORKER;
+}
 const instancesByRenderId = new Map<string, TLottie>();
 
 const PENDING_CANVAS_RESIZES = new WeakMap<HTMLCanvasElement, Promise<void>>();
@@ -401,7 +409,7 @@ class TLottie {
     this.workerIndex = cycleRestrict(MAX_WORKERS, ++lastWorkerIndex);
     const { dataGeneration } = this;
 
-    void workers[this.workerIndex].request({
+    void getWorker(this.workerIndex).request({
       name: 'tlottie:init',
       args: [
         this.renderId,
@@ -422,7 +430,7 @@ class TLottie {
   }
 
   private destroyRenderer() {
-    workers[this.workerIndex].request({
+    getWorker(this.workerIndex).request({
       name: 'tlottie:destroy',
       args: [this.renderId],
     });
@@ -458,7 +466,7 @@ class TLottie {
     this.params.fitzModifier = fitzModifier;
     this.initConfig();
 
-    void workers[this.workerIndex].request({
+    void getWorker(this.workerIndex).request({
       name: 'tlottie:changeData',
       args: [
         this.renderId,
@@ -676,7 +684,7 @@ class TLottie {
     const { frameGeneration } = this;
     this.frames[frameIndex] = WAITING;
 
-    workers[this.workerIndex].request({
+    getWorker(this.workerIndex).request({
       name: 'tlottie:renderFrames',
       args: [this.renderId, frameIndex, this.onFrameLoad.bind(this, frameGeneration)],
     });

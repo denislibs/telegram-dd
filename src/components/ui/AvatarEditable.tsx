@@ -47,7 +47,7 @@ const AvatarEditable = (props: OwnProps) => {
     props.onChange(croppedImg);
 
     if (croppedBlobUrl() && croppedBlobUrl() !== props.currentAvatarBlobUrl) {
-      URL.revokeObjectURL(croppedBlobUrl());
+      URL.revokeObjectURL(croppedBlobUrl()!);
     }
     setCroppedBlobUrl(URL.createObjectURL(croppedImg));
   };
@@ -68,7 +68,7 @@ const AvatarEditable = (props: OwnProps) => {
         tabIndex={0}
         title={props.title || lang('ChangeYourProfilePicture')}
       >
-        <input type="file" onChange={handleSelectFile} accept="image/png, image/jpeg" />
+        <input type="file" onInput={handleSelectFile} accept="image/png, image/jpeg" />
         <Icon name="camera-add" />
         {croppedBlobUrl() && <img src={croppedBlobUrl()} draggable={false} alt="" />}
       </label>
