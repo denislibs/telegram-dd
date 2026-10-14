@@ -228,7 +228,9 @@ export function captureEvents(element: HTMLElement, options: CaptureOptions) {
       }
 
       if (e) {
-        if (hasMoved) {
+        // Deviation: hardening. A swipe that started (swipeThreshold) but whose finger was lifted before the 15 px
+        // MOVE_THRESHOLD is a release too: tt left `isSwipeActive` of its swipe controller set forever in that case.
+        if (hasMoved || hasSwiped) {
           if (options.onRelease) {
             options.onRelease(e);
           }

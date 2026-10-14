@@ -14,7 +14,7 @@ const INERTIA_EASING = timingFunctions.easeOutCubic;
 let isSwipeActive = false;
 let swipeOffsets: MoveOffsets | undefined;
 let onDrag: ((offsets: MoveOffsets) => void) | undefined;
-let onRelease: ((onCancel: NoneToVoidFunction) => void) | undefined;
+let onRelease: ((onCancel: NoneToVoidFunction, isForcedRevert?: boolean) => void) | undefined;
 let cancelCurrentReleaseAnimation: NoneToVoidFunction | undefined;
 
 export function captureControlledSwipe(
@@ -26,7 +26,36 @@ export function captureControlledSwipe(
     onCancel: NoneToVoidFunction;
   },
 ) {
-  return captureEvents(element, {
+  // Deviation: hardening. tt resets `isSwipeActive` only in the `onRelease` of captureEvents, which is not reported when
+  // the finger is lifted below 15 px, when the owner is disposed mid-drag, or when the page is hidden: the flag stayed
+  // set, every later step with `withSwipeControl` was taken over by a swipe that no longer existed and stayed paused.
+  // Every end path now goes through `endSwipe`; the ones that are not a lift of the finger revert the gesture.
+  let isOwnSwipe = false;
+  let removeAbandonListeners: NoneToVoidFunction | undefined;
+
+  function endSwipe(isForcedRevert: boolean) {
+    removeAbandonListeners?.();
+    removeAbandonListeners = undefined;
+
+    if (!isOwnSwipe) return;
+    isOwnSwipe = false;
+
+    if (!isSwipeActive) return;
+    isSwipeActive = false;
+
+    onRelease?.(options.onCancel, isForcedRevert);
+
+    onDrag = undefined;
+    onRelease = undefined;
+  }
+
+  // The page goes away under a finger: no `touchend` / `touchcancel` may arrive.
+  const abandonSwipe = () => endSwipe(true);
+  const abandonIfHidden = () => {
+    if (document.hidden) endSwipe(true);
+  };
+
+  const stopCapturing = captureEvents(element, {
     excludedClosestSelector: options.excludedClosestSelector,
     selectorToPreventScroll: options.selectorToPreventScroll,
     swipeThreshold: 10,
@@ -42,7 +71,19 @@ export function captureControlledSwipe(
 
       if (IS_IOS) {
         isSwipeActive = true;
+        isOwnSwipe = true;
         swipeOffsets = offsets;
+
+        if (!removeAbandonListeners) {
+          document.addEventListener('visibilitychange', abandonIfHidden);
+          document.addEventListener('pointercancel', abandonSwipe);
+          window.addEventListener('pagehide', abandonSwipe);
+          removeAbandonListeners = () => {
+            document.removeEventListener('visibilitychange', abandonIfHidden);
+            document.removeEventListener('pointercancel', abandonSwipe);
+            window.removeEventListener('pagehide', abandonSwipe);
+          };
+        }
       }
 
       return true;
@@ -54,17 +95,16 @@ export function captureControlledSwipe(
       onDrag?.(offsets);
     },
 
-    onRelease() {
-      if (!isSwipeActive) return;
-
-      isSwipeActive = false;
-
-      onRelease?.(options.onCancel);
-
-      onDrag = undefined;
-      onRelease = undefined;
+    onRelease(e) {
+      // A `touchcancel` is the system taking the touch away, not the user choosing: revert.
+      endSwipe(e.type === 'touchcancel');
     },
   });
+
+  return () => {
+    stopCapturing();
+    endSwipe(true);
+  };
 }
 
 // Deviation: tt returns nothing. The kit's <Transition> needs to know whether the swipe took the animation over (an
@@ -159,8 +199,8 @@ export function allowSwipeControlForTransition(
     };
     onDrag = ownOnDrag;
 
-    ownOnRelease = (onCancelForClient: NoneToVoidFunction) => {
-      const isRevertSwipe = currentDirection === -1;
+    ownOnRelease = (onCancelForClient: NoneToVoidFunction, isForcedRevert = false) => {
+      const isRevertSwipe = isForcedRevert || currentDirection === -1;
 
       options?.onRelease?.();
 

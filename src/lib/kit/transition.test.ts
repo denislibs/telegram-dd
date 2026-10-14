@@ -1209,3 +1209,97 @@ it('swipe: the whole gesture (take over, drag, release, inertia, end; and a reve
   expect(violations).toEqual([]);
   stop();
 });
+
+// ---- review fix round: a swipe ends on every path, a superseded swipe cleans up, thresholds and direction are pinned ----------
+
+const fireAnimationEnd = (...els: Element[]) => {
+  for (const el of els) el.dispatchEvent(new Event('animationend', { bubbles: true }));
+  vi.advanceTimersByTime(50);
+};
+
+/** A programmatic step (no finger) must not be taken over by a swipe that no longer exists. */
+async function expectNotCaptured(base: Awaited<ReturnType<typeof swipeSetup>>, key: number) {
+  const { t, setKey, scope } = base;
+  setKey(key);
+  await frame();
+  await frame();
+  const to = slidesOf(t).find((s) => s.classList.contains('Transition_slide-to'))!;
+  expect(animations.get(to)?.animation.state).not.toBe('paused'); // a phantom swipe would have paused it
+  expect(to.style.animationTimingFunction).toBe('');
+  vi.advanceTimersByTime(1000); // the normal fallback settles the step
+  await frame();
+  expect(scope.isAnimating.peek()).toBe(false);
+}
+
+it('swipe I1 (probe A, D): a release below the 15 px drag threshold (12 px) still ends the swipe: it commits, settles, and does not capture the next step', async () => {
+  nowMs = 0;
+  const base = await swipeSetup({ isBlockingAnimation: true });
+  const { t, s1, scope, log, stop } = base;
+  await startSwipe(t, s1); // the swipe started at 12 px
+  const [s0, s1b] = slidesOf(t);
+  touch('touchend', s1b); // never moved 15 px: captureEvents reports no release
+  await advance(0);
+  await advance(200);
+  await advance(200);
+  await advance(16);
+  fireAnimationEnd(s0, s1b);
+  await frame();
+  expect(classes(s0)).toBe('Transition_slide Transition_slide-active');
+  expect(scope.isAnimating.peek()).toBe(false);
+  expect(log).toEqual(['start', 'stop']);
+  await expectNotCaptured(base, 1);
+  stop();
+});
+
+it.each(['touchcancel', 'pointercancel', 'visibilitychange', 'pagehide'])(
+  'swipe I1 (probe A): %s during a short drag ends the swipe (reverted: the client cancel runs) and the next step is not captured',
+  async (type) => {
+    nowMs = 0;
+    const base = await swipeSetup({ isBlockingAnimation: true });
+    const { t, s1, scope, swipeCalls, log, stop } = base;
+    await startSwipe(t, s1);
+    const [, s1b] = slidesOf(t);
+    if (type === 'touchcancel') touch('touchcancel' as never, s1b);
+    else if (type === 'visibilitychange') {
+      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+      document.dispatchEvent(new Event(type));
+      delete (document as unknown as { hidden?: boolean }).hidden;
+    } else if (type === 'pagehide') window.dispatchEvent(new Event(type));
+    else document.dispatchEvent(new Event(type, { bubbles: true }));
+    await advance(0);
+    await advance(200);
+    await advance(200);
+    await advance(16);
+    expect(swipeCalls).toEqual(['right', 'cancel']);
+    expect(log).toEqual(['start', 'stop']);
+    expect(scope.isAnimating.peek()).toBe(false);
+    await frame();
+    await expectNotCaptured(base, 0);
+    stop();
+  },
+);
+
+it('swipe I1 (probe E): the owner of the gesture unmounting mid-drag reverts the swipe, releases the scope and does not leave a phantom swipe', async () => {
+  nowMs = 0;
+  const base = await swipeSetup({ isBlockingAnimation: true });
+  const { t, s1, scope, swipeCalls, log, stop } = base;
+  await startSwipe(t, s1);
+  const [, s1b] = slidesOf(t);
+  touch('touchmove', s1b, 212);
+  stop(); // the owner is gone
+  await advance(0);
+  await advance(200);
+  await advance(200);
+  await advance(16);
+  expect(swipeCalls).toEqual(['right', 'cancel']);
+  expect(log).toEqual(['start', 'stop']);
+  expect(scope.isAnimating.peek()).toBe(false);
+  touch('touchend', s1b);
+  await frame();
+  const t2 = await swipeSetup(); // a new owner afterwards works
+  await startSwipe(t2.t, t2.s1);
+  expect(animationOf(slidesOf(t2.t)[1]).state).toBe('paused');
+  touch('touchend', slidesOf(t2.t)[1]);
+  t2.stop();
+});
+
