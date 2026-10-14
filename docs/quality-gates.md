@@ -160,7 +160,7 @@ and `pnpm test` and are part of the per-slice checklist ([porting guide §7.2](p
 
 Playwright configs: `playwright.config.ts` (e2e + a11y, vite **dev** server on :1240, stricterdom on),
 `playwright.perf.config.ts` (a **production** build served by `vite preview` on :1241, one worker),
-`playwright.visual.config.ts` (our dev server + the tt copy on :1235, one worker). Ports and the build environment are in
+`playwright.visual.config.ts` (our dev server + the tt copy, one worker). Ports — 1240 / 1241 / 1242 in CI, shifted by a stable per-checkout offset locally so parallel git worktrees never reuse each other's servers — and the build environment are in
 `tests/config.ts`. All servers start themselves and are reused when already running (`pnpm dev:mocked` style).
 
 ### The mocked backend (shared by all gates)
@@ -204,6 +204,13 @@ with 404 for a scenario without a middleware. `strictMonitor.spec.ts` is the gat
 `tests/e2e/multitab.spec.ts` is the two-tab test of the state layer: two pages of one context boot the real entry, the
 first becomes the master, the second gets its global through `requestGlobal`; a chat and a tab-state field written in A
 reach B, B posts nothing back, and a write in B reaches A.
+
+The auth flow (`tests/e2e/auth.spec.ts`, helpers in `tests/e2e/authHelpers.ts`, shared with `tests/a11y/auth.a11y.spec.ts` and
+`tests/perf/perf.spec.ts`): the test plays the server with `apiUpdate` actions and drives the real UI through phone number,
+code, password, registration and the main placeholder, plus the QR code screen. `openApp()` first waits until the
+mocked sync has been quiet for a second (see the visual section for why). frameact's DEV timing hints (`Slow effect run`,
+`Slow measure drain`, `Slow store update`) are ignored by the monitor: they fire on a cold dev server under parallel CPU
+load; real jank is the long-task gate's job.
 
 Adding a screen: `tests/e2e/<screen>.spec.ts`, `import { expect, test } from './fixtures'`, open the route, exercise it.
 For a screen that needs data open it with the mock (`/#?mockScenario=...`).
@@ -254,6 +261,13 @@ Real vs scaffolded today:
   (`global.auth.state = 'authorizationStateReady'` when `IS_MOCKED_CLIENT`).
 - tt's mock does not implement every request (e.g. folders, language pack: errors in its console, a perpetual sync
   spinner). That is tt's noise, identical on every run; do not "fix" it in the screens, mask it.
+
+Ported screens (auth slice): `auth-phone-number`, `auth-code`, `auth-password`, `auth-registration`, `auth-qr-code`
+(`authScreen()` in `tests/visual/screens.ts`). Both apps boot logged in under the mock, so each target plays the server:
+after the mocked API has settled (its `sync` handlers write whole-global snapshots taken before their awaits, which undo
+an auth step played in the middle of them) it feeds the same `apiUpdate({'@type': 'updateAuthorizationState', …})` that
+the API worker would send (both apps expose `window.getActions()` in the dev/test build), waits for the form and for
+the screen transition. Result: 0 differing pixels on all five, threshold 0.05 %.
 
 ### 3. Leak check
 

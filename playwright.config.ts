@@ -10,6 +10,9 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   fullyParallel: true,
+  // The strict gates run a cold vite dev server and, per test, the whole app with its API worker: more than four at a
+  // time starve each other and time out (frameact's slow-run hints, `?api` log polling).
+  workers: process.env.CI ? 2 : 4,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   outputDir: 'test-results/e2e',
   use: {

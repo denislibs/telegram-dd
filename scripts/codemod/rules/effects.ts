@@ -15,6 +15,7 @@ import {
   findBodies,
   isFunctionNode,
   type Kinds,
+  rewriteReads,
 } from '../analysis.ts';
 import { type Ctx, isGlobalRef } from '../context.ts';
 
@@ -32,12 +33,14 @@ const HOOKS: Record<string, { facade: Facade | 'auto'; prevDeps: boolean; sync?:
   useSyncEffectWithPrevDeps: { facade: 'auto', prevDeps: true, sync: true },
 };
 
-function depsText(ctx: Ctx, deps: t.ArrayExpression, keepArray: boolean): string {
+function depsText(ctx: Ctx, deps: t.ArrayExpression, keepArray: boolean, asConst: boolean): string {
   const elements = deps.elements.filter(Boolean) as t.Node[];
   if (!keepArray && elements.length === 1 && elements[0].type !== 'SpreadElement') {
     return ctx.textWithParens(elements[0]);
   }
-  return ctx.text(deps);
+  // A tuple, so that the destructured parameter of the apply half keeps the type of each dependency (an array literal
+  // of mixed types widens to a union array). The `effectDeps` rule then makes the array compare by value.
+  return asConst && elements.length > 1 ? `${ctx.text(deps)} as const` : ctx.text(deps);
 }
 
 /**
@@ -46,11 +49,24 @@ function depsText(ctx: Ctx, deps: t.ArrayExpression, keepArray: boolean): string
  * value it was written for (teact's closure semantics) and TypeScript narrows it.
  */
 function shadowedDeps(deps: t.ArrayExpression, kinds: Kinds | undefined): string[] | undefined {
-  if (!kinds) return undefined;
   const names: string[] = [];
   let any = false;
   for (const element of deps.elements) {
-    if (element?.type === 'Identifier' && !names.includes(element.name)) {
+    // `props.error`: a prop read in the apply half would evaluate the prop getter there, and a getter that the compiler
+    // wrapped in a memo (a conditional / logical expression at the call site) cannot be read in an apply (no owner).
+    if (
+      element?.type === 'MemberExpression' &&
+      !element.computed &&
+      element.object.type === 'Identifier' &&
+      element.object.name === 'props' &&
+      element.property.type === 'Identifier' &&
+      !names.includes(`props.${element.property.name}`)
+    ) {
+      names.push(`props.${element.property.name}`);
+      any = true;
+      continue;
+    }
+    if (kinds && element?.type === 'Identifier' && !names.includes(element.name)) {
       const kind = kinds.byName.get(element.name);
       if (kind === 'accessor' || kind === 'reactive' || kind === 'thunk') {
         names.push(element.name);
@@ -64,6 +80,9 @@ function shadowedDeps(deps: t.ArrayExpression, kinds: Kinds | undefined): string
   while (names.length && names[names.length - 1] === '') names.pop();
   return names;
 }
+
+/** `props.error` → `error2`, `isOpen` → `isOpen2` (tt's `no-shadow` is on: the parameter cannot reuse the name). */
+const paramName = (dep: string) => `${dep.startsWith('props.') ? dep.slice(6) : dep}2`;
 
 export const effectsRule: Rule = {
   name: 'effects',
@@ -180,14 +199,40 @@ export const effectsRule: Rule = {
         const owner = path.findParent((p) => kindsByFn.has(p.node));
         const shadowed = shadowedDeps(deps, owner ? kindsByFn.get(owner.node) : undefined);
         const keepArray = Boolean(prevParam) || Boolean(shadowed && (shadowed.length > 1 || deps.elements.length > 1));
-        ctx.insertBefore(fnNode.start!, `() => ${depsText(ctx, deps, keepArray)}, `);
+        ctx.insertBefore(fnNode.start!, `() => ${depsText(ctx, deps, keepArray, Boolean(shadowed) && !prevParam)}, `);
         ctx.remove(fnNode.end!, args[args.length - 1].end!);
         if (shadowed && isFunctionNode(fnNode) && !prevParam) {
           const arrow = fnNode as t.ArrowFunctionExpression | t.FunctionExpression;
-          const pattern = keepArray ? `[${shadowed.join(', ')}]` : shadowed[0];
+          // The parameter is `name2`, not `name`: tt's `no-shadow` is on. The reads of the accessor inside the callback
+          // become reads of the parameter (the value the compute half returned), so TypeScript still narrows them.
+          const renamed = shadowed.map((dep) => (dep ? paramName(dep) : dep));
+          const pattern = keepArray ? `[${renamed.join(', ')}]` : renamed[0];
           if (arrow.params.length === 0) {
             const open = ctx.code.indexOf('(', arrow.start!);
-            if (open !== -1 && open < arrow.body.start!) ctx.insertAfter(open + 1, pattern);
+            if (open !== -1 && open < arrow.body.start!) {
+              ctx.insertAfter(open + 1, pattern);
+              const insideCallback = (node: t.Node) => node.start! >= arrow.start! && node.end! <= arrow.end!;
+              for (const dep of shadowed.filter(Boolean)) {
+                if (dep.startsWith('props.')) {
+                  const prop = dep.slice(6);
+                  path.traverse({
+                    MemberExpression(member) {
+                      const node = member.node;
+                      if (!insideCallback(node) || node.computed) return;
+                      if (node.object.type !== 'Identifier' || node.object.name !== 'props') return;
+                      if (node.property.type !== 'Identifier' || node.property.name !== prop) return;
+                      // an assignment target (`props.x = …`) is not a read
+                      if (member.parentPath.isAssignmentExpression({ left: node })) return;
+                      ctx.overwrite(node, paramName(dep));
+                    },
+                  });
+                  continue;
+                }
+                const binding = path.scope.getBinding(dep);
+                if (!binding) continue;
+                rewriteReads(ctx, binding, paramName(dep), { filter: (ref) => insideCallback(ref.node) });
+              }
+            }
           }
           ctx.hit('effectValueDeps');
         }

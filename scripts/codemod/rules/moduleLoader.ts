@@ -54,6 +54,7 @@ export const moduleLoaderRule: Rule = {
           continue;
         }
         let rendered: t.Expression | undefined;
+        let fallback: t.Expression | undefined;
         const argument = last.node.argument;
         if (
           argument.type === 'ConditionalExpression' &&
@@ -61,6 +62,9 @@ export const moduleLoaderRule: Rule = {
           argument.test.name === name
         ) {
           rendered = argument.consequent;
+          // `X ? <X/> : <Loading />` keeps its fallback as lazy()'s placeholder; `: undefined` has none
+          const alternate = argument.alternate;
+          if (alternate.type !== 'Identifier' && alternate.type !== 'NullLiteral') fallback = alternate;
         } else if (
           argument.type === 'LogicalExpression' &&
           argument.operator === '&&' &&
@@ -80,7 +84,14 @@ export const moduleLoaderRule: Rule = {
           continue;
         }
         const componentStatement = body.fn.getStatementParent();
-        const lazyLine = `const ${name} = lazy(() => loadBundle(${ctx.text(bundle)}).then((m) => ({ default: m.${moduleName.value} })));\n\n`;
+        // The props type is explicit: without it `lazy` cannot infer `P` from the bundle's component type.
+        const param = body.fn.node.params[0];
+        const annotation =
+          param && 'typeAnnotation' in param && param.typeAnnotation && param.typeAnnotation.type === 'TSTypeAnnotation'
+            ? ctx.text(param.typeAnnotation.typeAnnotation)
+            : 'Record<string, never>';
+        const placeholder = fallback ? `, { placeholder: () => ${ctx.text(fallback)} }` : '';
+        const lazyLine = `const ${name} = lazy<${annotation}>(() => loadBundle(${ctx.text(bundle)}).then((m) => ({ default: m.${moduleName.value} }))${placeholder});\n\n`;
         ctx.insertBefore(componentStatement.node.start!, lazyLine);
         ctx.removeStatement(statement.node);
         const renderedText = ctx.textWithParens(rendered);

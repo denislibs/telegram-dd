@@ -4,12 +4,12 @@ import { expectAccessible } from './axe';
 // Example: one test per screen / state; the test title is the key of its entry in tests/a11y/baseline.json.
 test('app shell', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('heading', { name: 'Telegram on frameact' }).waitFor();
+  await page.locator('#Main').waitFor();
   await expectAccessible(page);
 });
 
-test('app shell: the main landmark only', async ({ page }) => {
+test('app shell: the main placeholder only', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('heading', { name: 'Telegram on frameact' }).waitFor();
-  await expectAccessible(page, 'main');
+  await page.locator('#Main').waitFor();
+  await expectAccessible(page, '#Main');
 });

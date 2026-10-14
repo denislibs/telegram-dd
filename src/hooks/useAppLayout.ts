@@ -1,7 +1,5 @@
-// FOUNDATION STUB (no hook): the module-level breakpoint state and `getIsMobile`/`getIsTablet`/
-// `getIsWebAppsFullscreenSupported` are telegram-tt's code (the global layer calls them from actions, reducers and the
-// cache); the `useAppLayout()` hook itself (teact `useEffect`/`useForceUpdate`) is ported with the components (T6).
-// Copied from telegram-tt src/hooks/useAppLayout.ts
+import { createSignal } from 'frameact';
+
 import {
   MIN_SCREEN_WIDTH_FOR_STATIC_LEFT_COLUMN,
   MOBILE_SCREEN_LANDSCAPE_MAX_HEIGHT,
@@ -72,4 +70,24 @@ function initMediaQueryCache() {
 initMediaQueryCache();
 handleMediaQueryChange();
 
-export { callbacks as appLayoutCallbacks, isLandscape, isTouchScreen };
+// Deviation: a component runs once, so the layout flags are accessors over one module-level signal that follows the media
+// query callbacks (tt re-rendered the component with `useForceUpdate`).
+const [layoutVersion, setLayoutVersion] = createSignal(0);
+callbacks.addCallback(() => setLayoutVersion((value) => value + 1));
+
+const tracked =
+  <T>(getValue: () => T) =>
+  () => {
+    layoutVersion();
+    return getValue();
+  };
+
+export default function useAppLayout() {
+  return {
+    isMobile: tracked(() => isMobile),
+    isTablet: tracked(() => isTablet),
+    isLandscape: tracked(() => isLandscape),
+    isDesktop: tracked(() => !isMobile && !isTablet),
+    isTouchScreen: tracked(() => isTouchScreen),
+  };
+}

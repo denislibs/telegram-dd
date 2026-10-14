@@ -3,10 +3,12 @@
 // DOM events (with `currentTarget` typed) and `JSX.Element` children, so these aliases let ported files keep tt's
 // annotations unchanged (porting guide §7.3: smaller diffs against the reference). No React code is involved.
 type WithTarget<E extends Event, T> = E & { readonly currentTarget: T; readonly target: EventTarget | null };
+// React types the `target` of form and change events as the element itself (`EventTarget & T`); tt reads `e.target.value`.
+type WithElementTarget<E extends Event, T> = E & { readonly currentTarget: T; readonly target: T };
 
 declare namespace React {
   type ReactNode = import('frameact/jsx-runtime').JSX.Element;
-  type AriaRole = string;
+  type AriaRole = NonNullable<import('frameact/jsx-runtime').JSX.HTMLAttributes<HTMLElement>['role']>;
   type CSSProperties = string;
 
   type SyntheticEvent<T = Element, E extends Event = Event> = WithTarget<E, T>;
@@ -25,7 +27,7 @@ declare namespace React {
     T
   >;
   type FormEvent<T = Element, E extends Event = Event> = WithTarget<E, T>;
-  type ChangeEvent<T = Element, E extends Event = Event> = WithTarget<E, T>;
+  type ChangeEvent<T = Element, E extends Event = Event> = WithElementTarget<E, T>;
 
   type MouseEventHandler<T = Element> = (event: MouseEvent<T>) => void;
   type KeyboardEventHandler<T = Element> = (event: KeyboardEvent<T>) => void;

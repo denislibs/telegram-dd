@@ -250,12 +250,12 @@ describe('effects', () => {
     );
     expectIncludes(
       code,
-      'createEffect(() => props.isOpen, () => { if (!props.isOpen) return undefined; return subscribe(); });',
+      'createEffect(() => props.isOpen, (isOpen2) => { if (!isOpen2) return undefined; return subscribe(); });',
     );
     expectIncludes(code, 'onMount(() => { mount(); return () => unmount(); });');
     // an accessor dependency is received as a value by apply
-    expectIncludes(code, 'createMeasureEffect(() => n(), (n) => { const h = el.offsetHeight; use(h, n); });');
-    expectIncludes(code, 'createMutationEffect(() => [props.isOpen, n()], ([, n]) => {');
+    expectIncludes(code, 'createMeasureEffect(() => n(), (n2) => { const h = el.offsetHeight; use(h, n2); });');
+    expectIncludes(code, 'createMutationEffect(depsOf(() => [props.isOpen, n()] as const), ([isOpen2, n2]) => {');
     expectIncludes(code, 'onDestroy(() => stop());');
     expectIncludes(code, 'onMount(() => once());');
     expect(report.hits).toMatchObject({ onMount: 2, onDestroy: 1, createMeasureEffect: 1, createMutationEffect: 1 });
@@ -275,7 +275,7 @@ describe('effects', () => {
       code,
       'createEffect(() => [props.a], (_deps, prev) => { const [prevA] = prev ?? []; log(prevA, props.a); });',
     );
-    expectIncludes(code, 'createEffect(() => props.a, () => { sync(props.a); });');
+    expectIncludes(code, 'createEffect(() => props.a, (a2) => { sync(a2); });');
     expect(report.todos.map((t) => t.kind)).toEqual(['sync-effect']);
   });
 });
@@ -391,6 +391,68 @@ describe('derived values and early returns', () => {
   });
 });
 
+describe('forwardedHandlers', () => {
+  it('a handler forwarded from props to an element calls through the prop; components and body functions stay', () => {
+    const { code } = run(
+      `const X = (props: { onClick?: () => void; onOpen?: () => void }) => {
+  const handleOpen = () => {};
+  return <div onClick={props.onClick} onMouseDown={handleOpen}><Child onOpen={props.onOpen} /></div>;
+};`,
+      ['forwardedHandlers'],
+    );
+    expectIncludes(code, '<div onClick={(e) => props.onClick?.(e)} onMouseDown={handleOpen}>');
+    expectIncludes(code, '<Child onOpen={props.onOpen} />');
+  });
+});
+
+describe('effectDeps', () => {
+  it('an effect compute that returns an array compares by value; a single value and a wrapped compute stay', () => {
+    const { code } = run(
+      `const X = (props: { a: number; b: number }) => {
+  createEffect(() => [props.a, props.b], ([a, b]) => { go(a, b); });
+  createEffect(() => props.a, (a) => { one(a); });
+  createEffect(depsOf(() => [props.a, props.b]), ([a, b]) => { go(a, b); });
+  return <div />;
+};`,
+      ['effectDeps'],
+    );
+    expectIncludes(code, 'createEffect(depsOf(() => [props.a, props.b]), ([a, b]) => { go(a, b); });');
+    expectIncludes(code, 'createEffect(() => props.a, (a) => { one(a); });');
+    expectIncludes(code, 'createEffect(depsOf(() => [props.a, props.b]), ([a, b]) => { go(a, b); });');
+  });
+});
+
+describe('inputEvents', () => {
+  it('onChange on an intrinsic non-select element → onInput; select and components keep it', () => {
+    const { code } = run(
+      `const X = (props: { onChange: () => void }) => (
+  <form>
+    <input type="text" onChange={props.onChange} />
+    <textarea onChange={props.onChange} />
+    <select onChange={props.onChange} />
+    <Foo onChange={props.onChange} />
+  </form>
+);`,
+      ['inputEvents'],
+    );
+    expectIncludes(code, '<input type="text" onInput={props.onChange} />');
+    expectIncludes(code, '<textarea onInput={props.onChange} />');
+    expectIncludes(code, '<select onChange={props.onChange} />');
+    expectIncludes(code, '<Foo onChange={props.onChange} />');
+  });
+});
+
+describe('attributes', () => {
+  it('camelCase DOM attributes → HTML names on intrinsic elements only', () => {
+    const { code } = run(
+      `const X = () => <form><input autoComplete="off" spellCheck={false} /><Foo autoComplete="x" /></form>;`,
+      ['attributes'],
+    );
+    expectIncludes(code, '<input autocomplete="off" spellcheck={false} />');
+    expectIncludes(code, '<Foo autoComplete="x" />');
+  });
+});
+
 describe('jsx', () => {
   it('className → class on elements only; reactive .map → <For> (keyed when the row had key=)', () => {
     const { code } = run(
@@ -462,7 +524,7 @@ const X = (props: { chat: ApiChat }) => {
     expectIncludes(code, 'return trackGlobal(() => getCanPostInChat(chat()));');
     expectIncludes(code, 'const canPost = createMemo(() => trackGlobal(() => getCanPostInChat(props.chat)));');
     expectIncludes(code, 'const status = useSelector((global) => getGroupStatus(global, props.chat));');
-    expectIncludes(code, 'log(trackGlobal(() => getPeerColorCount(props.chat)));');
+    expectIncludes(code, 'log(trackGlobal(() => getPeerColorCount(chat2)));');
     expectIncludes(code, 'const onClick = () => sortChatIds(getGlobal(), ids);');
     expectIncludes(code, 'title={trackGlobal(() => renderMessageSummary(props.chat))}');
     expectIncludes(code, "import { getGlobal, trackGlobal } from '../../global';");
@@ -501,12 +563,29 @@ export default CalendarModalAsync;`,
     );
     expectIncludes(
       code,
-      'const CalendarModal = lazy(() => loadBundle(Bundles.Extra).then((m) => ({ default: m.CalendarModal })));',
+      'const CalendarModal = lazy<OwnProps>(() => loadBundle(Bundles.Extra).then((m) => ({ default: m.CalendarModal })));',
     );
     expectIncludes(code, '<Show when={props.isOpen}> <CalendarModal {...props} /> </Show>');
     expectIncludes(code, "import { Bundles, loadBundle } from '../../util/moduleLoader';");
     expect(code).not.toContain('useModuleLoader');
     expect(report.todos).toEqual([]);
+  });
+
+  it('keeps the loading fallback as the placeholder and types a propless wrapper', () => {
+    const { code } = run(
+      `import { Bundles } from '../../util/moduleLoader';
+import useModuleLoader from '../../hooks/useModuleLoader';
+import Loading from '../ui/Loading';
+const AuthCodeAsync = () => {
+  const AuthCode = useModuleLoader(Bundles.Auth, 'AuthCode');
+  return AuthCode ? <AuthCode /> : <Loading />;
+};
+export default AuthCodeAsync;`,
+    );
+    expectIncludes(
+      code,
+      'const AuthCode = lazy<Record<string, never>>(() => loadBundle(Bundles.Auth).then((m) => ({ default: m.AuthCode })), { placeholder: () => <Loading /> });',
+    );
   });
 });
 

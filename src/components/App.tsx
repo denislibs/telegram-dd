@@ -1,13 +1,313 @@
-import { createSignal } from 'frameact';
+import { createEffect, createMemo, createMutationEffect, onMount, previous, requestMutation } from 'frameact';
+import { forceMutation } from 'frameact/stricterdom';
+import { withGlobal } from '../global';
 
-export default function App() {
-  const [count, setCount] = createSignal(0);
-  return (
-    <main>
-      <h1>Telegram on frameact</h1>
-      <button type="button" onClick={() => setCount(count() + 1)}>
-        clicks: {count()}
-      </button>
-    </main>
-  );
+import type { GlobalState } from '../global/types';
+import type { ThemeKey } from '../types';
+import type { UiLoaderPage } from './common/UiLoader';
+
+import { DARK_THEME_BG_COLOR, INACTIVE_MARKER, LIGHT_THEME_BG_COLOR, PAGE_TITLE, PAGE_TITLE_TAURI } from '../config';
+import { selectActionMessageBg, selectTabState, selectTheme, selectThemeValues } from '../global/selectors';
+import { IS_TAURI } from '../util/browser/globalEnvironment';
+import { IS_INSTALL_PROMPT_SUPPORTED, PLATFORM_ENV } from '../util/browser/windowEnvironment';
+import buildClassName from '../util/buildClassName';
+import { depsOf } from '../util/effectDeps';
+import { setupBeforeInstallPrompt } from '../util/installPrompt';
+import { ACCOUNT_SLOT, getAccountSlotUrl, getFirstLoggedInAccountSlot } from '../util/multiaccount';
+import { hasLegacyEncryptedSession } from '../util/passcode';
+import { getInitialLocationHash, getPendingWebLogin } from '../util/routing';
+import { checkSessionLocked, hasStoredSession } from '../util/sessions';
+import { getActionMessageBg, getWallpaperBaseColor } from '../util/wallpaper';
+import { handoffWebLogin } from '../util/webLoginHandoff';
+import { updateSizes } from '../util/windowSize';
+
+import useTauriDrag from '../hooks/tauri/useTauriDrag';
+import useAppLayout from '../hooks/useAppLayout';
+import useFileHoverOpen, { FILE_HOVER_OPEN_SELECTOR, hasFiles } from '../hooks/useFileHoverOpen';
+import { getIsInBackground } from '../hooks/window/useBackgroundMode';
+
+import Auth from './auth/Auth';
+import Notifications from './common/Notifications';
+import UiLoader from './common/UiLoader';
+import AppInactive from './main/AppInactive';
+import LockScreen from './main/LockScreen.async';
+import Main from './main/Main.async';
+// import Test from './test/demo/MessageTextStreamingTest';
+import Transition from './ui/Transition';
+
+import styles from './App.module.scss';
+
+type StateProps = {
+  authState: GlobalState['auth']['state'];
+  isScreenLocked?: boolean;
+  hasPasscode?: boolean;
+  inactiveReason?: 'auth' | 'otherClient';
+  hasWebAuthTokenFailed?: boolean;
+  isTestServer?: boolean;
+  theme: ThemeKey;
+  customBackgroundColor?: string;
+  actionMessageBg?: string;
+};
+
+enum AppScreens {
+  auth,
+  main,
+  lock,
+  inactive,
 }
+
+const TRANSITION_RENDER_COUNT = Object.keys(AppScreens).length / 2;
+const ACTIVE_PAGE_TITLE = IS_TAURI ? PAGE_TITLE_TAURI : PAGE_TITLE;
+const INACTIVE_PAGE_TITLE = `${ACTIVE_PAGE_TITLE} ${INACTIVE_MARKER}`;
+
+const App = () => {
+  const props = withGlobal({}, mapStateToProps);
+  const { isMobile } = useAppLayout();
+  const isMobileOs = PLATFORM_ENV === 'iOS' || PLATFORM_ENV === 'Android';
+
+  onMount(() => {
+    if (IS_INSTALL_PROMPT_SUPPORTED) {
+      setupBeforeInstallPrompt();
+    }
+  });
+
+  onMount(() => {
+    const hash = getInitialLocationHash();
+    // If there is no stored session on first slot, navigate to any other slot with stored session
+    if (!getPendingWebLogin() && !hasStoredSession() && !ACCOUNT_SLOT && !hash) {
+      const firstLoggedInAccountSlot = getFirstLoggedInAccountSlot();
+      if (firstLoggedInAccountSlot) {
+        const url = getAccountSlotUrl(firstLoggedInAccountSlot);
+        window.location.href = `${url}#${hash || 'login'}`;
+      }
+    }
+
+    if (checkSessionLocked() && ACCOUNT_SLOT) {
+      void hasLegacyEncryptedSession()
+        .then(async (hasLegacySession) => {
+          if (hasLegacySession && !(await handoffWebLogin(getAccountSlotUrl(1)))) {
+            window.location.replace(getAccountSlotUrl(1));
+          }
+        })
+        .catch(() => undefined);
+    }
+  });
+
+  // Prevent drop on elements that do not accept it
+  onMount(() => {
+    const body = document.body;
+    const handleDrag = (e: DragEvent) => {
+      e.preventDefault();
+      if (!e.dataTransfer) return;
+      if (!(e.target instanceof Element && e.target.closest('[data-dropzone]'))) {
+        const isFileHoverOpen =
+          hasFiles(e.dataTransfer) &&
+          e.target instanceof Element &&
+          Boolean(e.target.closest(FILE_HOVER_OPEN_SELECTOR));
+        e.dataTransfer.dropEffect = isFileHoverOpen ? 'link' : 'none';
+      } else {
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    };
+    const handleDrop = (e: DragEvent) => {
+      e.preventDefault();
+    };
+    body.addEventListener('drop', handleDrop);
+    body.addEventListener('dragover', handleDrag);
+    body.addEventListener('dragenter', handleDrag);
+
+    return () => {
+      body.removeEventListener('drop', handleDrop);
+      body.removeEventListener('dragover', handleDrag);
+      body.removeEventListener('dragenter', handleDrag);
+    };
+  });
+
+  // return <Test />;
+
+  // Deviation: tt computed `activeKey` and `page` on every render; a component runs once, so they are one memo.
+  const screen = createMemo(
+    () => {
+      let activeKey: AppScreens;
+      let page: UiLoaderPage | undefined;
+
+      if (props.inactiveReason) {
+        activeKey = AppScreens.inactive;
+      } else if (props.isScreenLocked) {
+        page = 'lock';
+        activeKey = AppScreens.lock;
+      } else if (props.authState) {
+        switch (props.authState) {
+          case 'authorizationStateWaitPhoneNumber':
+            page = 'authPhoneNumber';
+            activeKey = AppScreens.auth;
+            break;
+          case 'authorizationStateWaitCode':
+            page = 'authCode';
+            activeKey = AppScreens.auth;
+            break;
+          case 'authorizationStateWaitPassword':
+            page = 'authPassword';
+            activeKey = AppScreens.auth;
+            break;
+          case 'authorizationStateWaitRegistration':
+            activeKey = AppScreens.auth;
+            break;
+          case 'authorizationStateWaitQrCode':
+            page = 'authQrCode';
+            activeKey = AppScreens.auth;
+            break;
+          case 'authorizationStateClosed':
+          case 'authorizationStateClosing':
+          case 'authorizationStateLoggingOut':
+          case 'authorizationStateReady':
+            page = 'main';
+            activeKey = AppScreens.main;
+            break;
+        }
+      } else if (hasStoredSession()) {
+        page = 'main';
+        activeKey = AppScreens.main;
+      } else if (props.hasPasscode) {
+        activeKey = AppScreens.lock;
+      } else {
+        page = isMobileOs ? 'authPhoneNumber' : 'authQrCode';
+        activeKey = AppScreens.auth;
+      }
+
+      if (
+        activeKey !== AppScreens.lock &&
+        activeKey !== AppScreens.inactive &&
+        activeKey !== AppScreens.main &&
+        getPendingWebLogin() &&
+        !props.hasWebAuthTokenFailed
+      ) {
+        page = 'main';
+        activeKey = AppScreens.main;
+      }
+
+      return { activeKey: activeKey!, page };
+    },
+    { equals: (a, b) => a.activeKey === b.activeKey && a.page === b.page },
+  );
+  const activeKey = () => screen().activeKey;
+  const page = () => screen().page;
+
+  onMount(() => {
+    updateSizes();
+  });
+
+  createEffect(
+    () => props.inactiveReason,
+    (inactiveReason2) => {
+      if (inactiveReason2) {
+        document.title = INACTIVE_PAGE_TITLE;
+      } else {
+        document.title = ACTIVE_PAGE_TITLE;
+      }
+    },
+  );
+
+  const prevActiveKey = previous(activeKey);
+
+  function renderContent(key: AppScreens) {
+    switch (key) {
+      case AppScreens.auth:
+        return <Auth />;
+      case AppScreens.main:
+        return <Main isMobile={isMobile()} />;
+      case AppScreens.lock:
+        return <LockScreen isLocked={props.isScreenLocked} />;
+      case AppScreens.inactive:
+        return <AppInactive inactiveReason={props.inactiveReason!} />;
+    }
+  }
+
+  useTauriDrag();
+  useFileHoverOpen();
+
+  // Deviation: `useLayoutEffect(…, [])` wrote the DOM during the commit; `onMount` is a measure-phase callback.
+  onMount(() => {
+    requestMutation(() => {
+      document.body.classList.add(styles.bg);
+      document.documentElement.classList.remove('initial');
+    });
+  });
+
+  createMutationEffect(
+    depsOf(() => [props.theme, props.customBackgroundColor] as const),
+    ([theme2, customBackgroundColor2]) => {
+      // Prefer the chosen wallpaper's base color, so the pre-render base matches the
+      // actual wallpaper instead of flashing the built-in default first.
+      document.body.style.setProperty(
+        '--theme-background-color',
+        customBackgroundColor2 || (theme2 === 'dark' ? DARK_THEME_BG_COLOR : LIGHT_THEME_BG_COLOR),
+      );
+    },
+  );
+
+  createMutationEffect(
+    depsOf(() => [props.actionMessageBg, props.theme] as const),
+    ([actionMessageBg2, theme2]) => {
+      // Fall back to the theme default when the tint is unset (e.g. a photo wallpaper without a
+      // thumbnail), so service chips don't keep the previous wallpaper's tint.
+      document.body.style.setProperty('--action-message-bg', actionMessageBg2 || getActionMessageBg(theme2)!);
+    },
+  );
+
+  // Deviation: `useSignalEffect` is a subscription started on mount (the first run happens in the measure phase, as in tt).
+  onMount(() => {
+    const toggleInBackground = () => {
+      // Mutation forced to avoid RAF throttling in background
+      forceMutation(
+        () => {
+          document.body.classList.toggle('in-background', getIsInBackground());
+        },
+        document.body,
+        true,
+      );
+    };
+    toggleInBackground();
+
+    return getIsInBackground.subscribe(toggleInBackground);
+  });
+
+  return (
+    <UiLoader page={page()} isMobile={isMobile()}>
+      <Transition
+        name="fade"
+        activeKey={activeKey()}
+        shouldCleanup
+        className={buildClassName(
+          'full-height',
+          (activeKey() === AppScreens.auth || prevActiveKey() === AppScreens.auth) && 'is-auth',
+        )}
+        renderCount={TRANSITION_RENDER_COUNT}
+      >
+        {(slide) => renderContent(slide.key)}
+      </Transition>
+      {activeKey() === AppScreens.auth && props.isTestServer && <div class="test-server-badge">Test server</div>}
+      <Notifications />
+    </UiLoader>
+  );
+};
+
+const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
+  const { state: authState, hasWebAuthTokenFailed, hasWebAuthTokenPasswordRequired } = global.auth;
+  const theme = selectTheme(global);
+  const themeValues = selectThemeValues(global, theme);
+
+  return {
+    authState,
+    isScreenLocked: global.passcode?.isScreenLocked,
+    hasPasscode: global.passcode?.hasPasscode,
+    inactiveReason: selectTabState(global).inactiveReason,
+    hasWebAuthTokenFailed: hasWebAuthTokenFailed || hasWebAuthTokenPasswordRequired,
+    theme,
+    customBackgroundColor: getWallpaperBaseColor(theme, themeValues || {}),
+    isTestServer: global.config?.isTestServer,
+    actionMessageBg: selectActionMessageBg(global),
+  };
+};
+
+export default App;

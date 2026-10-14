@@ -7,7 +7,7 @@ import { createStrictMonitor } from './strictMonitor';
 async function openApp(page: Page, baseURL: string) {
   const monitor = createStrictMonitor(page, new URL(baseURL).origin);
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Telegram on frameact' })).toBeVisible();
+  await expect(page.locator('#Main')).toBeVisible();
   return monitor;
 }
 
@@ -75,7 +75,7 @@ test('failed requests to the app origin are reported', async ({ page, baseURL })
 test('stricterdom violations are reported', async ({ page, baseURL }) => {
   const monitor = await openApp(page, baseURL!);
   // A live-DOM write outside an effect's mutate phase: exactly what stricterdom exists to catch.
-  await page.evaluate(() => document.querySelector('button')!.setAttribute('title', 'written behind the scheduler'));
+  await page.evaluate(() => document.querySelector('#Main')!.setAttribute('title', 'written behind the scheduler'));
   await expect.poll(async () => (await monitor.problems()).length).toBe(1);
   const [problem] = await monitor.problems();
   expect(problem).toContain('stricterdom mutation violation');

@@ -1,8 +1,5 @@
 {
   "files": {
-    "src/components/App.tsx": {
-      "reason": "Placeholder app shell (a frameact counter) until the real App is ported in the auth/chat-list milestones (porting guide 7.1); remove the entry then."
-    },
     "src/global/index.ts": {
       "reason": "The store glue replacing TeactN (docs/store-architecture.md): tt's exported names and types are kept, the binding behind them is frameact's store.",
       "maxRatio": 0.95
@@ -12,12 +9,160 @@
       "maxRatio": 0.85
     },
     "src/components/middle/MessageListHistoryHandler.tsx": {
-      "reason": "55-line component: the component-model change (withGlobal in the body, <For>, props getters) is 20 lines (store-architecture.md \u00a75, the tab-specific example).",
+      "reason": "55-line component: the component-model change (withGlobal in the body, <For>, props getters) is 20 lines (store-architecture.md §5, the tab-specific example).",
       "maxRatio": 0.55
     },
     "src/hooks/useFolderManager.ts": {
       "reason": "teact's useForceUpdate + useEffect become signals set from the folderManager callbacks and returned as accessors (docs/plans/2026-10-14-store.md T4); folderManager itself is verbatim.",
       "maxRatio": 0.9
+    },
+    "src/components/auth/AuthPassword.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.57
+    },
+    "src/components/auth/AuthPhoneNumber.tsx": {
+      "reason": "The 346-line screen: every state/prop read is an accessor call or props.x, the effects are split by phase, apply parameters carry the 2 suffix for tt no-shadow (codemod effects rule).",
+      "maxRatio": 0.5
+    },
+    "src/components/auth/AuthRegister.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.45
+    },
+    "src/components/auth/CountryCodeInput.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.52
+    },
+    "src/components/common/AnimatedCounter.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.47
+    },
+    "src/components/common/AnimatedIcon.tsx": {
+      "reason": "The media-transition class string becomes createMediaTransition applied through the sticker ref; splitProps for the pass-through props.",
+      "maxRatio": 0.77
+    },
+    "src/components/common/AnimatedSticker.tsx": {
+      "reason": "Lottie lifecycle re-expressed for a run-once component: forwarded ref as a callback, useHeavyAnimation(isDisabled) as watchHeavyAnimation with guards, useSyncEffect colour as a memo, init as a measure effect (see the Deviation comments). The heavy-animation scope chain (util/heavyAnimationChain.ts) and the props memo for applies add to it.",
+      "maxRatio": 0.72
+    },
+    "src/components/common/Avatar.tsx": {
+      "reason": "Reactive media selection: imageHash/videoHash/content/specialIcon become memos over the entity proxy, useMedia/useThumbnail return accessors, containerRef is a callback ref (see Deviation comments).",
+      "maxRatio": 0.66
+    },
+    "src/components/common/CustomEmoji.tsx": {
+      "reason": "Forwarded ref as a callback, getGlobal() in JSX as useGlobal(), useCustomEmoji accessors; every prop read is props.x.",
+      "maxRatio": 0.62
+    },
+    "src/components/common/PasswordForm.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.49
+    },
+    "src/components/common/SafeLink.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.53
+    },
+    "src/components/common/StickerView.tsx": {
+      "reason": "useMountAfterHeavyAnimation, key={renderId} remount, a sticky intersection memo and element-accessor refs for the observer hooks (see Deviation comments); every prop read is props.x.",
+      "maxRatio": 0.68
+    },
+    "src/components/common/hooks/useCustomEmoji.ts": {
+      "reason": "Hook ported in place with accessor parameters and returns (porting guide 4.2): MaybeAccessor reads, a version signal instead of useForceUpdate and the createEffect(compute, apply) wrapper are most of the diff.",
+      "maxRatio": 0.81
+    },
+    "src/components/common/icons/GramIcon.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.48
+    },
+    "src/components/common/icons/Icon.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.58
+    },
+    "src/components/middle/message/hooks/useVideoAutoPause.ts": {
+      "reason": "Hook ported in place with accessor parameters and returns (porting guide 4.2): MaybeAccessor reads, a version signal instead of useForceUpdate and the createEffect(compute, apply) wrapper are most of the diff.",
+      "maxRatio": 0.66
+    },
+    "src/components/ui/AvatarEditable.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.56
+    },
+    "src/components/ui/Button.tsx": {
+      "reason": "Forwarded ref as a callback, handlers bound once (render-time conditions in the callbacks), onFileHoverOpen as a native on:filehoveropen listener.",
+      "maxRatio": 0.61
+    },
+    "src/components/ui/Checkbox.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.64
+    },
+    "src/components/ui/DropdownMenu.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.55
+    },
+    "src/components/ui/ImageCropper.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.52
+    },
+    "src/components/ui/InputText.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.67
+    },
+    "src/components/ui/Menu.tsx": {
+      "reason": "createShowTransition through ref, element accessors for useMenuPosition/useKeyboardListNavigation, render-time handler conditions moved into the callbacks.",
+      "maxRatio": 0.68
+    },
+    "src/components/ui/MenuItem.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.52
+    },
+    "src/components/ui/Modal.tsx": {
+      "reason": "Handlers bound once, scalar props snapshotted while closing, a modalElement signal for the focus-trap and native-dialog effects, dialog ref as a callback (see Deviation comments).",
+      "maxRatio": 0.59
+    },
+    "src/components/ui/Notification.tsx": {
+      "reason": "useShowTransitionDeprecated as createShowTransition + ref, key={cacheBreaker} as <Show keyed>, timers in onMount/onDestroy.",
+      "maxRatio": 0.69
+    },
+    "src/components/ui/OptimizedVideo.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.69
+    },
+    "src/components/ui/Portal.ts": {
+      "reason": "Adapter over frameact Portal (porting guide section 2): keeps tt props and the wrapper div in #portals; tt rendered through the teact portal API.",
+      "maxRatio": 0.84
+    },
+    "src/components/ui/RangeSlider.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.59
+    },
+    "src/components/ui/RoundTimer.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessor calls and effects split into compute/apply by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.58
+    },
+    "src/components/ui/Transition.tsx": {
+      "reason": "Adapter over src/lib/kit Transition (porting guide section 2): tt implements the transition itself; here only the prop mapping, the animations-off switch and the Deviation/TODO(port) list (nextKey, swipe control, slideOptimized) remain.",
+      "maxRatio": 0.92
+    },
+    "src/hooks/element/useStyleObserver.ts": {
+      "reason": "Hook ported in place with accessor parameters and returns (porting guide 4.2): MaybeAccessor reads, a version signal instead of useForceUpdate and the createEffect(compute, apply) wrapper are most of the diff.",
+      "maxRatio": 0.5
+    },
+    "src/hooks/useImageLoader.ts": {
+      "reason": "Hook ported in place with accessor parameters and returns (porting guide 4.2): MaybeAccessor reads, a version signal instead of useForceUpdate and the createEffect(compute, apply) wrapper are most of the diff.",
+      "maxRatio": 0.68
+    },
+    "src/hooks/useLangString.ts": {
+      "reason": "Hook ported in place with accessor parameters and returns (porting guide 4.2): MaybeAccessor reads, a version signal instead of useForceUpdate and the createEffect(compute, apply) wrapper are most of the diff.",
+      "maxRatio": 0.73
+    },
+    "src/hooks/useMedia.ts": {
+      "reason": "Hook ported in place with accessor parameters and returns (porting guide 4.2): MaybeAccessor reads, a version signal instead of useForceUpdate and the createEffect(compute, apply) wrapper are most of the diff.",
+      "maxRatio": 0.76
+    },
+    "src/hooks/useMultiaccountInfo.ts": {
+      "reason": "Hook ported in place with accessor parameters and returns (porting guide 4.2): MaybeAccessor reads, a version signal instead of useForceUpdate and the createEffect(compute, apply) wrapper are most of the diff.",
+      "maxRatio": 0.51
+    },
+    "src/hooks/useVideoCleanup.ts": {
+      "reason": "Hook ported in place with accessor parameters and returns (porting guide 4.2): MaybeAccessor reads, a version signal instead of useForceUpdate and the createEffect(compute, apply) wrapper are most of the diff.",
+      "maxRatio": 0.67
     }
   }
 }

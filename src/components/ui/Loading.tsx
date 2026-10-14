@@ -16,7 +16,10 @@ type OwnProps = {
 const Loading = (rawProps: OwnProps) => {
   const props = mergeProps({ color: 'blue' }, rawProps) as OwnProps & Required<Pick<OwnProps, 'color'>>;
   return (
-    <div class={buildClassName('Loading', props.onClick && 'interactive', props.className)} onClick={props.onClick}>
+    <div
+      class={buildClassName('Loading', props.onClick && 'interactive', props.className)}
+      onClick={() => props.onClick?.()}
+    >
       <Spinner color={props.color} backgroundColor={props.backgroundColor} />
     </div>
   );
