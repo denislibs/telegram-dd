@@ -17,6 +17,10 @@
     "src/components/middle/MessageListHistoryHandler.tsx": {
       "reason": "55-line component: the component-model change (withGlobal in the body, <For>, props getters) is 20 lines (store-architecture.md \u00a75, the tab-specific example).",
       "maxRatio": 0.55
+    },
+    "src/hooks/useFolderManager.ts": {
+      "reason": "teact's useForceUpdate + useEffect become signals set from the folderManager callbacks and returned as accessors (docs/plans/2026-10-14-store.md T4); folderManager itself is verbatim.",
+      "maxRatio": 0.9
     }
   }
 }
