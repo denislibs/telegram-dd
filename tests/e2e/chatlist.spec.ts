@@ -361,4 +361,57 @@ test.describe('chat list', () => {
     await page.waitForTimeout(500);
     expect(await page.evaluate(() => (window as unknown as { __animated: number }).__animated)).toBe(0);
   });
+
+  test('conceals spoilers in the chat list: the login code of the 777000 chat and a spoilered draft', async ({
+    page,
+  }) => {
+    await openApp(page);
+    await addContacts(page, 1);
+    // The service notifications chat: tt wraps the login code of its last message in a Spoiler entity for the chat list
+    await page.evaluate(() => {
+      const { apiUpdate } = (window as unknown as TestWindow).getActions();
+      const id = '777000';
+      apiUpdate({
+        '@type': 'updateUser',
+        id,
+        user: { id, type: 'userTypeRegular', firstName: 'Telegram', isMin: false, phoneNumber: '' },
+      });
+      apiUpdate({ '@type': 'updateChat', id, chat: { id, type: 'chatTypePrivate', title: 'Telegram', isMin: false } });
+      apiUpdate({ '@type': 'updateChatListType', id, folderId: 0 });
+      apiUpdate({
+        '@type': 'newMessage',
+        chatId: id,
+        id: 1,
+        message: {
+          id: 1,
+          chatId: id,
+          date: Math.floor(Date.now() / 1000),
+          isOutgoing: false,
+          senderId: id,
+          content: {
+            text: {
+              text: 'Login code: 48213. Do not give this code to anyone, even if they say they are from Telegram!',
+            },
+          },
+        },
+      });
+    });
+    const login = page.locator(ROW).filter({ hasText: /Do not give this code/ });
+    await expect(login).toHaveCount(1);
+    await expect(login).not.toContainText('48213');
+    await expect(login).toContainText('Login code:');
+
+    // A draft of the contact with a spoilered secret
+    await patchMainThread(page, '1001', {
+      localState: {
+        draft: {
+          text: { text: 'the pin is 9917', entities: [{ type: 'MessageEntitySpoiler', offset: 11, length: 4 }] },
+          date: Math.floor(Date.now() / 1000) + 10,
+        },
+      },
+    });
+    const draft = page.locator(ROW).filter({ hasText: 'the pin is' });
+    await expect(draft).toHaveCount(1);
+    await expect(draft).not.toContainText('9917');
+  });
 });
