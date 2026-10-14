@@ -317,7 +317,10 @@ type StickToFirstFn = (value: any) => boolean;
 type MapStateToProps<OwnProps, StateProps> = (global: GlobalState, ownProps: OwnProps) => StateProps;
 type ActivationFn<OwnProps> = (global: GlobalState, ownProps: OwnProps, stickToFirst: StickToFirstFn) => boolean;
 
-const EMPTY_PROPS = {} as AnyLiteral;
+// Frozen: it is the first value of every mapper memo and was the target of every props proxy — one mutable object
+// shared by all components (appsec review, finding 5).
+const EMPTY_PROPS = Object.freeze({}) as AnyLiteral;
+const readOnly = () => false; // a write through the props proxy: a TypeError in strict mode
 
 /**
  * The component-side replacement of tt's `withGlobal(mapStateToProps)(Component)` HOC, called in the component body:
@@ -364,19 +367,27 @@ export function withGlobal<OwnProps extends AnyLiteral, StateProps extends AnyLi
     { equals: areRecordsShallowEqual },
   );
   // `{ ...mappedProps, ...props }` of tt's container, with lazy getters: an own prop wins whenever its key is present.
-  return new Proxy(EMPTY_PROPS, {
-    get: (_target, key) => (key in ownProps ? ownProps[key as string] : mapped()[key as string]),
-    has: (_target, key) => key in ownProps || key in mapped(),
-    ownKeys: () => [...new Set([...Reflect.ownKeys(mapped()), ...Reflect.ownKeys(ownProps)])],
-    getOwnPropertyDescriptor: (_target, key) =>
-      key in ownProps || key in mapped()
-        ? {
-            configurable: true,
-            enumerable: true,
-            get: () => (key in ownProps ? ownProps[key as string] : mapped()[key as string]),
-          }
-        : undefined,
-  }) as OwnProps & StateProps;
+  // The target is a fresh object per component (a frozen target would break the `ownKeys` invariants of the traps).
+  return new Proxy(
+    {},
+    {
+      set: readOnly,
+      defineProperty: readOnly,
+      deleteProperty: readOnly,
+      setPrototypeOf: readOnly,
+      get: (_target, key) => (key in ownProps ? ownProps[key as string] : mapped()[key as string]),
+      has: (_target, key) => key in ownProps || key in mapped(),
+      ownKeys: () => [...new Set([...Reflect.ownKeys(mapped()), ...Reflect.ownKeys(ownProps)])],
+      getOwnPropertyDescriptor: (_target, key) =>
+        key in ownProps || key in mapped()
+          ? {
+              configurable: true,
+              enumerable: true,
+              get: () => (key in ownProps ? ownProps[key as string] : mapped()[key as string]),
+            }
+          : undefined,
+    },
+  ) as OwnProps & StateProps;
 }
 
 if (DEBUG) {

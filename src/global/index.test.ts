@@ -542,6 +542,33 @@ describe('appsec 3: setGlobal is atomic — a walk that throws leaves the commit
   });
 });
 
+describe('appsec 5: withGlobal props are read-only and never shared between components', () => {
+  it("a write to one inactive container's props neither works nor shows up in another one", () => {
+    createRoot((dispose) => {
+      const inactive = () =>
+        withGlobal(
+          {} as AnyLiteral,
+          () => ({ never: 1 }),
+          () => false,
+        );
+      const a = inactive();
+      const b = inactive();
+      expect(() => {
+        a.leaked = 'from A';
+      }).toThrow(TypeError);
+      expect(() => Object.defineProperty(a, 'leaked2', { value: 1 })).toThrow(TypeError);
+      expect(() => {
+        delete a.never;
+      }).toThrow(TypeError);
+      expect(b.leaked).toBeUndefined();
+      expect(b.leaked2).toBeUndefined();
+      expect(Object.keys(b)).toEqual([]);
+      expect(Object.keys(inactive())).toEqual([]);
+      dispose();
+    });
+  });
+});
+
 describe('M4: getPromiseActions returns a promise for a synchronous action too', () => {
   it('awaits and .then() work', async () => {
     register('test:syncAction', () => undefined);
