@@ -59,6 +59,21 @@ const ownedCopies = new WeakSet<object>();
 export const isStoreOwned = (value: unknown): boolean =>
   Boolean(value) && typeof value === 'object' && ownedCopies.has(value as object);
 
+/**
+ * A tt global is shallower than this by far (a container walk reaches ~10 levels). A value nested deeper is a cycle (a
+ * structured clone from IndexedDB keeps them) or a corrupted value: refused with a clear error instead of a stack
+ * overflow on every start (appsec review, finding 2).
+ */
+const MAX_DEPTH = 64;
+function assertDepth(depth: number, path: PropertyKey[]) {
+  if (depth > MAX_DEPTH) {
+    throw new Error(
+      `[global] the value at ${path.slice(0, 6).map(String).join('.')} is nested deeper than ${MAX_DEPTH} levels ` +
+        'or contains a cycle',
+    );
+  }
+}
+
 let devChecks = false;
 /** DEV: scan values written by reference for store proxies / owned copies nested deeper than `sanitize` looks. */
 export function setDevChecks(enabled: boolean) {
@@ -84,7 +99,8 @@ function detach(owned: AnyLiteral, path: PropertyKey[]): AnyLiteral {
  * direct children (writing the fixed child back into that fresh array / object). Values that are tt's own objects
  * come back unchanged, so the common case costs one `unwrap` and a `WeakSet` lookup.
  */
-function sanitize(value: object, path: PropertyKey[]): object {
+function sanitize(value: object, path: PropertyKey[], depth = 0): object {
+  assertDepth(depth, path);
   const raw = unwrap(value);
   if (ownedCopies.has(raw)) return detach(raw, path);
   let leaf = false; // an array or an entity: the only values written whole, so the only ones the DEV scan needs
@@ -94,7 +110,7 @@ function sanitize(value: object, path: PropertyKey[]): object {
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       if (item && typeof item === 'object') {
-        const fixed = sanitize(item, path);
+        const fixed = sanitize(item, path, depth + 1);
         if (fixed !== item) items[i] = fixed;
       }
     }
@@ -144,6 +160,7 @@ function devScan(value: object, path: PropertyKey[], depth: number) {
 
 /** The store's own copy of a container: shallow, with nested containers copied too; entities and arrays shared. */
 export function copyContainer(value: AnyLiteral, path: PropertyKey[]): AnyLiteral {
+  assertDepth(path.length, path);
   const copy: AnyLiteral = { ...value };
   const keys = Object.keys(copy);
   for (let i = 0; i < keys.length; i++) {
@@ -190,6 +207,7 @@ export function applyContainer(
   path: PropertyKey[],
   isRoot = false,
 ): boolean {
+  assertDepth(path.length, path);
   let written = false;
   const nextKeys = Object.keys(next);
   let present = 0;

@@ -271,6 +271,47 @@ describe('appsec 1: keys that Object.prototype also has must not hide a deletion
   );
 });
 
+describe('appsec 2: a cyclic or absurdly deep value is refused with a clear error, not a stack overflow', () => {
+  const REFUSED = /\[global\] .*(cycle|nested deeper)/i;
+  const withSettings = (g: State, value: unknown) => ({ ...g, settings: value }) as unknown as State;
+
+  it('a container that points back at itself (structured clone keeps cycles)', () => {
+    const { setGlobal, getGlobal } = setup();
+    const settings: AnyLiteral = { x: { y: 1 } };
+    settings.x.self = settings;
+    expect(() => setGlobal(withSettings(getGlobal(), settings))).toThrow(REFUSED);
+  });
+
+  it('a 10 000-deep chain of id-less objects', () => {
+    const { setGlobal, getGlobal } = setup();
+    let deep: AnyLiteral = { leaf: true };
+    for (let i = 0; i < 10_000; i++) deep = { next: deep };
+    expect(() => setGlobal(withSettings(getGlobal(), deep))).toThrow(REFUSED);
+  });
+
+  it('an array that contains itself, and a deep chain of arrays', () => {
+    const { setGlobal, getGlobal } = setup();
+    const cyclic: unknown[] = [];
+    cyclic.push(cyclic);
+    expect(() => setGlobal(withSettings(getGlobal(), { list: cyclic }))).toThrow(REFUSED);
+    let nested: unknown[] = [];
+    for (let i = 0; i < 10_000; i++) nested = [nested];
+    expect(() => setGlobal(withSettings(getGlobal(), { list: nested }))).toThrow(REFUSED);
+  });
+
+  it('copyContainer refuses too (the new-container branch)', () => {
+    const cyc: AnyLiteral = {};
+    cyc.self = cyc;
+    expect(() => copyContainer(cyc, ['settings'])).toThrow(REFUSED);
+  });
+
+  it('legitimately nested containers (a few levels, wide) pass', () => {
+    const { setGlobal, getGlobal, mirror } = setup();
+    setGlobal(withSettings(getGlobal(), { a: { b: { c: { d: { e: { f: { value: 1 } } } } } } }));
+    expect((mirror as AnyLiteral).settings.a.b.c.d.e.f.value).toBe(1);
+  });
+});
+
 describe('C1: tt value semantics hold for code that captured objects before setGlobal', () => {
   it('a captured entity is a snapshot: changedFields detection (apiUpdaters/chats.ts updateChat) works', () => {
     const { setGlobal, getGlobal } = setup();
