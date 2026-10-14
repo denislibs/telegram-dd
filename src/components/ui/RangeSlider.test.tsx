@@ -6,7 +6,6 @@ import { disableStrict, enableStrict, setHandler, suppressStrict } from 'frameac
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { setGlobal } from '../../global';
 
-import { installControlledInputListeners } from '../../lib/kit/controlledInputs';
 import { container, useDomHarness } from '../../lib/kit/testing/dom';
 import { INITIAL_GLOBAL_STATE } from '../../global/initialState';
 
@@ -23,7 +22,6 @@ const host = () => suppressStrict(container);
 beforeEach(() => {
   violations.length = 0;
   delegateEvents(['click', 'input']);
-  installControlledInputListeners();
   enableStrict();
   setHandler((error) => violations.push(`${error.kind} ${error.detail} [${error.phase}]`));
 });
