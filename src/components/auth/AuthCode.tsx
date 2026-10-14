@@ -54,7 +54,8 @@ const AuthCode = () => {
     const { currentTarget: target } = e;
     target.value = target.value.replace(/[^\d]+/, '').substr(0, CODE_LENGTH);
 
-    if (target.value === code()) {
+    const prevCode = code();
+    if (target.value === prevCode) {
       return;
     }
 
@@ -66,7 +67,8 @@ const AuthCode = () => {
       setIsTracking(false);
     }
 
-    if (code() && code().length > target.value.length) {
+    // Deviation: tt's `code` is the closure value from before the edit; the signal is already the new one here.
+    if (prevCode && prevCode.length > target.value.length) {
       setTrackingDirection(-1);
     } else {
       setTrackingDirection(1);
