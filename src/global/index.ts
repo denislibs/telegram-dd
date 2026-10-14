@@ -3,38 +3,29 @@
 // `withGlobal`, `addCallback`) so that the action, reducer and selector layers port unchanged; the TeactN binding
 // behind it (`src/lib/teact/teactn.tsx` in tt) is replaced by the store glue below.
 //
-//  - `getGlobal()` is the raw store tree: the current state as plain objects, read untracked. Reducers spread-copy
-//    it and `setGlobal(next)` merges the copy back in place (`store/apply.ts`), notifying only the changed leaves.
+//  - The **committed global** is tt's immutable global, exactly the object tt would hold: `setGlobal(next)` commits
+//    `next` itself. `getGlobal()` hands out a shallow copy of it (as tt's DEBUG build did, in both modes here), so
+//    reducers, `prevGlobal` comparisons in callbacks, identity caches and constants behave as in tt.
+//  - The frameact store is a **mirror** of the committed global that only components read: `setGlobal` walks the
+//    previous and the next global and writes the changed leaves into the store (`store/apply.ts`).
 //  - `useGlobal()` is the tracked view (the store proxy) for component bodies, JSX, memos and effects. `withGlobal`
 //    and `useSelector` read through it.
 import { createMemo, flushSync, getIsHeavyAnimating, rootScope } from 'frameact';
 import { mergeProps } from 'frameact/dom';
-import { afterActions, createStore, defineActions, ungated, unwrap } from 'frameact/store';
+import { afterActions, createStore, defineActions, ungated } from 'frameact/store';
 
 import type { ActionPayloads, GlobalState, RequiredActionPayloads, RequiredGlobalState } from './types';
 
 import { DEBUG } from '../config';
 import { areRecordsShallowEqual } from '../util/areShallowEqual';
 import { throttleWithTickEnd } from '../util/schedulers';
-import {
-  applyGlobal,
-  createJournal,
-  type Journal,
-  journalToDiff,
-  setStrictKeyCounts,
-  type UntypedSetState,
-} from './store/apply';
+import { applyGlobal, type UntypedSetState } from './store/apply';
 
 export interface ActionOptions {
   forceOnHeavyAnimation?: boolean;
   // Workaround for iOS gesture history navigation
   forceSyncOnIOs?: boolean;
   forceOutdated?: boolean;
-  /**
-   * telegram-dd: the global comes from another tab (multitab). Its writes are journaled apart (`remoteDiff` in the
-   * store callbacks), so the receiving tab does not broadcast them back — tt relied on `currentGlobal === global` for that.
-   */
-  fromRemote?: boolean;
 }
 
 type ProjectActionTypes = ActionPayloads & RequiredActionPayloads;
@@ -75,20 +66,18 @@ type ProjectActions<ReturnType = void> = {
     : (payload: ProjectActionTypes[ActionName], options?: ActionOptions) => ReturnType;
 };
 
-/**
- * A store callback gets the current global and, in tt's `deepDiff` format, what was written since its previous run:
- * `diff` by this tab's own actions, `remoteDiff` by globals received from other tabs (`fromRemote`).
- */
-export type GlobalCallback = (global: GlobalState, diff?: AnyLiteral, remoteDiff?: AnyLiteral) => void;
+/** A store callback gets the committed global (tt's immutable global), as in tt: `prevGlobal` comparisons work. */
+export type GlobalCallback = (global: GlobalState) => void;
 
 // ---- the store --------------------------------------------------------------------------------------------------
 
 // As in tt, the global starts as `{ isInited: false }` and gets its shape from `initGlobal` (`'byTabId' in global`
-// tells a fresh tab from one that received the master's global). The root object is permanent: `setGlobal` merges into it.
-const [trackedGlobal, setStateTyped] = createStore<GlobalState>({ isInited: false } as GlobalState);
+// tells a fresh tab from one that received the master's global).
+let currentGlobal = { isInited: false } as GlobalState;
+
+// The mirror. Its root object is permanent (`setGlobal` writes into it); it starts as a copy of the committed root.
+const [trackedGlobal, setStateTyped] = createStore<GlobalState>({ ...currentGlobal });
 const setState = setStateTyped as unknown as UntypedSetState;
-const rawGlobal = unwrap(trackedGlobal) as unknown as GlobalState;
-setStrictKeyCounts(DEBUG);
 
 // ---- DEV: outdated-global detection (tt's DEBUG_randomId) -------------------------------------------------------
 
@@ -101,8 +90,6 @@ const DEBUG_invalidateGlobalOnTickEnd = throttleWithTickEnd(() => {
 // ---- callbacks (cache, multitab, folderManager) ------------------------------------------------------------------
 
 const callbacks: GlobalCallback[] = [];
-let journal: Journal = createJournal();
-let remoteJournal: Journal = createJournal();
 let forceOnHeavyAnimation = true;
 
 function runCallbacks() {
@@ -113,11 +100,7 @@ function runCallbacks() {
     return;
   }
 
-  const diff = journalToDiff(journal);
-  const remoteDiff = journalToDiff(remoteJournal);
-  journal = createJournal();
-  remoteJournal = createJournal();
-  for (const cb of callbacks) cb(rawGlobal, diff, remoteDiff);
+  callbacks.forEach((cb) => cb(currentGlobal));
 }
 
 const runCallbacksThrottled = throttleWithTickEnd(runCallbacks);
@@ -140,17 +123,19 @@ export function forceOnHeavyAnimationOnce() {
 // ---- getGlobal / setGlobal --------------------------------------------------------------------------------------
 
 /**
- * The current global as plain objects (the raw store tree), read untracked — for handlers, reducers, selectors
- * called from handlers, event handlers and anything that serialises or posts the state. In DEV it is a stamped
- * shallow copy, as in tt, so that `setGlobal` can detect a global taken before another write (`forceOutdated` skips the check).
+ * The committed global — tt's immutable global — as a shallow copy, for handlers, reducers, selectors called from
+ * handlers, event handlers and anything that serialises or posts the state. The copy (0.2 µs) is what tt's DEBUG build
+ * handed out; here it is handed out in production too, so `global.x = …; setGlobal(global)` (tt has a few) behaves
+ * the same in both modes. In DEV the copy is stamped, so that `setGlobal` can detect a global taken before another
+ * write (`forceOutdated` skips the check).
  */
 export function getGlobal<T extends GlobalState>(): T {
   if (DEBUG) {
-    const copy = { ...rawGlobal, DEBUG_randomId: DEBUG_currentRandomId } as unknown as T;
+    const copy = { ...currentGlobal, DEBUG_randomId: DEBUG_currentRandomId } as unknown as T;
     DEBUG_invalidateGlobalOnTickEnd();
     return copy;
   }
-  return rawGlobal as T;
+  return { ...currentGlobal } as T;
 }
 
 /**
@@ -162,12 +147,12 @@ export function useGlobal(): GlobalState {
 }
 
 /**
- * Merge a tt-style immutable global into the store: unchanged branches (`===`) are skipped, changed leaves are
- * written in place and notify their readers. `forceOnHeavyAnimation` writes `ungated` (parked effects run now),
- * `forceSyncOnIOs` also flushes the frame synchronously; both run the store callbacks at once instead of at tick end.
+ * Commit a tt-style immutable global and mirror the change into the store: unchanged branches (`===`) are skipped,
+ * changed leaves are written and notify their readers. `forceOnHeavyAnimation` writes `ungated` (parked effects run
+ * now), `forceSyncOnIOs` also flushes the frame synchronously; both run the store callbacks at once instead of at tick end.
  */
 export function setGlobal(newGlobal: GlobalState, options?: ActionOptions) {
-  if (!newGlobal || typeof newGlobal !== 'object') return;
+  if (!newGlobal || typeof newGlobal !== 'object' || newGlobal === currentGlobal) return;
 
   if (DEBUG) {
     const stamp = (newGlobal as AnyLiteral).DEBUG_randomId;
@@ -177,9 +162,11 @@ export function setGlobal(newGlobal: GlobalState, options?: ActionOptions) {
     DEBUG_currentRandomId = Math.random();
   }
 
-  const apply = () => applyGlobal(setState, rawGlobal, newGlobal, options?.fromRemote ? remoteJournal : journal);
-  const changed = options?.forceOnHeavyAnimation || options?.forceSyncOnIOs ? ungated(apply) : apply();
-  if (!changed) return;
+  const prev = currentGlobal;
+  currentGlobal = newGlobal;
+  const apply = () => applyGlobal(setState, prev, newGlobal);
+  if (options?.forceOnHeavyAnimation || options?.forceSyncOnIOs) ungated(apply);
+  else apply();
 
   if (options?.forceSyncOnIOs) {
     forceOnHeavyAnimation = true;
@@ -204,7 +191,7 @@ function runHandlers(name: string, payload: unknown, options?: ActionOptions) {
   const pending: Promise<void>[] = [];
   const exec = () => {
     for (const handler of actionHandlers[name]) {
-      const result = handler(DEBUG ? getGlobal() : rawGlobal, actions, payload);
+      const result = handler(getGlobal(), actions, payload);
       if (!result) continue;
       if (typeof (result as Promise<void>).then === 'function') {
         pending.push(result as Promise<void>);
@@ -221,7 +208,8 @@ function runHandlers(name: string, payload: unknown, options?: ActionOptions) {
   } else {
     exec();
   }
-  return pending.length ? Promise.all(pending).then(() => undefined) : undefined;
+  // tt's action call always returned a promise (`getPromiseActions().x().then(…)` on a synchronous action works)
+  return pending.length ? Promise.all(pending).then(() => undefined) : Promise.resolve();
 }
 
 export const addActionHandler = (<ActionName extends ProjectActionNames>(

@@ -56,10 +56,13 @@ afterEach(async () => {
 describe('tt action semantics on the frameact store', () => {
   it('runs a ported tt handler unchanged: apiUpdate → twoFaSettings written in place', () => {
     const twoFa = getGlobal().twoFaSettings;
+    const mirrorTwoFa = unwrap(useGlobal().twoFaSettings);
     actions.apiUpdate({ '@type': 'updateTwoFaStateWaitCode', length: 6 } satisfies ApiUpdate);
     expect(getGlobal().twoFaSettings.waitingEmailCodeLength).toBe(6);
     expect(getGlobal().twoFaSettings.isLoading).toBe(false);
-    expect(unwrap(useGlobal()).twoFaSettings).toBe(twoFa); // merged in place, identity kept
+    expect(twoFa.waitingEmailCodeLength).toBeUndefined(); // tt value semantics: the captured object is a snapshot
+    expect(unwrap(useGlobal().twoFaSettings)).toBe(mirrorTwoFa); // the store's container, merged in place
+    expect(useGlobal().twoFaSettings.waitingEmailCodeLength).toBe(6);
   });
 
   it('queues a nested action after the current handler and runs execAfterActions after the cascade', () => {
@@ -115,30 +118,28 @@ describe('tt action semantics on the frameact store', () => {
 });
 
 describe('store callbacks (cache / multitab feed)', () => {
-  it('runs once per tick with the composed diff of every setGlobal', async () => {
-    const calls: AnyLiteral[] = [];
-    const cb = (_global: GlobalState, diff?: AnyLiteral) => calls.push(diff);
+  it('runs once per tick with the committed global (the object setGlobal received)', async () => {
+    const calls: GlobalState[] = [];
+    const cb = (global: GlobalState) => calls.push(global);
     addCallback(cb);
     try {
       setGlobal({ ...getGlobal(), isSyncing: true });
       setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, byId: { a: chat('a') } } });
-      setGlobal(updateTabState(getGlobal(), { isLeftColumnShown: false }, tabId));
+      const last = updateTabState(getGlobal(), { isLeftColumnShown: false }, tabId);
+      setGlobal(last);
       expect(calls).toEqual([]);
       await tick();
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toEqual({
-        isSyncing: true,
-        chats: { byId: { a: chat('a') } },
-        byTabId: { [tabId]: { isLeftColumnShown: false } },
-      });
+      expect(calls[0]).toBe(last);
+      expect(calls[0].chats.byId.a).toEqual(chat('a'));
     } finally {
       removeCallback(cb);
     }
   });
 
   it('waits for a heavy animation unless the write is forced (forceOnHeavyAnimation / forceSyncOnIOs)', async () => {
-    const calls: AnyLiteral[] = [];
-    const cb = (_global: GlobalState, diff?: AnyLiteral) => calls.push(diff);
+    const calls: GlobalState[] = [];
+    const cb = (global: GlobalState) => calls.push(global);
     addCallback(cb);
     const end = beginHeavyAnimation(10_000, true);
     try {
@@ -148,11 +149,12 @@ describe('store callbacks (cache / multitab feed)', () => {
 
       setGlobal({ ...getGlobal(), isSynced: true }, { forceOnHeavyAnimation: true });
       await tick();
-      expect(calls).toEqual([{ isSyncing: true, isSynced: true }]);
+      expect(calls).toHaveLength(1);
+      expect(pick(calls[0], ['isSyncing', 'isSynced'])).toEqual({ isSyncing: true, isSynced: true });
 
       setGlobal({ ...getGlobal(), isFetchingDifference: true }, { forceSyncOnIOs: true });
       expect(calls).toHaveLength(2); // synchronously, before the tick
-      expect(calls[1]).toEqual({ isFetchingDifference: true });
+      expect(calls[1].isFetchingDifference).toBe(true);
     } finally {
       end();
       removeCallback(cb);
@@ -200,7 +202,7 @@ describe('fine-grained reads over the tracked global', () => {
     });
   });
 
-  it('withGlobal: the mapper re-runs on its own leaves only; fields of returned store objects bypass it', () => {
+  it('withGlobal: the mapper re-runs when an entity it returned changes (tt granularity), not for other chats', () => {
     setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, byId: { a: chat('a'), b: chat('b') } } });
     let mapperRuns = 0;
     createRoot((dispose) => {
@@ -215,14 +217,14 @@ describe('fine-grained reads over the tracked global', () => {
       expect([titleViaChat(), selected(), props.title]).toEqual(['a', false, 'own title wins']);
       expect(mapperRuns).toBe(1);
 
-      // a field the mapper did not read: the leaf wakes the reader directly, the mapper stays
+      // the entity is replaced (a new tt object): the mapper that read `byId[a]` re-runs, as tt's container did
       setGlobal({
         ...getGlobal(),
         chats: { ...getGlobal().chats, byId: { ...getGlobal().chats.byId, a: { ...chat('a'), unreadCount: 5 } } },
       });
-      expect(mapperRuns).toBe(1);
+      expect(props.chat.unreadCount).toBe(5); // (memos are lazy: the pull is what re-runs the mapper)
+      expect(mapperRuns).toBe(2);
 
-      // a field the mapper read (title): mapper re-runs, mapped record is shallow-equal except `title`
       setGlobal({
         ...getGlobal(),
         chats: {
@@ -231,18 +233,19 @@ describe('fine-grained reads over the tracked global', () => {
         },
       });
       expect(titleViaChat()).toBe('A2');
-      expect(mapperRuns).toBe(2);
+      expect(mapperRuns).toBe(3);
 
-      // another chat: nothing
+      // another chat, an unrelated tab write: nothing
       setGlobal({
         ...getGlobal(),
         chats: { ...getGlobal().chats, byId: { ...getGlobal().chats.byId, b: { ...chat('b'), title: 'B2' } } },
       });
-      expect(mapperRuns).toBe(2);
+      setGlobal(updateTabState(getGlobal(), { isLeftColumnShown: false }, tabId));
+      expect(mapperRuns).toBe(3);
 
       setGlobal({ ...getGlobal(), currentUserId: 'a' });
       expect(selected()).toBe(true);
-      expect(mapperRuns).toBe(3);
+      expect(mapperRuns).toBe(4);
       dispose();
     });
   });
@@ -289,6 +292,79 @@ describe('fine-grained reads over the tracked global', () => {
     } finally {
       end();
     }
+  });
+});
+
+describe('C2: callbacks get the committed immutable global, so prevGlobal consumers work as in tt', () => {
+  it('a ui/settings.ts-style callback sees the theme change exactly once', async () => {
+    const changes: string[] = [];
+    let prevGlobal = getGlobal();
+    const cb = (global: GlobalState) => {
+      if (global.sharedState.settings.theme !== prevGlobal.sharedState.settings.theme) {
+        changes.push(global.sharedState.settings.theme);
+      }
+      prevGlobal = global;
+    };
+    addCallback(cb);
+    try {
+      const g = getGlobal();
+      setGlobal({ ...g, sharedState: { ...g.sharedState, settings: { ...g.sharedState.settings, theme: 'dark' } } });
+      await tick();
+      setGlobal({ ...getGlobal(), isSyncing: true });
+      await tick();
+      expect(changes).toEqual(['dark']);
+    } finally {
+      removeCallback(cb);
+    }
+  });
+
+  it('an intervals.ts-style callback sees the master role flip; a sharedStateConnector-style identity check works', async () => {
+    const roles: boolean[] = [];
+    let prevGlobal = getGlobal();
+    let lastSharedState = prevGlobal.sharedState;
+    const sharedChanges: number[] = [];
+    const cb = (global: GlobalState) => {
+      const wasMaster = Boolean(selectTabState(prevGlobal, tabId)?.isMasterTab);
+      const isMaster = Boolean(selectTabState(global, tabId)?.isMasterTab);
+      if (wasMaster !== isMaster) roles.push(isMaster);
+      prevGlobal = global;
+      if (global.sharedState !== lastSharedState) {
+        sharedChanges.push(1);
+        lastSharedState = global.sharedState;
+      }
+    };
+    addCallback(cb);
+    try {
+      setGlobal(updateTabState(getGlobal(), { isMasterTab: true }, tabId));
+      await tick();
+      setGlobal(updateTabState(getGlobal(), { isLeftColumnShown: false }, tabId));
+      await tick();
+      setGlobal(updateTabState(getGlobal(), { isMasterTab: false }, tabId));
+      await tick();
+      expect(roles).toEqual([true, false]);
+      expect(sharedChanges).toEqual([]);
+    } finally {
+      removeCallback(cb);
+    }
+  });
+});
+
+describe('I2: tt code that mutates the global it got from getGlobal() behaves the same in DEV and production', () => {
+  it('global.x = …; setGlobal(global) (init.ts) reaches the store', () => {
+    const global = getGlobal();
+    global.isCacheApiSupported = true;
+    setGlobal(global);
+    expect(useGlobal().isCacheApiSupported).toBe(true);
+    expect(getGlobal().isCacheApiSupported).toBe(true);
+  });
+});
+
+describe('M4: getPromiseActions returns a promise for a synchronous action too', () => {
+  it('awaits and .then() work', async () => {
+    register('test:syncAction', () => undefined);
+    const promise = (getPromiseActions() as unknown as Record<string, () => Promise<void>>)['test:syncAction']();
+    expect(promise).toBeInstanceOf(Promise);
+    await promise.then(() => undefined);
   });
 });
 

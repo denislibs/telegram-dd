@@ -1,159 +1,83 @@
-// The bridge between telegram-tt's immutable `setGlobal(newGlobal)` and frameact's in-place store (docs/store-architecture.md).
+// The bridge between telegram-tt's immutable global and frameact's in-place store (docs/store-architecture.md §1).
 //
-// A tt reducer returns `{ ...global, chats: { ...global.chats, byId: { ...byId, [id]: chat } } }`: every object on the
-// written path is a fresh copy, everything else is the same reference as before (structural sharing). `applyGlobal`
-// walks `next` against the raw store tree and stops at every `===` branch, so its cost is the key width along the
-// changed paths, not the size of the state. Where it finds a difference it writes that leaf through `setState`, which
-// notifies only the signals of that leaf — the component layer never sees a root replacement.
+// The committed global is exactly the object tt would hold: a reducer returns `{ ...global, chats: { ...global.chats,
+// byId: { ...byId, [id]: chat } } }` — fresh objects along the written path, the same references everywhere else — and
+// `setGlobal(next)` commits `next` as is. The frameact store is a *mirror* of it that only components read:
+// `applyGlobal(prev, next)` walks the two immutable globals, stops at every `===` branch (tt's structural sharing makes
+// the unchanged 99.9 % free to skip) and writes each change into the store through `setState`, which notifies only the
+// signals of that leaf.
 //
-// Rules (they match frameact's `reconcile`, so a hot path can switch to `setState(…path, reconcile(chunk))` later
-// without a change in behaviour):
-//  - two plain objects are merged in place, key by key; an object with another `id` is another entity and replaces;
-//  - arrays are values: replaced whole when their content differs (same length, every item `===` → nothing happens);
-//  - `undefined` deletes the key (tt kept the key with an `undefined` value; `in` / `Object.keys` differ, reads do not);
-//  - class instances, Dates, frozen objects are values (frameact never wraps them) and replace.
-//
-// Every effective write is also recorded in a journal, converted on demand into telegram-tt's `deepDiff` format
-// (`{ key: value | subDiff | { __delete: true } }`), the format tt broadcasts between tabs and applies with `deepMerge`.
-// `deepMerge` merges key by key, so a replaced object has to be spelled out against what the receiver holds: a
-// whole-value write remembers the object it detached (`base`) and the entry it supersedes (`before`), and the conversion
-// emits `before ⊕ deepDiff(base, current)`. One journal covers one callback run; it is never composed across runs.
+// What the store holds, and why tt's value semantics survive:
+//  - **Entities** (plain objects with an `id`: chats, users, messages, stickers, folders, …) and **arrays** are written
+//    into the store **by reference** and replaced whole when they change. The store never writes into them, so an
+//    object tt code took from `getGlobal()` is never mutated: captured snapshots, optimistic-update rollbacks,
+//    WeakMap caches keyed by object identity and module constants (`INITIAL_TAB_STATE`) behave as in tt.
+//  - **Containers** (every other plain object: the root, the slices, dictionaries such as `chats.byId`,
+//    `messages.byChatId[id]`, `byTabId[id]` and the id-less records) are the store's **own shallow copies**, merged key
+//    by key so that a change under them wakes only the readers of the changed key, not everything under the container.
+//    The copies are private to the store; tt's objects stay untouched. `byTabId[id]` is a container although it has an
+//    `id` (tt's tab id).
+//  - A changed entity that is shallow-equal to the previous one is not written (a `replaceUsers` of 5k fresh copies
+//    with 100 real changes is 100 writes). A changed array with the same items in the same order is not written.
+//  - `undefined` deletes a key in a container (tt kept the key with `undefined`; `in`/`Object.keys` differ, reads do
+//    not). Frozen objects, class instances and Dates are values (replaced), as frameact treats them.
+//  - A store proxy inside `next` (a component handed `props.chat` to an action) is unwrapped: the committed global
+//    gets the raw object, so `structuredClone` / `postMessage` of the global keep working.
 import { unwrap } from 'frameact/store';
 
-import { deepDiff } from '../../util/deepDiff';
 import { isLiteralObject } from '../../util/iteratees';
 
 /** The same `setState` shape frameact exports, without the 7-key typing: the walk builds paths at run time. */
 export type UntypedSetState = (...pathAndValue: unknown[]) => void;
 
-/** tt's deletion marker (`src/util/deepDiff.ts`). */
-export const DELETE_MARK = { __delete: true } as const;
-
-/** DEV stamp telegram-tt puts on the global it hands out (`getGlobal()`); never stored. */
+/** DEV stamp telegram-tt puts on the global it hands out (`getGlobal()`); never mirrored into the store. */
 export const DEBUG_RANDOM_ID_KEY = 'DEBUG_randomId';
 
-/**
- * A journal node: per key, the latest effective write.
- *  - a sub-journal: the object at the key was merged in place (its own keys journaled below);
- *  - a value entry: the key was written whole. `cur` is the written value (the live object of the tree from now on,
- *    so later in-place writes into it need no record), `base` the value it detached, `before` the entry it supersedes.
- *    `live` (the base was not a plain object: the receiver has nothing to merge into) converts to the value itself,
- *    otherwise to `before ⊕ deepDiff(base, cur)` — what turns the receiver's object into `cur`;
- *  - a delete entry: the key is gone; it keeps what it deleted for a later write under the same key.
- */
-type ValueEntry = { cur: unknown; base: unknown; live: boolean; before?: Entry };
-type DeleteEntry = { del: true; base: unknown; before?: Entry };
-type Entry = Journal | ValueEntry | DeleteEntry;
-export type Journal = { [key: string]: Entry } & { __isJournal: true };
-
-const JOURNAL_TAG = '__isJournal';
-
-export function createJournal(): Journal {
-  const j = {} as Journal;
-  Object.defineProperty(j, JOURNAL_TAG, { value: true, enumerable: false });
-  return j;
-}
-
-const isJournal = (e: unknown): e is Journal => Boolean(e) && (e as Journal)[JOURNAL_TAG] === true;
-const isDeleteEntry = (e: unknown): e is DeleteEntry => Boolean(e) && (e as DeleteEntry).del === true;
-
-function journalSet(journal: Journal | undefined, key: string, prev: unknown, value: unknown) {
-  if (!journal) return;
-  const existing = journal[key];
-  if (value === undefined) {
-    if (!isDeleteEntry(existing)) journal[key] = { del: true, base: prev, before: existing };
-    return;
-  }
-  // After a deletion the receiver (once the diff is applied) still holds what was deleted: continue from there.
-  const base = isDeleteEntry(existing) ? existing.base : prev;
-  const before = isDeleteEntry(existing) ? existing.before : existing;
-  const live = !(isLiteralObject(base) && isLiteralObject(value));
-  journal[key] = { cur: value, base, live, before: live ? undefined : before };
-}
-
-function journalChild(journal: Journal | undefined, key: string): Journal | undefined {
-  if (!journal) return undefined;
-  const entry = journal[key];
-  if (isJournal(entry)) return entry;
-  if (entry === undefined) return (journal[key] = createJournal());
-  return undefined; // a value entry: `cur` is the live object, the conversion diffs it as it is then
-}
-
-function diffOfEntry(entry: Entry): unknown {
-  if (isJournal(entry)) return journalToDiff(entry) ?? {};
-  if (isDeleteEntry(entry)) return DELETE_MARK;
-  if (entry.live) return entry.cur;
-  const own = deepDiff(entry.base, entry.cur);
-  const ownDiff = typeof own === 'symbol' ? {} : (own as AnyLiteral);
-  if (entry.before === undefined) return ownDiff;
-  return mergeDiffs(diffOfEntry(entry.before) as AnyLiteral, ownDiff) ?? ownDiff;
-}
-
-/** The journal as a tt `deepDiff` object (`undefined` when nothing was written). */
-export function journalToDiff(journal: Journal): AnyLiteral | undefined {
-  const keys = Object.keys(journal);
-  if (keys.length === 0) return undefined;
-  const diff: AnyLiteral = {};
-  for (const key of keys) {
-    const entry = journal[key];
-    const value = diffOfEntry(entry);
-    if (isJournal(entry) && Object.keys(value as AnyLiteral).length === 0) continue;
-    diff[key] = value;
-  }
-  return Object.keys(diff).length ? diff : undefined;
+/** A plain, unfrozen object: something the store would wrap. Arrays are values here. */
+export function isPlainObject(value: unknown): value is AnyLiteral {
+  return isLiteralObject(value) && !Object.isFrozen(value);
 }
 
 /**
- * Compose two tt diffs of the same base, `b` after `a`: a later value or deletion wins, two object diffs merge key by
- * key (what `deepMerge` produces when applying them in turn). A plain value cannot express "replace the receiver's
- * object" after a deletion, which is why the journal keeps `base` and this function is only used on its own output.
+ * The container rule: a plain object without an `id` is a structural container (the store keeps its own copy and
+ * merges into it); one with an `id` is an entity (shared by reference, replaced whole). `byTabId[tabId]` is the one
+ * container with an `id`.
  */
-export function mergeDiffs(a: AnyLiteral | undefined, b: AnyLiteral | undefined): AnyLiteral | undefined {
-  if (!a) return b;
-  if (!b) return a;
-  const out: AnyLiteral = { ...a };
-  for (const key of Object.keys(b)) {
-    const av = out[key];
-    const bv = b[key];
-    out[key] =
-      isLiteralObject(av) && isLiteralObject(bv) && !isDeletion(av) && !isDeletion(bv) ? mergeDiffs(av, bv) : bv;
-  }
-  return out;
+export function isContainer(value: unknown, path: readonly PropertyKey[]): value is AnyLiteral {
+  if (!isPlainObject(value)) return false;
+  if (!Object.hasOwn(value, 'id')) return true;
+  return path.length === 2 && path[0] === 'byTabId';
 }
 
-const isDeletion = (v: AnyLiteral) => v.__delete === true || v.__deleteAllChildren === true;
-
-/**
- * Own-key counts of the container objects the walk has visited. `Object.keys(raw)` on a 2k-key dictionary costs more
- * than the comparison loop itself, and it is needed only to tell whether `next` dropped keys; since every write into
- * the tree goes through this walk, the count can be kept instead. `verifyKeyCounts` (DEV) checks it on every visit.
- */
-const keyCounts = new WeakMap<object, number>();
-let verifyKeyCounts = false;
-
-/** DEV: recount the keys of every visited object and throw when a write bypassed the walk. */
-export function setStrictKeyCounts(enabled: boolean) {
-  verifyKeyCounts = enabled;
-}
-
-function keyCountOf(raw: object): number {
-  let count = keyCounts.get(raw);
-  if (count === undefined || verifyKeyCounts) {
-    const actual = Object.keys(raw).length;
-    if (count !== undefined && count !== actual) {
-      throw new Error(`[global] the store was written outside setGlobal: ${count} keys expected, ${actual} found`);
+/** The store's own copy of a container: shallow, with nested containers copied too; entities and arrays shared. */
+export function copyContainer(value: AnyLiteral, path: PropertyKey[]): AnyLiteral {
+  const copy: AnyLiteral = { ...value };
+  const keys = Object.keys(copy);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    if (key === '__proto__') continue;
+    let child = copy[key];
+    if (child && typeof child === 'object') {
+      const raw = unwrap(child);
+      if (raw !== child) value[key] = child = raw; // a proxy from a component: the committed global gets the raw object
+      if (isContainer(child, path.concat(key))) child = copyContainer(child, path.concat(key));
+      copy[key] = child;
     }
-    count = actual;
-    keyCounts.set(raw, count);
   }
-  return count;
+  return copy;
 }
 
-function sameEntity(prev: AnyLiteral, next: AnyLiteral) {
-  return prev.id === next.id;
+function areRecordsShallowEqual(a: AnyLiteral, b: AnyLiteral) {
+  const ka = Object.keys(a);
+  if (ka.length !== Object.keys(b).length) return false;
+  for (let i = 0; i < ka.length; i++) {
+    const k = ka[i];
+    if (!Object.hasOwn(b, k) || a[k] !== b[k]) return false;
+  }
+  return true;
 }
 
-function areArraysShallowEqual(prev: unknown[], next: unknown[]) {
+function areArraysShallowEqual(prev: readonly unknown[], next: readonly unknown[]) {
   if (prev.length !== next.length) return false;
   for (let i = 0; i < prev.length; i++) {
     if (prev[i] !== next[i]) return false;
@@ -162,20 +86,17 @@ function areArraysShallowEqual(prev: unknown[], next: unknown[]) {
 }
 
 /**
- * Merge `next` into the raw object `raw` (which lives in the store at `path`), writing changed leaves through
- * `setState` and recording them in `journal`. Returns `true` when anything was written.
+ * Mirror the difference between the committed container `prev` and the next one `next` (both tt objects, immutable)
+ * into the store's container at `path`. Returns `true` when anything was written.
  */
-export function applyObject(
+export function applyContainer(
   setState: UntypedSetState,
-  raw: AnyLiteral,
+  prev: AnyLiteral,
   next: AnyLiteral,
   path: PropertyKey[],
-  journal: Journal | undefined,
   isRoot = false,
 ): boolean {
   let written = false;
-  const rawCount = keyCountOf(raw);
-  let count = rawCount;
   const nextKeys = Object.keys(next);
   let present = 0;
 
@@ -183,63 +104,56 @@ export function applyObject(
     const key = nextKeys[i];
     if (key === '__proto__') continue;
     let nv = next[key];
-    let pv = raw[key];
+    let pv = prev[key];
     let has = pv !== undefined;
     if (!has) {
-      has = Object.hasOwn(raw, key);
+      has = Object.hasOwn(prev, key);
       pv = undefined;
     }
     if (has) present++;
-    if (isRoot && key === DEBUG_RANDOM_ID_KEY) continue; // (counted as present or not like any key, never written)
+    if (isRoot && key === DEBUG_RANDOM_ID_KEY) continue;
     if (nv === pv) continue;
     if (nv && typeof nv === 'object') {
-      nv = unwrap(nv); // a proxy handed in from a component
+      const raw = unwrap(nv);
+      if (raw !== nv) next[key] = nv = raw; // a proxy from a component: the committed global gets the raw object
       if (nv === pv) continue;
     }
 
+    const childPath = path.concat(key);
     if (Array.isArray(nv)) {
       if (Array.isArray(pv) && areArraysShallowEqual(pv, nv)) continue;
-    } else if (isLiteralObject(nv) && isLiteralObject(pv) && sameEntity(pv, nv)) {
-      if (applyObject(setState, pv, nv, path.concat(key), journalChild(journal, key))) written = true;
+    } else if (isContainer(nv, childPath)) {
+      if (isContainer(pv, childPath)) {
+        if (applyContainer(setState, pv, nv, childPath)) written = true;
+        continue;
+      }
+      setState(...path, key, copyContainer(nv, childPath));
+      written = true;
       continue;
+    } else if (isPlainObject(nv) && isPlainObject(pv) && areRecordsShallowEqual(pv, nv)) {
+      continue; // a fresh but equal entity (replaceUsers): the store keeps the old object
     }
 
     setState(...path, key, nv);
-    journalSet(journal, key, pv, nv);
     written = true;
-    if (nv === undefined) {
-      count--; // an explicit `undefined` in `next` deletes the key
-    } else if (!has) {
-      count++;
-    }
   }
 
-  if (present !== rawCount) {
-    const rawKeys = Object.keys(raw);
-    for (let i = 0; i < rawKeys.length; i++) {
-      const key = rawKeys[i];
+  if (present !== Object.keys(prev).length) {
+    const prevKeys = Object.keys(prev);
+    for (let i = 0; i < prevKeys.length; i++) {
+      const key = prevKeys[i];
       if (Object.hasOwn(next, key)) continue;
       if (isRoot && key === DEBUG_RANDOM_ID_KEY) continue;
-      const pv = raw[key];
       setState(...path, key, undefined);
-      journalSet(journal, key, pv, undefined);
       written = true;
-      count--;
     }
   }
-  if (count !== rawCount) keyCounts.set(raw, count);
 
   return written;
 }
 
-/** `setGlobal(next)`: merge a tt-style immutable global into the raw root. */
-export function applyGlobal(
-  setState: UntypedSetState,
-  root: AnyLiteral,
-  next: AnyLiteral,
-  journal: Journal | undefined,
-): boolean {
-  const target = unwrap(next);
-  if (target === root) return false;
-  return applyObject(setState, root, target, [], journal, true);
+/** `setGlobal(next)`: mirror the change from the committed global `prev` to `next` into the store. */
+export function applyGlobal(setState: UntypedSetState, prev: AnyLiteral, next: AnyLiteral): boolean {
+  if (next === prev) return false;
+  return applyContainer(setState, prev, next, [], true);
 }
