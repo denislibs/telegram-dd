@@ -15,8 +15,9 @@ import { afterActions, createStore, defineActions, ungated } from 'frameact/stor
 
 import type { ActionPayloads, GlobalState, RequiredActionPayloads, RequiredGlobalState } from './types';
 
-import { DEBUG } from '../config';
+import { DEBUG, DEBUG_MORE } from '../config';
 import { areRecordsShallowEqual } from '../util/areShallowEqual';
+import { deepDiff } from '../util/deepDiff';
 import { handleError } from '../util/handleError';
 import { throttleWithTickEnd } from '../util/schedulers';
 import { applyGlobal, setDevChecks, type UntypedSetState } from './store/apply';
@@ -121,6 +122,22 @@ export function forceOnHeavyAnimationOnce() {
   forceOnHeavyAnimation = true;
 }
 
+// DEV tool (docs/store-architecture.md §10): the last `deepDiff`s between consecutive callback runs, newest last, for
+// debugging "who changed that" in the console (`window.__globalDiffLog`).
+const DIFF_LOG_SIZE = 100;
+if (DEBUG_MORE) {
+  const diffLog: { time: number; diff: unknown }[] = [];
+  let prevLogged: GlobalState | undefined;
+  (window as any).__globalDiffLog = diffLog;
+  addCallback((global) => {
+    if (prevLogged) {
+      diffLog.push({ time: Date.now(), diff: deepDiff(prevLogged, global) });
+      if (diffLog.length > DIFF_LOG_SIZE) diffLog.shift();
+    }
+    prevLogged = global;
+  });
+}
+
 // ---- getGlobal / setGlobal --------------------------------------------------------------------------------------
 
 // ---- the mapper context (N3) ------------------------------------------------------------------------------------
@@ -222,14 +239,29 @@ const actions = {} as Record<string, (payload?: unknown, options?: ActionOptions
 function runHandlers(name: string, payload: unknown, options?: ActionOptions) {
   const pending: Promise<void>[] = [];
   const exec = () => {
-    for (const handler of actionHandlers[name]) {
-      const result = handler(getGlobal(), actions, payload);
-      if (!result) continue;
-      if (typeof (result as Promise<void>).then === 'function') {
-        pending.push(result as Promise<void>);
-        continue;
+    // An action called synchronously from a component's mapper must not get the mirror: `getGlobal()` below would be
+    // the tracked proxy, `{ ...global, x }` would put store containers into `setGlobal` and subscribe the mapper to
+    // every root key. The handler runs outside the mapper context (the caller is a pure mapper in tt too: a bug).
+    const outerMapperDepth = mapperDepth;
+    if (outerMapperDepth > 0) {
+      if (DEBUG) {
+        // eslint-disable-next-line no-console
+        console.error(`[global] Action "${name}" was called from a mapper; mappers must be pure.`);
       }
-      setGlobal(result as GlobalState, options);
+      mapperDepth = 0;
+    }
+    try {
+      for (const handler of actionHandlers[name]) {
+        const result = handler(getGlobal(), actions, payload);
+        if (!result) continue;
+        if (typeof (result as Promise<void>).then === 'function') {
+          pending.push(result as Promise<void>);
+          continue;
+        }
+        setGlobal(result as GlobalState, options);
+      }
+    } finally {
+      mapperDepth = outerMapperDepth;
     }
   };
   // The options cover the handler's synchronous writes (its returned global and any `setGlobal` it makes before an
@@ -332,4 +364,10 @@ export function withGlobal<OwnProps extends AnyLiteral, StateProps extends AnyLi
           }
         : undefined,
   }) as OwnProps & StateProps;
+}
+
+if (DEBUG) {
+  (window as any).getGlobal = getGlobal;
+  (window as any).setGlobal = setGlobal;
+  (window as any).getActions = getActions;
 }
