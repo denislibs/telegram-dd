@@ -206,6 +206,11 @@ export default Notifications;
   object when it changed and the same object otherwise, so `memoized(selector)`, WeakMap caches, `prevGlobal.chats.byId
 !== global.chats.byId` and a `const chat = selectChat(global, id)` kept across an `await` all behave as in tt. In a
   component, a store proxy taken from `useGlobal()` is live (the mirror); derive with `createMemo`, not by identity.
+- **An entity proxy is not a handle.** `const chat = useGlobal().chats.byId[id]` kept in a variable shows the old
+  values after the entity is replaced (it is a new object): read entities through the path or through a props getter
+  (`props.chat.title`) inside the computation that needs them. A list of entities renders with
+  `<For each={…} keyed={(x) => x.id}>`, otherwise a replaced entity recreates its row. Container proxies (a tab
+  record, `settings`) are stable and live.
 - **Never mutate a nested object of the global** (`global.stories.stateHash = …`): the mirror follows `prev → next` by
   identity and would not see it. Return a new object (a `// Deviation:` in the 4 tt lines that do this).
 - Heavy animations: `actions.x(payload, { forceOnHeavyAnimation: true })` and `forceOnHeavyAnimationOnce()` work as in
