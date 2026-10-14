@@ -114,17 +114,19 @@ the plan is [`plans/2026-10-14-store.md`](plans/2026-10-14-store.md). The short 
 
 - `src/global/index.ts` keeps tt's API: `getGlobal`, `setGlobal`, `getActions`, `getPromiseActions`,
   `addActionHandler`, `execAfterActions`, `withGlobal`, `addCallback`/`removeCallback`, `ActionOptions`.
-- **Actions, reducers and selectors port byte-identical** (only `lib/teact/teactn` imports move to `../global`).
-  `getGlobal()` is the raw store tree; a reducer spread-copies the path it changes; `setGlobal(next)` walks the copy
-  against the tree, skips every `===` branch and writes the changed leaves in place through frameact's `setState`
-  (`src/global/store/apply.ts`). Nothing is rewritten to `setState` paths by hand; `reconcile`/`produce` are an opt-in
-  for a reducer that a trace shows to be hot.
+- **Actions, reducers, selectors and the `addCallback` consumers port byte-identical** (only `lib/teact/teactn`
+  imports move to `../global`). The committed global is tt's immutable global: `setGlobal(next)` commits `next` itself,
+  `getGlobal()` hands out a shallow copy (tt's DEBUG behaviour, in both modes), callbacks get the committed object, so
+  `prevGlobal` comparisons, identity caches and captured snapshots behave as in tt. The frameact store is a **mirror**
+  that only components read: `setGlobal` walks the previous and the next global, skips every `===` branch and writes
+  the changed leaves (`src/global/store/apply.ts`) — entities (objects with an `id`) and arrays by reference, id-less
+  containers as the store's own copies merged key by key. Nothing is rewritten to `setState` paths by hand.
 - Components read the tracked view: `const props = withGlobal(ownProps, mapStateToProps)` in the body (mapper body
   unchanged), `useSelector(sel)` returns an accessor, a direct read in JSX uses `useGlobal()`. A read is a leaf
   subscription: a chat row re-runs for its chat only.
 - `forceOnHeavyAnimation` → the handler's writes run `ungated`; `forceSyncOnIOs` → `ungated` + `flushSync()`;
   `forceOutdated` and the DEV outdated-global check work as in tt. Cache and multitab port unchanged except their
-  imports and 12 lines in `multitab.ts` (the journal replaces `deepDiff(prev, current)`).
+  imports (`deepDiff(prev, current)` works: the globals are immutable snapshots).
 
 ### 3.3 Reducers and handlers: unchanged
 
@@ -200,12 +202,12 @@ export default Notifications;
 
 - **Selectors port verbatim.** Called from a handler they get the raw tree; called from a component (through
   `withGlobal`/`useSelector`/`useGlobal()`) they get the proxy and track exactly what they read. Keep them pure.
-- **Identity no longer means change** (framework §5.3): `useMemo(…, [chatsById])`, `memoized(selector)` over store
-  objects and `prevGlobal.chats.byId !== global.chats.byId` checks are stale forever. In components use
-  `createMemo(() => selector(useGlobal(), …))`; in `addCallback` consumers (`folderManager`) read the `diff` argument
-  (tt's `deepDiff` format: `Object.keys(diff.chats.byId)` are the changed chats). The plan lists every site.
-- **A local variable holding a state object is live.** `const chat = selectChat(global, id)` kept across an `await`
-  sees later writes (tt's copy was frozen in time). Use `structuredClone`/`snapshot` when the old value matters.
+- **Identity semantics are tt's** for everything that reads `getGlobal()` or a callback's global: an entity is a new
+  object when it changed and the same object otherwise, so `memoized(selector)`, WeakMap caches, `prevGlobal.chats.byId
+!== global.chats.byId` and a `const chat = selectChat(global, id)` kept across an `await` all behave as in tt. In a
+  component, a store proxy taken from `useGlobal()` is live (the mirror); derive with `createMemo`, not by identity.
+- **Never mutate a nested object of the global** (`global.stories.stateHash = …`): the mirror follows `prev → next` by
+  identity and would not see it. Return a new object (a `// Deviation:` in the 4 tt lines that do this).
 - Heavy animations: `actions.x(payload, { forceOnHeavyAnimation: true })` and `forceOnHeavyAnimationOnce()` work as in
   tt; an **async** handler that must write during an animation after an `await` wraps that `setGlobal` in
   `ungated(() => …)`. A component read that must update while its subtree animates → `live(() => …)`.
@@ -215,9 +217,9 @@ export default Notifications;
 
 - **Cache**: `src/global/cache.ts` ports unchanged except two imports (`addCallback` from `./index`, `onFullyIdle` /
   `getIsHeavyAnimating` from `frameact`). It serialises `reduceGlobal(getGlobal())` — plain objects, nothing to unwrap.
-- **Multitab**: `src/util/browser/multitab.ts` is ported (12 changed lines): the store callbacks hand it the journal
-  diff of each tick (`globalDiffUpdate`, one message per callback run), a received global is applied with
-  `setGlobal(global, { fromRemote: true })` so it is not echoed back. `establishMultitabRole.ts` is verbatim.
+- **Multitab**: `src/util/browser/multitab.ts` and `establishMultitabRole.ts` are tt's code (two import lines differ):
+  `deepDiff(lastBroadcastDiffGlobal, currentGlobal)` at the idle flush and the `currentGlobal === global` echo check
+  work on the committed immutable globals.
 
 ## 4. Components
 
