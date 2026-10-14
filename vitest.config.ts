@@ -11,8 +11,19 @@ export default defineConfig((configEnv) =>
     test: {
       environment: 'jsdom',
       setupFiles: ['src/dev/vitestSetup.ts'],
-      // tests/** are Playwright specs (docs/quality-gates.md), run by `pnpm test:*`, not by vitest.
-      exclude: [...configDefaults.exclude, 'reference/**', 'src/vendor/**', '.worktrees/**', '.cache/**', 'tests/**'],
+      // tests/{e2e,a11y,perf,visual} are Playwright specs (docs/quality-gates.md), run by `pnpm test:*`, not by vitest.
+      // tests/perfcmp holds the unit tests of the performance-comparison harness (trace analysis, statistics).
+      exclude: [
+        ...configDefaults.exclude,
+        'reference/**',
+        'src/vendor/**',
+        '.worktrees/**',
+        '.cache/**',
+        'tests/e2e/**',
+        'tests/a11y/**',
+        'tests/perf/**',
+        'tests/visual/**',
+      ],
     },
   }),
 );

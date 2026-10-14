@@ -34,6 +34,7 @@
     "codemod:sweep": "tsx scripts/codemod/cli.ts --sweep --report",
     "codemod:typecheck": "tsx scripts/codemod/typecheck.ts",
     "slice:inventory": "tsx scripts/slice/inventory.ts",
+    "perf:compare": "tsx tests/perfcmp/run.ts",
     "bench:store": "tsx scripts/bench/store.ts",
     "framework:update": "git submodule update --remote src/vendor/frameact",
     "test:e2e": "playwright test --project=e2e",

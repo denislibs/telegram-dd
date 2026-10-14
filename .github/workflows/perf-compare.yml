@@ -1,0 +1,76 @@
+name: Perf compare (telegram-dd vs telegram-tt)
+
+# Manual only: a measurement, not a gate. A shared CI runner is noisy, so read the A/A section of the report first and
+# compare only against the same runner class (docs/quality-gates.md, "Performance vs telegram-tt").
+on:
+  workflow_dispatch:
+    inputs:
+      scenarios:
+        description: 'Scenario ids, comma separated (empty = all; ids: pnpm perf:compare --list)'
+        required: false
+        default: ''
+      runs:
+        description: 'Runs per app and scenario (interleaved)'
+        required: false
+        default: '7'
+      cpu_throttling:
+        description: 'CPU throttling factor (Emulation.setCPUThrottlingRate)'
+        required: false
+        default: '4'
+      aa:
+        description: 'Also run tt against tt (A/A) to measure the noise of this runner'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  perf-compare:
+    name: perf compare
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The comparison copies this reference, patches the copy (scripts/visual/tt-patches.mjs) and builds it.
+      - name: Clone the telegram-tt reference at the base commit
+        run: pnpm gates:reference
+      - run: pnpm exec playwright install --with-deps chromium
+      # Inputs go through env (never interpolated into the script).
+      - name: 'A/A (tt against tt): the noise of the method on this runner'
+        if: ${{ inputs.aa }}
+        env:
+          SCENARIOS: ${{ inputs.scenarios }}
+          RUNS: ${{ inputs.runs }}
+          CPU: ${{ inputs.cpu_throttling }}
+        run: pnpm perf:compare --aa --runs "$RUNS" --cpu "$CPU" ${SCENARIOS:+--scenario "$SCENARIOS"}
+      - name: telegram-dd vs telegram-tt
+        env:
+          SCENARIOS: ${{ inputs.scenarios }}
+          RUNS: ${{ inputs.runs }}
+          CPU: ${{ inputs.cpu_throttling }}
+        run: pnpm perf:compare --runs "$RUNS" --cpu "$CPU" ${SCENARIOS:+--scenario "$SCENARIOS"}
+      - name: Job summary
+        if: always()
+        run: |
+          for report in tests/perfcmp/results/latest-aa.md tests/perfcmp/results/latest-dd-vs-tt.md; do
+            [ -f "$report" ] && cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          done
+          uptime >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-compare-results
+          path: tests/perfcmp/results/
+          retention-days: 30

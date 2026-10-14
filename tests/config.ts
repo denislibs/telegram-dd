@@ -28,3 +28,7 @@ export const E2E_ENV = {
   TG_TELEGRAM_API_ID: '1',
   TG_TELEGRAM_API_HASH: 'e2e-dummy-hash',
 };
+
+// Environment of the performance comparison (tests/perfcmp): the same mocked client, but a PRODUCTION app (DEBUG off),
+// because debug code paths (tt copies the whole global on every getGlobal() in DEBUG) would distort the measurement.
+export const PERFCMP_ENV = { ...E2E_ENV, APP_ENV: 'production' };
