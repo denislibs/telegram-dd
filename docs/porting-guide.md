@@ -585,8 +585,13 @@ repository and `LICENSE`.
    `suppressStrict` is only for third-party code.
 6. **Note deviations** in the commit message (`Deviation: …`) whenever behaviour differs from tt (a missing
    `Transition` option, a deferred feature) and add a `// TODO(port): …` at the spot.
-7. Commit the adaptation separately: `port(<area>): adapt <component> to frameact`.
-8. **Per slice** (before the PR): run `pnpm gates` once. Read the report, not only the exit code:
+7. **Browser gates** for the slice's screen ([`quality-gates.md`](quality-gates.md)): add an e2e spec with the strict
+   fixture (`tests/e2e/`, zero console / page / request / stricterdom problems) and an axe test (`tests/a11y/`);
+   switch its entry in `tests/visual/screens.ts` to `ported: true` and bring the diff against tt under the screen's
+   threshold; for lists, modals and anything that mounts and unmounts add a `expectNoLeak` cycle and an
+   `expectNoLongTasks` interaction (`tests/perf/`). Run `pnpm test:e2e`, `test:a11y`, `test:perf` and `test:visual`.
+8. Commit the adaptation separately: `port(<area>): adapt <component> to frameact`.
+9. **Per slice** (before the PR): run `pnpm gates` once. Read the report, not only the exit code:
    - `gates:diff` top offenders (is a big ratio really required by teact -> frameact?) and the stub list (a
      `FOUNDATION STUB` you just replaced must lose its marker);
    - `gates:tests`: tests whose subject you ported are copied and pass under `pnpm test`;

@@ -7,3 +7,7 @@ dist
 .env.local
 /.worktrees/
 .cache
+# browser gates
+/test-results/
+/playwright-report*/
+/tests/visual/__diff__/

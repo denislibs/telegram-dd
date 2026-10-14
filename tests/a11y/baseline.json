@@ -1,0 +1,9 @@
+{
+  "app shell": [
+    {
+      "rule": "meta-viewport",
+      "target": "meta[name=\"viewport\"]",
+      "reason": "telegram-tt's index.html disables zooming (maximum-scale=1, user-scalable=no) and we keep its viewport meta verbatim; revisit together with the UI port"
+    }
+  ]
+}
