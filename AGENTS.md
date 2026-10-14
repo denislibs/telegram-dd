@@ -19,6 +19,7 @@ git submodule update --init      # first checkout: fetch the framework
 git clone --depth 1 https://github.com/Ajaxy/telegram-tt.git reference/telegram-tt   # first checkout: the reference
 pnpm install
 pnpm dev                         # Vite dev server on http://localhost:1234 (stricterdom on)
+pnpm dev:test                    # same, opened on /?test: Telegram's test servers (test accounts +99966XYYYY, code = X×5)
 pnpm check                       # oxlint + prettier --check + tsc + script gates + vite build + bundle budgets
 pnpm gates                       # all script gates: diff vs the reference, upstream drift, tt tests, size, licenses
 pnpm gates:reference             # clone the reference at the baseline commit (CI, fresh checkouts)
