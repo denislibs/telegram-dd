@@ -576,7 +576,10 @@ repository and `LICENSE`.
    - Refs (§4.3); `className` → `class`.
    - Effects split by phase (§4.5).
    - Identity memos to `createMemo` (§3.6); reducers and handlers to writes (§3.3–3.5).
-4. **`pnpm check`**: oxlint, prettier, tsc and the build, with zero warnings.
+4. **`pnpm check`**: oxlint, prettier, tsc, the script gates (diff against the reference, tt unit tests, licenses),
+   the build and the bundle budgets, with zero warnings. If `gates:diff` fails, shrink the diff (port, don't rewrite)
+   or allowlist the file with a reason; if `gates:tests` fails, copy the tt test next to the code. Both are described
+   in [`quality-gates.md`](quality-gates.md#script-gates).
 5. **Run in dev** (`pnpm dev`) and exercise the screen. The stricterdom console must be clean, with no
    `[frameact/stricterdom]` violations and no destructured-props warnings. Fix the cause; never suppress it.
    `suppressStrict` is only for third-party code.
@@ -588,6 +591,12 @@ repository and `LICENSE`.
    threshold; for lists, modals and anything that mounts and unmounts add a `expectNoLeak` cycle and an
    `expectNoLongTasks` interaction (`tests/perf/`). Run `pnpm test:e2e`, `test:a11y`, `test:perf` and `test:visual`.
 8. Commit the adaptation separately: `port(<area>): adapt <component> to frameact`.
+9. **Per slice** (before the PR): run `pnpm gates` once. Read the report, not only the exit code:
+   - `gates:diff` top offenders (is a big ratio really required by teact -> frameact?) and the stub list (a
+     `FOUNDATION STUB` you just replaced must lose its marker);
+   - `gates:tests`: tests whose subject you ported are copied and pass under `pnpm test`;
+   - `gates:size`: the deltas are expected; raise a budget (`pnpm gates:size --update`) only with a reason in the PR;
+   - `gates:licenses`: a new dependency has a GPL-3.0-or-later compatible license and a row in `NOTICE.md`.
 
 ### 7.3 Keeping diffs readable
 
@@ -597,6 +606,8 @@ repository and `LICENSE`.
   `git show <adapt-commit>` is exactly the teact → frameact change.
 - Compare against a prettier-formatted reference, so formatting does not hide real changes:
   `pnpm exec prettier --stdin-filepath x.tsx < reference/telegram-tt/<path> | diff -u - <path>`.
+  `pnpm gates:diff` does this for every ported file (both sides prettier-formatted, whitespace ignored, import lines
+  counted separately) and fails above 40% changed non-import lines.
 
 ### 7.4 Tracking upstream
 
@@ -606,6 +617,9 @@ repository and `LICENSE`.
   ported:
   `git -C reference/telegram-tt diff --stat <baseline> origin/master -- $(git ls-files src ':!src/vendor')`.
   This works because paths are kept.
+- `pnpm gates:upstream` automates the listing: it reports the ported files that changed between the baseline
+  recorded in `NOTICE.md` and the reference's HEAD (`--remote` compares with upstream `master` without touching the
+  reference clone).
 - Port the relevant changes as `port(<area>): sync with tt@<sha>`. Then `git -C reference/telegram-tt checkout
 origin/master` and update the **reference baseline** line at the top of this guide, plus the baseline in `NOTICE.md`.
 - New files that upstream adds are ported when their feature's milestone comes, by the same checklist.
