@@ -63,7 +63,7 @@ Keep the telegram-tt path. A tt file `src/components/left/main/Chat.tsx` becomes
 here, and its stylesheet, hooks and helpers move next to it under the same names. That way
 `diff reference/telegram-tt/<path> <path>` always works.
 
-| telegram-tt                                                                                                                          | tg-frameact                  | Status                                                                                                                                          |
+| telegram-tt                                                                                                                          | telegram-dd                  | Status                                                                                                                                          |
 | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/lib/gramjs/`                                                                                                                    | same                         | **Verbatim.** No UI dependencies (no teact or fasterdom imports).                                                                               |
 | `src/api/gramjs/`, `src/api/types/`                                                                                                  | same                         | **Verbatim**, except one adaptation in `worker/connector.ts` ([§6](#6-workers-and-gramjs)).                                                     |
@@ -72,7 +72,7 @@ here, and its stylesheet, hooks and helpers move next to it under the same names
 | `src/global/types`, `initialState.ts`, `selectors/`, `helpers/`                                                                      | same                         | Verbatim. Selectors are pure functions and work over the store proxy.                                                                           |
 | `src/global/reducers/`                                                                                                               | same                         | **Adapted**: they become writers ([§3.3](#33-reducers-become-writers)).                                                                         |
 | `src/global/actions/**`                                                                                                              | same                         | **Adapted**: same `addActionHandler` calls; handlers write instead of returning state ([§3.5](#35-worked-example-an-action-handler)).           |
-| `src/global/index.ts`                                                                                                                | same path, **rewritten**     | The store glue: `createStore` + an `addActionHandler` registry over `defineActions` ([§3.2](#32-the-tg-frameact-store)).                        |
+| `src/global/index.ts`                                                                                                                | same path, **rewritten**     | The store glue: `createStore` + an `addActionHandler` registry over `defineActions` ([§3.2](#32-the-telegram-dd-store)).                        |
 | `src/global/cache.ts`, `src/util/browser/multitab.ts`, `src/global/shared/`                                                          | same                         | **Deferred** ([§3.7](#37-cache-and-multitab)).                                                                                                  |
 | `src/components/**`, `src/bundles/`                                                                                                  | same                         | Adapted ([§4](#4-components)).                                                                                                                  |
 | `src/components/ui/{Transition,ShowTransition,InfiniteScroll}.tsx`, `Portal.ts`                                                      | same path, **thin adapters** | Re-export the `src/lib/kit` / `frameact/dom` components and import tt's stylesheet, so call sites keep their imports.                           |
@@ -107,7 +107,7 @@ here, and its stylesheet, hooks and helpers move next to it under the same names
 - Cache: `addCallback` + a throttled serializer into IndexedDB/localStorage. Multitab: the master tab owns the API and
   broadcasts `deepDiff`s of the global over a `BroadcastChannel`.
 
-### 3.2 The tg-frameact store
+### 3.2 The telegram-dd store
 
 One store, written in place (model B). `src/global/index.ts` keeps tt's exported names so that ported code changes as
 little as possible:
@@ -214,7 +214,7 @@ export function updateTabState<T extends GlobalState>(
 ): T {
   return { ...global, byTabId: { ...global.byTabId, [tabId]: { ...global.byTabId[tabId], ...tabStatePartial } } };
 }
-// tg-frameact
+// telegram-dd
 export function updateTabState<T extends GlobalState>(
   global: T,
   tabStatePartial: Partial<TabState>,
@@ -265,7 +265,7 @@ export default memo(
 );
 ```
 
-tg-frameact:
+telegram-dd:
 
 ```tsx
 import { For, Show } from 'frameact/dom';
@@ -335,7 +335,7 @@ addActionHandler('showNotification', (global, actions, payload): ActionReturnTyp
 });
 ```
 
-tg-frameact:
+telegram-dd:
 
 ```ts
 addActionHandler('showNotification', (global, actions, payload): ActionReturnType => {
@@ -426,7 +426,7 @@ re-derive them. The short version:
 
 ### 4.2 App-specific mapping
 
-| telegram-tt                                                                         | tg-frameact                                                                                                                                                                                                                                                                                      |
+| telegram-tt                                                                         | telegram-dd                                                                                                                                                                                                                                                                                      |
 | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `useFlag()` (172 files)                                                             | Port `src/hooks/useFlag.ts` in place: `createSignal`, returning `[Accessor<boolean>, setTrue, setFalse]`. Call sites change `isOpen` to `isOpen()`.                                                                                                                                              |
 | `useLang()`, `useOldLang()`                                                         | Port in place. `lang` reads the language signal, so `lang('Key')` in JSX is reactive. `lang.isRtl` becomes a getter.                                                                                                                                                                             |
