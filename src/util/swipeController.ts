@@ -183,6 +183,7 @@ export function allowSwipeControlForTransition(
       // Deviation: the finger was lifted before this measure ran, so nothing would ever resume the paused animations.
       currentSlide.getAnimations().forEach((a) => a.play());
       nextSlide.getAnimations().forEach((a) => a.play());
+      resetTimingFunctions(); // they run with the stylesheet's easing, not the swipe's `linear`
       waitForAnimationEnd(currentSlide, cleanup);
       options?.onRelease?.();
       return;

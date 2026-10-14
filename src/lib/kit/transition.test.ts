@@ -1084,6 +1084,9 @@ it('swipe: the finger lifted before the first measure resumes the paused animati
   await frame();
   expect(animationOf(s1b).state).toBe('running');
   expect(animationOf(s0).state).toBe('running');
+  await frame(); // the resumed animations run with the stylesheet's easing, not the swipe's linear
+  expect(s1b.style.animationTimingFunction).toBe('');
+  expect(s0.style.animationTimingFunction).toBe('');
   expect(scope.isBlockingAnimating.peek()).toBe(true);
   s0.dispatchEvent(new Event('animationend', { bubbles: true }));
   s1b.dispatchEvent(new Event('animationend', { bubbles: true }));
