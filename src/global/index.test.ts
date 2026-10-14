@@ -295,6 +295,65 @@ describe('fine-grained reads over the tracked global', () => {
   });
 });
 
+describe("I3: withGlobal behaves like tt's container", () => {
+  it('a throwing mapper is reported and the previous props stay', () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, byId: { a: chat('a') } } });
+      createRoot((dispose) => {
+        const props = withGlobal({ chatId: 'a' }, (global, { chatId }) => ({ title: global.chats.byId[chatId].title }));
+        const title = createMemo(() => props.title);
+        expect(title()).toBe('a');
+        setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, byId: {} } }); // the mapper throws on `undefined.title`
+        expect(title()).toBe('a');
+        expect(errors).toHaveBeenCalled();
+        dispose();
+      });
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  it('an inactive container is not mapped, on the first run included; stickToFirst sticks to the first value', () => {
+    let runs = 0;
+    createRoot((dispose) => {
+      const inactive = withGlobal(
+        {},
+        () => (runs++, { count: 1 }),
+        () => false,
+      );
+      expect(inactive.count).toBeUndefined();
+      expect(runs).toBe(0);
+
+      setGlobal({ ...getGlobal(), currentUserId: 'u1' });
+      const stuck = withGlobal(
+        {},
+        (global) => ({ user: global.currentUserId }),
+        (global, _own, stickToFirst) => stickToFirst(global.currentUserId),
+      );
+      expect(stuck.user).toBe('u1');
+      setGlobal({ ...getGlobal(), currentUserId: 'u2' }); // another value: the container is inactive and keeps u1
+      expect(stuck.user).toBe('u1');
+      dispose();
+    });
+  });
+
+  it('an own prop present with undefined wins over the mapped value, as {...mapped, ...own} did', () => {
+    createRoot((dispose) => {
+      const props = withGlobal({ title: undefined as string | undefined, other: 1 }, () => ({
+        title: 'mapped',
+        extra: 2,
+      }));
+      expect(props.title).toBeUndefined();
+      expect(props.extra).toBe(2);
+      expect(props.other).toBe(1);
+      expect(Object.keys(props).sort()).toEqual(['extra', 'other', 'title']);
+      expect('title' in props).toBe(true);
+      dispose();
+    });
+  });
+});
+
 describe('C2: callbacks get the committed immutable global, so prevGlobal consumers work as in tt', () => {
   it('a ui/settings.ts-style callback sees the theme change exactly once', async () => {
     const changes: string[] = [];

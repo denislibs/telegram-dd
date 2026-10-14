@@ -11,13 +11,13 @@
 //  - `useGlobal()` is the tracked view (the store proxy) for component bodies, JSX, memos and effects. `withGlobal`
 //    and `useSelector` read through it.
 import { createMemo, flushSync, getIsHeavyAnimating, rootScope } from 'frameact';
-import { mergeProps } from 'frameact/dom';
 import { afterActions, createStore, defineActions, ungated } from 'frameact/store';
 
 import type { ActionPayloads, GlobalState, RequiredActionPayloads, RequiredGlobalState } from './types';
 
 import { DEBUG } from '../config';
 import { areRecordsShallowEqual } from '../util/areShallowEqual';
+import { handleError } from '../util/handleError';
 import { throttleWithTickEnd } from '../util/schedulers';
 import { applyGlobal, type UntypedSetState } from './store/apply';
 
@@ -240,6 +240,8 @@ type StickToFirstFn = (value: any) => boolean;
 type MapStateToProps<OwnProps, StateProps> = (global: GlobalState, ownProps: OwnProps) => StateProps;
 type ActivationFn<OwnProps> = (global: GlobalState, ownProps: OwnProps, stickToFirst: StickToFirstFn) => boolean;
 
+const EMPTY_PROPS = {} as AnyLiteral;
+
 /**
  * The component-side replacement of tt's `withGlobal(mapStateToProps)(Component)` HOC, called in the component body:
  *
@@ -248,17 +250,19 @@ type ActivationFn<OwnProps> = (global: GlobalState, ownProps: OwnProps, stickToF
  *     …props.chat, props.chatId…
  *
  * `mapStateToProps` keeps its tt body. It runs in a memo over the tracked global, so it re-runs when a leaf it read
- * (or an own prop it read) changes, and nothing else re-runs when the mapped record is shallow-equal to the previous
- * one. Store objects it returns (`chat`) are stable proxies: a field the component reads from them (`props.chat.title`)
- * is a direct leaf subscription that does not go through the mapper at all. Own props win over state props, as in tt.
+ * (or an own prop it read) changes — an entity it returned (`chat`) is a new object when it changed, as in tt — and
+ * nothing downstream re-runs while the mapped record stays shallow-equal. As tt's container: a throwing mapper is
+ * reported through `handleError` and the previous props stay; an inactive container (`activationFn`) is not mapped,
+ * on the first run included; own props win over state props, a key present in the own props with `undefined` too
+ * (`{ ...mapped, ...own }`). The second type argument has a default, so tt's `withGlobal<OwnProps>(…)` compiles.
  */
-export function withGlobal<OwnProps extends AnyLiteral, StateProps extends AnyLiteral>(
+export function withGlobal<OwnProps extends AnyLiteral, StateProps extends AnyLiteral = AnyLiteral>(
   ownProps: OwnProps,
   mapStateToProps: MapStateToProps<OwnProps, StateProps>,
   activationFn?: ActivationFn<OwnProps>,
 ): OwnProps & StateProps {
   let stuckTo: unknown;
-  let last: StateProps | undefined;
+  let last: StateProps = EMPTY_PROPS as StateProps;
   const stickToFirst: StickToFirstFn = (stickTo) => {
     if (stuckTo) return stuckTo === stickTo;
     if (stickTo !== undefined) stuckTo = stickTo;
@@ -267,11 +271,28 @@ export function withGlobal<OwnProps extends AnyLiteral, StateProps extends AnyLi
   const global = useGlobal();
   const mapped = createMemo<StateProps>(
     () => {
-      if (activationFn && last && !activationFn(global, ownProps, stickToFirst)) return last;
-      last = mapStateToProps(global, ownProps);
+      if (activationFn && !activationFn(global, ownProps, stickToFirst)) return last;
+      try {
+        last = mapStateToProps(global, ownProps);
+      } catch (err: any) {
+        handleError(err);
+      }
       return last;
     },
     { equals: areRecordsShallowEqual },
   );
-  return mergeProps(() => mapped(), ownProps) as OwnProps & StateProps;
+  // `{ ...mappedProps, ...props }` of tt's container, with lazy getters: an own prop wins whenever its key is present.
+  return new Proxy(EMPTY_PROPS, {
+    get: (_target, key) => (key in ownProps ? ownProps[key as string] : mapped()[key as string]),
+    has: (_target, key) => key in ownProps || key in mapped(),
+    ownKeys: () => [...new Set([...Reflect.ownKeys(mapped()), ...Reflect.ownKeys(ownProps)])],
+    getOwnPropertyDescriptor: (_target, key) =>
+      key in ownProps || key in mapped()
+        ? {
+            configurable: true,
+            enumerable: true,
+            get: () => (key in ownProps ? ownProps[key as string] : mapped()[key as string]),
+          }
+        : undefined,
+  }) as OwnProps & StateProps;
 }

@@ -1,10 +1,10 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { getGlobal, setGlobal } from '../../global';
 
 import type { GlobalState, TabState } from '../../global/types';
 
-import { updateTabState } from '../../global/reducers/tabs';
-import { getGlobal, setGlobal } from '../../global';
 import { INITIAL_GLOBAL_STATE, INITIAL_TAB_STATE } from '../../global/initialState';
+import { updateTabState } from '../../global/reducers/tabs';
 import { deepMerge } from '../deepMerge';
 import { getCurrentTabId } from '../establishMultitabRole';
 import { cloneDeep } from '../iteratees';

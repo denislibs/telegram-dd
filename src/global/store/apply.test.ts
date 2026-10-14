@@ -9,7 +9,11 @@ type Message = { id: number; chatId: string; text: string; content?: { text: { t
 type Chat = { id: string; title: string; unread: number; photo?: { small: string } };
 type State = {
   isInited: boolean;
-  chats: { byId: Record<string, Chat>; listIds: { active: string[] }; lastMessageIds?: { all: Record<string, number> } };
+  chats: {
+    byId: Record<string, Chat>;
+    listIds: { active: string[] };
+    lastMessageIds?: { all: Record<string, number> };
+  };
   messages: {
     byChatId: Record<string, { byId: Record<number, Message>; threadsById: Record<number, { listedIds: number[] }> }>;
   };
@@ -178,7 +182,7 @@ describe('applyGlobal: the store mirrors the committed tt global', () => {
       byTabId: { ...g.byTabId, 1: { ...g.byTabId[1], giftCraftModal: { gift1: proxyA as Chat, gifts: [] } } },
     };
     setGlobal(next);
-    expect(next.byTabId[1].giftCraftModal!.gift1).toBe(unwrap(proxyA));
+    expect(next.byTabId[1].giftCraftModal.gift1).toBe(unwrap(proxyA));
     expect(mirror.byTabId[1].giftCraftModal!.gift1).toBe(g.chats.byId.a);
     expect(() => structuredClone(getGlobal())).not.toThrow();
   });
@@ -290,13 +294,20 @@ describe('C1: tt value semantics hold for code that captured objects before setG
 
   it('module constants spread into the global are never mutated (reducers/passcode.ts clearGlobalForLockScreen)', () => {
     const { setGlobal, getGlobal } = setup();
-    const INITIAL_TAB = { id: 0, notifications: [] as { localId: string }[], globalSearch: { results: [] as number[] } };
+    const INITIAL_TAB = {
+      id: 0,
+      notifications: [] as { localId: string }[],
+      globalSearch: { results: [] as number[] },
+    };
     const g = getGlobal();
     setGlobal({ ...g, byTabId: { ...g.byTabId, 2: { ...INITIAL_TAB, id: 2 } } });
     const g2 = getGlobal();
     setGlobal({
       ...g2,
-      byTabId: { ...g2.byTabId, 2: { ...g2.byTabId[2], globalSearch: { ...g2.byTabId[2].globalSearch!, query: 'secret' } } },
+      byTabId: {
+        ...g2.byTabId,
+        2: { ...g2.byTabId[2], globalSearch: { ...g2.byTabId[2].globalSearch!, query: 'secret' } },
+      },
     });
     expect(INITIAL_TAB.globalSearch).toEqual({ results: [] });
     expect('query' in INITIAL_TAB.globalSearch).toBe(false);
@@ -329,7 +340,10 @@ describe('M3 property: random nested tt-style updates keep the mirror equal to t
         } else if (op === 3) {
           next = updateChat(g, id, { id, title: id, unread: 0, photo: rnd(2) ? { small: String(rnd(9)) } : undefined });
         } else if (op === 4) {
-          next = { ...g, byTabId: { ...g.byTabId, 2: { id: 2, notifications: [], globalSearch: { results: [rnd(5)] } } } };
+          next = {
+            ...g,
+            byTabId: { ...g.byTabId, 2: { id: 2, notifications: [], globalSearch: { results: [rnd(5)] } } },
+          };
         } else if (op === 5) {
           next = { ...g, byTabId: omit(g.byTabId, [2]) };
         } else if (op === 6) {
@@ -341,7 +355,9 @@ describe('M3 property: random nested tt-style updates keep the mirror equal to t
           const message: Message = { id: mid, chatId: 'x', text: String(rnd(100)), content: { text: { text: 't' } } };
           next = {
             ...g,
-            messages: { byChatId: { ...g.messages.byChatId, [chatKey]: { ...c, byId: { ...c.byId, [mid]: message } } } },
+            messages: {
+              byChatId: { ...g.messages.byChatId, [chatKey]: { ...c, byId: { ...c.byId, [mid]: message } } },
+            },
           };
         } else {
           next = { ...g, chats: { ...g.chats, lastMessageIds: rnd(2) ? { all: { [id]: rnd(50) } } : undefined } };
