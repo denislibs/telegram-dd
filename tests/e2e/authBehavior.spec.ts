@@ -75,7 +75,7 @@ test.describe('phone number screen', () => {
 
     await page.locator('#sign-in-phone-code').click();
     // the country field selects its text, the menu lists the countries and the filter narrows them
-    await page.locator('#sign-in-phone-code').pressSequentially('Unit');
+    await page.locator('#sign-in-phone-code').fill('Unit');
     await expect(page.locator('.CountryCodeInput .MenuItem')).toHaveCount(2); // United States, United Kingdom
     await page.locator('.CountryCodeInput .MenuItem', { hasText: 'United States' }).click();
 

@@ -14,14 +14,30 @@ export type TestWindow = {
   getGlobal: () => { auth: Record<string, unknown> };
 };
 
+type ServerWindow = TestWindow & {
+  __server?: { state: string; fields: Record<string, unknown> };
+  __serverTimer?: number;
+};
+
+// The server keeps answering with its current state: a late whole-global write of the mocked sync (see waitForQuietSync)
+// that sets the state back is answered again, as the real API worker would. Only the state is replayed.
 export async function serverSays(page: Page, authorizationState: AuthState, extra: Record<string, unknown> = {}) {
   await page.evaluate(
     ({ state, fields }) => {
-      (window as unknown as TestWindow).getActions().apiUpdate({
-        '@type': 'updateAuthorizationState',
-        authorizationState: state,
-        ...fields,
-      });
+      const w = window as unknown as ServerWindow;
+      const send = () => {
+        const server = w.__server!;
+        w.getActions().apiUpdate({
+          '@type': 'updateAuthorizationState',
+          authorizationState: server.state,
+          ...server.fields,
+        });
+      };
+      w.__server = { state, fields };
+      send();
+      w.__serverTimer ??= window.setInterval(() => {
+        if (w.getGlobal().auth.state !== w.__server!.state) send();
+      }, 100);
     },
     { state: authorizationState, fields: extra },
   );
