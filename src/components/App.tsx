@@ -1,3 +1,4 @@
+// FOUNDATION STUB: the skeleton's counter page; the real App (telegram-tt src/components/App.tsx) lands with the auth slice.
 import { createSignal } from 'frameact';
 
 export default function App() {
