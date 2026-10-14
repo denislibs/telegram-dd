@@ -7,13 +7,22 @@
 // from `shape.ts` (temporary, see its TODO). The direction is one way: `src/util` never imports the kit (index.test.ts).
 export { waitForAnimationEnd, waitForTransitionEnd, type WaitForEndOptions } from './animationEnd';
 export {
-  createShowTransition, createMediaTransition, ShowTransition,
-  type ShowTransitionOptions, type ShowTransitionResult, type ShowTransitionState, type ShowTransitionProps,
+  createShowTransition,
+  createMediaTransition,
+  ShowTransition,
+  type ShowTransitionOptions,
+  type ShowTransitionResult,
+  type ShowTransitionState,
+  type ShowTransitionProps,
   type MediaTransitionOptions,
 } from './showTransition';
 export {
-  Transition, ACTIVE_SLIDE_CLASS_NAME, TO_SLIDE_CLASS_NAME,
-  type TransitionProps, type TransitionSlide, type TransitionDirection,
+  Transition,
+  ACTIVE_SLIDE_CLASS_NAME,
+  TO_SLIDE_CLASS_NAME,
+  type TransitionProps,
+  type TransitionSlide,
+  type TransitionDirection,
 } from './transition';
 export { createScrollAnchor, type ScrollAnchor, type ScrollAnchorOptions } from './scrollAnchor';
 export { InfiniteScroll, type InfiniteScrollProps, type LoadMoreDirection } from './infiniteScroll';

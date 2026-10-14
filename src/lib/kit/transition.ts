@@ -47,10 +47,23 @@
 //     scope); the component's own effects live under a child owner that re-provides the ENCLOSING
 //     scope, so a step is never parked by this transition's own blocking animation.
 import {
-type Accessor,
-  createEffect, createHeavyAnimationScope, createMemo, createMutationEffect, createRoot, createSignal, currentHeavyAnimationScope, getOwner,
+  type Accessor,
+  createEffect,
+  createHeavyAnimationScope,
+  createMemo,
+  createMutationEffect,
+  createRoot,
+  createSignal,
+  currentHeavyAnimationScope,
+  getOwner,
   type HeavyAnimationScope,
-  onCleanup, provideHeavyAnimationScope, requestForcedReflow, requestMutation, runWithOwner, untrack, } from 'frameact';
+  onCleanup,
+  provideHeavyAnimationScope,
+  requestForcedReflow,
+  requestMutation,
+  runWithOwner,
+  untrack,
+} from 'frameact';
 import { insert, setExtraStyles, spread } from 'frameact/dom';
 
 import { getNatives } from '../../util/dom/natives';
@@ -174,8 +187,25 @@ interface Step {
 
 /** The props the component consumes itself; everything else (`id`, `class`, `ref`, `data-*`, `on*`) is spread onto the container. */
 const OWN_PROPS = new Set([
-  'activeKey', 'nextKey', 'name', 'direction', 'renderCount', 'shouldCleanup', 'cleanupExceptionKey', 'cleanupOnlyKey', 'shouldRestoreHeight',
-  'restoreHeightKey', 'contentSelector', 'isBlockingAnimation', 'withSwipeControl', 'scope', 'disableAnimation', 'slideClass', 'onStart', 'onStop', 'children',
+  'activeKey',
+  'nextKey',
+  'name',
+  'direction',
+  'renderCount',
+  'shouldCleanup',
+  'cleanupExceptionKey',
+  'cleanupOnlyKey',
+  'shouldRestoreHeight',
+  'restoreHeightKey',
+  'contentSelector',
+  'isBlockingAnimation',
+  'withSwipeControl',
+  'scope',
+  'disableAnimation',
+  'slideClass',
+  'onStart',
+  'onStop',
+  'children',
 ]);
 const isOwnProp = (key: string) => OWN_PROPS.has(key);
 
@@ -334,7 +364,9 @@ export function Transition(props: TransitionProps): unknown {
   }
 
   function settleSlides(active: SlideRecord): void {
-    for (const record of slides) setSlideState(record, record === active ? ACTIVE_SLIDE_CLASS_NAME : INACTIVE_SLIDE_CLASS_NAME);
+    for (const record of slides) {
+      setSlideState(record, record === active ? ACTIVE_SLIDE_CLASS_NAME : INACTIVE_SLIDE_CLASS_NAME);
+    }
     setContainerAnimation(undefined);
     setFromKey(undefined);
   }
@@ -373,7 +405,9 @@ export function Transition(props: TransitionProps): unknown {
       const record = findSlide(key);
       if (record === undefined) return undefined;
       const selector = props.contentSelector;
-      const target = selector ? (natives.querySelectorAll.call(record.el, selector)[0] as HTMLElement | undefined) : record.el;
+      const target = selector
+        ? (natives.querySelectorAll.call(record.el, selector)[0] as HTMLElement | undefined)
+        : record.el;
       if (target === undefined) return undefined;
       const height = target.clientHeight;
       return () => {
@@ -518,7 +552,10 @@ export function Transition(props: TransitionProps): unknown {
     running = step;
     inFlight.push(step);
     for (const record of slides) {
-      setSlideState(record, record === next ? TO_SLIDE_CLASS_NAME : record === prev ? FROM_SLIDE_CLASS_NAME : INACTIVE_SLIDE_CLASS_NAME);
+      setSlideState(
+        record,
+        record === next ? TO_SLIDE_CLASS_NAME : record === prev ? FROM_SLIDE_CLASS_NAME : INACTIVE_SLIDE_CLASS_NAME,
+      );
     }
     const isBackwards = !isForwards(props.direction, prevKey, key);
     setContainerAnimation(`${CONTAINER_CLASS_NAME}-${name}${isBackwards ? 'Backwards' : ''}`);

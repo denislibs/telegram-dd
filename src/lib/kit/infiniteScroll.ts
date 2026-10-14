@@ -56,8 +56,16 @@ const LOAD_MORE_QUIET_MS = 1000;
 
 /** The props the component consumes itself; everything else (`id`, `class`, `style`, `ref`, `data-*`, `on*`) is spread onto the div. */
 const OWN_PROPS = new Set([
-  'items', 'itemSelector', 'preloadBackwards', 'sensitiveArea', 'noScrollRestore', 'noScrollRestoreOnTop', 'scrollContainer',
-  'onLoadMore', 'onScroll', 'children',
+  'items',
+  'itemSelector',
+  'preloadBackwards',
+  'sensitiveArea',
+  'noScrollRestore',
+  'noScrollRestoreOnTop',
+  'scrollContainer',
+  'onLoadMore',
+  'onScroll',
+  'children',
 ]);
 const isOwnProp = (key: string) => OWN_PROPS.has(key);
 
@@ -95,8 +103,11 @@ export function InfiniteScroll(props: InfiniteScrollProps): unknown {
   /** Measure phase (layout reads): preload while the list is short or does not fill the viewport. */
   function preload(): void {
     const count = props.items?.length ?? 0;
-    if (count < (props.preloadBackwards ?? DEFAULT_PRELOAD_BACKWARDS)) props.onLoadMore?.({ direction: 'backwards', noScroll: true });
-    else if (scroller.scrollHeight <= scroller.clientHeight) loadBackwards();
+    if (count < (props.preloadBackwards ?? DEFAULT_PRELOAD_BACKWARDS)) {
+      props.onLoadMore?.({ direction: 'backwards', noScroll: true });
+    } else if (scroller.scrollHeight <= scroller.clientHeight) {
+      loadBackwards();
+    }
   }
 
   // ---- the scroll handler (an event handler: layout reads are fine here) --------
@@ -107,7 +118,10 @@ export function InfiniteScroll(props: InfiniteScrollProps): unknown {
     if (items.length === 0) return;
     const viewportTop = scroller.getBoundingClientRect().top;
     const current = anchor.anchor();
-    let i = anchorIndex < items.length && items[anchorIndex] === current ? anchorIndex : Math.max(0, current ? items.indexOf(current) : 0);
+    let i =
+      anchorIndex < items.length && items[anchorIndex] === current
+        ? anchorIndex
+        : Math.max(0, current ? items.indexOf(current) : 0);
     let rect = items[i].getBoundingClientRect();
     while (i > 0) {
       const above = items[i - 1].getBoundingClientRect();

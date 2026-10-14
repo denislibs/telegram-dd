@@ -23,10 +23,11 @@ const utilSources = import.meta.glob('../../util/**/*.ts', { query: '?raw', impo
   string,
   string
 >;
-const kitSources = import.meta.glob(['./*.ts', '!./*.test.ts'], { query: '?raw', import: 'default', eager: true }) as Record<
-  string,
-  string
->;
+const kitSources = import.meta.glob(['./*.ts', '!./*.test.ts'], {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
 const importsOf = (source: string) => Array.from(source.matchAll(/from '([^']+)'/g), (m) => m[1]);
 
 it('src/util never imports the kit', () => {

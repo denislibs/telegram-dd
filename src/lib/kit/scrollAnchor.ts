@@ -12,10 +12,17 @@
 // phase order (the store-gate release goes through a measure task — audit R1): create the anchor under
 // the same heavy-animation scope as the list it anchors, so that they park and release together.
 import {
-type Accessor,
-  createEffect, createMeasureEffect, createMemo, createMutationEffect, createSignal, frameForcedReflow, requestMeasure, untrack, } from 'frameact';
-import { $SHAPE,$TRACK } from 'frameact/store';
-
+  type Accessor,
+  createEffect,
+  createMeasureEffect,
+  createMemo,
+  createMutationEffect,
+  createSignal,
+  frameForcedReflow,
+  requestMeasure,
+  untrack,
+} from 'frameact';
+import { $SHAPE, $TRACK } from 'frameact/store';
 
 /**
  * What a list change is detected by: a store array (model B: `produce`/`reconcile` rewrite it in
@@ -143,7 +150,11 @@ export function createScrollAnchor(options: ScrollAnchorOptions): ScrollAnchor {
         const newTop = current.getBoundingClientRect().top;
         const delta = snapshotOf === change ? newTop - anchorTop : 0; // no snapshot for this change: re-base only
         anchorTop = newTop;
-        if (delta !== 0 && !untrack(() => noScrollRestore?.()) && !(untrack(() => noScrollRestoreOnTop?.()) && el.scrollTop === 0)) {
+        if (
+          delta !== 0 &&
+          !untrack(() => noScrollRestore?.()) &&
+          !(untrack(() => noScrollRestoreOnTop?.()) && el.scrollTop === 0)
+        ) {
           setScrollTopFix({ top: el.scrollTop + delta });
           anchorTop -= delta; // after the write the anchor is back where it was
         }

@@ -10,7 +10,7 @@ function snapshotDescriptors() {
   return protos().map((proto) => KEYS.map((key) => Object.getOwnPropertyDescriptor(proto, key)));
 }
 
-it('resetLayout restores the prototypes it overrode: jsdom\'s own members come back, the fake leaves nothing on any prototype', () => {
+it("resetLayout restores the prototypes it overrode: jsdom's own members come back, the fake leaves nothing on any prototype", () => {
   const before = snapshotDescriptors();
   const scroller = document.createElement('div');
   document.body.append(scroller);

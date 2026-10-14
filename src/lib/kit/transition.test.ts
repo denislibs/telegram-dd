@@ -1,4 +1,13 @@
-import { createHeavyAnimationScope, createMeasureEffect, createMutationEffect, createRoot, createSignal, type HeavyAnimationScope,onCleanup, requestMeasure } from 'frameact';
+import {
+  createHeavyAnimationScope,
+  createMeasureEffect,
+  createMutationEffect,
+  createRoot,
+  createSignal,
+  type HeavyAnimationScope,
+  onCleanup,
+  requestMeasure,
+} from 'frameact';
 import { createComponent, insert } from 'frameact/dom';
 import { disableStrict, enableStrict, setHandler } from 'frameact/stricterdom';
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
@@ -55,7 +64,9 @@ function setup(extra: Record<string, unknown> = {}, initial = 0): Setup {
   const log: string[] = [];
   const dispose = createRoot((d) => {
     const props: Record<string, unknown> = {
-      get activeKey() { return key(); },
+      get activeKey() {
+        return key();
+      },
       name: 'slide',
       scope,
       onStart: () => log.push('start'),
@@ -176,7 +187,10 @@ it('name "none" or disableAnimation switches at once: no classes, no heavy anima
   off.setKey(1);
   await frame();
   expect(classes(t2)).toBe('Transition');
-  expect(slidesOf(t2).map(classes)).toEqual(['Transition_slide Transition_slide-inactive', 'Transition_slide Transition_slide-active']);
+  expect(slidesOf(t2).map(classes)).toEqual([
+    'Transition_slide Transition_slide-inactive',
+    'Transition_slide Transition_slide-active',
+  ]);
   expect(off.scope.isAnimating.peek()).toBe(false);
   expect(off.log).toEqual([]);
 });
@@ -214,7 +228,12 @@ it('the scope is provided to the slides: a blocking animation parks their frame 
     isBlockingAnimation: true,
     children: () => {
       const b = document.createElement('b');
-      createMutationEffect(() => text(), (v) => { applied.push(v); });
+      createMutationEffect(
+        () => text(),
+        (v) => {
+          applied.push(v);
+        },
+      );
       return b;
     },
   });
@@ -281,8 +300,14 @@ it('disposal after the end event but before its mutate task: no onStop, no write
 it('a throwing onStart / onStop is reported and leaves neither the step animating nor the scope begun (clean-room finding 2)', async () => {
   const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
   const { root, scope, setKey, log } = setup({
-    onStart: () => { log.push('start'); throw new Error('onStart boom'); },
-    onStop: () => { log.push('stop'); throw new Error('onStop boom'); },
+    onStart: () => {
+      log.push('start');
+      throw new Error('onStart boom');
+    },
+    onStop: () => {
+      log.push('stop');
+      throw new Error('onStop boom');
+    },
   });
   const t = root.firstElementChild as HTMLElement;
   setKey(1);
@@ -317,11 +342,15 @@ it('a non-animated switch during an animation stops it: waiter cancelled, scope 
     insert(
       root,
       createComponent(Transition, {
-        get activeKey() { return key(); },
+        get activeKey() {
+          return key();
+        },
         name: 'slide',
         scope,
         isBlockingAnimation: true,
-        get disableAnimation() { return off(); },
+        get disableAnimation() {
+          return off();
+        },
         onStart: () => log.push('start'),
         onStop: () => log.push('stop'),
         children: (slide: TransitionSlide) => {
@@ -395,7 +424,12 @@ it('slide.isActive() is current in the frame of the switch: a measure effect in 
   const { root, setKey } = setup({
     renderCount: 2, // both slides stay alive, so a switch back reuses a slide whose measure effect already exists
     children: (slide: TransitionSlide) => {
-      createMeasureEffect(() => slide.isActive(), (active) => { seen.push(`${slide.key}:${active}`); });
+      createMeasureEffect(
+        () => slide.isActive(),
+        (active) => {
+          seen.push(`${slide.key}:${active}`);
+        },
+      );
       return document.createElement('b');
     },
   });
@@ -689,10 +723,13 @@ it('slideOptimized: the active slide rests at translate3d(0, 0, 0) with no trans
 
 it('slideOptimized: the starting position of the `to` slide is +100% forwards and -100% backwards, the `from` slide leaves to the opposite side', async () => {
   const starts: string[] = [];
-  const { root, setKey } = setup({
-    name: 'slideOptimized',
-    onStart: () => starts.push(slidesOf(root.firstElementChild!).map(transformOf).join(' | ')),
-  }, 1);
+  const { root, setKey } = setup(
+    {
+      name: 'slideOptimized',
+      onStart: () => starts.push(slidesOf(root.firstElementChild!).map(transformOf).join(' | ')),
+    },
+    1,
+  );
   const t = root.firstElementChild as HTMLElement;
   setKey(2);
   await frame();
@@ -784,13 +821,11 @@ it('slideOptimized: shouldRestoreHeight measures the active slide after the tran
 
 it('slideOptimized: switching to or from an optimized name drops every slide but the active one and clears the container class and the inline transforms', async () => {
   const [name, setName] = createSignal('slideOptimized');
-  const { root, setKey } = setup(
-    {
-      get name() {
-        return name();
-      },
+  const { root, setKey } = setup({
+    get name() {
+      return name();
     },
-  );
+  });
   const t = root.firstElementChild as HTMLElement;
   setKey(1);
   await frame();
@@ -887,9 +922,15 @@ function fakeGetAnimations(this: HTMLElement): FakeAnimation[] {
       effect: new FakeKeyframeEffect(cls === 'from' ? 'translateX(100%)' : 'translateX(0)'),
       currentTime: 0,
       state: 'running',
-      pause: () => { animation.state = 'paused'; },
-      play: () => { animation.state = 'running'; },
-      cancel: () => { animation.state = 'canceled'; },
+      pause: () => {
+        animation.state = 'paused';
+      },
+      play: () => {
+        animation.state = 'running';
+      },
+      cancel: () => {
+        animation.state = 'canceled';
+      },
     };
     entry = { cls, animation };
     animations.set(this, entry);
@@ -926,7 +967,10 @@ const advance = async (ms: number) => {
 /** A transition on keys 1 → 0 (going back) with the swipe wired like tt's LeftColumn: swiping right goes to key 0, a cancel returns to key 1. */
 async function swipeSetup(extra: Record<string, unknown> = {}) {
   vi.spyOn(Date, 'now').mockImplementation(() => nowMs);
-  const props = Object.defineProperties({}, Object.getOwnPropertyDescriptors({ name: 'slideLayers', withSwipeControl: true }));
+  const props = Object.defineProperties(
+    {},
+    Object.getOwnPropertyDescriptors({ name: 'slideLayers', withSwipeControl: true }),
+  );
   Object.defineProperties(props, Object.getOwnPropertyDescriptors(extra)); // keeps getters reactive
   const base = setup(props, 1);
   const t = base.root.firstElementChild as HTMLElement;
@@ -1168,9 +1212,13 @@ it('swipe: the whole gesture (take over, drag, release, inertia, end; and a reve
   const violations: string[] = [];
   const { t, s1, setKey, stop } = await swipeSetup({ isBlockingAnimation: true });
   enableStrict();
-  setHandler((error) => { violations.push(error.message); });
+  setHandler((error) => {
+    violations.push(error.message);
+  });
   try {
-    requestMeasure(() => { t.style.opacity = '0.5'; }); // a canary: a write in the measure phase is reported, so the monitor is live
+    requestMeasure(() => {
+      t.style.opacity = '0.5';
+    }); // a canary: a write in the measure phase is reported, so the monitor is live
     await frame();
     expect(violations.length).toBeGreaterThan(0);
     violations.length = 0;
@@ -1430,7 +1478,6 @@ it('swipe (tt behaviour, documented): a move event that brings no progress (same
   expect(swipeCalls).toEqual(['right', 'cancel']);
   stop();
 });
-
 
 it('swipe (review m3): the animations are looked up once per gesture, not on every move', async () => {
   nowMs = 0;

@@ -12,7 +12,7 @@ function animationEnd(name = 'slide-in') {
   return e;
 }
 
-it('fires once, 50 ms after the node\'s own animationend (not a descendant\'s); a second event is ignored', () => {
+it("fires once, 50 ms after the node's own animationend (not a descendant's); a second event is ignored", () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   const el = document.createElement('div');
   const child = document.createElement('i');
