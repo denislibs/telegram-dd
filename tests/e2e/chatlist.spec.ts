@@ -257,4 +257,52 @@ test.describe('chat list', () => {
     expect(titles.length).toBeGreaterThan(first);
     expect(new Set(titles).size).toBe(titles.length);
   });
+
+  test('a hidden chat list that receives reorders comes back at the top (the preload does not slide its window)', async ({
+    page,
+  }) => {
+    await openApp(page);
+    await addContacts(page, 90);
+    await expect.poll(() => visualOrder(page).then((titles) => titles[0])).toBe('Contact 90');
+
+    // Focusing the search switches the left column to the global search: the chat list slide gets `display: none`
+    await page.locator('#LeftColumn .SearchInput input').click();
+    await expect(page.locator('#LeftColumn .chat-list')).toBeHidden();
+
+    for (const [id, text] of [
+      ['1005', 'first reorder'],
+      ['1007', 'second reorder'],
+    ]) {
+      await page.evaluate(
+        ([chatId, message]) => {
+          (window as unknown as TestWindow).getActions().apiUpdate({
+            '@type': 'newMessage',
+            chatId,
+            id: 5000 + Number(chatId),
+            message: {
+              id: 5000 + Number(chatId),
+              chatId,
+              date: Math.floor(Date.now() / 1000),
+              isOutgoing: false,
+              senderId: chatId,
+              content: { text: { text: message } },
+            },
+          });
+        },
+        [id, text],
+      );
+      await page.waitForTimeout(1200); // longer than the loader's quiet period
+    }
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#LeftColumn .chat-list').first()).toBeVisible();
+    await expect.poll(() => visualOrder(page).then((titles) => titles.slice(0, 2))).toEqual(['Contact 7', 'Contact 5']);
+    // The window is still on top: the first row is inside the list, not below the fold
+    const firstTop = await page.evaluate((selector) => {
+      const list = document.querySelector('#LeftColumn .chat-list')!.getBoundingClientRect();
+      const tops = [...document.querySelectorAll<HTMLElement>(selector)].map((row) => row.getBoundingClientRect().top);
+      return Math.min(...tops) - list.top;
+    }, ROW);
+    expect(firstTop).toBeLessThan(80);
+  });
 });

@@ -211,7 +211,9 @@ function mount(extra: Record<string, unknown>, initial: number[]) {
   const [items, setItems] = createSignal(initial);
   const loads: unknown[] = [];
   let el!: HTMLDivElement;
-  createRoot(() => {
+  let dispose!: () => void;
+  createRoot((disposeRoot) => {
+    dispose = disposeRoot;
     insert(
       root,
       createComponent(InfiniteScroll, {
@@ -236,12 +238,36 @@ function mount(extra: Record<string, unknown>, initial: number[]) {
     );
   });
   fakeLayout(el);
-  return { el, items, setItems, loads };
+  return { el, items, setItems, loads, dispose };
 }
 
 async function frames(count: number) {
   for (let i = 0; i < count; i++) await frame();
 }
+
+describe('<InfiniteScroll> preload guards', () => {
+  it('a list without a box (display: none: clientHeight 0) is not "short": it does not slide its window', async () => {
+    const { el, setItems, loads } = mount({ preloadBackwards: 0 }, ids(0, 50));
+    Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => 0 });
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => 0 });
+    await frames(2);
+    setItems(ids(0, 52));
+    await frames(2);
+    expect(loads).toEqual([]);
+  });
+
+  it('a preload booked before the list is disposed does not run after it', async () => {
+    const { setItems, loads, dispose } = mount({}, ids(0, 5));
+    await frames(2);
+    const before = loads.length;
+    expect(before).toBeGreaterThan(0);
+    setItems(ids(0, 6));
+    await frame(); // the items effect books the preload for the next frame
+    dispose();
+    await frames(2);
+    expect(loads.length).toBe(before);
+  });
+});
 
 describe('<InfiniteScroll>', () => {
   it('preloads backwards when the list is shorter than preloadBackwards; otherwise when it does not fill the viewport; not when it does', async () => {

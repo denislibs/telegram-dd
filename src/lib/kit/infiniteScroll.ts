@@ -75,6 +75,7 @@ export function InfiniteScroll(props: InfiniteScrollProps): unknown {
   const scrollContainerSelector = props.scrollContainer;
   let scroller: HTMLElement = el;
   let listening = false;
+  let disposed = false;
   let lastScrollTop: number | undefined;
   let anchorIndex = 0;
 
@@ -102,10 +103,16 @@ export function InfiniteScroll(props: InfiniteScrollProps): unknown {
 
   /** Measure phase (layout reads): preload while the list is short or does not fill the viewport. */
   function preload(): void {
+    if (disposed) return; // a task booked before the list was disposed (tt: the effect of an unmounted instance is skipped)
     const count = props.items?.length ?? 0;
     if (count < (props.preloadBackwards ?? DEFAULT_PRELOAD_BACKWARDS)) {
       props.onLoadMore?.({ direction: 'backwards', noScroll: true });
-    } else if (scroller.scrollHeight <= scroller.clientHeight) {
+      return;
+    }
+    // As in tt: a list without a box (`clientHeight` 0, e.g. inside a `display: none` slide) is not "short", whatever its
+    // `scrollHeight` is. Asking again there slid the window of a hidden chat list towards the end.
+    const { scrollHeight, clientHeight } = scroller;
+    if (clientHeight && scrollHeight < clientHeight) {
       loadBackwards();
     }
   }
@@ -176,6 +183,7 @@ export function InfiniteScroll(props: InfiniteScrollProps): unknown {
   );
 
   onCleanup(() => {
+    disposed = true;
     if (listening) natives.removeEventListener.call(scroller, 'scroll', onScroll);
   });
 
