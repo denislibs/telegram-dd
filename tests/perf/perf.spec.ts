@@ -62,6 +62,8 @@ test.describe('long tasks under 4x CPU throttling', () => {
     await openApp(page);
     await serverSays(page, 'authorizationStateWaitPhoneNumber');
     await page.locator('#auth-phone-number-form').waitFor();
+    // the screen switch itself (mount, fade, dropping the left slide) is not what this test measures
+    await page.waitForTimeout(1500);
 
     await expectNoLongTasks(
       page,
