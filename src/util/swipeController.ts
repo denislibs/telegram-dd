@@ -16,6 +16,9 @@ let swipeOffsets: MoveOffsets | undefined;
 let onDrag: ((offsets: MoveOffsets) => void) | undefined;
 let onRelease: ((onCancel: NoneToVoidFunction, isForcedRevert?: boolean) => void) | undefined;
 let cancelCurrentReleaseAnimation: NoneToVoidFunction | undefined;
+// Deviation: hardening. Which swipe set the inline `animation-timing-function` of a slide: a swipe that is let go of
+// resets it only if no newer swipe took the same slide over (a step that supersedes a swiped one takes it over at once).
+const timingOwners = new WeakMap<HTMLElement, object>();
 
 export function captureControlledSwipe(
   element: HTMLElement, options: {
@@ -144,8 +147,11 @@ export function allowSwipeControlForTransition(
   currentSlide.getAnimations().forEach((a) => a.pause());
   nextSlide.getAnimations().forEach((a) => a.pause());
 
+  const owner = {};
   currentSlide.style.animationTimingFunction = 'linear';
   nextSlide.style.animationTimingFunction = 'linear';
+  timingOwners.set(currentSlide, owner);
+  timingOwners.set(nextSlide, owner);
 
   let currentDirection: 1 | -1 | undefined;
   let isDisposed = false;
@@ -153,14 +159,21 @@ export function allowSwipeControlForTransition(
   let ownOnRelease: typeof onRelease;
   let ownCancelReleaseAnimation: NoneToVoidFunction | undefined;
 
+  function resetTimingFunctions() {
+    requestMutation(() => {
+      for (const slide of [currentSlide, nextSlide]) {
+        if (timingOwners.get(slide) !== owner) continue;
+        timingOwners.delete(slide);
+        slide.style.animationTimingFunction = '';
+      }
+    });
+  }
+
   function cleanup() {
     currentSlide.getAnimations().forEach((a) => a.cancel());
     nextSlide.getAnimations().forEach((a) => a.cancel());
 
-    requestMutation(() => {
-      currentSlide.style.animationTimingFunction = '';
-      nextSlide.style.animationTimingFunction = '';
-    });
+    resetTimingFunctions();
   }
 
   requestMeasure(() => {
@@ -237,6 +250,11 @@ export function allowSwipeControlForTransition(
     dispose() {
       if (isDisposed) return;
       isDisposed = true;
+
+      // Deviation: hardening. tt had no way to let go of a swipe, and a step that supersedes a swiped one found the old
+      // animations paused and the slides' `linear` timing function on for good: undo both now (the caller does it before
+      // it rewrites the slides' classes, so these are still the swipe's animations).
+      cleanup();
 
       if (onDrag === ownOnDrag) onDrag = undefined;
       if (onRelease === ownOnRelease) onRelease = undefined;

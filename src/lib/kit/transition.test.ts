@@ -1300,6 +1300,82 @@ it('swipe I1 (probe E): the owner of the gesture unmounting mid-drag reverts the
   await startSwipe(t2.t, t2.s1);
   expect(animationOf(slidesOf(t2.t)[1]).state).toBe('paused');
   touch('touchend', slidesOf(t2.t)[1]);
+  await advance(0);
+  await advance(400); // let the release inertia of this swipe run out
+  await advance(16);
+  fireAnimationEnd(...slidesOf(t2.t));
+  await frame();
   t2.stop();
+});
+
+it('swipe I2 (probe B2): a step that supersedes a swipe in its release inertia leaves no inline linear timing and no paused animations on the slides', async () => {
+  nowMs = 0;
+  const base = await swipeSetup({ renderCount: 3 });
+  const { t, s1, setKey, stop } = base;
+  await startSwipe(t, s1);
+  const [s0, s1b] = slidesOf(t);
+  touch('touchmove', s1b, 312);
+  touch('touchend', s1b); // commit: the inertia starts
+  await advance(0);
+  await advance(100);
+  const oldAnimations = [animationOf(s0), animationOf(s1b)];
+  setKey(2);
+  await frame();
+  await frame();
+  for (const slide of slidesOf(t)) expect(slide.style.animationTimingFunction, String(slide.textContent)).toBe('');
+  expect(oldAnimations.map((a) => a.state)).toEqual(['canceled', 'canceled']);
+  await advance(500);
+  for (const slide of slidesOf(t)) expect(slide.style.animationTimingFunction).toBe('');
+  stop();
+});
+
+it('swipe I2 (probe C): a step that supersedes a swiped one under the finger takes the finger over; a revert of the new gesture releases the first step too', async () => {
+  nowMs = 0;
+  const base = await swipeSetup({ renderCount: 3, isBlockingAnimation: true });
+  const { t, s1, setKey, scope, log, swipeCalls, stop } = base;
+  await startSwipe(t, s1);
+  setKey(2); // the finger is still down
+  await frame();
+  await frame();
+  const slides = slidesOf(t);
+  const to = slides.find((s) => s.classList.contains('Transition_slide-to'))!;
+  expect(animationOf(to).state).toBe('paused'); // the same finger drives the new step
+  expect(scope.isBlockingAnimating.peek()).toBe(false);
+  touch('touchmove', s1, 312); // the listeners are on the element the finger went down on
+  touch('touchmove', s1, 262); // turn back
+  touch('touchend', s1);
+  await advance(0);
+  await advance(200);
+  await advance(200);
+  await advance(16);
+  await frame();
+  expect(swipeCalls).toContain('cancel');
+  expect(scope.isAnimating.peek()).toBe(false); // the superseded first step did not keep it animating
+  expect(scope.isBlockingAnimating.peek()).toBe(false);
+  expect(log.filter((e) => e === 'start').length).toBe(log.filter((e) => e === 'stop').length);
+  stop();
+});
+
+it('swipe I2: a swipe whose step is superseded by an instant switch (and an optimized step) is cleaned up the same way', async () => {
+  nowMs = 0;
+  const [off, setOff] = createSignal(false);
+  const base = await swipeSetup({
+    renderCount: 3,
+    get disableAnimation() {
+      return off();
+    },
+  });
+  const { t, s1, setKey, stop } = base;
+  await startSwipe(t, s1);
+  const [s0, s1b] = slidesOf(t);
+  const old = [animationOf(s0), animationOf(s1b)];
+  setOff(true);
+  setKey(1);
+  await frame();
+  await frame();
+  for (const slide of slidesOf(t)) expect(slide.style.animationTimingFunction).toBe('');
+  expect(old.map((a) => a.state)).toEqual(['canceled', 'canceled']);
+  touch('touchend', s1b);
+  stop();
 });
 

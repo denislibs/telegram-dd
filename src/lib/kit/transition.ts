@@ -421,6 +421,31 @@ export function Transition(props: TransitionProps): unknown {
     stopStep(step);
   }
 
+  /**
+   * A new animated step starts while `running` is still going: it is over for `onStop` now (so every `onStart` has one
+   * `onStop`); its own end only releases its heavy animation. A swiped step lets its swipe go first. Returns the step to
+   * pass to `releaseSuperseded` once the new step has begun its own heavy animation.
+   */
+  function supersede(): Step | undefined {
+    const prev = running;
+    if (prev === undefined) return undefined;
+    prev.swipe?.dispose();
+    stopStep(prev);
+    return prev;
+  }
+
+  /**
+   * A swiped step waits for an animation end without a fallback, on a slide whose animation the swipe has just cancelled
+   * (or that is hidden now): its end may never come, and its heavy animation would stay for good. End it here, after the
+   * new step has begun its own (the scope never flickers idle). A step with a fallback ends itself.
+   */
+  function releaseSuperseded(prev: Step | undefined): void {
+    if (prev?.swipe === undefined) return;
+    prev.cancelWait();
+    prev.endHeavyAnimation();
+    forget(prev);
+  }
+
   /** The step's heavy animation, swapped for one with `blocking` (the new one begins first: the scope never flickers idle). */
   function reBeginHeavyAnimation(step: Step, blocking: boolean): void {
     const end = scope.begin(Infinity, blocking);
@@ -488,10 +513,7 @@ export function Transition(props: TransitionProps): unknown {
     }
     // A step still running is superseded: it is over for `onStop` now (so every `onStart` has one `onStop`);
     // its own end only releases its heavy animation.
-    if (running !== undefined) {
-      running.swipe?.dispose();
-      stopStep(running);
-    }
+    const superseded = supersede();
     const step: Step = { seq: ++stepSeq, to: next, cancelWait: () => {}, endHeavyAnimation: () => {}, stopped: false };
     running = step;
     inFlight.push(step);
@@ -504,6 +526,7 @@ export function Transition(props: TransitionProps): unknown {
     setFromKey(prevKey);
     const isBlocking = Boolean(props.isBlockingAnimation);
     step.endHeavyAnimation = scope.begin(Infinity, isBlocking);
+    releaseSuperseded(superseded);
     // The slide the stylesheet animates: `to`, except the two names whose backwards variant animates `from` only
     // (tt `watchedNode`). Without that slide nothing animates and the step ends at once.
     const watched = isBackwards && animatesFromWhenBackwards(name) ? prev : next;
@@ -565,10 +588,7 @@ export function Transition(props: TransitionProps): unknown {
     }
     // The Rtl variant mirrors the direction.
     const isBackwards = name === 'slideOptimizedRtl' ? !isBackwardsByKeys : isBackwardsByKeys;
-    if (running !== undefined) {
-      running.swipe?.dispose();
-      stopStep(running);
-    }
+    const superseded = supersede();
     const step: Step = { seq: ++stepSeq, to: next, cancelWait: () => {}, endHeavyAnimation: () => {}, stopped: false };
     running = step;
     inFlight.push(step);
@@ -578,6 +598,7 @@ export function Transition(props: TransitionProps): unknown {
     syncChildren();
     setFromKey(prev?.key);
     step.endHeavyAnimation = scope.begin(Infinity, Boolean(props.isBlockingAnimation));
+    releaseSuperseded(superseded);
     // The reflow commits the starting positions; then the CSS transition runs to the final ones.
     requestForcedReflow(() => {
       if (!isLive(step)) return undefined;
