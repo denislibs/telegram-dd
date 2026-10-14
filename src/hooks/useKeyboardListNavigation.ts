@@ -1,31 +1,33 @@
-import type { ElementRef } from '../lib/teact/teact';
-import { useEffect, useState } from '../lib/teact/teact';
+import { createMeasureEffect, createSignal, requestMeasure, requestMutation } from 'frameact';
 
-import { requestMeasure, requestMutation } from '../lib/fasterdom/fasterdom';
 import useLastCallback from './useLastCallback';
 
+// TODO(codemod): useKeyboardListNavigation: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 const useKeyboardListNavigation = (
-  elementRef: ElementRef<HTMLElement>,
+  elementRef: (el: HTMLElement) => void,
   isOpen: boolean,
   onSelectWithEnter?: (index: number) => void,
   itemSelector?: string,
   noCaptureFocus?: boolean,
 ) => {
-  const [focusedIndex, setFocusedIndex] = useState(-1);
+  const [focusedIndex, setFocusedIndex] = createSignal(-1);
 
-  useEffect(() => {
-    setFocusedIndex(-1);
+  createMeasureEffect(
+    () => [elementRef, isOpen, noCaptureFocus],
+    () => {
+      setFocusedIndex(-1);
 
-    const element = elementRef.current;
-    if (isOpen && element && !noCaptureFocus) {
-      requestMutation(() => {
-        element.tabIndex = -1;
-      });
-      requestMeasure(() => element.focus());
-    }
-  }, [elementRef, isOpen, noCaptureFocus]);
+      const element = elementRef.current;
+      if (isOpen && element && !noCaptureFocus) {
+        requestMutation(() => {
+          element.tabIndex = -1;
+        });
+        requestMeasure(() => element.focus());
+      }
+    },
+  );
 
-  return useLastCallback((e: React.KeyboardEvent<any>) => {
+  return (e: React.KeyboardEvent<any>) => {
     const element = elementRef.current;
 
     if (!element || !isOpen) {
@@ -33,7 +35,7 @@ const useKeyboardListNavigation = (
     }
 
     if (e.keyCode === 13 && onSelectWithEnter) {
-      onSelectWithEnter(focusedIndex);
+      onSelectWithEnter(focusedIndex());
       return;
     }
 
@@ -47,7 +49,7 @@ const useKeyboardListNavigation = (
     const elementChildren = Array.from(itemSelector ? element.querySelectorAll(itemSelector) : element.children);
 
     const activeIndex = focusedElement ? elementChildren.indexOf(focusedElement) : -1;
-    let newIndex = activeIndex >= 0 ? activeIndex : focusedIndex;
+    let newIndex = activeIndex >= 0 ? activeIndex : focusedIndex();
 
     if (e.keyCode === 38 && newIndex > 0) {
       newIndex--;
@@ -65,7 +67,7 @@ const useKeyboardListNavigation = (
       item.focus({ preventScroll: true });
       item.scrollIntoView({ behavior: 'instant', block: 'nearest' });
     }
-  });
+  };
 };
 
 export default useKeyboardListNavigation;

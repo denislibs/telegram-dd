@@ -1,4 +1,4 @@
-import { useEffect, useState } from '../lib/teact/teact';
+import { createEffect, createSignal } from 'frameact';
 
 import type { RegularLangKey } from '../types/language';
 
@@ -6,10 +6,11 @@ import { LANG_PACK } from '../config';
 import { callApi } from '../api/gramjs';
 import useLastCallback from './useLastCallback';
 
+// TODO(codemod): useLangString: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useLangString(key: RegularLangKey, langCode?: string) {
-  const [value, setValue] = useState<string | undefined>(undefined);
+  const [value, setValue] = createSignal<string | undefined>(undefined);
 
-  const fetchLangString = useLastCallback(async () => {
+  const fetchLangString = async () => {
     if (!langCode) return undefined;
 
     const result = await callApi('fetchLangStrings', {
@@ -20,11 +21,14 @@ export default function useLangString(key: RegularLangKey, langCode?: string) {
     const langString = result?.strings[key];
     if (!langString || typeof langString !== 'string') return undefined;
     return langString;
-  });
+  };
 
-  useEffect(() => {
-    fetchLangString().then(setValue);
-  }, [key, langCode]);
+  createEffect(
+    () => [key, langCode],
+    () => {
+      fetchLangString().then(setValue);
+    },
+  );
 
   return value;
 }

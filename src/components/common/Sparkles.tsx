@@ -1,4 +1,5 @@
-import { memo } from '../../lib/teact/teact';
+import { Show, splitProps } from 'frameact/dom';
+import { createShowTransition } from '../../lib/kit';
 
 import type { GlobalState } from '../../global/types';
 
@@ -7,7 +8,6 @@ import buildClassName from '../../util/buildClassName';
 import buildStyle from '../../util/buildStyle';
 
 import useSelector from '../../hooks/data/useSelector';
-import useShowTransition from '../../hooks/useShowTransition';
 
 import styles from './Sparkles.module.scss';
 
@@ -106,74 +106,78 @@ const BUTTON_POSITIONS = [
 ];
 const PROGRESS_POSITIONS = generateRandomProgressPositions(100);
 
-const Sparkles = ({ className, style, noAnimation, ...presetSettings }: OwnProps) => {
+const Sparkles = (props: OwnProps) => {
+  const [, presetSettings] = splitProps(props, ['className', 'style', 'noAnimation']);
   const isHeavyModalOpen = useSelector(selectIsHeavyModalOpen);
 
-  const { ref, shouldRender } = useShowTransition<HTMLDivElement>({
-    isOpen: !isHeavyModalOpen,
-    withShouldRender: true,
+  const { ref, shouldRender } = createShowTransition({
+    isOpen: () => !isHeavyModalOpen(),
     noMountTransition: true,
   });
 
-  if (!shouldRender) return undefined;
-
-  if (presetSettings.preset === 'button') {
-    return (
-      <div
-        ref={ref}
-        className={buildClassName(styles.root, styles.button, className, noAnimation && styles.noAnimation)}
-        style={style}
+  return (
+    <Show when={shouldRender()}>
+      <Show
+        when={!(presetSettings.preset === 'button')}
+        fallback={
+          <div
+            ref={ref}
+            class={buildClassName(styles.root, styles.button, props.className, props.noAnimation && styles.noAnimation)}
+            style={props.style}
+          >
+            {BUTTON_POSITIONS.map((position) => {
+              const shiftX = Math.cos(Math.atan2(-50 + position.y, -50 + position.x)) * 100;
+              const shiftY = Math.sin(Math.atan2(-50 + position.y, -50 + position.x)) * 100;
+              return (
+                <div
+                  class={styles.symbol}
+                  style={buildStyle(
+                    `top: ${position.y}%`,
+                    `left: ${position.x}%`,
+                    `--_duration-shift: ${(-position.durationShift / 100) * ANIMATION_DURATION}s`,
+                    `--_shift-x: ${shiftX}%`,
+                    `--_shift-y: ${shiftY}%`,
+                    `scale: ${position.size}%`,
+                  )}
+                  aria-hidden="true"
+                >
+                  {SYMBOL}
+                </div>
+              );
+            })}
+          </div>
+        }
       >
-        {BUTTON_POSITIONS.map((position) => {
-          const shiftX = Math.cos(Math.atan2(-50 + position.y, -50 + position.x)) * 100;
-          const shiftY = Math.sin(Math.atan2(-50 + position.y, -50 + position.x)) * 100;
-          return (
-            <div
-              className={styles.symbol}
-              style={buildStyle(
-                `top: ${position.y}%`,
-                `left: ${position.x}%`,
-                `--_duration-shift: ${(-position.durationShift / 100) * ANIMATION_DURATION}s`,
-                `--_shift-x: ${shiftX}%`,
-                `--_shift-y: ${shiftY}%`,
-                `scale: ${position.size}%`,
-              )}
-              aria-hidden="true"
-            >
-              {SYMBOL}
+        <Show
+          when={!(presetSettings.preset === 'progress')}
+          fallback={
+            <div ref={ref} class={buildClassName(styles.root, styles.progress, props.className)} style={props.style}>
+              {PROGRESS_POSITIONS.map((position) => {
+                return (
+                  <div
+                    class={styles.symbol}
+                    style={buildStyle(
+                      `top: ${position.y}%`,
+                      `left: ${position.x}%`,
+                      `--_shift-x: ${position.velocityX}%`,
+                      `--_shift-y: ${position.velocityY}%`,
+                      `scale: ${position.scale}%`,
+                      `--_duration-shift: ${(-position.durationShift / 100) * ANIMATION_DURATION}s`,
+                    )}
+                    aria-hidden="true"
+                  >
+                    {SYMBOL}
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  if (presetSettings.preset === 'progress') {
-    return (
-      <div ref={ref} className={buildClassName(styles.root, styles.progress, className)} style={style}>
-        {PROGRESS_POSITIONS.map((position) => {
-          return (
-            <div
-              className={styles.symbol}
-              style={buildStyle(
-                `top: ${position.y}%`,
-                `left: ${position.x}%`,
-                `--_shift-x: ${position.velocityX}%`,
-                `--_shift-y: ${position.velocityY}%`,
-                `scale: ${position.scale}%`,
-                `--_duration-shift: ${(-position.durationShift / 100) * ANIMATION_DURATION}s`,
-              )}
-              aria-hidden="true"
-            >
-              {SYMBOL}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  return undefined;
+          }
+        >
+          {undefined}
+        </Show>
+      </Show>
+    </Show>
+  );
 };
 
 function generateRandomProgressPositions(count: number) {
@@ -191,4 +195,4 @@ function generateRandomProgressPositions(count: number) {
   return positions;
 }
 
-export default memo(Sparkles);
+export default Sparkles;

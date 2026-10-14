@@ -1,16 +1,14 @@
-import type { ElementRef } from '../../lib/teact/teact';
-import { memo, useMemo, useRef } from '../../lib/teact/teact';
+import { createEffect, createMemo } from 'frameact';
+import { splitProps } from 'frameact/dom';
 
 import useBuffering from '../../hooks/useBuffering';
-import useLastCallback from '../../hooks/useLastCallback';
-import useSyncEffect from '../../hooks/useSyncEffect';
 import useVideoCleanup from '../../hooks/useVideoCleanup';
 import useVideoAutoPause from '../middle/message/hooks/useVideoAutoPause';
 
 type VideoProps = React.DetailedHTMLProps<React.VideoHTMLAttributes<HTMLVideoElement>, HTMLVideoElement>;
 
 type OwnProps = {
-  ref?: ElementRef<HTMLVideoElement>;
+  ref?: (el: HTMLVideoElement) => void;
   isPriority?: boolean;
   canPlay: boolean;
   children?: React.ReactNode;
@@ -18,53 +16,68 @@ type OwnProps = {
   onBroken?: NoneToVoidFunction;
 } & VideoProps;
 
-function OptimizedVideo({
-  ref,
-  isPriority,
-  canPlay,
-  children,
-  onReady,
-  onBroken,
-  onTimeUpdate,
-  ...restProps
-}: OwnProps) {
-  const localRef = useRef<HTMLVideoElement>();
-  if (!ref) {
+function OptimizedVideo(props: OwnProps) {
+  const [, restProps] = splitProps(props, [
+    'ref',
+    'isPriority',
+    'canPlay',
+    'children',
+    'onReady',
+    'onBroken',
+    'onTimeUpdate',
+  ]);
+  let localRef!: HTMLVideoElement;
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (!props.ref) {
+    // TODO(codemod): "ref" was a destructured prop and is assigned here: props are read-only getters
+    // TODO(codemod): "localRef" was a ref object passed as a value: pass an accessor (() => localRef) or a callback ref
     ref = localRef;
   }
 
-  const { handlePlaying: handlePlayingForAutoPause } = useVideoAutoPause(ref, canPlay, isPriority);
+  const videoAutoPauseResult = createMemo(() =>
+    useVideoAutoPause(
+      props.ref,
+      () => props.canPlay,
+      () => props.isPriority,
+    ),
+  );
+  const handlePlayingForAutoPause = () => videoAutoPauseResult().handlePlaying;
 
-  const isReadyRef = useRef(false);
-  const handleReady = useLastCallback(() => {
-    if (!isReadyRef.current) {
-      onReady?.();
-      isReadyRef.current = true;
+  let isReadyRef = false;
+  const handleReady = () => {
+    if (!isReadyRef) {
+      props.onReady?.();
+      isReadyRef = true;
     }
-  });
+  };
 
   // This is only needed for browsers not allowing autoplay
-  const { isBuffered, bufferingHandlers } = useBuffering(true, onTimeUpdate, onBroken);
-  const { onPlaying: handlePlayingForBuffering, ...otherBufferingHandlers } = bufferingHandlers;
-  useSyncEffect(
-    ([prevIsBuffered]) => {
+  const bufferingResult = createMemo(() => useBuffering(true, props.onTimeUpdate, props.onBroken));
+  const isBuffered = () => bufferingResult().isBuffered;
+  const bufferingHandlers = () => bufferingResult().bufferingHandlers;
+  // TODO(codemod): destructuring of a reactive object with a nested/rest pattern: read the fields through accessors
+  const { onPlaying: handlePlayingForBuffering, ...otherBufferingHandlers } = bufferingHandlers();
+  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
+  createEffect(
+    () => [isBuffered(), handleReady],
+    (_deps, prev) => {
+      const [prevIsBuffered] = prev ?? [];
       if (prevIsBuffered === undefined) {
         return;
       }
 
       handleReady();
     },
-    [isBuffered, handleReady],
   );
 
-  const handlePlaying = useLastCallback((e) => {
-    handlePlayingForAutoPause();
+  const handlePlaying = (e) => {
+    handlePlayingForAutoPause()();
     handlePlayingForBuffering(e);
     handleReady();
     restProps.onPlaying?.(e);
-  });
+  };
 
-  const mergedOtherBufferingHandlers = useMemo(() => {
+  const mergedOtherBufferingHandlers = createMemo(() => {
     const mergedHandlers: Record<string, AnyFunction> = {};
     Object.keys(otherBufferingHandlers).forEach((keyString) => {
       const key = keyString as keyof typeof otherBufferingHandlers;
@@ -75,15 +88,15 @@ function OptimizedVideo({
     });
 
     return mergedHandlers;
-  }, [otherBufferingHandlers, restProps]);
+  });
 
-  useVideoCleanup(ref, mergedOtherBufferingHandlers);
+  useVideoCleanup(props.ref, () => mergedOtherBufferingHandlers());
 
   return (
-    <video ref={ref} autoPlay {...restProps} {...mergedOtherBufferingHandlers} onPlaying={handlePlaying}>
-      {children}
+    <video ref={props.ref} autoPlay {...restProps} {...mergedOtherBufferingHandlers()} onPlaying={handlePlaying}>
+      {props.children}
     </video>
   );
 }
 
-export default memo(OptimizedVideo);
+export default OptimizedVideo;

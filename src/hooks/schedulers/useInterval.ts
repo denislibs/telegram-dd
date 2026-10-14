@@ -1,20 +1,24 @@
-import { useEffect } from '../../lib/teact/teact';
+import { createEffect } from 'frameact';
 
 import useLastCallback from '../useLastCallback';
 
+// TODO(codemod): useInterval: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 function useInterval(callback: NoneToVoidFunction, delay?: number, noFirst = false) {
-  const savedCallback = useLastCallback(callback);
+  const savedCallback = callback;
 
-  useEffect(() => {
-    if (delay === undefined) {
-      return undefined;
-    }
+  createEffect(
+    () => [delay, noFirst],
+    () => {
+      if (delay === undefined) {
+        return undefined;
+      }
 
-    const id = setInterval(() => savedCallback(), delay);
-    if (!noFirst) savedCallback();
+      const id = setInterval(() => savedCallback(), delay);
+      if (!noFirst) savedCallback();
 
-    return () => clearInterval(id);
-  }, [delay, noFirst]);
+      return () => clearInterval(id);
+    },
+  );
 }
 
 export default useInterval;

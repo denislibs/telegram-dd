@@ -1,6 +1,7 @@
 import type { ChangeEvent } from 'react';
-import type { FC, TeactNode } from '../../lib/teact/teact';
-import { memo, useRef, useState } from '../../lib/teact/teact';
+import { createMemo, createSignal, currentOrPrev } from 'frameact';
+import { For } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import type { ApiPeer } from '../../api/types';
 import type { IconName } from '../../types/icons';
@@ -10,9 +11,7 @@ import buildClassName from '../../util/buildClassName';
 import { REM } from '../common/helpers/mediaDimensions';
 import renderText from '../common/helpers/renderText';
 
-import useCurrentOrPrev from '../../hooks/useCurrentOrPrev';
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
 
 import Avatar from '../common/Avatar';
 import Icon from '../common/icons/Icon';
@@ -26,8 +25,8 @@ type OwnProps = {
   name?: string;
   value?: string;
   peer?: ApiPeer;
-  label?: TeactNode;
-  labelText?: TeactNode;
+  label?: JSX.Element;
+  labelText?: JSX.Element;
   subLabel?: string;
   checked?: boolean;
   rightIcon?: IconName;
@@ -44,7 +43,7 @@ type OwnProps = {
   nestedCheckbox?: boolean;
   nestedCheckboxCount?: number | undefined;
   nestedOptionList?: IRadioOption[];
-  leftElement?: TeactNode;
+  leftElement?: JSX.Element;
   values?: string[];
   teactExperimentControlled?: boolean;
   onChange?: (e: ChangeEvent<HTMLInputElement>, nestedOptionList?: IRadioOption[]) => void;
@@ -53,65 +52,35 @@ type OwnProps = {
 };
 const AVATAR_SIZE = 1.25 * REM;
 
-const Checkbox: FC<OwnProps> = ({
-  id,
-  name,
-  value,
-  label,
-  peer,
-  labelText,
-  subLabel,
-  checked,
-  tabIndex,
-  disabled,
-  withIcon,
-  blocking,
-  permissionGroup,
-  isLoading,
-  className,
-  rightIcon,
-  onlyInput,
-  isRound,
-  nestedCheckbox,
-  nestedCheckboxCount,
-  nestedOptionList,
-  leftElement,
-  values,
-  teactExperimentControlled,
-  onChange,
-  onCheck,
-  onClickLabel,
-}) => {
+const Checkbox = (props: OwnProps) => {
   const lang = useLang();
-  const labelRef = useRef<HTMLLabelElement>();
-  const inputRef = useRef<HTMLInputElement>();
-  const [showNested, setShowNested] = useState(false);
-  const renderingPeer = useCurrentOrPrev(peer, true);
+  let labelRef!: HTMLLabelElement;
+  let inputRef!: HTMLInputElement;
+  const [showNested, setShowNested] = createSignal(false);
+  const renderingPeer = currentOrPrev(() => props.peer, { skipUndefined: true });
 
-  const handleChange = useLastCallback(
-    (event: ChangeEvent<HTMLInputElement>, childNestedOptionList?: IRadioOption[]) => {
-      if (disabled) {
-        return;
-      }
+  const handleChange = (event: ChangeEvent<HTMLInputElement>, childNestedOptionList?: IRadioOption[]) => {
+    if (props.disabled) {
+      return;
+    }
 
-      if (onChange) {
-        const isOwnInput = event.target === inputRef.current;
-        onChange(event, isOwnInput ? nestedOptionList : childNestedOptionList);
-      }
+    if (props.onChange) {
+      const isOwnInput = event.target === inputRef;
+      props.onChange(event, isOwnInput ? props.nestedOptionList : childNestedOptionList);
+    }
 
-      if (onCheck) {
-        onCheck(event.currentTarget.checked);
-      }
-    },
-  );
+    if (props.onCheck) {
+      props.onCheck(event.currentTarget.checked);
+    }
+  };
 
-  const toggleNested = useLastCallback(() => {
-    setShowNested(!showNested);
-  });
+  const toggleNested = () => {
+    setShowNested(!showNested());
+  };
 
   function handleClick(event: React.MouseEvent) {
-    if (event.target !== labelRef.current) {
-      onClickLabel?.(event, value);
+    if (event.target !== labelRef) {
+      props.onClickLabel?.(event, props.value);
     }
   }
 
@@ -119,87 +88,89 @@ const Checkbox: FC<OwnProps> = ({
     event.stopPropagation();
   }
 
-  const labelClassName = buildClassName(
-    'Checkbox',
-    disabled && 'disabled',
-    withIcon && 'withIcon',
-    isLoading && 'loading',
-    blocking && 'blocking',
-    nestedCheckbox && 'nested',
-    subLabel && 'withSubLabel',
-    permissionGroup && 'permission-group',
-    Boolean(leftElement) && 'avatar',
-    onlyInput && 'onlyInput',
-    isRound && 'round',
-    Boolean(rightIcon) && 'withNestedList',
-    className,
+  const labelClassName = createMemo(() =>
+    buildClassName(
+      'Checkbox',
+      props.disabled && 'disabled',
+      props.withIcon && 'withIcon',
+      props.isLoading && 'loading',
+      props.blocking && 'blocking',
+      props.nestedCheckbox && 'nested',
+      props.subLabel && 'withSubLabel',
+      props.permissionGroup && 'permission-group',
+      Boolean(props.leftElement) && 'avatar',
+      props.onlyInput && 'onlyInput',
+      props.isRound && 'round',
+      Boolean(props.rightIcon) && 'withNestedList',
+      props.className,
+    ),
   );
 
   return (
     <>
       <label
-        className={labelClassName}
+        class={labelClassName()}
         dir={lang.isRtl ? 'rtl' : undefined}
-        onClick={onClickLabel ? handleClick : undefined}
+        onClick={props.onClickLabel ? handleClick : undefined}
         ref={labelRef}
       >
         <input
           ref={inputRef}
           type="checkbox"
-          id={id}
-          name={name}
-          value={value}
-          checked={checked}
-          teactExperimentControlled={teactExperimentControlled}
-          disabled={disabled}
-          tabIndex={tabIndex}
+          id={props.id}
+          name={props.name}
+          use:value={() => props.value}
+          use:checked={() => props.checked}
+          disabled={props.disabled}
+          tabIndex={props.tabIndex}
           onChange={handleChange}
-          onClick={onClickLabel ? handleInputClick : undefined}
+          onClick={props.onClickLabel ? handleInputClick : undefined}
         />
-        <div className={buildClassName('Checkbox-main', Boolean(leftElement) && 'Nested-avatar-list')}>
-          <div className={buildClassName('user-avatar', renderingPeer && 'user-avatar-visible')}>
-            {renderingPeer && <Avatar peer={renderingPeer} size={AVATAR_SIZE} />}
+        <div class={buildClassName('Checkbox-main', Boolean(props.leftElement) && 'Nested-avatar-list')}>
+          <div class={buildClassName('user-avatar', renderingPeer() && 'user-avatar-visible')}>
+            {renderingPeer() && <Avatar peer={renderingPeer()} size={AVATAR_SIZE} />}
           </div>
-          <span className="label" dir="auto">
-            {leftElement}
-            {typeof label === 'string' ? renderText(label) : label}
-            {Boolean(labelText) && <span className="ml-1">{renderText(labelText)}</span>}
+          <span class="label" dir="auto">
+            {props.leftElement}
+            {typeof props.label === 'string' ? renderText(props.label) : props.label}
+            {Boolean(props.labelText) && <span class="ml-1">{renderText(props.labelText)}</span>}
           </span>
-          {subLabel && (
-            <span className="subLabel" dir="auto">
-              {renderText(subLabel)}
+          {props.subLabel && (
+            <span class="subLabel" dir="auto">
+              {renderText(props.subLabel)}
             </span>
           )}
-          {rightIcon && <Icon name={rightIcon} className="right-icon" />}
+          {props.rightIcon && <Icon name={props.rightIcon} className="right-icon" />}
         </div>
-        {nestedCheckbox && (
-          <span className="nestedButton" dir="auto">
+        {props.nestedCheckbox && (
+          <span class="nestedButton" dir="auto">
             <Button className="button" color="translucent" size="smaller" onClick={toggleNested}>
               <Icon name="group-filled" className="group-icon" />
-              {nestedCheckboxCount}
-              <Icon name={showNested ? 'up' : 'down'} />
+              {props.nestedCheckboxCount}
+              <Icon name={showNested() ? 'up' : 'down'} />
             </Button>
           </span>
         )}
-        {isLoading && <Spinner />}
+        {props.isLoading && <Spinner />}
       </label>
-      {nestedCheckbox && (
-        <div className={buildClassName('nested-checkbox-group', showNested && 'nested-checkbox-group-open')}>
-          {nestedOptionList?.map((nestedOption) => (
-            <Checkbox
-              key={nestedOption.value}
-              leftElement={leftElement}
-              onChange={handleChange}
-              checked={values?.indexOf(nestedOption.value) !== -1}
-              values={values}
+      {props.nestedCheckbox && (
+        <div class={buildClassName('nested-checkbox-group', showNested() && 'nested-checkbox-group-open')}>
+          <For each={props.nestedOptionList} keyed={(nestedOption) => nestedOption.value}>
+            {(nestedOption) => (
+              <Checkbox
+                leftElement={props.leftElement}
+                onChange={handleChange}
+                checked={props.values?.indexOf(nestedOption().value) !== -1}
+                values={props.values}
 
-              {...nestedOption}
-            />
-          ))}
+                {...nestedOption()}
+              />
+            )}
+          </For>
         </div>
       )}
     </>
   );
 };
 
-export default memo(Checkbox);
+export default Checkbox;

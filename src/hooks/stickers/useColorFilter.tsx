@@ -1,4 +1,4 @@
-import { useEffect } from '../../lib/teact/teact';
+import { createEffect } from 'frameact';
 
 import { SVG_NAMESPACE } from '../../config';
 import { buildColor, convertColor } from '../../lib/color';
@@ -40,20 +40,24 @@ class SvgColorFilter {
   }
 }
 
+// TODO(codemod): useColorFilter: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useColorFilter(color?: string, asValue?: boolean) {
-  useEffect(() => {
-    if (!color) return undefined;
+  createEffect(
+    () => color,
+    () => {
+      if (!color) return undefined;
 
-    return () => {
-      const colorFilter = SVG_MAP.get(color);
-      if (colorFilter) {
-        colorFilter.removeReference();
-        if (!colorFilter.isUsed()) {
-          SVG_MAP.delete(colorFilter.color);
+      return () => {
+        const colorFilter = SVG_MAP.get(color);
+        if (colorFilter) {
+          colorFilter.removeReference();
+          if (!colorFilter.isUsed()) {
+            SVG_MAP.delete(colorFilter.color);
+          }
         }
-      }
-    };
-  }, [color]);
+      };
+    },
+  );
 
   if (!color) return undefined;
 

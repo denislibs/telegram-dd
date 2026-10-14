@@ -1,6 +1,5 @@
 import type { ChangeEvent } from 'react';
-import type { FC } from '../../lib/teact/teact';
-import { memo, useCallback, useEffect, useState } from '../../lib/teact/teact';
+import { createEffect, createMemo, createSignal } from 'frameact';
 
 import buildClassName from '../../util/buildClassName';
 
@@ -19,15 +18,18 @@ interface OwnProps {
   onChange: (file: File) => void;
 }
 
-const AvatarEditable: FC<OwnProps> = ({ title, disabled, isForForum, currentAvatarBlobUrl, onChange }) => {
-  const [selectedFile, setSelectedFile] = useState<File | undefined>();
-  const [croppedBlobUrl, setCroppedBlobUrl] = useState<string | undefined>(currentAvatarBlobUrl);
+const AvatarEditable = (props: OwnProps) => {
+  const [selectedFile, setSelectedFile] = createSignal<File | undefined>(undefined);
+  const [croppedBlobUrl, setCroppedBlobUrl] = createSignal<string | undefined>(props.currentAvatarBlobUrl);
 
   const lang = useLang();
 
-  useEffect(() => {
-    setCroppedBlobUrl(currentAvatarBlobUrl);
-  }, [currentAvatarBlobUrl]);
+  createEffect(
+    () => props.currentAvatarBlobUrl,
+    () => {
+      setCroppedBlobUrl(props.currentAvatarBlobUrl);
+    },
+  );
 
   function handleSelectFile(event: ChangeEvent<HTMLInputElement>) {
     const target = event.target;
@@ -40,39 +42,39 @@ const AvatarEditable: FC<OwnProps> = ({ title, disabled, isForForum, currentAvat
     target.value = '';
   }
 
-  const handleAvatarCrop = useCallback(
-    (croppedImg: File) => {
-      setSelectedFile(undefined);
-      onChange(croppedImg);
-
-      if (croppedBlobUrl && croppedBlobUrl !== currentAvatarBlobUrl) {
-        URL.revokeObjectURL(croppedBlobUrl);
-      }
-      setCroppedBlobUrl(URL.createObjectURL(croppedImg));
-    },
-    [croppedBlobUrl, currentAvatarBlobUrl, onChange],
-  );
-
-  const handleModalClose = useCallback(() => {
+  const handleAvatarCrop = (croppedImg: File) => {
     setSelectedFile(undefined);
-  }, []);
+    props.onChange(croppedImg);
 
-  const labelClassName = buildClassName(
-    croppedBlobUrl && 'filled',
-    disabled && 'disabled',
-    isForForum && 'rounded-square',
+    if (croppedBlobUrl() && croppedBlobUrl() !== props.currentAvatarBlobUrl) {
+      URL.revokeObjectURL(croppedBlobUrl());
+    }
+    setCroppedBlobUrl(URL.createObjectURL(croppedImg));
+  };
+
+  const handleModalClose = () => {
+    setSelectedFile(undefined);
+  };
+
+  const labelClassName = createMemo(() =>
+    buildClassName(croppedBlobUrl() && 'filled', props.disabled && 'disabled', props.isForForum && 'rounded-square'),
   );
 
   return (
-    <div className="AvatarEditable">
-      <label className={labelClassName} role="button" tabIndex={0} title={title || lang('ChangeYourProfilePicture')}>
+    <div class="AvatarEditable">
+      <label
+        class={labelClassName()}
+        role="button"
+        tabIndex={0}
+        title={props.title || lang('ChangeYourProfilePicture')}
+      >
         <input type="file" onChange={handleSelectFile} accept="image/png, image/jpeg" />
         <Icon name="camera-add" />
-        {croppedBlobUrl && <img src={croppedBlobUrl} draggable={false} alt="" />}
+        {croppedBlobUrl() && <img src={croppedBlobUrl()} draggable={false} alt="" />}
       </label>
-      <CropModal file={selectedFile} onClose={handleModalClose} onChange={handleAvatarCrop} />
+      <CropModal file={selectedFile()} onClose={handleModalClose} onChange={handleAvatarCrop} />
     </div>
   );
 };
 
-export default memo(AvatarEditable);
+export default AvatarEditable;

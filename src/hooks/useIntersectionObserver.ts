@@ -1,5 +1,4 @@
-import type { ElementRef } from '../lib/teact/teact';
-import { useEffect, useRef, useState } from '../lib/teact/teact';
+import { createEffect, createSignal, watchHeavyAnimation } from 'frameact';
 
 import type { Scheduler } from '../util/schedulers';
 
@@ -26,6 +25,7 @@ interface Response {
   unfreeze: NoneToVoidFunction;
 }
 
+// TODO(codemod): useIntersectionObserver: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export function useIntersectionObserver(
   {
     rootRef,
@@ -37,7 +37,7 @@ export function useIntersectionObserver(
     threshold,
     isDisabled,
   }: {
-    rootRef: ElementRef<HTMLDivElement>;
+    rootRef: (el: HTMLDivElement) => void;
     throttleMs?: number;
     throttleScheduler?: Scheduler;
     debounceMs?: number;
@@ -48,45 +48,48 @@ export function useIntersectionObserver(
   },
   rootCallback?: RootCallback,
 ): Response {
-  const controllerRef = useRef<IntersectionController>();
-  const rootCallbackRef = useRef<RootCallback>();
-  const freezeFlagsRef = useRef(0);
-  const onUnfreezeRef = useRef<NoneToVoidFunction>();
+  let controllerRef: IntersectionController | undefined;
+  let rootCallbackRef: RootCallback | undefined;
+  let freezeFlagsRef = 0;
+  let onUnfreezeRef: NoneToVoidFunction | undefined;
 
-  rootCallbackRef.current = rootCallback;
+  rootCallbackRef = rootCallback;
 
-  const freeze = useLastCallback(() => {
-    freezeFlagsRef.current++;
-  });
+  const freeze = () => {
+    freezeFlagsRef++;
+  };
 
-  const unfreeze = useLastCallback(() => {
-    if (!freezeFlagsRef.current) {
+  const unfreeze = () => {
+    if (!freezeFlagsRef) {
       return;
     }
 
-    freezeFlagsRef.current--;
+    freezeFlagsRef--;
 
-    if (!freezeFlagsRef.current && onUnfreezeRef.current) {
-      onUnfreezeRef.current();
-      onUnfreezeRef.current = undefined;
+    if (!freezeFlagsRef && onUnfreezeRef) {
+      onUnfreezeRef();
+      onUnfreezeRef = undefined;
     }
-  });
+  };
 
-  useHeavyAnimation(freeze, unfreeze);
+  watchHeavyAnimation(freeze, unfreeze);
 
-  useEffect(() => {
-    if (isDisabled) {
-      return undefined;
-    }
-
-    return () => {
-      if (controllerRef.current) {
-        controllerRef.current.observer.disconnect();
-        controllerRef.current.destroy();
-        controllerRef.current = undefined;
+  createEffect(
+    () => isDisabled,
+    () => {
+      if (isDisabled) {
+        return undefined;
       }
-    };
-  }, [isDisabled]);
+
+      return () => {
+        if (controllerRef) {
+          controllerRef.observer.disconnect();
+          controllerRef.destroy();
+          controllerRef = undefined;
+        }
+      };
+    },
+  );
 
   function initController() {
     const callbacks = new Map<HTMLElement, CallbackManager<TargetCallback>>();
@@ -104,8 +107,8 @@ export function useIntersectionObserver(
     }
 
     function observerCallbackSync() {
-      if (freezeFlagsRef.current) {
-        onUnfreezeRef.current = observerCallback;
+      if (freezeFlagsRef) {
+        onUnfreezeRef = observerCallback;
         return;
       }
 
@@ -116,8 +119,8 @@ export function useIntersectionObserver(
         callbackManager?.runCallbacks(entry);
       });
 
-      if (rootCallbackRef.current) {
-        rootCallbackRef.current(entries);
+      if (rootCallbackRef) {
+        rootCallbackRef(entries);
       }
 
       entriesAccumulator.clear();
@@ -148,8 +151,8 @@ export function useIntersectionObserver(
           entriesAccumulator.set(entry.target, entry);
         });
 
-        if (freezeFlagsRef.current) {
-          onUnfreezeRef.current = observerCallback;
+        if (freezeFlagsRef) {
+          onUnfreezeRef = observerCallback;
         } else {
           observerCallback();
         }
@@ -167,7 +170,7 @@ export function useIntersectionObserver(
       entriesAccumulator.clear();
     }
 
-    controllerRef.current = {
+    controllerRef = {
       observer,
       addCallback,
       removeCallback,
@@ -175,12 +178,12 @@ export function useIntersectionObserver(
     };
   }
 
-  const observe = useLastCallback((target, targetCallback) => {
-    if (!controllerRef.current) {
+  const observe = (target, targetCallback) => {
+    if (!controllerRef) {
       initController();
     }
 
-    const controller = controllerRef.current!;
+    const controller = controllerRef!;
     controller.observer.observe(target);
 
     if (targetCallback) {
@@ -194,25 +197,34 @@ export function useIntersectionObserver(
 
       controller.observer.unobserve(target);
     };
-  });
+  };
 
   return { observe, freeze, unfreeze };
 }
 
-export function useOnIntersect(targetRef: ElementRef<HTMLDivElement>, observe?: ObserveFn, callback?: TargetCallback) {
-  const lastCallback = useLastCallback(callback);
-
-  useEffect(() => {
-    return observe ? observe(targetRef.current!, lastCallback) : undefined;
-  }, [lastCallback, observe, targetRef]);
-}
-
-export function useIsIntersecting(
-  targetRef: ElementRef<HTMLDivElement>,
+// TODO(codemod): useOnIntersect: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+export function useOnIntersect(
+  targetRef: (el: HTMLDivElement) => void,
   observe?: ObserveFn,
   callback?: TargetCallback,
 ) {
-  const [isIntersecting, setIsIntersecting] = useState(!observe);
+  const lastCallback = callback;
+
+  createEffect(
+    () => [lastCallback, observe, targetRef],
+    () => {
+      return observe ? observe(targetRef.current!, lastCallback) : undefined;
+    },
+  );
+}
+
+// TODO(codemod): useIsIntersecting: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+export function useIsIntersecting(
+  targetRef: (el: HTMLDivElement) => void,
+  observe?: ObserveFn,
+  callback?: TargetCallback,
+) {
+  const [isIntersecting, setIsIntersecting] = createSignal(!observe);
 
   useOnIntersect(targetRef, observe, (entry) => {
     setIsIntersecting(entry.isIntersecting);

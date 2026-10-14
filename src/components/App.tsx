@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect } from '../lib/teact/teact';
+import { createEffect, createMutationEffect, onMount, previous } from 'frameact';
 import { withGlobal } from '../global';
 
 import type { GlobalState } from '../global/types';
@@ -23,7 +23,6 @@ import { updateSizes } from '../util/windowSize';
 import useTauriDrag from '../hooks/tauri/useTauriDrag';
 import useAppLayout from '../hooks/useAppLayout';
 import useFileHoverOpen, { FILE_HOVER_OPEN_SELECTOR, hasFiles } from '../hooks/useFileHoverOpen';
-import usePrevious from '../hooks/usePrevious';
 import { useSignalEffect } from '../hooks/useSignalEffect';
 import { getIsInBackground } from '../hooks/window/useBackgroundMode';
 
@@ -61,27 +60,18 @@ const TRANSITION_RENDER_COUNT = Object.keys(AppScreens).length / 2;
 const ACTIVE_PAGE_TITLE = IS_TAURI ? PAGE_TITLE_TAURI : PAGE_TITLE;
 const INACTIVE_PAGE_TITLE = `${ACTIVE_PAGE_TITLE} ${INACTIVE_MARKER}`;
 
-const App = ({
-  authState,
-  isScreenLocked,
-  hasPasscode,
-  inactiveReason,
-  hasWebAuthTokenFailed,
-  isTestServer,
-  theme,
-  customBackgroundColor,
-  actionMessageBg,
-}: StateProps) => {
+const App = () => {
+  const props = withGlobal({}, mapStateToProps);
   const { isMobile } = useAppLayout();
   const isMobileOs = PLATFORM_ENV === 'iOS' || PLATFORM_ENV === 'Android';
 
-  useEffect(() => {
+  onMount(() => {
     if (IS_INSTALL_PROMPT_SUPPORTED) {
       setupBeforeInstallPrompt();
     }
-  }, []);
+  });
 
-  useEffect(() => {
+  onMount(() => {
     const hash = getInitialLocationHash();
     // If there is no stored session on first slot, navigate to any other slot with stored session
     if (!getPendingWebLogin() && !hasStoredSession() && !ACCOUNT_SLOT && !hash) {
@@ -101,10 +91,10 @@ const App = ({
         })
         .catch(() => undefined);
     }
-  }, []);
+  });
 
   // Prevent drop on elements that do not accept it
-  useEffect(() => {
+  onMount(() => {
     const body = document.body;
     const handleDrag = (e: DragEvent) => {
       e.preventDefault();
@@ -131,20 +121,21 @@ const App = ({
       body.removeEventListener('dragover', handleDrag);
       body.removeEventListener('dragenter', handleDrag);
     };
-  }, []);
+  });
 
   // return <Test />;
 
   let activeKey: AppScreens;
   let page: UiLoaderPage | undefined;
 
-  if (inactiveReason) {
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (props.inactiveReason) {
     activeKey = AppScreens.inactive;
-  } else if (isScreenLocked) {
+  } else if (props.isScreenLocked) {
     page = 'lock';
     activeKey = AppScreens.lock;
-  } else if (authState) {
-    switch (authState) {
+  } else if (props.authState) {
+    switch (props.authState) {
       case 'authorizationStateWaitPhoneNumber':
         page = 'authPhoneNumber';
         activeKey = AppScreens.auth;
@@ -175,37 +166,41 @@ const App = ({
   } else if (hasStoredSession()) {
     page = 'main';
     activeKey = AppScreens.main;
-  } else if (hasPasscode) {
+  } else if (props.hasPasscode) {
     activeKey = AppScreens.lock;
   } else {
     page = isMobileOs ? 'authPhoneNumber' : 'authQrCode';
     activeKey = AppScreens.auth;
   }
 
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
   if (
     activeKey !== AppScreens.lock &&
     activeKey !== AppScreens.inactive &&
     activeKey !== AppScreens.main &&
     getPendingWebLogin() &&
-    !hasWebAuthTokenFailed
+    !props.hasWebAuthTokenFailed
   ) {
     page = 'main';
     activeKey = AppScreens.main;
   }
 
-  useEffect(() => {
+  onMount(() => {
     updateSizes();
-  }, []);
+  });
 
-  useEffect(() => {
-    if (inactiveReason) {
-      document.title = INACTIVE_PAGE_TITLE;
-    } else {
-      document.title = ACTIVE_PAGE_TITLE;
-    }
-  }, [inactiveReason]);
+  createEffect(
+    () => props.inactiveReason,
+    () => {
+      if (props.inactiveReason) {
+        document.title = INACTIVE_PAGE_TITLE;
+      } else {
+        document.title = ACTIVE_PAGE_TITLE;
+      }
+    },
+  );
 
-  const prevActiveKey = usePrevious(activeKey);
+  const prevActiveKey = previous(() => activeKey);
 
   function renderContent() {
     switch (activeKey) {
@@ -214,36 +209,43 @@ const App = ({
       case AppScreens.main:
         return <Main isMobile={isMobile} />;
       case AppScreens.lock:
-        return <LockScreen isLocked={isScreenLocked} />;
+        return <LockScreen isLocked={props.isScreenLocked} />;
       case AppScreens.inactive:
-        return <AppInactive inactiveReason={inactiveReason!} />;
+        return <AppInactive inactiveReason={props.inactiveReason!} />;
     }
   }
 
   useTauriDrag();
   useFileHoverOpen();
 
-  useLayoutEffect(() => {
+  onMount(() => {
     document.body.classList.add(styles.bg);
     document.documentElement.classList.remove('initial');
-  }, []);
+  });
 
-  useLayoutEffect(() => {
-    // Prefer the chosen wallpaper's base color, so the pre-render base matches the
-    // actual wallpaper instead of flashing the built-in default first.
-    document.body.style.setProperty(
-      '--theme-background-color',
-      customBackgroundColor || (theme === 'dark' ? DARK_THEME_BG_COLOR : LIGHT_THEME_BG_COLOR),
-    );
-  }, [theme, customBackgroundColor]);
+  createMutationEffect(
+    () => [props.theme, props.customBackgroundColor],
+    () => {
+      // Prefer the chosen wallpaper's base color, so the pre-render base matches the
+      // actual wallpaper instead of flashing the built-in default first.
+      document.body.style.setProperty(
+        '--theme-background-color',
+        props.customBackgroundColor || (props.theme === 'dark' ? DARK_THEME_BG_COLOR : LIGHT_THEME_BG_COLOR),
+      );
+    },
+  );
 
-  useLayoutEffect(() => {
-    // Fall back to the theme default when the tint is unset (e.g. a photo wallpaper without a
-    // thumbnail), so service chips don't keep the previous wallpaper's tint.
-    document.body.style.setProperty('--action-message-bg', actionMessageBg || getActionMessageBg(theme)!);
-  }, [actionMessageBg, theme]);
+  createMutationEffect(
+    () => [props.actionMessageBg, props.theme],
+    () => {
+      // Fall back to the theme default when the tint is unset (e.g. a photo wallpaper without a
+      // thumbnail), so service chips don't keep the previous wallpaper's tint.
+      document.body.style.setProperty('--action-message-bg', props.actionMessageBg || getActionMessageBg(props.theme)!);
+    },
+  );
 
   const getIsInBackgroundLocal = getIsInBackground;
+  // TODO(codemod): useSignalEffect: createEffect(compute, apply) with the signal reads in compute
   useSignalEffect(() => {
     // Mutation forced to avoid RAF throttling in background
     forceMutation(
@@ -257,25 +259,26 @@ const App = ({
 
   return (
     <UiLoader page={page} isMobile={isMobile}>
+      {/* TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6) */}
       <Transition
         name="fade"
         activeKey={activeKey}
         shouldCleanup
         className={buildClassName(
           'full-height',
-          (activeKey === AppScreens.auth || prevActiveKey === AppScreens.auth) && 'is-auth',
+          (activeKey === AppScreens.auth || prevActiveKey() === AppScreens.auth) && 'is-auth',
         )}
         renderCount={TRANSITION_RENDER_COUNT}
       >
         {renderContent}
       </Transition>
-      {activeKey === AppScreens.auth && isTestServer && <div className="test-server-badge">Test server</div>}
+      {activeKey === AppScreens.auth && props.isTestServer && <div class="test-server-badge">Test server</div>}
       <Notifications />
     </UiLoader>
   );
 };
 
-export default withGlobal((global): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
   const { state: authState, hasWebAuthTokenFailed, hasWebAuthTokenPasswordRequired } = global.auth;
   const theme = selectTheme(global);
   const themeValues = selectThemeValues(global, theme);
@@ -291,4 +294,6 @@ export default withGlobal((global): Complete<StateProps> => {
     isTestServer: global.config?.isTestServer,
     actionMessageBg: selectActionMessageBg(global),
   };
-})(App);
+};
+
+export default App;

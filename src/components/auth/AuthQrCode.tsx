@@ -1,10 +1,13 @@
-import { memo, useLayoutEffect, useRef } from '../../lib/teact/teact';
+import { createMemo, createMutationEffect } from 'frameact';
+import { enableStrict } from 'frameact/stricterdom';
 import { getActions, withGlobal } from '../../global';
+import { createMediaTransition } from '../../lib/kit';
 
 import type { GlobalState } from '../../global/types';
 
 import { STRICTERDOM_ENABLED } from '../../config';
-import { disableStrict, enableStrict } from '../../lib/fasterdom/stricterdom';
+// TODO(codemod): still imported from teact: disableStrict
+import { disableStrict } from '../../lib/fasterdom/stricterdom';
 import { selectSharedSettings } from '../../global/selectors/sharedState';
 import buildClassName from '../../util/buildClassName';
 import { oldSetLanguage } from '../../util/oldLangProvider';
@@ -17,8 +20,6 @@ import useAsync from '../../hooks/useAsync';
 import useFlag from '../../hooks/useFlag';
 import useLang from '../../hooks/useLang';
 import useLangString from '../../hooks/useLangString';
-import useLastCallback from '../../hooks/useLastCallback';
-import useMediaTransitionDeprecated from '../../hooks/useMediaTransitionDeprecated';
 import useMultiaccountInfo from '../../hooks/useMultiaccountInfo';
 
 import AnimatedIcon from '../common/AnimatedIcon';
@@ -37,16 +38,18 @@ const QR_PLANE_SIZE = 54;
 const QR_IMAGE_SIZE_RATIO = 0.4;
 const QR_CODE_MUTATION_DURATION = 50; // The library is asynchronous and we need to wait for its mutation code
 
-const AuthCode = ({ connectionState, auth, language }: StateProps) => {
+const AuthCode = () => {
+  const props = withGlobal({}, mapStateToProps);
   const { returnToAuthPhoneNumber, setSharedSettingOption, loginWithPasskey } = getActions();
 
-  const { state, qrCode: authQrCode, passkeyOption } = auth;
-
+  const state = () => props.auth.state;
+  const authQrCode = () => props.auth.qrCode;
+  const passkeyOption = () => props.auth.passkeyOption;
   const suggestedLanguage = getSuggestedLanguage();
   const lang = useLang();
-  const qrCodeRef = useRef<HTMLDivElement>();
+  let qrCodeRef!: HTMLDivElement;
 
-  const isConnected = connectionState === 'connectionStateReady';
+  const isConnected = createMemo(() => props.connectionState === 'connectionStateReady');
   const continueText = useLangString('AuthContinueOnThisLanguage', suggestedLanguage);
   const [isLoading, markIsLoading, unmarkIsLoading] = useFlag();
   const [isQrMounted, markQrMounted, unmarkQrMounted] = useFlag();
@@ -63,49 +66,53 @@ const AuthCode = ({ connectionState, auth, language }: StateProps) => {
     [],
   );
 
-  const transitionClassNames = useMediaTransitionDeprecated(isQrMounted);
+  // TODO(codemod): useMediaTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element
+  const transitionClassNames = createMemo(() => createMediaTransition({ hasMediaData: () => Boolean(isQrMounted()) }));
 
-  useLayoutEffect(() => {
-    if (!authQrCode || !qrCode) {
-      return () => {
-        unmarkQrMounted();
-      };
-    }
+  createMutationEffect(
+    () => [isConnected(), authQrCode(), isQrMounted(), qrCode],
+    ([isConnected, authQrCode, isQrMounted]) => {
+      if (!authQrCode || !qrCode) {
+        return () => {
+          unmarkQrMounted();
+        };
+      }
 
-    if (!isConnected) {
+      if (!isConnected) {
+        return undefined;
+      }
+
+      const container = qrCodeRef!;
+      const data = `${DATA_PREFIX}${authQrCode.token}`;
+
+      if (STRICTERDOM_ENABLED) {
+        disableStrict();
+      }
+
+      qrCode.update({
+        data,
+      });
+
+      if (!isQrMounted) {
+        qrCode.append(container);
+        markQrMounted();
+      }
+
+      if (STRICTERDOM_ENABLED) {
+        window.setTimeout(() => {
+          enableStrict();
+        }, QR_CODE_MUTATION_DURATION);
+      }
+
       return undefined;
-    }
+    },
+  );
 
-    const container = qrCodeRef.current!;
-    const data = `${DATA_PREFIX}${authQrCode.token}`;
-
-    if (STRICTERDOM_ENABLED) {
-      disableStrict();
-    }
-
-    qrCode.update({
-      data,
-    });
-
-    if (!isQrMounted) {
-      qrCode.append(container);
-      markQrMounted();
-    }
-
-    if (STRICTERDOM_ENABLED) {
-      window.setTimeout(() => {
-        enableStrict();
-      }, QR_CODE_MUTATION_DURATION);
-    }
-
-    return undefined;
-  }, [isConnected, authQrCode, isQrMounted, qrCode]);
-
-  const handleBackNavigation = useLastCallback(() => {
+  const handleBackNavigation = () => {
     navigateBack();
-  });
+  };
 
-  const handleLangChange = useLastCallback(() => {
+  const handleLangChange = () => {
     markIsLoading();
 
     void oldSetLanguage(suggestedLanguage, () => {
@@ -113,20 +120,20 @@ const AuthCode = ({ connectionState, auth, language }: StateProps) => {
 
       setSharedSettingOption({ language: suggestedLanguage });
     });
-  });
+  };
 
-  const handleReturnToAuthPhoneNumber = useLastCallback(() => {
+  const handleReturnToAuthPhoneNumber = () => {
     returnToAuthPhoneNumber();
-  });
+  };
 
-  const handleLoginWithPasskey = useLastCallback(() => {
+  const handleLoginWithPasskey = () => {
     loginWithPasskey();
-  });
+  };
 
-  const isAuthReady = state === 'authorizationStateWaitQrCode';
+  const isAuthReady = createMemo(() => state() === 'authorizationStateWaitQrCode');
 
   return (
-    <div id="auth-qr-form" className="custom-scroll">
+    <div id="auth-qr-form" class="custom-scroll">
       {hasActiveAccount && (
         <Button
           size="smaller"
@@ -137,15 +144,10 @@ const AuthCode = ({ connectionState, auth, language }: StateProps) => {
           onClick={handleBackNavigation}
         />
       )}
-      <div className="auth-form qr">
-        <div className="qr-outer">
-          <div className={buildClassName('qr-inner', transitionClassNames)} key="qr-inner">
-            <div
-              key="qr-container"
-              className="qr-container"
-              ref={qrCodeRef}
-              style={`width: ${QR_SIZE}px; height: ${QR_SIZE}px`}
-            />
+      <div class="auth-form qr">
+        <div class="qr-outer">
+          <div class={buildClassName('qr-inner', transitionClassNames())}>
+            <div class="qr-container" ref={qrCodeRef} style={`width: ${QR_SIZE}px; height: ${QR_SIZE}px`} />
             <AnimatedIcon
               tgsUrl={LOCAL_TGS_URLS.QrPlane}
               size={QR_PLANE_SIZE}
@@ -154,8 +156,8 @@ const AuthCode = ({ connectionState, auth, language }: StateProps) => {
               noLoop={false}
             />
           </div>
-          {!isQrMounted && (
-            <div className="qr-loading">
+          {!isQrMounted() && (
+            <div class="qr-loading">
               <Loading />
             </div>
           )}
@@ -172,18 +174,18 @@ const AuthCode = ({ connectionState, auth, language }: StateProps) => {
             <span>{lang('LoginQRHelp3')}</span>
           </li>
         </ol>
-        {isAuthReady && (
+        {isAuthReady() && (
           <Button className="auth-button" isText onClick={handleReturnToAuthPhoneNumber}>
             {lang('LoginQRCancel')}
           </Button>
         )}
-        {passkeyOption && (
+        {passkeyOption() && (
           <Button className="auth-button" isText onClick={handleLoginWithPasskey}>
             {lang('LoginPasskey')}
           </Button>
         )}
-        {suggestedLanguage && suggestedLanguage !== language && continueText && (
-          <Button className="auth-button" isText isLoading={isLoading} onClick={handleLangChange}>
+        {suggestedLanguage && suggestedLanguage !== props.language && continueText && (
+          <Button className="auth-button" isText isLoading={isLoading()} onClick={handleLangChange}>
             {continueText}
           </Button>
         )}
@@ -192,16 +194,16 @@ const AuthCode = ({ connectionState, auth, language }: StateProps) => {
   );
 };
 
-export default memo(
-  withGlobal((global): Complete<StateProps> => {
-    const { connectionState, auth } = global;
+const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
+  const { connectionState, auth } = global;
 
-    const { language } = selectSharedSettings(global);
+  const { language } = selectSharedSettings(global);
 
-    return {
-      connectionState,
-      auth,
-      language,
-    };
-  })(AuthCode),
-);
+  return {
+    connectionState,
+    auth,
+    language,
+  };
+};
+
+export default AuthCode;

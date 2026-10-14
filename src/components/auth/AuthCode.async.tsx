@@ -1,13 +1,13 @@
-import { Bundles } from '../../util/moduleLoader';
+import { lazy } from 'frameact/dom';
 
-import useModuleLoader from '../../hooks/useModuleLoader';
+import { Bundles, loadBundle } from '../../util/moduleLoader';
 
 import Loading from '../ui/Loading';
 
-const AuthCodeAsync = () => {
-  const AuthCode = useModuleLoader(Bundles.Auth, 'AuthCode');
+const AuthCode = lazy(() => loadBundle(Bundles.Auth).then((m) => ({ default: m.AuthCode })));
 
-  return AuthCode ? <AuthCode /> : <Loading />;
+const AuthCodeAsync = () => {
+  return <AuthCode />;
 };
 
 export default AuthCodeAsync;

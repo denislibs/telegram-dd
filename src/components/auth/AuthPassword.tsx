@@ -1,4 +1,4 @@
-import { memo, useCallback, useState } from '../../lib/teact/teact';
+import { createSignal } from 'frameact';
 import { getActions, withGlobal } from '../../global';
 
 import type { GlobalState } from '../../global/types';
@@ -14,36 +14,36 @@ type StateProps = {
   auth: GlobalState['auth'];
 };
 
-const AuthPassword = ({ auth }: StateProps) => {
+const AuthPassword = () => {
+  const props = withGlobal({}, mapStateToProps);
   const { setAuthPassword, clearAuthErrorKey } = getActions();
-  const { isLoading, errorKey, hint } = auth;
+  const isLoading = () => props.auth.isLoading;
+  const errorKey = () => props.auth.errorKey;
+  const hint = () => props.auth.hint;
 
   const lang = useLang();
-  const [showPassword, setShowPassword] = useState(false);
+  const [showPassword, setShowPassword] = createSignal(false);
 
-  const handleChangePasswordVisibility = useCallback((isVisible) => {
+  const handleChangePasswordVisibility = (isVisible) => {
     setShowPassword(isVisible);
-  }, []);
+  };
 
-  const handleSubmit = useCallback(
-    (password: string) => {
-      setAuthPassword({ password });
-    },
-    [setAuthPassword],
-  );
+  const handleSubmit = (password: string) => {
+    setAuthPassword({ password });
+  };
 
   return (
-    <div id="auth-password-form" className="custom-scroll">
-      <div className="auth-form">
-        <MonkeyPassword isPasswordVisible={showPassword} />
+    <div id="auth-password-form" class="custom-scroll">
+      <div class="auth-form">
+        <MonkeyPassword isPasswordVisible={showPassword()} />
         <h1>{lang('LoginHeaderPassword')}</h1>
-        <p className="note">{lang('LoginEnterPasswordDescription')}</p>
+        <p class="note">{lang('LoginEnterPasswordDescription')}</p>
         <PasswordForm
           onClearError={clearAuthErrorKey}
-          error={errorKey && lang.withRegular(errorKey)}
-          hint={hint}
-          isLoading={isLoading}
-          isPasswordVisible={showPassword}
+          error={errorKey() && lang.withRegular(errorKey())}
+          hint={hint()}
+          isLoading={isLoading()}
+          isPasswordVisible={showPassword()}
           onChangePasswordVisibility={handleChangePasswordVisibility}
           onSubmit={handleSubmit}
         />
@@ -52,4 +52,6 @@ const AuthPassword = ({ auth }: StateProps) => {
   );
 };
 
-export default memo(withGlobal((global): Complete<StateProps> => pick(global, ['auth']))(AuthPassword));
+const mapStateToProps = (global: GlobalState): Complete<StateProps> => pick(global, ['auth']);
+
+export default AuthPassword;

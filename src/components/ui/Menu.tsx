@@ -1,4 +1,6 @@
-import { beginHeavyAnimation, type ElementRef, memo, useEffect, useRef } from '../../lib/teact/teact';
+import { beginHeavyAnimation, createEffect, createMemo } from 'frameact';
+import { mergeProps, Show, splitProps } from 'frameact/dom';
+import { createShowTransition } from '../../lib/kit';
 
 import type { MenuPositionOptions } from '../../hooks/useMenuPosition';
 
@@ -8,12 +10,9 @@ import captureEscKeyListener from '../../util/captureEscKeyListener';
 import { preventMessageInputBlurWithBubbling } from '../middle/helpers/preventMessageInputBlur';
 
 import useAppLayout from '../../hooks/useAppLayout';
-import useEffectWithPrevDeps from '../../hooks/useEffectWithPrevDeps';
 import useHistoryBack from '../../hooks/useHistoryBack';
 import useKeyboardListNavigation from '../../hooks/useKeyboardListNavigation';
-import useLastCallback from '../../hooks/useLastCallback';
 import useMenuPosition from '../../hooks/useMenuPosition';
-import useShowTransition from '../../hooks/useShowTransition';
 import useVirtualBackdrop from '../../hooks/useVirtualBackdrop';
 
 import Portal from './Portal';
@@ -23,7 +22,7 @@ import './Menu.scss';
 export type { MenuPositionOptions } from '../../hooks/useMenuPosition';
 
 type OwnProps = {
-  ref?: ElementRef<HTMLDivElement>;
+  ref?: (el: HTMLDivElement) => void;
   isOpen: boolean;
   shouldCloseFast?: boolean;
   id?: string;
@@ -49,135 +48,157 @@ type OwnProps = {
 
 const ANIMATION_DURATION = 200;
 
-const Menu = ({
-  ref: externalRef,
-  shouldCloseFast,
-  isOpen,
-  id,
-  className,
-  bubbleClassName,
-  ariaLabel,
-  ariaLabelledBy,
-  children,
-  autoClose = false,
-  footer,
-  noCloseOnBackdrop = false,
-  backdropExcludedSelector,
-  noCompact,
-  onCloseAnimationEnd,
-  onClose,
-  onMouseEnter,
-  onMouseLeave,
-  withPortal,
-  onMouseEnterBackdrop,
-  nested,
-  ...positionOptions
-}: OwnProps) => {
+const Menu = (rawProps: OwnProps) => {
+  const props = mergeProps({ autoClose: false, noCloseOnBackdrop: false }, rawProps) as OwnProps &
+    Required<Pick<OwnProps, 'autoClose' | 'noCloseOnBackdrop'>>;
+  const [, positionOptions] = splitProps(props, [
+    'ref',
+    'shouldCloseFast',
+    'isOpen',
+    'id',
+    'className',
+    'bubbleClassName',
+    'ariaLabel',
+    'ariaLabelledBy',
+    'children',
+    'autoClose',
+    'footer',
+    'noCloseOnBackdrop',
+    'backdropExcludedSelector',
+    'noCompact',
+    'onCloseAnimationEnd',
+    'onClose',
+    'onMouseEnter',
+    'onMouseLeave',
+    'withPortal',
+    'onMouseEnterBackdrop',
+    'nested',
+  ]);
   const { isTouchScreen } = useAppLayout();
 
-  const containerRef = useRef<HTMLDivElement>();
+  let containerRef!: HTMLDivElement;
 
-  const { ref: bubbleRef } = useShowTransition({
-    isOpen,
-    ref: externalRef,
-    onCloseAnimationEnd,
+  const { ref: bubbleRef } = createShowTransition({
+    isOpen: () => props.isOpen,
+    // TODO(codemod): ref option: hand the result `ref` to the element (ref={t.ref}) instead
+    ref: props.ref,
+    onCloseAnimationEnd: props.onCloseAnimationEnd,
   });
 
-  useMenuPosition(isOpen, containerRef, bubbleRef, positionOptions);
+  useMenuPosition(
+    () => props.isOpen,
+    () => containerRef,
+    bubbleRef,
+    positionOptions,
+  );
 
-  useEffect(() => (isOpen ? captureEscKeyListener(onClose) : undefined), [isOpen, onClose]);
+  createEffect(
+    () => [props.isOpen, props.onClose],
+    () => (props.isOpen ? captureEscKeyListener(props.onClose) : undefined),
+  );
 
   useHistoryBack({
-    isActive: isOpen,
-    onBack: onClose,
+    isActive: () => props.isOpen,
+    onBack: props.onClose,
     shouldBeReplaced: true,
   });
 
-  useEffectWithPrevDeps(
-    ([prevIsOpen]) => {
-      if (isOpen || (!isOpen && prevIsOpen === true)) {
+  createEffect(
+    () => [props.isOpen],
+    (_deps, prev) => {
+      const [prevIsOpen] = prev ?? [];
+      if (props.isOpen || (!props.isOpen && prevIsOpen === true)) {
         beginHeavyAnimation(ANIMATION_DURATION);
       }
     },
-    [isOpen],
   );
 
   const navigateWithKeyboard = useKeyboardListNavigation(
     bubbleRef,
-    isOpen,
+    () => props.isOpen,
     undefined,
     '.MenuItem:not(.disabled), [role="menuitemradio"]:not(:disabled)',
     true,
   );
 
-  const handleKeyDown = useLastCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     navigateWithKeyboard(e);
-    if (!autoClose || (e.key !== 'Enter' && e.key !== ' ')) {
+    if (!props.autoClose || (e.key !== 'Enter' && e.key !== ' ')) {
       return;
     }
 
     const menuItem = e.target instanceof HTMLElement ? e.target.closest('.MenuItem') : undefined;
     if (menuItem && !menuItem.classList.contains('submenu')) {
-      onClose();
+      props.onClose();
     }
-  });
+  };
 
-  const fullExcludedSelector = backdropExcludedSelector ? `${backdropExcludedSelector}, .submenu` : '.submenu';
-
-  useVirtualBackdrop(isOpen, containerRef, noCloseOnBackdrop ? undefined : onClose, undefined, fullExcludedSelector);
-
-  const bubbleFullClassName = buildClassName(
-    'bubble menu-container custom-scroll',
-    footer && 'with-footer',
-    bubbleClassName,
-    shouldCloseFast && 'close-fast',
+  const fullExcludedSelector = createMemo(() =>
+    props.backdropExcludedSelector ? `${props.backdropExcludedSelector}, .submenu` : '.submenu',
   );
 
-  const handleClick = useLastCallback((e: React.MouseEvent<HTMLDivElement>) => {
+  useVirtualBackdrop(
+    () => props.isOpen,
+    () => containerRef,
+    () => (props.noCloseOnBackdrop ? undefined : props.onClose),
+    undefined,
+    () => fullExcludedSelector(),
+  );
+
+  const bubbleFullClassName = createMemo(() =>
+    buildClassName(
+      'bubble menu-container custom-scroll',
+      props.footer && 'with-footer',
+      props.bubbleClassName,
+      props.shouldCloseFast && 'close-fast',
+    ),
+  );
+
+  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
-    if (autoClose) {
-      onClose();
+    if (props.autoClose) {
+      props.onClose();
     }
-  });
+  };
 
   const menu = (
     <div
       ref={containerRef}
-      id={id}
-      className={buildClassName(
+      id={props.id}
+      class={buildClassName(
         'Menu',
-        !noCompact && !isTouchScreen && 'compact',
+        !props.noCompact && !isTouchScreen && 'compact',
         !IS_BACKDROP_BLUR_SUPPORTED && 'no-blur',
-        withPortal && 'in-portal',
-        className,
+        props.withPortal && 'in-portal',
+        props.className,
       )}
-      aria-label={ariaLabel}
-      aria-labelledby={ariaLabelledBy}
-      role={ariaLabel || ariaLabelledBy ? 'menu' : undefined}
-      onKeyDown={isOpen ? handleKeyDown : undefined}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={isOpen ? onMouseLeave : undefined}
+      aria-label={props.ariaLabel}
+      aria-labelledby={props.ariaLabelledBy}
+      role={props.ariaLabel || props.ariaLabelledBy ? 'menu' : undefined}
+      onKeyDown={props.isOpen ? handleKeyDown : undefined}
+      onMouseEnter={props.onMouseEnter}
+      onMouseLeave={props.isOpen ? props.onMouseLeave : undefined}
     >
-      {isOpen && !nested && (
+      {props.isOpen && !props.nested && (
         // This only prevents click events triggering on underlying elements
         <div
-          className="backdrop"
+          class="backdrop"
           onMouseDown={preventMessageInputBlurWithBubbling}
-          onMouseEnter={onMouseEnterBackdrop}
+          onMouseEnter={props.onMouseEnterBackdrop}
         />
       )}
-      <div role="presentation" ref={bubbleRef} className={bubbleFullClassName} onClick={handleClick}>
-        {children}
-        {footer && <div className="footer">{footer}</div>}
+      <div role="presentation" ref={bubbleRef} class={bubbleFullClassName()} onClick={handleClick}>
+        {props.children}
+        {props.footer && <div class="footer">{props.footer}</div>}
       </div>
     </div>
   );
 
-  if (withPortal) {
-    return <Portal>{menu}</Portal>;
-  }
-
-  return menu;
+  return (
+    <Show when={!props.withPortal} fallback={<Portal>{menu}</Portal>}>
+      {menu}
+    </Show>
+  );
 };
 
-export default memo(Menu);
+export default Menu;

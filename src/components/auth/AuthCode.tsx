@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from '../../lib/teact/teact';
+import { createSignal, onMount } from 'frameact';
 import { getActions, withGlobal } from '../../global';
 
 import type { GlobalState } from '../../global/types';
@@ -20,80 +20,80 @@ type StateProps = {
 
 const CODE_LENGTH = 5;
 
-const AuthCode = ({ auth }: StateProps) => {
+const AuthCode = () => {
+  const props = withGlobal({}, mapStateToProps);
   const { setAuthCode, returnToAuthPhoneNumber, clearAuthErrorKey } = getActions();
 
-  const { phoneNumber, isCodeViaApp, isLoading, errorKey } = auth;
-
+  const phoneNumber = () => props.auth.phoneNumber;
+  const isCodeViaApp = () => props.auth.isCodeViaApp;
+  const isLoading = () => props.auth.isLoading;
+  const errorKey = () => props.auth.errorKey;
   const lang = useLang();
-  const inputRef = useRef<HTMLInputElement>();
+  let inputRef!: HTMLInputElement;
 
-  const [code, setCode] = useState<string>('');
-  const [isTracking, setIsTracking] = useState(false);
-  const [trackingDirection, setTrackingDirection] = useState(1);
+  const [code, setCode] = createSignal<string>('');
+  const [isTracking, setIsTracking] = createSignal(false);
+  const [trackingDirection, setTrackingDirection] = createSignal(1);
 
-  useEffect(() => {
+  onMount(() => {
     if (!IS_TOUCH_ENV) {
-      inputRef.current!.focus();
+      inputRef!.focus();
     }
-  }, []);
+  });
 
   useHistoryBack({
     isActive: true,
     onBack: returnToAuthPhoneNumber,
   });
 
-  const onCodeChange = useCallback(
-    (e: React.FormEvent<HTMLInputElement>) => {
-      if (errorKey) {
-        clearAuthErrorKey();
-      }
+  const onCodeChange = (e: React.FormEvent<HTMLInputElement>) => {
+    if (errorKey()) {
+      clearAuthErrorKey();
+    }
 
-      const { currentTarget: target } = e;
-      target.value = target.value.replace(/[^\d]+/, '').substr(0, CODE_LENGTH);
+    const { currentTarget: target } = e;
+    target.value = target.value.replace(/[^\d]+/, '').substr(0, CODE_LENGTH);
 
-      if (target.value === code) {
-        return;
-      }
+    if (target.value === code()) {
+      return;
+    }
 
-      setCode(target.value);
+    setCode(target.value);
 
-      if (!isTracking) {
-        setIsTracking(true);
-      } else if (!target.value.length) {
-        setIsTracking(false);
-      }
+    if (!isTracking()) {
+      setIsTracking(true);
+    } else if (!target.value.length) {
+      setIsTracking(false);
+    }
 
-      if (code && code.length > target.value.length) {
-        setTrackingDirection(-1);
-      } else {
-        setTrackingDirection(1);
-      }
+    if (code() && code().length > target.value.length) {
+      setTrackingDirection(-1);
+    } else {
+      setTrackingDirection(1);
+    }
 
-      if (target.value.length === CODE_LENGTH) {
-        setAuthCode({ code: target.value });
-      }
-    },
-    [errorKey, code, isTracking],
-  );
+    if (target.value.length === CODE_LENGTH) {
+      setAuthCode({ code: target.value });
+    }
+  };
 
   function handleReturnToAuthPhoneNumber() {
     returnToAuthPhoneNumber();
   }
 
   return (
-    <div id="auth-code-form" className="custom-scroll">
-      <div className="auth-form">
+    <div id="auth-code-form" class="custom-scroll">
+      <div class="auth-form">
         <TrackingMonkey
-          code={code}
+          code={code()}
           codeLength={CODE_LENGTH}
-          isTracking={isTracking}
-          trackingDirection={trackingDirection}
+          isTracking={isTracking()}
+          trackingDirection={trackingDirection()}
         />
         <h1>
-          {phoneNumber}
+          {phoneNumber()}
           <div
-            className="auth-number-edit div-button"
+            class="auth-number-edit div-button"
             onClick={handleReturnToAuthPhoneNumber}
             role="button"
             tabIndex={0}
@@ -103,8 +103,8 @@ const AuthCode = ({ auth }: StateProps) => {
             <Icon name="edit" />
           </div>
         </h1>
-        <p className="note">
-          {lang(isCodeViaApp ? 'SentAppCode' : 'LoginJustSentSms', undefined, {
+        <p class="note">
+          {lang(isCodeViaApp() ? 'SentAppCode' : 'LoginJustSentSms', undefined, {
             withNodes: true,
             withMarkdown: true,
           })}
@@ -114,15 +114,17 @@ const AuthCode = ({ auth }: StateProps) => {
           id="sign-in-code"
           label={lang('Code')}
           onInput={onCodeChange}
-          value={code}
-          error={errorKey && lang.withRegular(errorKey)}
+          value={code()}
+          error={errorKey() && lang.withRegular(errorKey())}
           autoComplete="off"
           inputMode="numeric"
         />
-        {isLoading && <Loading />}
+        {isLoading() && <Loading />}
       </div>
     </div>
   );
 };
 
-export default memo(withGlobal((global): Complete<StateProps> => pick(global, ['auth']))(AuthCode));
+const mapStateToProps = (global: GlobalState): Complete<StateProps> => pick(global, ['auth']);
+
+export default AuthCode;

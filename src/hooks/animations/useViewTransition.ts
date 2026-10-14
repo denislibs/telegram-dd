@@ -1,11 +1,10 @@
-import { beginHeavyAnimation, useEffect, useRef, useState } from '../../lib/teact/teact';
+import { beginHeavyAnimation, createEffect, createSignal, requestMutation, requestNextMutation } from 'frameact';
 import { getGlobal } from '../../global';
 
 import type { AnimationLevel } from '../../types';
 import type { VTTypes } from '../../util/animations/viewTransitionTypes';
 
 import { ANIMATION_LEVEL_MED, VT_CLASS_NAME, VT_TYPE_CLASS_PREFIX } from '../../config';
-import { requestMutation, requestNextMutation } from '../../lib/fasterdom/fasterdom';
 import { selectSharedSettings } from '../../global/selectors/sharedState';
 import { IS_VIEW_TRANSITION_SUPPORTED } from '../../util/browser/windowEnvironment';
 import Deferred from '../../util/Deferred';
@@ -35,51 +34,35 @@ export function hasActiveViewTransition(): boolean {
 }
 
 export function useViewTransition(): ViewTransitionController {
-  const parametersRef = useRef<ViewTransitionParameters>();
-  const [transitionState, setTransitionState] = useState<TransitionState>('idle');
+  let parametersRef: ViewTransitionParameters | undefined;
+  const [transitionState, setTransitionState] = createSignal<TransitionState>('idle');
 
-  useEffect(() => {
-    if (transitionState !== 'capturing-old') return;
-    const { domUpdateCallback, types } = parametersRef.current || {};
+  createEffect(
+    () => transitionState(),
+    (transitionState) => {
+      if (transitionState !== 'capturing-old') return;
+      const { domUpdateCallback, types } = parametersRef || {};
 
-    const onHeavyAnimationEnd = beginHeavyAnimation();
-    const transition = document.startViewTransition(async () => {
-      setTransitionState('capturing-new');
-      if (domUpdateCallback) {
-        await domUpdateCallback();
-      }
-      const deferred = new Deferred<void>();
-      requestNextMutation(() => {
-        deferred.resolve();
-      });
-      return deferred.promise;
-    });
-
-    types?.getTypes().forEach((type) => {
-      transition.types?.add(type);
-    });
-
-    transition.finished.then(() => {
-      onHeavyAnimationEnd();
-      setTransitionState('idle');
-      requestMutation(() => {
-        cleanUp(types);
+      const onHeavyAnimationEnd = beginHeavyAnimation();
+      const transition = document.startViewTransition(async () => {
+        setTransitionState('capturing-new');
+        if (domUpdateCallback) {
+          await domUpdateCallback();
+        }
+        const deferred = new Deferred<void>();
+        requestNextMutation(() => {
+          deferred.resolve();
+        });
+        return deferred.promise;
       });
 
-      hasActiveTransition = false;
-    });
+      types?.getTypes().forEach((type) => {
+        transition.types?.add(type);
+      });
 
-    let isReady = false;
-
-    transition.ready
-      .then(() => {
-        isReady = true;
-        setTransitionState('animating');
-      })
-      .catch((e: unknown) => {
-        // eslint-disable-next-line no-console
-        console.error('View transition error', e, types?.getTypes());
-        setTransitionState('skipped');
+      transition.finished.then(() => {
+        onHeavyAnimationEnd();
+        setTransitionState('idle');
         requestMutation(() => {
           cleanUp(types);
         });
@@ -87,13 +70,32 @@ export function useViewTransition(): ViewTransitionController {
         hasActiveTransition = false;
       });
 
-    setTimeout(() => {
-      if (!isReady) {
-        // Skip transition if it's not prepared in time
-        transition.skipTransition();
-      }
-    }, SKIP_TIMEOUT);
-  }, [transitionState]);
+      let isReady = false;
+
+      transition.ready
+        .then(() => {
+          isReady = true;
+          setTransitionState('animating');
+        })
+        .catch((e: unknown) => {
+          // eslint-disable-next-line no-console
+          console.error('View transition error', e, types?.getTypes());
+          setTransitionState('skipped');
+          requestMutation(() => {
+            cleanUp(types);
+          });
+
+          hasActiveTransition = false;
+        });
+
+      setTimeout(() => {
+        if (!isReady) {
+          // Skip transition if it's not prepared in time
+          transition.skipTransition();
+        }
+      }, SKIP_TIMEOUT);
+    },
+  );
 
   function startViewTransition(
     types: VTTypes,
@@ -115,7 +117,7 @@ export function useViewTransition(): ViewTransitionController {
       return;
     }
 
-    parametersRef.current = {
+    parametersRef = {
       domUpdateCallback: updateCallback,
       types,
     };

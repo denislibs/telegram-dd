@@ -1,70 +1,72 @@
-import type { ElementRef } from '../lib/teact/teact';
-import { getIsHeavyAnimating, useEffect } from '../lib/teact/teact';
+import { createEffect, getIsHeavyAnimating, requestMeasure } from 'frameact';
 
 import type { CallbackManager } from '../util/callbacks';
 
-import { requestMeasure } from '../lib/fasterdom/fasterdom';
 import { createCallbackManager } from '../util/callbacks';
 import useLastCallback from './useLastCallback';
 
 const elementObserverMap = new Map<HTMLElement, [IntersectionObserver, CallbackManager]>();
 
+// TODO(codemod): useSharedIntersectionObserver: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useSharedIntersectionObserver(
-  refOrElement: ElementRef<HTMLElement> | HTMLElement | undefined,
+  refOrElement: (el: HTMLElement) => void | HTMLElement | undefined,
   onIntersectionChange: (entry: IntersectionObserverEntry) => void,
   isDisabled = false,
 ) {
-  const onIntersectionChangeLast = useLastCallback(onIntersectionChange);
+  const onIntersectionChangeLast = onIntersectionChange;
 
-  useEffect(() => {
-    const el = refOrElement && 'current' in refOrElement ? refOrElement.current : refOrElement;
-    if (!el || isDisabled) {
-      return undefined;
-    }
+  createEffect(
+    () => [isDisabled, refOrElement],
+    () => {
+      const el = refOrElement && 'current' in refOrElement ? refOrElement.current : refOrElement;
+      if (!el || isDisabled) {
+        return undefined;
+      }
 
-    const entriesAccumulator = new Map<Element, IntersectionObserverEntry>();
+      const entriesAccumulator = new Map<Element, IntersectionObserverEntry>();
 
-    function flush() {
-      for (const entry of entriesAccumulator.values()) {
-        // Ignore updates when element is not properly mounted (`display: none`)
-        if (!(entry.target as HTMLElement).offsetParent) {
-          continue;
+      function flush() {
+        for (const entry of entriesAccumulator.values()) {
+          // Ignore updates when element is not properly mounted (`display: none`)
+          if (!(entry.target as HTMLElement).offsetParent) {
+            continue;
+          }
+
+          onIntersectionChangeLast(entry);
         }
 
-        onIntersectionChangeLast(entry);
+        entriesAccumulator.clear();
       }
 
-      entriesAccumulator.clear();
-    }
+      const callback: IntersectionObserverCallback = ([entry]) => {
+        entriesAccumulator.set(entry.target, entry);
 
-    const callback: IntersectionObserverCallback = ([entry]) => {
-      entriesAccumulator.set(entry.target, entry);
+        if (!getIsHeavyAnimating()) {
+          flush();
+        } else {
+          getIsHeavyAnimating.once(() => {
+            requestMeasure(flush);
+          });
+        }
+      };
 
-      if (!getIsHeavyAnimating()) {
-        flush();
-      } else {
-        getIsHeavyAnimating.once(() => {
-          requestMeasure(flush);
-        });
+      let [observer, callbackManager] = elementObserverMap.get(el) || [undefined, undefined];
+      if (!observer) {
+        callbackManager = createCallbackManager();
+        observer = new IntersectionObserver(callbackManager.runCallbacks);
+        elementObserverMap.set(el, [observer, callbackManager]);
+        observer.observe(el);
       }
-    };
+      callbackManager!.addCallback(callback);
 
-    let [observer, callbackManager] = elementObserverMap.get(el) || [undefined, undefined];
-    if (!observer) {
-      callbackManager = createCallbackManager();
-      observer = new IntersectionObserver(callbackManager.runCallbacks);
-      elementObserverMap.set(el, [observer, callbackManager]);
-      observer.observe(el);
-    }
-    callbackManager!.addCallback(callback);
-
-    return () => {
-      callbackManager!.removeCallback(callback);
-      if (!callbackManager!.hasCallbacks()) {
-        observer.unobserve(el);
-        observer.disconnect();
-        elementObserverMap.delete(el);
-      }
-    };
-  }, [isDisabled, refOrElement]);
+      return () => {
+        callbackManager!.removeCallback(callback);
+        if (!callbackManager!.hasCallbacks()) {
+          observer.unobserve(el);
+          observer.disconnect();
+          elementObserverMap.delete(el);
+        }
+      };
+    },
+  );
 }

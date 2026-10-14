@@ -1,4 +1,4 @@
-import { useEffect, useRef } from '../lib/teact/teact';
+import { onMount } from 'frameact';
 
 import { preloadImage } from '../util/files';
 import useAsync from './useAsync';
@@ -7,32 +7,33 @@ export type UseImageLoaderResult = {
   image?: HTMLImageElement;
 };
 
+// TODO(codemod): useImageLoader: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useImageLoader(file?: Blob): UseImageLoaderResult {
-  const urlRef = useRef<string | undefined>();
+  let urlRef: string | undefined;
 
   const { result: image } = useAsync(() => {
     if (!file) {
       return Promise.resolve(undefined);
     }
 
-    if (urlRef.current) {
-      URL.revokeObjectURL(urlRef.current);
+    if (urlRef) {
+      URL.revokeObjectURL(urlRef);
     }
 
     const url = URL.createObjectURL(file);
-    urlRef.current = url;
+    urlRef = url;
 
     return preloadImage(url);
   }, [file]);
 
-  useEffect(() => {
+  onMount(() => {
     return () => {
-      if (urlRef.current) {
-        URL.revokeObjectURL(urlRef.current);
-        urlRef.current = undefined;
+      if (urlRef) {
+        URL.revokeObjectURL(urlRef);
+        urlRef = undefined;
       }
     };
-  }, []);
+  });
 
   return { image };
 }

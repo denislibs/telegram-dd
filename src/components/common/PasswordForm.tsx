@@ -1,8 +1,8 @@
 import type { ChangeEvent } from 'react';
-import { memo, useEffect, useRef, useState } from '../../lib/teact/teact';
+import { createEffect, createSignal, requestMutation } from 'frameact';
+import { mergeProps } from 'frameact/dom';
 
 import { MIN_PASSWORD_LENGTH } from '../../config';
-import { requestMutation } from '../../lib/fasterdom/fasterdom';
 import { IS_TAURI } from '../../util/browser/globalEnvironment';
 import { IS_TOUCH_ENV } from '../../util/browser/windowEnvironment';
 import buildClassName from '../../util/buildClassName';
@@ -35,106 +35,98 @@ type OwnProps = {
   onSubmit?: (password: string) => void;
 };
 
-const PasswordForm = ({
-  isLoading = false,
-  isPasswordVisible,
-  error,
-  hint,
-  placeholder,
-  submitLabel,
-  description,
-  className,
-  shouldShowSubmit,
-  shouldResetValue,
-  shouldOfferPasskey,
-  shouldDisablePasswordManager = false,
-  noRipple = false,
-  onClearError,
-  onChangePasswordVisibility,
-  onInputChange,
-  onSubmit,
-}: OwnProps) => {
-  const inputRef = useRef<HTMLInputElement>();
+const PasswordForm = (rawProps: OwnProps) => {
+  const props = mergeProps(
+    { isLoading: false, shouldDisablePasswordManager: false, noRipple: false },
+    rawProps,
+  ) as OwnProps & Required<Pick<OwnProps, 'isLoading' | 'shouldDisablePasswordManager' | 'noRipple'>>;
+  let inputRef!: HTMLInputElement;
 
   const lang = useLang();
 
   const { isMobile } = useAppLayout();
-  const [password, setPassword] = useState('');
-  const [canSubmit, setCanSubmit] = useState(false);
+  const [password, setPassword] = createSignal('');
+  const [canSubmit, setCanSubmit] = createSignal(false);
   const focusDelayTimeoutMs = isMobile ? 550 : 400;
 
-  useEffect(() => {
-    if (shouldResetValue) {
-      setPassword('');
-      setCanSubmit(false);
-    }
-  }, [shouldResetValue]);
+  createEffect(
+    () => props.shouldResetValue,
+    () => {
+      if (props.shouldResetValue) {
+        setPassword('');
+        setCanSubmit(false);
+      }
+    },
+  );
 
   useTimeout(() => {
     if (!IS_TOUCH_ENV) {
-      inputRef.current!.focus();
+      inputRef!.focus();
     }
   }, focusDelayTimeoutMs);
 
-  useEffect(() => {
-    if (error) {
-      requestMutation(() => {
-        inputRef.current!.focus();
-        inputRef.current!.select();
-      });
-    }
-  }, [error]);
+  createEffect(
+    () => props.error,
+    () => {
+      if (props.error) {
+        requestMutation(() => {
+          inputRef!.focus();
+          inputRef!.select();
+        });
+      }
+    },
+  );
 
   function onPasswordChange(e: ChangeEvent<HTMLInputElement>) {
-    if (error) {
-      onClearError();
+    if (props.error) {
+      props.onClearError();
     }
 
     const { target } = e;
     setPassword(target.value);
     setCanSubmit(target.value.length >= MIN_PASSWORD_LENGTH);
-    if (onInputChange) {
-      onInputChange(target.value);
+    if (props.onInputChange) {
+      props.onInputChange(target.value);
     }
   }
 
   function togglePasswordVisibility() {
-    onChangePasswordVisibility(!isPasswordVisible);
+    props.onChangePasswordVisibility(!props.isPasswordVisible);
   }
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (isLoading) {
+    if (props.isLoading) {
       return;
     }
 
-    if (canSubmit) {
-      onSubmit!(password);
+    if (canSubmit()) {
+      props.onSubmit!(password());
     }
   }
 
   function renderFakeInput() {
-    return <input type="password" id="prevent_autofill" autoComplete="off" className="visually-hidden" tabIndex={-2} />;
+    return <input type="password" id="prevent_autofill" autoComplete="off" class="visually-hidden" tabIndex={-2} />;
   }
 
   return (
-    <form className={className} action="" onSubmit={onSubmit ? handleSubmit : stopEvent} autoComplete="off">
+    <form class={props.className} action="" onSubmit={props.onSubmit ? handleSubmit : stopEvent} autoComplete="off">
       <div
-        className={buildClassName('input-group password-input', password && 'touched', error && 'error')}
+        class={buildClassName('input-group password-input', password() && 'touched', props.error && 'error')}
         dir={lang.isRtl ? 'rtl' : undefined}
       >
-        {shouldDisablePasswordManager && renderFakeInput()}
+        {props.shouldDisablePasswordManager && renderFakeInput()}
         <input
           ref={inputRef}
-          className="form-control"
-          type={isPasswordVisible ? 'text' : 'password'}
+          class="form-control"
+          type={props.isPasswordVisible ? 'text' : 'password'}
           id="sign-in-password"
-          value={password || ''}
+          value={password() || ''}
           autoComplete={
-            shouldOfferPasskey
+            props.shouldOfferPasskey
               ? 'one-time-code webauthn'
-              : shouldDisablePasswordManager
+              : props.shouldDisablePasswordManager
                 ? 'one-time-code'
                 : 'current-password'
           }
@@ -143,26 +135,26 @@ const PasswordForm = ({
           maxLength={256}
           dir="auto"
         />
-        <label>{error || hint || placeholder || lang('PasswordFormPlaceholder')}</label>
+        <label>{props.error || props.hint || props.placeholder || lang('PasswordFormPlaceholder')}</label>
         <div
-          className="div-button toggle-password"
+          class="div-button toggle-password"
           onClick={togglePasswordVisibility}
           role="button"
           tabIndex={0}
           title={lang('AriaPasswordToggle')}
           aria-label={lang('AriaPasswordToggle')}
         >
-          <Icon name={isPasswordVisible ? 'eye' : 'eye-crossed'} />
+          <Icon name={props.isPasswordVisible ? 'eye' : 'eye-crossed'} />
         </div>
       </div>
-      {description && <p className="description">{description}</p>}
-      {onSubmit && (canSubmit || shouldShowSubmit) && (
-        <Button type="submit" ripple={!noRipple} isLoading={isLoading} disabled={!canSubmit}>
-          {submitLabel || lang('PasswordFormSubmit')}
+      {props.description && <p class="description">{props.description}</p>}
+      {props.onSubmit && (canSubmit() || props.shouldShowSubmit) && (
+        <Button type="submit" ripple={!props.noRipple} isLoading={props.isLoading} disabled={!canSubmit()}>
+          {props.submitLabel || lang('PasswordFormSubmit')}
         </Button>
       )}
     </form>
   );
 };
 
-export default memo(PasswordForm);
+export default PasswordForm;

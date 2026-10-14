@@ -1,14 +1,17 @@
+import { lazy, Show } from 'frameact/dom';
+
 import type { OwnProps } from './LockScreen';
 
-import { Bundles } from '../../util/moduleLoader';
+import { Bundles, loadBundle } from '../../util/moduleLoader';
 
-import useModuleLoader from '../../hooks/useModuleLoader';
+const LockScreen = lazy(() => loadBundle(Bundles.Main).then((m) => ({ default: m.LockScreen })));
 
 const LockScreenAsync = (props: OwnProps) => {
-  const { isLocked } = props;
-  const LockScreen = useModuleLoader(Bundles.Main, 'LockScreen', !isLocked);
-
-  return LockScreen ? <LockScreen {...props} /> : undefined;
+  return (
+    <Show when={props.isLocked}>
+      <LockScreen {...props} />
+    </Show>
+  );
 };
 
 export default LockScreenAsync;

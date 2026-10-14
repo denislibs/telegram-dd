@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from '../lib/teact/teact';
+import { createEffect, createSignal } from 'frameact';
 
 import { areDeepEqual } from '../util/areDeepEqual';
 import { isSafariPatchInProgress } from '../util/patchSafariProgressiveAudio';
@@ -18,22 +18,21 @@ const BUFFERING_EVENTS = ['play', 'loadeddata', 'playing', 'loadstart', 'pause',
  */
 export type BufferedRange = { start: number; end: number };
 
+// TODO(codemod): useBuffering: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 const useBuffering = (
   noInitiallyBuffered = false,
   onTimeUpdate?: AnyToVoidFunction,
   onBroken?: AnyToVoidFunction,
   mediaElement?: HTMLMediaElement,
 ) => {
-  const [isBuffered, setIsBuffered] = useState(!noInitiallyBuffered);
-  const [isReady, setIsReady] = useState(false);
-  const [bufferedProgress, setBufferedProgress] = useState(0);
-  const [bufferedRanges, setBufferedRanges] = useState<BufferedRange[]>([]);
+  const [isBuffered, setIsBuffered] = createSignal(!noInitiallyBuffered);
+  const [isReady, setIsReady] = createSignal(false);
+  const [bufferedProgress, setBufferedProgress] = createSignal(0);
+  const [bufferedRanges, setBufferedRanges] = createSignal<BufferedRange[]>([]);
 
-  const setIsBufferedDebounced = useMemo(() => {
-    return debounce(setIsBuffered, DEBOUNCE, false, true);
-  }, []);
+  const setIsBufferedDebounced = debounce(setIsBuffered, DEBOUNCE, false, true);
 
-  const handleBuffering = useLastCallback<BufferingEvent>((e) => {
+  const handleBuffering = (e) => {
     const media = e.currentTarget as HTMLMediaElement;
 
     if (media.duration < MIN_ALLOWED_MEDIA_DURATION) {
@@ -58,18 +57,21 @@ const useBuffering = (
       setIsBufferedDebounced(media.readyState >= MIN_READY_STATE || media.currentTime > 0);
       setIsReady((current) => current || media.readyState > MIN_READY_STATE);
     }
-  });
+  };
 
-  useEffect(() => {
-    if (!mediaElement) return undefined;
+  createEffect(
+    () => [mediaElement, handleBuffering],
+    () => {
+      if (!mediaElement) return undefined;
 
-    const listener = handleBuffering as EventListener;
-    BUFFERING_EVENTS.forEach((event) => mediaElement.addEventListener(event, listener));
+      const listener = handleBuffering as EventListener;
+      BUFFERING_EVENTS.forEach((event) => mediaElement.addEventListener(event, listener));
 
-    return () => {
-      BUFFERING_EVENTS.forEach((event) => mediaElement.removeEventListener(event, listener));
-    };
-  }, [mediaElement, handleBuffering]);
+      return () => {
+        BUFFERING_EVENTS.forEach((event) => mediaElement.removeEventListener(event, listener));
+      };
+    },
+  );
 
   const bufferingHandlers = {
     onPLay: handleBuffering,

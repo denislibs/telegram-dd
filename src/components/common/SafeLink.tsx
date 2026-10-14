@@ -1,4 +1,6 @@
-import type { TeactNode } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import { mergeProps, Show } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
 import { getActions } from '../../global';
 
 import type { ThreadId } from '../../types';
@@ -9,13 +11,11 @@ import { ensureProtocol, getUnicodeUrl, isSuspiciousUrl } from '../../util/brows
 import { MouseButton } from '../../util/browser/windowEnvironment';
 import buildClassName from '../../util/buildClassName';
 
-import useLastCallback from '../../hooks/useLastCallback';
-
 type OwnProps = {
   url?: string;
   text: string;
   className?: string;
-  children?: TeactNode;
+  children?: JSX.Element;
   isRtl?: boolean;
   shouldSkipModal?: boolean;
   tryInstantView?: boolean;
@@ -30,67 +30,58 @@ type OwnProps = {
     | `${ApiMessageEntityTypes.Url}`;
 };
 
-const SafeLink = ({
-  url,
-  text,
-  className,
-  children,
-  isRtl,
-  shouldSkipModal,
-  tryInstantView,
-  previewId,
-  chatId,
-  messageId,
-  threadId,
-  entityType = ApiMessageEntityTypes.Url,
-}: OwnProps) => {
+const SafeLink = (rawProps: OwnProps) => {
+  const props = mergeProps({ entityType: ApiMessageEntityTypes.Url }, rawProps) as OwnProps &
+    Required<Pick<OwnProps, 'entityType'>>;
   const { openUrl } = getActions();
 
-  const content = children || text;
-  const isRegularLink = url === text;
+  const content = createMemo(() => props.children || props.text);
+  const isRegularLink = createMemo(() => props.url === props.text);
 
-  const handleClick = useLastCallback((e: React.MouseEvent<HTMLAnchorElement, MouseEvent>) => {
-    if (!url) return true;
+  const handleClick = (e: React.MouseEvent<HTMLAnchorElement, MouseEvent>) => {
+    if (!props.url) return true;
     if (e.button !== MouseButton.Main && e.button !== MouseButton.Auxiliary) return true;
 
     e.preventDefault();
 
     const shouldOpenInNewTab = e.button === MouseButton.Auxiliary || e.ctrlKey || e.metaKey || e.shiftKey;
-    const isTrustedLink = isRegularLink && !isSuspiciousUrl(url);
+    const isTrustedLink = isRegularLink() && !isSuspiciousUrl(props.url);
     const linkContext: LinkContext | undefined =
-      chatId && messageId ? { type: 'message', chatId, threadId, messageId } : undefined;
+      props.chatId && props.messageId
+        ? { type: 'message', chatId: props.chatId, threadId: props.threadId, messageId: props.messageId }
+        : undefined;
     openUrl({
-      url,
-      shouldSkipModal: shouldSkipModal || isTrustedLink,
+      url: props.url,
+      shouldSkipModal: props.shouldSkipModal || isTrustedLink,
       ignoreDeepLinks: shouldOpenInNewTab,
-      tryInstant: shouldOpenInNewTab ? false : tryInstantView,
-      previewId,
+      tryInstant: shouldOpenInNewTab ? false : props.tryInstantView,
+      previewId: props.previewId,
       linkContext,
     });
 
     return false;
-  });
+  };
 
-  if (!url) {
-    return undefined;
-  }
-
-  const classNames = buildClassName(className || 'text-entity-link', isRegularLink && 'word-break-all');
+  const classNames = createMemo(() =>
+    buildClassName(props.className || 'text-entity-link', isRegularLink() && 'word-break-all'),
+  );
 
   return (
-    <a
-      href={ensureProtocol(url)}
-      title={getUnicodeUrl(url)}
-      target={IS_TAURI ? '_self' : '_blank'}
-      rel="noopener noreferrer"
-      className={classNames}
-      onClick={handleClick}
-      onAuxClick={handleClick}
-      dir={isRtl ? 'rtl' : 'auto'}
-      data-entity-type={entityType}
-    >
-      {content}
-    </a>
+    <Show when={props.url}>
+      <a
+        href={ensureProtocol(props.url)}
+        title={getUnicodeUrl(props.url)}
+        target={IS_TAURI ? '_self' : '_blank'}
+        rel="noopener noreferrer"
+        class={classNames()}
+        onClick={handleClick}
+        onAuxClick={handleClick}
+        dir={props.isRtl ? 'rtl' : 'auto'}
+        data-entity-type={props.entityType}
+      >
+        {content()}
+      </a>
+    </Show>
   );
 };
 

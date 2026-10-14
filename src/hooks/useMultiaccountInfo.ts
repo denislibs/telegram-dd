@@ -1,4 +1,4 @@
-import { useEffect, useState } from '../lib/teact/teact';
+import { createEffect, createMemo, createSignal, onMount } from 'frameact';
 import { getGlobal } from '../global';
 
 import type { ApiUser } from '../api/types';
@@ -20,14 +20,15 @@ const LOCAL_STORAGE_LISTENING_THROTTLE = 1000;
 const REFRESH_INTERVAL = 1000 * 60;
 const PREVIEW_SIZE = 72;
 
+// TODO(codemod): useMultiaccountInfo: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useMultiaccountInfo(currentUser?: ApiUser) {
-  const isUpdater = Boolean(currentUser) && getGlobal().auth.rememberMe;
+  const isUpdater = createMemo(() => Boolean(currentUser) && getGlobal().auth.rememberMe);
   const isSynced = useSelector(selectIsSynced);
 
-  const [accountsInfo, setAccountsInfo] = useState(() => getAccountsInfo());
+  const [accountsInfo, setAccountsInfo] = createSignal((() => getAccountsInfo())());
 
   const avatarHash = currentUser && getChatAvatarHash(currentUser);
-  const avatarUrl = useMedia(avatarHash, !isUpdater);
+  const avatarUrl = useMedia(avatarHash, () => !isUpdater());
 
   const refresh = useThrottledCallback(
     () => {
@@ -37,34 +38,37 @@ export default function useMultiaccountInfo(currentUser?: ApiUser) {
     LOCAL_STORAGE_LISTENING_THROTTLE,
   );
 
-  useEffect(() => {
-    if (!isUpdater || !isSynced) return;
-    const color = currentUser.color?.type === 'regular' ? currentUser.color.color : undefined;
-    storeAccountData(ACCOUNT_SLOT, {
-      userId: currentUser.id,
-      firstName: currentUser.firstName,
-      lastName: currentUser.lastName,
-      emojiStatusId: currentUser.emojiStatus?.documentId,
-      color,
-      isPremium: currentUser.isPremium,
-      phone: currentUser.phoneNumber,
-    });
+  createEffect(
+    () => [
+      isUpdater(),
+      currentUser?.emojiStatus?.documentId,
+      currentUser?.firstName,
+      currentUser?.id,
+      currentUser?.lastName,
+      currentUser?.color,
+      currentUser?.isPremium,
+      currentUser?.phoneNumber,
+      refresh,
+      isSynced(),
+    ],
+    ([isUpdater, , , , , , , , , isSynced]) => {
+      if (!isUpdater || !isSynced) return;
+      const color = currentUser.color?.type === 'regular' ? currentUser.color.color : undefined;
+      storeAccountData(ACCOUNT_SLOT, {
+        userId: currentUser.id,
+        firstName: currentUser.firstName,
+        lastName: currentUser.lastName,
+        emojiStatusId: currentUser.emojiStatus?.documentId,
+        color,
+        isPremium: currentUser.isPremium,
+        phone: currentUser.phoneNumber,
+      });
 
-    refresh();
-  }, [
-    isUpdater,
-    currentUser?.emojiStatus?.documentId,
-    currentUser?.firstName,
-    currentUser?.id,
-    currentUser?.lastName,
-    currentUser?.color,
-    currentUser?.isPremium,
-    currentUser?.phoneNumber,
-    refresh,
-    isSynced,
-  ]);
+      refresh();
+    },
+  );
 
-  const updateAvatar = useLastCallback(async (url: string, abortSignal?: AbortSignal) => {
+  const updateAvatar = async (url: string, abortSignal?: AbortSignal) => {
     const resizedAvatar = await resizeImage(url, PREVIEW_SIZE, PREVIEW_SIZE);
     const img = await preloadImage(resizedAvatar);
     if (abortSignal?.aborted) return;
@@ -77,21 +81,24 @@ export default function useMultiaccountInfo(currentUser?: ApiUser) {
     storeAccountData(ACCOUNT_SLOT, { avatarUri: dataUrl });
 
     refresh();
-  });
+  };
 
-  useEffect(() => {
-    if (!avatarUrl || !isUpdater || !isSynced) return undefined;
-    const controller = new AbortController();
-    updateAvatar(avatarUrl, controller.signal);
+  createEffect(
+    () => [avatarUrl, isSynced(), isUpdater()],
+    ([, isSynced, isUpdater]) => {
+      if (!avatarUrl || !isUpdater || !isSynced) return undefined;
+      const controller = new AbortController();
+      updateAvatar(avatarUrl, controller.signal);
 
-    return () => {
-      controller.abort();
-    };
-  }, [avatarUrl, isSynced, isUpdater]);
+      return () => {
+        controller.abort();
+      };
+    },
+  );
 
   // Storage event only thrown when other tabs change the storage
   useInterval(refresh, REFRESH_INTERVAL);
-  useEffect(() => {
+  onMount(() => {
     function handleStorageChange(e: StorageEvent) {
       if (!e.key?.startsWith(SESSION_ACCOUNT_PREFIX)) return;
       refresh();
@@ -102,9 +109,9 @@ export default function useMultiaccountInfo(currentUser?: ApiUser) {
     return () => {
       window.removeEventListener('storage', handleStorageChange);
     };
-  }, [refresh]);
+  });
 
-  useEffect(() => addSessionStoreChangeListener(refresh), [refresh]);
+  onMount(() => addSessionStoreChangeListener(refresh));
 
   return accountsInfo;
 }

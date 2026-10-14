@@ -1,10 +1,9 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from '../../lib/teact/teact';
+import { createEffect, createMemo, createMutationEffect, createSignal, requestMeasure } from 'frameact';
 import { getActions, withGlobal } from '../../global';
 
 import type { ApiCountryCode } from '../../api/types';
 import type { GlobalState } from '../../global/types';
 
-import { requestMeasure } from '../../lib/fasterdom/fasterdom';
 import { IS_SAFARI, IS_TOUCH_ENV } from '../../util/browser/windowEnvironment';
 import { preloadImage } from '../../util/files';
 import preloadFonts from '../../util/fonts';
@@ -17,7 +16,6 @@ import { getSuggestedLanguage } from './helpers/getSuggestedLanguage';
 import useFlag from '../../hooks/useFlag';
 import useLang from '../../hooks/useLang';
 import useLangString from '../../hooks/useLangString';
-import useLastCallback from '../../hooks/useLastCallback';
 import useMultiaccountInfo from '../../hooks/useMultiaccountInfo';
 
 import Button from '../ui/Button';
@@ -40,7 +38,8 @@ const MIN_NUMBER_LENGTH = 7;
 
 let isPreloadInitiated = false;
 
-const AuthPhoneNumber = ({ auth, connectionState, phoneCodeList, language, isTestServer }: StateProps) => {
+const AuthPhoneNumber = () => {
+  const props = withGlobal({}, mapStateToProps);
   const {
     setAuthPhoneNumber,
     setAuthRememberMe,
@@ -52,94 +51,101 @@ const AuthPhoneNumber = ({ auth, connectionState, phoneCodeList, language, isTes
     loginWithPasskey,
   } = getActions();
 
-  const {
-    state,
-    phoneNumber: authPhoneNumber,
-    nearestCountry,
-    isLoading: authIsLoading,
-    errorKey,
-    rememberMe,
-    isLoadingQrCode,
-    passkeyOption,
-  } = auth;
-
+  const state = () => props.auth.state;
+  const authPhoneNumber = () => props.auth.phoneNumber;
+  const nearestCountry = () => props.auth.nearestCountry;
+  const authIsLoading = () => props.auth.isLoading;
+  const errorKey = () => props.auth.errorKey;
+  const rememberMe = () => props.auth.rememberMe;
+  const isLoadingQrCode = () => props.auth.isLoadingQrCode;
+  const passkeyOption = () => props.auth.passkeyOption;
   const lang = useLang();
-  const inputRef = useRef<HTMLInputElement>();
+  let inputRef!: HTMLInputElement;
   const suggestedLanguage = getSuggestedLanguage();
 
-  const isConnected = connectionState === 'connectionStateReady';
+  const isConnected = createMemo(() => props.connectionState === 'connectionStateReady');
   const continueText = useLangString('AuthContinueOnThisLanguage', suggestedLanguage);
-  const [country, setCountry] = useState<ApiCountryCode | undefined>();
-  const [phoneNumber, setPhoneNumber] = useState<string | undefined>();
-  const [isTouched, setIsTouched] = useState(false);
-  const [lastSelection, setLastSelection] = useState<[number, number] | undefined>();
+  const [country, setCountry] = createSignal<ApiCountryCode | undefined>(undefined);
+  const [phoneNumber, setPhoneNumber] = createSignal<string | undefined>(undefined);
+  const [isTouched, setIsTouched] = createSignal(false);
+  const [lastSelection, setLastSelection] = createSignal<[number, number] | undefined>(undefined);
   const [isLoading, markIsLoading, unmarkIsLoading] = useFlag();
 
   const accountsInfo = useMultiaccountInfo();
   const hasActiveAccount = Object.values(accountsInfo).length > 0;
-  const phoneNumberSlots = useMemo(
-    () =>
-      Object.entries(accountsInfo)
-        .filter(([, info]) => info.isTest === isTestServer)
-        .reduce(
-          (acc, [key, { phone }]) => {
-            if (phone) acc[phone] = Number(key);
-            return acc;
-          },
-          {} as Record<string, number>,
-        ),
-    [accountsInfo, isTestServer],
+  const phoneNumberSlots = createMemo(() =>
+    Object.entries(accountsInfo)
+      .filter(([, info]) => info.isTest === props.isTestServer)
+      .reduce(
+        (acc, [key, { phone }]) => {
+          if (phone) acc[phone] = Number(key);
+          return acc;
+        },
+        {} as Record<string, number>,
+      ),
   );
 
-  const fullNumber = country ? `+${country.countryCode} ${phoneNumber || ''}` : phoneNumber;
-  const canSubmit = fullNumber && fullNumber.replace(/[^\d]+/g, '').length >= MIN_NUMBER_LENGTH;
+  const fullNumber = createMemo(() => (country() ? `+${country().countryCode} ${phoneNumber() || ''}` : phoneNumber()));
+  const canSubmit = createMemo(() => fullNumber() && fullNumber().replace(/[^\d]+/g, '').length >= MIN_NUMBER_LENGTH);
 
-  useEffect(() => {
-    if (!IS_TOUCH_ENV) {
-      inputRef.current!.focus();
-    }
-  }, [country]);
+  createEffect(
+    () => country(),
+    (country) => {
+      if (!IS_TOUCH_ENV) {
+        inputRef!.focus();
+      }
+    },
+  );
 
-  useEffect(() => {
-    if (isConnected && !nearestCountry) {
-      loadNearestCountry();
-    }
-  }, [isConnected, nearestCountry]);
+  createEffect(
+    () => [isConnected(), nearestCountry()],
+    ([isConnected, nearestCountry]) => {
+      if (isConnected && !nearestCountry) {
+        loadNearestCountry();
+      }
+    },
+  );
 
-  useEffect(() => {
-    if (isConnected) {
-      loadCountryList({ langCode: language });
-    }
-  }, [isConnected, language]);
+  createEffect(
+    () => [isConnected(), props.language],
+    ([isConnected]) => {
+      if (isConnected) {
+        loadCountryList({ langCode: props.language });
+      }
+    },
+  );
 
-  useEffect(() => {
-    if (nearestCountry && phoneCodeList && !country && !isTouched) {
-      setCountry(getCountryCodeByIso(phoneCodeList, nearestCountry));
-    }
-  }, [country, nearestCountry, isTouched, phoneCodeList]);
+  createEffect(
+    () => [country(), nearestCountry(), isTouched(), props.phoneCodeList],
+    ([country, nearestCountry, isTouched]) => {
+      if (nearestCountry && props.phoneCodeList && !country && !isTouched) {
+        setCountry(getCountryCodeByIso(props.phoneCodeList, nearestCountry));
+      }
+    },
+  );
 
-  const parseFullNumber = useLastCallback((newFullNumber: string) => {
+  const parseFullNumber = (newFullNumber: string) => {
     if (!newFullNumber.length) {
       setPhoneNumber('');
     }
 
-    const suggestedCountry = phoneCodeList && getCountryFromPhoneNumber(phoneCodeList, newFullNumber);
+    const suggestedCountry = props.phoneCodeList && getCountryFromPhoneNumber(props.phoneCodeList, newFullNumber);
 
     // Any phone numbers should be allowed, in some cases ignoring formatting
     const selectedCountry =
-      !country ||
-      (suggestedCountry && suggestedCountry.iso2 !== country.iso2) ||
+      !country() ||
+      (suggestedCountry && suggestedCountry.iso2 !== country().iso2) ||
       (!suggestedCountry && newFullNumber.length)
         ? suggestedCountry
-        : country;
+        : country();
 
-    if (!country || !selectedCountry || (selectedCountry && selectedCountry.iso2 !== country.iso2)) {
+    if (!country() || !selectedCountry || (selectedCountry && selectedCountry.iso2 !== country().iso2)) {
       setCountry(selectedCountry);
     }
     setPhoneNumber(formatPhoneNumber(newFullNumber, selectedCountry));
-  });
+  };
 
-  const handleLangChange = useLastCallback(() => {
+  const handleLangChange = () => {
     markIsLoading();
 
     void oldSetLanguage(suggestedLanguage, () => {
@@ -147,39 +153,45 @@ const AuthPhoneNumber = ({ auth, connectionState, phoneCodeList, language, isTes
 
       setSharedSettingOption({ language: suggestedLanguage });
     });
-  });
+  };
 
-  useEffect(() => {
-    if (phoneNumber === undefined && authPhoneNumber) {
-      parseFullNumber(authPhoneNumber);
-    }
-  }, [authPhoneNumber, phoneNumber, parseFullNumber]);
+  createEffect(
+    () => [authPhoneNumber(), phoneNumber(), parseFullNumber],
+    ([authPhoneNumber, phoneNumber]) => {
+      if (phoneNumber === undefined && authPhoneNumber) {
+        parseFullNumber(authPhoneNumber);
+      }
+    },
+  );
 
-  useLayoutEffect(() => {
-    if (inputRef.current && lastSelection) {
-      inputRef.current.setSelectionRange(...lastSelection);
-    }
-  }, [lastSelection]);
+  createMutationEffect(
+    () => lastSelection(),
+    (lastSelection) => {
+      if (inputRef && lastSelection) {
+        inputRef.setSelectionRange(...lastSelection);
+      }
+    },
+  );
 
-  const isJustPastedRef = useRef(false);
-  const handlePaste = useLastCallback(() => {
-    isJustPastedRef.current = true;
+  let isJustPastedRef = false;
+  const handlePaste = () => {
+    isJustPastedRef = true;
     requestMeasure(() => {
-      isJustPastedRef.current = false;
+      isJustPastedRef = false;
     });
-  });
+  };
 
-  const handleBackNavigation = useLastCallback(() => {
+  const handleBackNavigation = () => {
     navigateBack();
-  });
+  };
 
-  const handleCountryChange = useLastCallback((value: ApiCountryCode) => {
+  const handleCountryChange = (value: ApiCountryCode) => {
     setCountry(value);
     setPhoneNumber('');
-  });
+  };
 
-  const handlePhoneNumberChange = useLastCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    if (errorKey) {
+  const handlePhoneNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (errorKey()) {
       clearAuthErrorKey();
     }
 
@@ -199,47 +211,47 @@ const AuthPhoneNumber = ({ auth, connectionState, phoneCodeList, language, isTes
 
     const shouldFixSafariAutoComplete =
       IS_SAFARI &&
-      country &&
-      fullNumber !== undefined &&
-      value.length - fullNumber.length > 1 &&
-      !isJustPastedRef.current;
-    parseFullNumber(shouldFixSafariAutoComplete ? `${country.countryCode} ${value}` : value);
-  });
+      country() &&
+      fullNumber() !== undefined &&
+      value.length - fullNumber().length > 1 &&
+      !isJustPastedRef;
+    parseFullNumber(shouldFixSafariAutoComplete ? `${country().countryCode} ${value}` : value);
+  };
 
-  const handleKeepSessionChange = useLastCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleKeepSessionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setAuthRememberMe({ value: e.target.checked });
-  });
+  };
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (authIsLoading) {
+    if (authIsLoading()) {
       return;
     }
 
-    const adaptedPhoneNumber = fullNumber?.replace(/[^\d]/g, '');
-    if (adaptedPhoneNumber && phoneNumberSlots[adaptedPhoneNumber]) {
-      window.location.replace(getAccountSlotUrl(phoneNumberSlots[adaptedPhoneNumber]));
+    const adaptedPhoneNumber = fullNumber()?.replace(/[^\d]/g, '');
+    if (adaptedPhoneNumber && phoneNumberSlots()[adaptedPhoneNumber]) {
+      window.location.replace(getAccountSlotUrl(phoneNumberSlots()[adaptedPhoneNumber]));
       return;
     }
 
-    if (canSubmit) {
-      setAuthPhoneNumber({ phoneNumber: fullNumber });
+    if (canSubmit()) {
+      setAuthPhoneNumber({ phoneNumber: fullNumber() });
     }
   }
 
-  const handleGoToAuthQrCode = useLastCallback(() => {
+  const handleGoToAuthQrCode = () => {
     goToAuthQrCode();
-  });
+  };
 
-  const handleLoginWithPasskey = useLastCallback(() => {
+  const handleLoginWithPasskey = () => {
     loginWithPasskey();
-  });
+  };
 
-  const isAuthReady = state === 'authorizationStateWaitPhoneNumber';
+  const isAuthReady = createMemo(() => state() === 'authorizationStateWaitPhoneNumber');
 
   return (
-    <div id="auth-phone-number-form" className="custom-scroll">
+    <div id="auth-phone-number-form" class="custom-scroll">
       {hasActiveAccount && (
         <Button
           size="smaller"
@@ -250,23 +262,23 @@ const AuthPhoneNumber = ({ auth, connectionState, phoneCodeList, language, isTes
           onClick={handleBackNavigation}
         />
       )}
-      <div className="auth-form">
+      <div class="auth-form">
         <div id="logo" />
         <h1>{lang('AuthTitle')}</h1>
-        <p className="note">{lang('StartText')}</p>
-        <form className="form" action="" onSubmit={handleSubmit}>
+        <p class="note">{lang('StartText')}</p>
+        <form class="form" action="" onSubmit={handleSubmit}>
           <CountryCodeInput
             id="sign-in-phone-code"
-            value={country}
-            isLoading={!nearestCountry && !country}
+            value={country()}
+            isLoading={!nearestCountry() && !country()}
             onChange={handleCountryChange}
           />
           <InputText
             ref={inputRef}
             id="sign-in-phone-number"
             label={lang('LoginPhonePlaceholder')}
-            value={fullNumber}
-            error={errorKey && lang.withRegular(errorKey)}
+            value={fullNumber()}
+            error={errorKey() && lang.withRegular(errorKey())}
             inputMode="tel"
             onChange={handlePhoneNumberChange}
             onPaste={IS_SAFARI ? handlePaste : undefined}
@@ -274,29 +286,29 @@ const AuthPhoneNumber = ({ auth, connectionState, phoneCodeList, language, isTes
           <Checkbox
             id="sign-in-keep-session"
             label={lang('AuthKeepSignedIn')}
-            checked={Boolean(rememberMe)}
+            checked={Boolean(rememberMe())}
             onChange={handleKeepSessionChange}
           />
-          {canSubmit &&
-            (isAuthReady ? (
-              <Button className="auth-button" type="submit" ripple isLoading={authIsLoading}>
+          {canSubmit() &&
+            (isAuthReady() ? (
+              <Button className="auth-button" type="submit" ripple isLoading={authIsLoading()}>
                 {lang('LoginNext')}
               </Button>
             ) : (
               <Loading />
             ))}
-          {isAuthReady && (
-            <Button className="auth-button" isText ripple isLoading={isLoadingQrCode} onClick={handleGoToAuthQrCode}>
+          {isAuthReady() && (
+            <Button className="auth-button" isText ripple isLoading={isLoadingQrCode()} onClick={handleGoToAuthQrCode}>
               {lang('LoginQRLogin')}
             </Button>
           )}
-          {passkeyOption && (
+          {passkeyOption() && (
             <Button className="auth-button" isText onClick={handleLoginWithPasskey}>
               {lang('LoginPasskey')}
             </Button>
           )}
-          {suggestedLanguage && suggestedLanguage !== language && continueText && (
-            <Button className="auth-button" isText isLoading={isLoading} onClick={handleLangChange}>
+          {suggestedLanguage && suggestedLanguage !== props.language && continueText && (
+            <Button className="auth-button" isText isLoading={isLoading()} onClick={handleLangChange}>
               {continueText}
             </Button>
           )}
@@ -306,24 +318,24 @@ const AuthPhoneNumber = ({ auth, connectionState, phoneCodeList, language, isTes
   );
 };
 
-export default memo(
-  withGlobal((global): Complete<StateProps> => {
-    const {
-      sharedState: {
-        settings: { language },
-      },
-      countryList: { phoneCodes: phoneCodeList },
-      config,
-      auth,
-      connectionState,
-    } = global;
+const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
+  const {
+    sharedState: {
+      settings: { language },
+    },
+    countryList: { phoneCodes: phoneCodeList },
+    config,
+    auth,
+    connectionState,
+  } = global;
 
-    return {
-      auth,
-      connectionState,
-      language,
-      phoneCodeList,
-      isTestServer: config?.isTestServer,
-    };
-  })(AuthPhoneNumber),
-);
+  return {
+    auth,
+    connectionState,
+    language,
+    phoneCodeList,
+    isTestServer: config?.isTestServer,
+  };
+};
+
+export default AuthPhoneNumber;

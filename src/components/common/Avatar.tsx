@@ -1,10 +1,11 @@
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import type { ElementRef, TeactNode } from '../../lib/teact/teact';
-import { memo, useMemo, useRef } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import { mergeProps } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
 import { getActions } from '../../global';
+import { createMediaTransition } from '../../lib/kit';
 
 import type { ApiPeer, ApiPhoto, ApiWebDocument } from '../../api/types';
-import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 import type { CustomPeer, StoryViewerOrigin } from '../../types';
 import { ApiMediaFormat } from '../../api/types';
 
@@ -31,9 +32,7 @@ import { REM } from './helpers/mediaDimensions';
 import renderText from './helpers/renderText';
 
 import { useFastClick } from '../../hooks/useFastClick';
-import useLastCallback from '../../hooks/useLastCallback';
 import useMedia from '../../hooks/useMedia';
-import useMediaTransition from '../../hooks/useMediaTransition';
 import useOldLang from '../../hooks/useOldLang';
 import { getPeerColorClass } from '../../hooks/usePeerColor';
 
@@ -63,7 +62,7 @@ cn.media = cn('media');
 cn.icon = cn('icon');
 
 type OwnProps = {
-  containerRef?: ElementRef<HTMLDivElement>;
+  containerRef?: (el: HTMLDivElement) => void;
   className?: string;
   style?: string;
   size?: AvatarSize;
@@ -96,148 +95,127 @@ type OwnProps = {
   onLoad?: NoneToVoidFunction;
 };
 
-const Avatar = ({
-  containerRef,
-  className,
-  style,
-  size = 'large',
-  peer,
-  photo,
-  webPhoto,
-  previewUrl,
-  text,
-  isSavedMessages,
-  isSavedDialog,
-  withVideo,
-  withStory,
-  forPremiumPromo,
-  withStoryGap,
-  storyGapPercent,
-  withStorySolid,
-  storyColors,
-  forceFriendStorySolid,
-  forceUnreadStorySolid,
-  storyViewerOrigin,
-  storyViewerMode = 'single-peer',
-  loopIndefinitely,
-  noPersonalPhoto,
-  asMessageBubble,
-  storyCircleStyle,
-  onClick,
-  onContextMenu,
-  onMouseMove,
-  onLoad,
-}: OwnProps) => {
+const Avatar = (rawProps: OwnProps) => {
+  const props = mergeProps({ size: 'large', storyViewerMode: 'single-peer' }, rawProps) as OwnProps &
+    Required<Pick<OwnProps, 'size' | 'storyViewerMode'>>;
   const { openStoryViewer } = getActions();
 
-  const videoLoopCountRef = useRef(0);
-  const isCustomPeer = peer && 'isCustomPeer' in peer;
-  const realPeer = peer && !isCustomPeer ? peer : undefined;
-  const user = realPeer && isApiPeerUser(realPeer) ? realPeer : undefined;
-  const chat = realPeer && isApiPeerChat(realPeer) ? realPeer : undefined;
-  const isDeleted = user && isDeletedUser(user);
-  const isReplies = realPeer && isChatWithRepliesBot(realPeer.id);
-  const isAnonymousForwards = realPeer && isAnonymousForwardsChat(realPeer.id);
-  const isForum = chat?.isForum;
-  const isCommunity = Boolean(chat && isChatCommunity(chat));
+  let videoLoopCountRef = 0;
+  const isCustomPeer = createMemo(() => props.peer && 'isCustomPeer' in props.peer);
+  const realPeer = createMemo(() => (props.peer && !isCustomPeer() ? props.peer : undefined));
+  const user = createMemo(() => (realPeer() && isApiPeerUser(realPeer()) ? realPeer() : undefined));
+  const chat = createMemo(() => (realPeer() && isApiPeerChat(realPeer()) ? realPeer() : undefined));
+  const isDeleted = createMemo(() => user() && isDeletedUser(user()));
+  const isReplies = createMemo(() => realPeer() && isChatWithRepliesBot(realPeer().id));
+  const isAnonymousForwards = createMemo(() => realPeer() && isAnonymousForwardsChat(realPeer().id));
+  const isForum = createMemo(() => chat()?.isForum);
+  const isCommunity = createMemo(() => Boolean(chat() && isChatCommunity(chat())));
 
-  const peerColorKey = getPeerColorKey(peer, true);
-  const peerColorClass = peerColorKey !== undefined ? getPeerColorClass(peerColorKey) : undefined;
+  const peerColorKey = createMemo(() => getPeerColorKey(props.peer, true));
+  const peerColorClass = createMemo(() =>
+    peerColorKey() !== undefined ? getPeerColorClass(peerColorKey()) : undefined,
+  );
 
-  const isStoryClickable = withStory && storyViewerMode !== 'disabled' && realPeer?.hasStories;
+  const isStoryClickable = createMemo(
+    () => props.withStory && props.storyViewerMode !== 'disabled' && realPeer()?.hasStories,
+  );
 
   let imageHash: string | undefined;
   let videoHash: string | undefined;
 
-  const pxSize = typeof size === 'number' ? size : AVATAR_SIZES[size];
+  const pxSize = createMemo(() => (typeof props.size === 'number' ? props.size : AVATAR_SIZES[props.size]));
 
-  const shouldLoadVideo = withVideo && photo?.isVideo;
+  const shouldLoadVideo = createMemo(() => props.withVideo && props.photo?.isVideo);
 
-  const isBig = pxSize >= AVATAR_SIZES.jumbo;
-  if (!isSavedMessages && !isDeleted) {
-    if ((user && !noPersonalPhoto) || chat) {
-      imageHash = getChatAvatarHash(peer as ApiPeer, isBig ? 'big' : undefined);
-    } else if (photo) {
-      imageHash = `photo${photo.id}?size=m`;
-      if (photo.isVideo && withVideo) {
-        videoHash = getVideoProfilePhotoMediaHash(photo);
+  const isBig = createMemo(() => pxSize() >= AVATAR_SIZES.jumbo);
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (!props.isSavedMessages && !isDeleted()) {
+    if ((user() && !props.noPersonalPhoto) || chat()) {
+      imageHash = getChatAvatarHash(props.peer as ApiPeer, isBig() ? 'big' : undefined);
+    } else if (props.photo) {
+      imageHash = `photo${props.photo.id}?size=m`;
+      if (props.photo.isVideo && props.withVideo) {
+        videoHash = getVideoProfilePhotoMediaHash(props.photo);
       }
-    } else if (webPhoto) {
-      imageHash = getWebDocumentHash(webPhoto);
+    } else if (props.webPhoto) {
+      imageHash = getWebDocumentHash(props.webPhoto);
     }
   }
 
-  const specialIcon = useMemo(() => {
-    if (isCustomPeer) {
-      return peer.avatarIcon;
+  const specialIcon = createMemo(() => {
+    if (isCustomPeer()) {
+      return props.peer.avatarIcon;
     }
 
-    if (isSavedMessages) {
-      return isSavedDialog ? 'my-notes' : 'saved-messages-filled';
+    if (props.isSavedMessages) {
+      return props.isSavedDialog ? 'my-notes' : 'saved-messages-filled';
     }
 
-    if (isDeleted) {
+    if (isDeleted()) {
       return 'avatar-deleted-account';
     }
 
-    if (isReplies) {
+    if (isReplies()) {
       return 'reply-filled';
     }
 
-    if (isAnonymousForwards) {
+    if (isAnonymousForwards()) {
       return 'author-hidden';
     }
 
     return undefined;
-  }, [isCustomPeer, isSavedMessages, isDeleted, isReplies, isAnonymousForwards, peer, isSavedDialog]);
+  });
 
   const imgBlobUrl = useMedia(imageHash, false, ApiMediaFormat.BlobUrl);
-  const videoBlobUrl = useMedia(videoHash, !shouldLoadVideo, ApiMediaFormat.BlobUrl);
-  const imgUrl = imgBlobUrl || previewUrl;
-  const hasBlobUrl = Boolean(imgUrl || videoBlobUrl);
+  const videoBlobUrl = useMedia(videoHash, () => !shouldLoadVideo(), ApiMediaFormat.BlobUrl);
+  const imgUrl = createMemo(() => imgBlobUrl || props.previewUrl);
+  const hasBlobUrl = createMemo(() => Boolean(imgUrl() || videoBlobUrl));
   // `videoBlobUrl` can be taken from memory cache, so we need to check `shouldLoadVideo` again
-  const shouldPlayVideo = Boolean(videoBlobUrl && shouldLoadVideo);
+  const shouldPlayVideo = createMemo(() => Boolean(videoBlobUrl && shouldLoadVideo()));
 
-  const { ref: mediaRef } = useMediaTransition<HTMLImageElement>({ hasMediaData: hasBlobUrl });
+  const { ref: mediaRef } = createMediaTransition({ hasMediaData: () => hasBlobUrl() });
 
-  const handleVideoEnded = useLastCallback((e) => {
+  const handleVideoEnded = (e) => {
     const video = e.currentTarget;
     if (!videoBlobUrl) return;
 
-    if (loopIndefinitely) return;
+    if (props.loopIndefinitely) return;
 
-    videoLoopCountRef.current += 1;
-    if (videoLoopCountRef.current >= LOOP_COUNT) {
+    videoLoopCountRef += 1;
+    if (videoLoopCountRef >= LOOP_COUNT) {
       video.style.display = 'none';
     }
-  });
+  };
 
   const lang = useOldLang();
 
-  let content: TeactNode | undefined;
-  const author = user ? getUserFullName(user) : chat ? getChatTitle(lang, chat) : text;
+  let content: JSX.Element | undefined;
+  const author = createMemo(() =>
+    user() ? getUserFullName(user()) : chat() ? getChatTitle(lang, chat()) : props.text,
+  );
 
-  if (specialIcon) {
-    content = <Icon name={specialIcon} className={cn.icon} role="img" ariaLabel={author} />;
-  } else if (hasBlobUrl) {
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (specialIcon()) {
+    content = <Icon name={specialIcon()} className={cn.icon} role="img" ariaLabel={author()} />;
+  } else if (hasBlobUrl()) {
     content = (
       <>
         <img
           ref={mediaRef}
-          src={imgUrl}
-          className={buildClassName(cn.media, 'avatar-media', videoBlobUrl && 'poster')}
-          alt={author}
+          src={imgUrl()}
+          class={buildClassName(cn.media, 'avatar-media', videoBlobUrl && 'poster')}
+          alt={author()}
           decoding="async"
           draggable={false}
-          onLoad={onLoad}
+          onLoad={props.onLoad}
         />
-        {shouldPlayVideo && (
+        {shouldPlayVideo() && (
           <OptimizedVideo
             canPlay
             src={videoBlobUrl}
             className={buildClassName(cn.media, 'avatar-media', 'poster')}
             muted
-            loop={loopIndefinitely}
+            loop={props.loopIndefinitely}
             autoPlay
             disablePictureInPicture
             playsInline
@@ -247,103 +225,113 @@ const Avatar = ({
         )}
       </>
     );
-  } else if (user) {
-    const userFullName = getUserFullName(user);
+  } else if (user()) {
+    const userFullName = getUserFullName(user());
     content = userFullName ? getFirstLetters(userFullName, 2) : undefined;
-  } else if (chat) {
-    const title = getChatTitle(lang, chat);
-    content = title && getFirstLetters(title, isUserId(chat.id) ? 2 : 1);
-  } else if (isCustomPeer) {
-    const title = peer.title || lang(peer.titleKey!);
+  } else if (chat()) {
+    const title = getChatTitle(lang, chat());
+    content = title && getFirstLetters(title, isUserId(chat().id) ? 2 : 1);
+  } else if (isCustomPeer()) {
+    const title = props.peer.title || lang(props.peer.titleKey!);
     content = title && getFirstLetters(title, 1);
-  } else if (text) {
-    content = getFirstLetters(text, 2);
+  } else if (props.text) {
+    content = getFirstLetters(props.text, 2);
   }
 
-  const isRoundedRect =
-    (isCustomPeer && peer.isAvatarSquare) ||
-    isCommunity ||
-    (isForum && !((withStory || withStorySolid) && realPeer?.hasStories));
-  const isPremiumGradient = isCustomPeer && peer.withPremiumGradient;
-  const customColor = isCustomPeer && peer.customPeerAvatarColor;
+  const isRoundedRect = createMemo(
+    () =>
+      (isCustomPeer() && props.peer.isAvatarSquare) ||
+      isCommunity() ||
+      (isForum() && !((props.withStory || props.withStorySolid) && realPeer()?.hasStories)),
+  );
+  const isPremiumGradient = createMemo(() => isCustomPeer() && props.peer.withPremiumGradient);
+  const customColor = createMemo(() => isCustomPeer() && props.peer.customPeerAvatarColor);
 
-  const fullClassName = buildClassName(
-    'Avatar',
-    className,
-    typeof size === 'string' && `size-${size}`,
-    peerColorClass,
-    !peer && text && 'hidden-user',
-    isSavedMessages && 'saved-messages',
-    isAnonymousForwards && 'anonymous-forwards',
-    isDeleted && 'deleted-account',
-    isReplies && 'replies-bot-account',
-    isPremiumGradient && 'premium-gradient-bg',
-    isRoundedRect && 'forum',
-    isCommunity && 'community',
-    asMessageBubble && 'message-bubble',
-    (photo || webPhoto) && 'force-fit',
-    ((withStory && realPeer?.hasStories) || forPremiumPromo) && 'with-story-circle',
-    withStorySolid && realPeer?.hasStories && 'with-story-solid',
-    withStorySolid && forceFriendStorySolid && 'close-friend',
-    withStorySolid && (realPeer?.hasUnreadStories || forceUnreadStorySolid) && 'has-unread-story',
-    (onClick || isStoryClickable) && 'interactive',
-    !isSavedMessages && !imgUrl && 'no-photo',
+  const fullClassName = createMemo(() =>
+    buildClassName(
+      'Avatar',
+      props.className,
+      typeof props.size === 'string' && `size-${props.size}`,
+      peerColorClass(),
+      !props.peer && props.text && 'hidden-user',
+      props.isSavedMessages && 'saved-messages',
+      isAnonymousForwards() && 'anonymous-forwards',
+      isDeleted() && 'deleted-account',
+      isReplies() && 'replies-bot-account',
+      isPremiumGradient() && 'premium-gradient-bg',
+      isRoundedRect() && 'forum',
+      isCommunity() && 'community',
+      props.asMessageBubble && 'message-bubble',
+      (props.photo || props.webPhoto) && 'force-fit',
+      ((props.withStory && realPeer()?.hasStories) || props.forPremiumPromo) && 'with-story-circle',
+      props.withStorySolid && realPeer()?.hasStories && 'with-story-solid',
+      props.withStorySolid && props.forceFriendStorySolid && 'close-friend',
+      props.withStorySolid && (realPeer()?.hasUnreadStories || props.forceUnreadStorySolid) && 'has-unread-story',
+      (props.onClick || isStoryClickable()) && 'interactive',
+      !props.isSavedMessages && !imgUrl() && 'no-photo',
+    ),
   );
 
-  const fullStyle = buildStyle(`--_size: ${pxSize}px;`, customColor && `--color-user: ${customColor}`, style);
+  const fullStyle = createMemo(() =>
+    buildStyle(`--_size: ${pxSize()}px;`, customColor() && `--color-user: ${customColor()}`, props.style),
+  );
 
-  const hasMedia = Boolean(isSavedMessages || imgUrl);
+  const hasMedia = createMemo(() => Boolean(props.isSavedMessages || imgUrl()));
 
-  const { handleClick, handleMouseDown } = useFastClick((e: ReactMouseEvent<HTMLDivElement, MouseEvent>) => {
-    if (isStoryClickable) {
-      e.stopPropagation();
+  const fastClickResult = createMemo(() =>
+    useFastClick((e: ReactMouseEvent<HTMLDivElement, MouseEvent>) => {
+      if (isStoryClickable()) {
+        e.stopPropagation();
 
-      openStoryViewer({
-        peerId: realPeer.id,
-        isSinglePeer: storyViewerMode === 'single-peer',
-        origin: storyViewerOrigin,
-      });
-      return;
-    }
+        openStoryViewer({
+          peerId: realPeer().id,
+          isSinglePeer: props.storyViewerMode === 'single-peer',
+          origin: props.storyViewerOrigin,
+        });
+        return;
+      }
 
-    if (onClick) {
-      onClick(e, hasMedia);
-    }
-  });
+      if (props.onClick) {
+        props.onClick(e, hasMedia());
+      }
+    }),
+  );
+  const handleClick = () => fastClickResult().handleClick;
+  const handleMouseDown = () => fastClickResult().handleMouseDown;
 
   return (
     <div
-      ref={containerRef}
-      className={fullClassName}
-      id={realPeer?.id && withStory ? getPeerStoryHtmlId(realPeer.id) : undefined}
-      data-peer-id={realPeer?.id}
-      data-test-sender-id={IS_TEST ? realPeer?.id : undefined}
-      aria-label={typeof content === 'string' ? author : undefined}
-      style={fullStyle}
-      onClick={handleClick}
-      onContextMenu={onContextMenu}
-      onMouseDown={handleMouseDown}
-      onMouseMove={onMouseMove}
+      ref={props.containerRef}
+      class={fullClassName()}
+      id={realPeer()?.id && props.withStory ? getPeerStoryHtmlId(realPeer().id) : undefined}
+      data-peer-id={realPeer()?.id}
+      data-test-sender-id={IS_TEST ? realPeer()?.id : undefined}
+      aria-label={typeof content === 'string' ? author() : undefined}
+      style={fullStyle()}
+      onClick={handleClick()}
+      onContextMenu={props.onContextMenu}
+      onMouseDown={handleMouseDown()}
+      onMouseMove={props.onMouseMove}
     >
-      <div className="inner">
+      <div class="inner">
         {typeof content === 'string' ? (
-          <span className="letters">{renderText(content, [isBig ? 'hq_emoji' : 'emoji'])}</span>
+          <span class="letters">{renderText(content, [isBig() ? 'hq_emoji' : 'emoji'])}</span>
         ) : (
           content
         )}
       </div>
-      {withStory && realPeer?.hasStories && (
+      {props.withStory && realPeer()?.hasStories && (
         <AvatarStoryCircle
-          peerId={realPeer.id}
-          size={pxSize}
-          withExtraGap={withStoryGap}
-          extraGapPercent={storyGapPercent}
-          colors={storyColors}
-          style={storyCircleStyle}
+          peerId={realPeer().id}
+          size={pxSize()}
+          withExtraGap={props.withStoryGap}
+          extraGapPercent={props.storyGapPercent}
+          colors={props.storyColors}
+          style={props.storyCircleStyle}
         />
       )}
     </div>
   );
 };
 
-export default memo(Avatar);
+export default Avatar;

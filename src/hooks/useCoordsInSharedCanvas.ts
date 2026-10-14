@@ -1,9 +1,7 @@
-import type { ElementRef } from '../lib/teact/teact';
-import { useEffect, useMemo, useState } from '../lib/teact/teact';
+import { createEffect, createMemo, createSignal, requestMeasure, requestMutation } from 'frameact';
 
 import type { CallbackManager } from '../util/callbacks';
 
-import { requestMeasure, requestMutation } from '../lib/fasterdom/fasterdom';
 import { createCallbackManager } from '../util/callbacks';
 import { round } from '../util/math';
 import { throttleWith } from '../util/schedulers';
@@ -40,7 +38,7 @@ const PENDING_SHARED_CANVAS_RECALCULATIONS = new Set<HTMLCanvasElement>();
 const SCHEDULE_SHARED_CANVAS_RECALCULATION = throttleWith(requestMeasure, flushSharedCanvasCoordsRecalculations);
 
 export function requestSharedCanvasCoordsRecalculation(
-  ...sharedCanvasRefs: Array<ElementRef<HTMLCanvasElement> | undefined>
+  ...sharedCanvasRefs: Array<(el: HTMLCanvasElement) => void | undefined>
 ) {
   sharedCanvasRefs.forEach((sharedCanvasRef) => {
     const canvas = sharedCanvasRef?.current;
@@ -54,21 +52,19 @@ export function requestSharedCanvasCoordsRecalculation(
   }
 }
 
+// TODO(codemod): useCoordsInSharedCanvas: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useCoordsInSharedCanvas(
-  containerRef: ElementRef<HTMLDivElement>,
-  sharedCanvasRef?: ElementRef<HTMLCanvasElement>,
+  containerRef: (el: HTMLDivElement) => void,
+  sharedCanvasRef?: (el: HTMLCanvasElement) => void,
 ) {
-  const [coords, setCoords] = useState<SharedCanvasCoords>();
-  const sharedCanvasContainerRef = useMemo<ElementRef<HTMLElement>>(
-    () => ({
-      get current() {
-        return sharedCanvasRef?.current?.parentElement || undefined;
-      },
-    }),
-    [sharedCanvasRef],
-  );
+  const [coords, setCoords] = createSignal<SharedCanvasCoords | undefined>(undefined);
+  const sharedCanvasContainerRef = createMemo<(el: HTMLElement) => void>(() => ({
+    get current() {
+      return sharedCanvasRef?.current?.parentElement || undefined;
+    },
+  }));
 
-  const recalculate = useLastCallback((canvasMetrics?: SharedCanvasMetrics) => {
+  const recalculate = (canvasMetrics?: SharedCanvasMetrics) => {
     const container = containerRef.current;
     const canvas = sharedCanvasRef?.current;
     if (!container || !canvas) {
@@ -102,43 +98,49 @@ export default function useCoordsInSharedCanvas(
         ? currentCoords
         : { x, y, canvasWidth: metrics.width, canvasHeight: metrics.height },
     );
-  });
+  };
 
-  useEffect(() => {
-    if (sharedCanvasRef?.current) {
-      requestSharedCanvasCoordsRecalculation(sharedCanvasRef);
-    }
-  }, [sharedCanvasRef]);
-  useEffect(() => {
-    const canvas = sharedCanvasRef?.current;
-    if (!canvas) {
-      return undefined;
-    }
-
-    let manager = SHARED_CANVAS_RECALCULATION_MANAGERS.get(canvas);
-    if (!manager) {
-      manager = createCallbackManager();
-      SHARED_CANVAS_RECALCULATION_MANAGERS.set(canvas, manager);
-    }
-
-    const removeCallback = manager.addCallback(recalculate);
-    return () => {
-      removeCallback();
-      if (!manager.hasCallbacks()) {
-        SHARED_CANVAS_RECALCULATION_MANAGERS.delete(canvas);
+  createEffect(
+    () => sharedCanvasRef,
+    () => {
+      if (sharedCanvasRef?.current) {
+        requestSharedCanvasCoordsRecalculation(sharedCanvasRef);
       }
-    };
-  }, [recalculate, sharedCanvasRef]);
+    },
+  );
+  createEffect(
+    () => [recalculate, sharedCanvasRef],
+    () => {
+      const canvas = sharedCanvasRef?.current;
+      if (!canvas) {
+        return undefined;
+      }
+
+      let manager = SHARED_CANVAS_RECALCULATION_MANAGERS.get(canvas);
+      if (!manager) {
+        manager = createCallbackManager();
+        SHARED_CANVAS_RECALCULATION_MANAGERS.set(canvas, manager);
+      }
+
+      const removeCallback = manager.addCallback(recalculate);
+      return () => {
+        removeCallback();
+        if (!manager.hasCallbacks()) {
+          SHARED_CANVAS_RECALCULATION_MANAGERS.delete(canvas);
+        }
+      };
+    },
+  );
 
   const throttledRequestRecalculation = useThrottledCallback(
     () => requestSharedCanvasCoordsRecalculation(sharedCanvasRef),
     [sharedCanvasRef],
     THROTTLE_MS,
   );
-  useResizeObserver(sharedCanvasContainerRef, throttledRequestRecalculation);
+  useResizeObserver(() => sharedCanvasContainerRef(), throttledRequestRecalculation);
   useSharedIntersectionObserver(sharedCanvasRef, throttledRequestRecalculation);
 
-  return useMemo(() => (coords ? { x: coords.x, y: coords.y } : undefined), [coords]);
+  return createMemo(() => (coords() ? { x: coords().x, y: coords().y } : undefined));
 }
 
 function flushSharedCanvasCoordsRecalculations() {

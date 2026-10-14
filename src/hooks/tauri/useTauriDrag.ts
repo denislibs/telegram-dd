@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from '../../lib/teact/teact';
+import { onMount } from 'frameact';
 
 import { IS_TAURI } from '../../util/browser/globalEnvironment';
 import { IS_MAC_OS } from '../../util/browser/windowEnvironment';
@@ -6,7 +6,7 @@ import { IS_MAC_OS } from '../../util/browser/windowEnvironment';
 const NO_DRAG_ELEMENTS = 'input, a, button';
 
 const useTauriDrag = () => {
-  const handleMouseDown = useCallback(async (event: MouseEvent) => {
+  const handleMouseDown = async (event: MouseEvent) => {
     if (!(event.target instanceof HTMLElement)) {
       return;
     }
@@ -19,9 +19,9 @@ const useTauriDrag = () => {
       const tauriWindow = await window.tauri?.getCurrentWindow();
       tauriWindow?.startDragging();
     }
-  }, []);
+  };
 
-  useEffect(() => {
+  onMount(() => {
     if (!(IS_TAURI && IS_MAC_OS)) return undefined;
 
     document.addEventListener('mousedown', handleMouseDown);
@@ -29,7 +29,7 @@ const useTauriDrag = () => {
     return () => {
       document.removeEventListener('mousedown', handleMouseDown);
     };
-  }, [handleMouseDown]);
+  });
 };
 
 export default useTauriDrag;

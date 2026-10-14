@@ -1,5 +1,5 @@
 import type { AriaRole } from 'react';
-import { type ElementRef, memo } from '../../../lib/teact/teact';
+import { Show } from 'frameact/dom';
 
 import type { IconName } from '../../../types/icons';
 
@@ -18,23 +18,23 @@ type OwnProps = {
   ariaLabel?: string;
   character?: string;
   hasPremiumBadge?: boolean;
-  ref?: ElementRef<HTMLElement>;
+  ref?: (el: HTMLElement) => void;
   onClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
 };
 
 const Icon = (props: OwnProps) => {
-  if (props.hasPremiumBadge) {
-    return <IconWithPremiumBadge {...props} />;
-  }
-
-  return renderIcon(props);
+  return (
+    <Show when={!props.hasPremiumBadge} fallback={<IconWithPremiumBadge {...props} />}>
+      {renderIcon(props)}
+    </Show>
+  );
 };
 
-const IconWithPremiumBadge = memo((props: OwnProps) => {
+const IconWithPremiumBadge = (props: OwnProps) => {
   const isCurrentUserPremium = useSelector(selectIsCurrentUserPremium);
 
-  return renderIcon(props, !isCurrentUserPremium);
-});
+  return renderIcon(props, !isCurrentUserPremium());
+};
 
 function renderIcon(
   { name, ref, className, style, role, ariaLabel, character, onClick }: OwnProps,
@@ -43,7 +43,7 @@ function renderIcon(
   return (
     <i
       ref={ref}
-      className={buildClassName(`icon icon-${name}`, className, hasPremiumBadge && styles.hasPremiumBadge)}
+      class={buildClassName(`icon icon-${name}`, className, hasPremiumBadge && styles.hasPremiumBadge)}
       style={style}
       aria-hidden={!ariaLabel}
       aria-label={ariaLabel}

@@ -1,4 +1,4 @@
-import { useEffect } from '../lib/teact/teact';
+import { createEffect } from 'frameact';
 
 import { createCallbackManager } from '../util/callbacks';
 import useLastCallback from './useLastCallback';
@@ -9,27 +9,31 @@ const endCallbacks = createCallbackManager();
 let timeout: number | undefined;
 let isActive = false;
 
+// TODO(codemod): usePriorityPlaybackCheck: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 const usePriorityPlaybackCheck = (onStart?: AnyToVoidFunction, onEnd?: AnyToVoidFunction, isDisabled = false) => {
-  const lastOnStart = useLastCallback(onStart);
-  const lastOnEnd = useLastCallback(onEnd);
+  const lastOnStart = onStart;
+  const lastOnEnd = onEnd;
 
-  useEffect(() => {
-    if (isDisabled) {
-      return undefined;
-    }
+  createEffect(
+    () => [isDisabled, lastOnStart, lastOnEnd],
+    () => {
+      if (isDisabled) {
+        return undefined;
+      }
 
-    if (isActive) {
-      lastOnStart();
-    }
+      if (isActive) {
+        lastOnStart();
+      }
 
-    startCallbacks.addCallback(lastOnStart);
-    endCallbacks.addCallback(lastOnEnd);
+      startCallbacks.addCallback(lastOnStart);
+      endCallbacks.addCallback(lastOnEnd);
 
-    return () => {
-      endCallbacks.removeCallback(lastOnEnd);
-      startCallbacks.removeCallback(lastOnStart);
-    };
-  }, [isDisabled, lastOnStart, lastOnEnd]);
+      return () => {
+        endCallbacks.removeCallback(lastOnEnd);
+        startCallbacks.removeCallback(lastOnStart);
+      };
+    },
+  );
 };
 
 export function isPriorityPlaybackActive() {

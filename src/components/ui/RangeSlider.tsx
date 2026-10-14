@@ -1,6 +1,7 @@
 import type { ChangeEvent } from 'react';
-import type { FC, TeactNode } from '../../lib/teact/teact';
-import { memo, useCallback, useMemo } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import { For, mergeProps } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import buildClassName from '../../util/buildClassName';
 
@@ -19,65 +20,60 @@ type OwnProps = {
   readOnly?: boolean;
   bold?: boolean;
   className?: string;
-  renderValue?: (value: number) => TeactNode;
+  renderValue?: (value: number) => JSX.Element;
   onChange: (value: number) => void;
   isCenteredLayout?: boolean;
 };
 
-const RangeSlider: FC<OwnProps> = ({
-  options,
-  min = 0,
-  max = options ? options.length - 1 : 100,
-  step = 1,
-  label,
-  value,
-  disabled,
-  readOnly,
-  bold,
-  className,
-  renderValue,
-  onChange,
-  isCenteredLayout,
-}) => {
-  const lang = useLang();
-  const handleChange = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      onChange(Number(event.currentTarget.value));
+const RangeSlider = (rawProps: OwnProps) => {
+  const props = mergeProps(
+    {
+      min: 0,
+      get max() {
+        return props.options ? props.options.length - 1 : 100;
+      },
+      step: 1,
     },
-    [onChange],
+    rawProps,
+  ) as OwnProps & Required<Pick<OwnProps, 'min' | 'max' | 'step'>>;
+  const lang = useLang();
+  const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
+    props.onChange(Number(event.currentTarget.value));
+  };
+
+  const mainClassName = createMemo(() =>
+    buildClassName(
+      props.className,
+      'RangeSlider',
+      props.disabled && 'disabled',
+      props.readOnly && 'readOnly',
+      props.bold && 'bold',
+    ),
   );
 
-  const mainClassName = buildClassName(
-    className,
-    'RangeSlider',
-    disabled && 'disabled',
-    readOnly && 'readOnly',
-    bold && 'bold',
-  );
-
-  const trackWidth = useMemo(() => {
-    if (options) {
-      return (value / (options.length - 1)) * 100;
+  const trackWidth = createMemo(() => {
+    if (props.options) {
+      return (props.value / (props.options.length - 1)) * 100;
     } else {
-      const possibleValuesLength = (max - min) / step;
-      return ((value - min) / possibleValuesLength) * 100;
+      const possibleValuesLength = (props.max - props.min) / props.step;
+      return ((props.value - props.min) / possibleValuesLength) * 100;
     }
-  }, [options, value, max, min, step]);
+  });
 
   function renderTopRow() {
-    if (isCenteredLayout) {
+    if (props.isCenteredLayout) {
       return (
-        <div className="slider-top-row" dir={lang.isRtl ? 'rtl' : undefined}>
-          {!options && (
+        <div class="slider-top-row" dir={lang.isRtl ? 'rtl' : undefined}>
+          {!props.options && (
             <>
-              <span className="value-min" dir="auto">
-                {min}
+              <span class="value-min" dir="auto">
+                {props.min}
               </span>
-              <span className="label" dir="auto">
-                {renderValue ? renderValue(value) : value}
+              <span class="label" dir="auto">
+                {props.renderValue ? props.renderValue(props.value) : props.value}
               </span>
-              <span className="value-max" dir="auto">
-                {max}
+              <span class="value-max" dir="auto">
+                {props.max}
               </span>
             </>
           )}
@@ -85,18 +81,18 @@ const RangeSlider: FC<OwnProps> = ({
       );
     }
 
-    if (!label) {
+    if (!props.label) {
       return undefined;
     }
 
     return (
-      <div className="slider-top-row" dir={lang.isRtl ? 'rtl' : undefined}>
-        <span className="label" dir="auto">
-          {label}
+      <div class="slider-top-row" dir={lang.isRtl ? 'rtl' : undefined}>
+        <span class="label" dir="auto">
+          {props.label}
         </span>
-        {!options && (
-          <span className="value" dir="auto">
-            {renderValue ? renderValue(value) : value}
+        {!props.options && (
+          <span class="value" dir="auto">
+            {props.renderValue ? props.renderValue(props.value) : props.value}
           </span>
         )}
       </div>
@@ -104,29 +100,31 @@ const RangeSlider: FC<OwnProps> = ({
   }
 
   return (
-    <div className={mainClassName}>
+    <div class={mainClassName()}>
       {renderTopRow()}
-      <div className="slider-main">
-        <div className="slider-fill-track" style={`width: ${trackWidth}%`} />
+      <div class="slider-main">
+        <div class="slider-fill-track" style={`width: ${trackWidth()}%`} />
         <input
-          min={min}
-          max={max}
-          value={value}
-          step={step}
+          min={props.min}
+          max={props.max}
+          value={props.value}
+          step={props.step}
           type="range"
-          className="RangeSlider__input"
+          class="RangeSlider__input"
           onChange={handleChange}
         />
-        {options && (
-          <div className="slider-options">
-            {options.map((option, index) => (
-              <div
-                className={buildClassName('slider-option', index === value && 'active')}
-                onClick={() => onChange(index)}
-              >
-                {option}
-              </div>
-            ))}
+        {props.options && (
+          <div class="slider-options">
+            <For each={props.options}>
+              {(option, index) => (
+                <div
+                  class={buildClassName('slider-option', index() === props.value && 'active')}
+                  onClick={() => props.onChange(index())}
+                >
+                  {option}
+                </div>
+              )}
+            </For>
           </div>
         )}
       </div>
@@ -134,4 +132,4 @@ const RangeSlider: FC<OwnProps> = ({
   );
 };
 
-export default memo(RangeSlider);
+export default RangeSlider;

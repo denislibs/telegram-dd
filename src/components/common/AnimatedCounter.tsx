@@ -1,5 +1,4 @@
-import type { ElementRef, FC } from '../../lib/teact/teact';
-import { memo, useEffect, useMemo } from '../../lib/teact/teact';
+import { createEffect, createMemo, previous } from 'frameact';
 import { getGlobal } from '../../global';
 
 import { selectCanAnimateInterface } from '../../global/selectors';
@@ -8,7 +7,6 @@ import { throttleWithTickEnd } from '../../util/schedulers';
 
 import useForceUpdate from '../../hooks/useForceUpdate';
 import useLang from '../../hooks/useLang';
-import usePreviousDeprecated from '../../hooks/usePreviousDeprecated';
 
 import styles from './AnimatedCounter.module.scss';
 
@@ -16,7 +14,7 @@ type OwnProps = {
   text: string;
   className?: string;
   isDisabled?: boolean;
-  ref?: ElementRef<HTMLSpanElement>;
+  ref?: (el: HTMLSpanElement) => void;
 };
 
 const ANIMATION_TIME = 200;
@@ -28,40 +26,53 @@ const resetCounterOnTickEnd = throttleWithTickEnd(() => {
   scheduledAnimationsCounter = 0;
 });
 
-const AnimatedCounter: FC<OwnProps> = ({ text, className, isDisabled, ref }) => {
+const AnimatedCounter = (props: OwnProps) => {
   const { isRtl } = useLang();
 
-  const prevText = usePreviousDeprecated(text);
+  const prevText = previous(() => props.text);
+  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
   const forceUpdate = useForceUpdate();
 
-  const shouldAnimate = scheduleAnimation(
-    !isDisabled && selectCanAnimateInterface(getGlobal()) && prevText !== undefined && prevText !== text,
+  const shouldAnimate = createMemo(() =>
+    scheduleAnimation(
+      !props.isDisabled &&
+        selectCanAnimateInterface(getGlobal()) &&
+        prevText() !== undefined &&
+        prevText() !== props.text,
+    ),
   );
 
-  const characters = useMemo(() => {
-    return shouldAnimate ? renderAnimatedCharacters(text, prevText) : text;
-  }, [shouldAnimate, prevText, text]);
+  const characters = createMemo(() => {
+    return shouldAnimate() ? renderAnimatedCharacters(props.text, prevText()) : props.text;
+  });
 
-  useEffect(() => {
-    if (!shouldAnimate) return undefined;
+  createEffect(
+    () => [shouldAnimate(), props.text],
+    ([shouldAnimate]) => {
+      if (!shouldAnimate) return undefined;
 
-    const timeoutId = window.setTimeout(() => {
-      forceUpdate();
-    }, ANIMATION_TIME);
+      const timeoutId = window.setTimeout(() => {
+        forceUpdate();
+      }, ANIMATION_TIME);
 
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [shouldAnimate, text]);
+      return () => {
+        window.clearTimeout(timeoutId);
+      };
+    },
+  );
 
   return (
-    <span ref={ref} className={buildClassName(className, !isDisabled && styles.root)} dir={isRtl ? 'rtl' : undefined}>
-      {characters}
+    <span
+      ref={props.ref}
+      class={buildClassName(props.className, !props.isDisabled && styles.root)}
+      dir={isRtl ? 'rtl' : undefined}
+    >
+      {characters()}
     </span>
   );
 };
 
-export default memo(AnimatedCounter);
+export default AnimatedCounter;
 
 function scheduleAnimation(condition: boolean) {
   if (!condition || scheduledAnimationsCounter >= MAX_SIMULTANEOUS_ANIMATIONS) return false;
@@ -86,10 +97,10 @@ function renderAnimatedCharacters(text: string, prevText?: string) {
 
     if (prevText && prevTextCharIndex >= 0 && text[charIndex] !== prevText[prevTextCharIndex]) {
       elements.unshift(
-        <div className={styles.characterContainer}>
-          <div className={styles.character}>{text[charIndex] ?? ''}</div>
-          <div className={styles.characterOld}>{prevText[prevTextCharIndex]}</div>
-          <div className={styles.characterNew}>{text[charIndex] ?? ''}</div>
+        <div class={styles.characterContainer}>
+          <div class={styles.character}>{text[charIndex] ?? ''}</div>
+          <div class={styles.characterOld}>{prevText[prevTextCharIndex]}</div>
+          <div class={styles.characterNew}>{text[charIndex] ?? ''}</div>
         </div>,
       );
     } else {

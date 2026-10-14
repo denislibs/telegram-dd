@@ -1,5 +1,7 @@
-import type { ElementRef, TeactNode } from '../../lib/teact/teact';
-import { beginHeavyAnimation, useEffect, useLayoutEffect, useRef } from '../../lib/teact/teact';
+import { beginHeavyAnimation, createEffect, createMemo, createMutationEffect, frozenWhile } from 'frameact';
+import { Show } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
+import { createShowTransition } from '../../lib/kit';
 
 import type { TextPart } from '../../types';
 
@@ -10,12 +12,8 @@ import { countOpenModal } from '../../util/openModals';
 import trapFocus from '../../util/trapFocus';
 
 import useContextMenuHandlers from '../../hooks/useContextMenuHandlers';
-import useFrozenProps from '../../hooks/useFrozenProps';
 import useHistoryBack from '../../hooks/useHistoryBack';
-import useLastCallback from '../../hooks/useLastCallback';
-import useLayoutEffectWithPrevDeps from '../../hooks/useLayoutEffectWithPrevDeps';
 import useOldLang from '../../hooks/useOldLang';
-import useShowTransition from '../../hooks/useShowTransition';
 
 import Button, { type OwnProps as ButtonProps } from './Button';
 import Menu from './Menu';
@@ -33,7 +31,7 @@ export type OwnProps = {
   headerClassName?: string;
   dialogClassName?: string;
   isOpen?: boolean;
-  header?: TeactNode;
+  header?: JSX.Element;
   isSlim?: boolean;
   hasCloseButton?: boolean;
   hasAbsoluteCloseButton?: boolean;
@@ -46,11 +44,11 @@ export type OwnProps = {
   children: React.ReactNode;
   style?: string;
   dialogStyle?: string;
-  dialogRef?: ElementRef<HTMLDivElement>;
+  dialogRef?: (el: HTMLDivElement) => void;
   isLowStackPriority?: boolean;
   dialogContent?: React.ReactNode;
-  moreMenuItems?: TeactNode;
-  headerRightToolBar?: TeactNode;
+  moreMenuItems?: JSX.Element;
+  headerRightToolBar?: JSX.Element;
   withBalanceBar?: boolean;
   currencyInBalanceBar?: 'TON' | 'XTR';
   isCondensedHeader?: boolean;
@@ -61,152 +59,159 @@ export type OwnProps = {
 };
 
 const Modal = (props: OwnProps) => {
-  const {
-    dialogRef,
-    isOpen,
-    noBackdropClose,
-    noFreezeOnClose,
-    isNativeDialog,
-    noTitleAutoFocus,
-    onClose,
-    onCloseAnimationEnd,
-    onEnter,
-  } = props;
-
-  const { ref: modalRef, shouldRender } = useShowTransition<HTMLElement>({
-    isOpen,
-    withShouldRender: true,
-    onCloseAnimationEnd,
+  const { ref: modalRef, shouldRender } = createShowTransition({
+    isOpen: () => props.isOpen,
+    onCloseAnimationEnd: props.onCloseAnimationEnd,
   });
 
-  const shouldFreeze = !noFreezeOnClose && !isOpen;
-  const {
-    title,
-    isLowStackPriority,
-    header,
-    children,
-    className,
-    contentClassName,
-    headerClassName,
-    dialogClassName,
-    isSlim,
-    hasCloseButton,
-    hasAbsoluteCloseButton,
-    absoluteCloseButtonColor = 'translucent',
-    isBackButton,
-    noBackdrop,
-    style,
-    dialogStyle,
-    dialogContent,
-    moreMenuItems,
-    headerRightToolBar: headerToolBar,
-    withBalanceBar,
-    isCondensedHeader,
-    currencyInBalanceBar = 'XTR',
-  } = useFrozenProps(props, shouldFreeze);
+  const shouldFreeze = createMemo(() => !props.noFreezeOnClose && !props.isOpen);
+  const frozen = frozenWhile(
+    () => props,
+    () => shouldFreeze(),
+  );
+  const title = () => frozen().title;
+  const isLowStackPriority = () => frozen().isLowStackPriority;
+  const header = () => frozen().header;
+  const children = () => frozen().children;
+  const className = () => frozen().className;
+  const contentClassName = () => frozen().contentClassName;
+  const headerClassName = () => frozen().headerClassName;
+  const dialogClassName = () => frozen().dialogClassName;
+  const isSlim = () => frozen().isSlim;
+  const hasCloseButton = () => frozen().hasCloseButton;
+  const hasAbsoluteCloseButton = () => frozen().hasAbsoluteCloseButton;
+  const absoluteCloseButtonColor = () =>
+    frozen().absoluteCloseButtonColor === undefined ? 'translucent' : frozen().absoluteCloseButtonColor;
+  const isBackButton = () => frozen().isBackButton;
+  const noBackdrop = () => frozen().noBackdrop;
+  const style = () => frozen().style;
+  const dialogStyle = () => frozen().dialogStyle;
+  const dialogContent = () => frozen().dialogContent;
+  const moreMenuItems = () => frozen().moreMenuItems;
+  const headerToolBar = () => frozen().headerRightToolBar;
+  const withBalanceBar = () => frozen().withBalanceBar;
+  const isCondensedHeader = () => frozen().isCondensedHeader;
+  const currencyInBalanceBar = () =>
+    frozen().currencyInBalanceBar === undefined ? 'XTR' : frozen().currencyInBalanceBar;
 
-  const localDialogRef = useRef<HTMLDivElement>();
-  const moreButtonRef = useRef<HTMLButtonElement>();
-  const menuRef = useRef<HTMLDivElement>();
+  let localDialogRef!: HTMLDivElement;
+  let moreButtonRef!: HTMLButtonElement;
+  let menuRef!: HTMLDivElement;
 
   const { isContextMenuOpen, contextMenuAnchor, handleContextMenu, handleContextMenuClose, handleContextMenuHide } =
-    useContextMenuHandlers(moreButtonRef);
+    useContextMenuHandlers(() => moreButtonRef);
 
-  const actualDialogRef = dialogRef || localDialogRef;
-  const divModalRef = modalRef as ElementRef<HTMLDivElement>;
-  const nativeDialogRef = modalRef as ElementRef<HTMLDialogElement>;
+  // TODO(codemod): "localDialogRef" was a ref object passed as a value: pass an accessor (() => localDialogRef) or a callback ref
+  const actualDialogRef = createMemo(() => props.dialogRef || localDialogRef);
+  const divModalRef = modalRef as (el: HTMLDivElement) => void;
+  const nativeDialogRef = modalRef as (el: HTMLDialogElement) => void;
 
-  const getRootElement = useLastCallback(() => actualDialogRef.current);
-  const getTriggerElement = useLastCallback(() => moreButtonRef.current);
-  const getMenuElement = useLastCallback(() => menuRef.current);
-  const getLayout = useLastCallback(() => ({ withPortal: true }));
+  const getRootElement = () => actualDialogRef().current;
+  const getTriggerElement = () => moreButtonRef;
+  const getMenuElement = () => menuRef;
+  const getLayout = () => ({ withPortal: true });
 
-  const withCloseButton = hasCloseButton || hasAbsoluteCloseButton;
+  const withCloseButton = createMemo(() => hasCloseButton() || hasAbsoluteCloseButton());
 
-  useEffect(() => {
-    if (!isOpen) {
-      return undefined;
-    }
+  createEffect(
+    () => props.isOpen,
+    () => {
+      if (!props.isOpen) {
+        return undefined;
+      }
 
-    disableDirectTextInput();
+      disableDirectTextInput();
 
-    return enableDirectTextInput;
-  }, [isOpen]);
+      return enableDirectTextInput;
+    },
+  );
 
-  const handleEnter = useLastCallback((e: KeyboardEvent) => {
-    if (!onEnter) {
+  const handleEnter = (e: KeyboardEvent) => {
+    if (!props.onEnter) {
       return false;
     }
 
     e.preventDefault();
-    onEnter();
+    props.onEnter();
     return true;
-  });
+  };
 
-  useEffect(
-    () => (isOpen ? captureKeyboardListeners({ onEsc: onClose, onEnter: handleEnter }) : undefined),
-    [isOpen, onClose, handleEnter],
+  createEffect(
+    () => [props.isOpen, props.onClose, handleEnter],
+    () => (props.isOpen ? captureKeyboardListeners({ onEsc: props.onClose, onEnter: handleEnter }) : undefined),
   );
-  useEffect(() => (isOpen && modalRef.current ? trapFocus(modalRef.current) : undefined), [isOpen, modalRef]);
+  // TODO(codemod): modalRef is a callback ref now: keep the element in a let assigned from ref={(el) => { modalRef(el); element = el; }}
+  createEffect(
+    () => [props.isOpen, modalRef],
+    () => (props.isOpen && modalRef.current ? trapFocus(modalRef.current) : undefined),
+  );
 
-  useLayoutEffect(() => {
-    if (!isNativeDialog || !shouldRender) {
-      return undefined;
-    }
-
-    const dialog = nativeDialogRef.current;
-    if (!dialog) {
-      return undefined;
-    }
-
-    if (!dialog.open) {
-      dialog.showModal();
-    }
-
-    return () => {
-      if (dialog.open) {
-        dialog.close();
+  createMutationEffect(
+    () => [props.isNativeDialog, nativeDialogRef, shouldRender()],
+    ([, , shouldRender]) => {
+      if (!props.isNativeDialog || !shouldRender) {
+        return undefined;
       }
-    };
-  }, [isNativeDialog, nativeDialogRef, shouldRender]);
 
-  useEffect(() => {
-    if (!isNativeDialog || !shouldRender) {
-      return undefined;
-    }
-
-    const dialog = nativeDialogRef.current;
-    if (!dialog) {
-      return undefined;
-    }
-
-    const handleCancel = (event: Event) => {
-      event.preventDefault();
-
-      if (isOpen) {
-        onClose();
+      const dialog = nativeDialogRef.current;
+      if (!dialog) {
+        return undefined;
       }
-    };
 
-    dialog.addEventListener('cancel', handleCancel);
+      if (!dialog.open) {
+        dialog.showModal();
+      }
 
-    return () => {
-      dialog.removeEventListener('cancel', handleCancel);
-    };
-  }, [isNativeDialog, isOpen, nativeDialogRef, onClose, shouldRender]);
+      return () => {
+        if (dialog.open) {
+          dialog.close();
+        }
+      };
+    },
+  );
+
+  createEffect(
+    () => [props.isNativeDialog, props.isOpen, nativeDialogRef, props.onClose, shouldRender()],
+    ([, , , , shouldRender]) => {
+      if (!props.isNativeDialog || !shouldRender) {
+        return undefined;
+      }
+
+      const dialog = nativeDialogRef.current;
+      if (!dialog) {
+        return undefined;
+      }
+
+      const handleCancel = (event: Event) => {
+        event.preventDefault();
+
+        if (props.isOpen) {
+          props.onClose();
+        }
+      };
+
+      dialog.addEventListener('cancel', handleCancel);
+
+      return () => {
+        dialog.removeEventListener('cancel', handleCancel);
+      };
+    },
+  );
 
   useHistoryBack({
-    isActive: isOpen,
-    onBack: onClose,
+    isActive: () => props.isOpen,
+    onBack: props.onClose,
   });
 
-  useLayoutEffectWithPrevDeps(
-    ([prevIsOpen]) => {
-      document.body.classList.toggle('has-open-dialog', Boolean(isOpen));
+  createMutationEffect(
+    () => [props.isOpen],
+    (_deps, prev) => {
+      const [prevIsOpen] = prev ?? [];
+      document.body.classList.toggle('has-open-dialog', Boolean(props.isOpen));
 
-      const stopCounting = isOpen ? countOpenModal() : undefined;
+      const stopCounting = props.isOpen ? countOpenModal() : undefined;
 
-      if (isOpen || (!isOpen && prevIsOpen !== undefined)) {
+      if (props.isOpen || (!props.isOpen && prevIsOpen !== undefined)) {
         beginHeavyAnimation(ANIMATION_DURATION);
       }
 
@@ -215,40 +220,35 @@ const Modal = (props: OwnProps) => {
         stopCounting?.();
       };
     },
-    [isOpen],
   );
 
   const lang = useOldLang();
 
-  if (!shouldRender) {
-    return undefined;
-  }
-
   function renderHeader() {
-    if (header) {
-      return header;
+    if (header()) {
+      return header();
     }
 
-    const closeIconClassName = buildClassName('animated-close-icon', isBackButton && 'state-back');
+    const closeIconClassName = buildClassName('animated-close-icon', isBackButton() && 'state-back');
 
-    const closeButton = withCloseButton ? (
+    const closeButton = withCloseButton() ? (
       <Button
-        className={buildClassName(hasAbsoluteCloseButton && 'modal-absolute-close-button')}
+        className={buildClassName(hasAbsoluteCloseButton() && 'modal-absolute-close-button')}
         round
-        color={absoluteCloseButtonColor}
+        color={absoluteCloseButtonColor()}
         size="tiny"
-        ariaLabel={isBackButton ? lang('Back') : lang('Close')}
-        onClick={onClose}
+        ariaLabel={isBackButton() ? lang('Back') : lang('Close')}
+        onClick={props.onClose}
       >
-        <div className={closeIconClassName} />
+        <div class={closeIconClassName} />
       </Button>
     ) : undefined;
 
-    return title ? (
-      <div className={buildClassName('modal-header', headerClassName, isCondensedHeader && 'modal-header-condensed')}>
+    return title() ? (
+      <div class={buildClassName('modal-header', headerClassName(), isCondensedHeader() && 'modal-header-condensed')}>
         {closeButton}
-        <div className="modal-title" autoFocus={!noTitleAutoFocus}>
-          {title}
+        <div class="modal-title" autoFocus={!props.noTitleAutoFocus}>
+          {title()}
         </div>
       </div>
     ) : (
@@ -256,33 +256,35 @@ const Modal = (props: OwnProps) => {
     );
   }
 
-  const fullClassName = buildClassName(
-    'Modal',
-    className,
-    noBackdrop && 'transparent-backdrop',
-    isSlim && 'slim',
-    isLowStackPriority && 'low-priority',
-    withBalanceBar && 'with-balance-bar',
+  const fullClassName = createMemo(() =>
+    buildClassName(
+      'Modal',
+      className(),
+      noBackdrop() && 'transparent-backdrop',
+      isSlim() && 'slim',
+      isLowStackPriority() && 'low-priority',
+      withBalanceBar() && 'with-balance-bar',
+    ),
   );
 
-  const modalDialogClassName = buildClassName('modal-dialog', dialogClassName);
+  const modalDialogClassName = createMemo(() => buildClassName('modal-dialog', dialogClassName()));
 
   function renderContent() {
     return (
       <>
-        <div className="modal-container">
-          <div className="modal-backdrop" onClick={!noBackdropClose ? onClose : undefined} />
-          {withBalanceBar && <ModalStarBalanceBar isModalOpen={isOpen} currency={currencyInBalanceBar} />}
-          <div className={modalDialogClassName} ref={actualDialogRef} style={dialogStyle}>
+        <div class="modal-container">
+          <div class="modal-backdrop" onClick={!props.noBackdropClose ? props.onClose : undefined} />
+          {withBalanceBar() && <ModalStarBalanceBar isModalOpen={props.isOpen} currency={currencyInBalanceBar()} />}
+          <div class={modalDialogClassName()} ref={actualDialogRef()} style={dialogStyle()}>
             {renderHeader()}
-            {headerToolBar}
-            {Boolean(moreMenuItems) && (
+            {headerToolBar()}
+            {Boolean(moreMenuItems()) && (
               <>
                 <Button
                   ref={moreButtonRef}
                   className="modal-more-button"
                   round
-                  color={absoluteCloseButtonColor}
+                  color={absoluteCloseButtonColor()}
                   size="tiny"
                   iconName="more"
                   ariaLabel={lang('AriaMoreButton')}
@@ -303,13 +305,13 @@ const Modal = (props: OwnProps) => {
                   getMenuElement={getMenuElement}
                   getLayout={getLayout}
                 >
-                  {moreMenuItems}
+                  {moreMenuItems()}
                 </Menu>
               </>
             )}
-            {dialogContent}
-            <div className={buildClassName('modal-content custom-scroll', contentClassName)} style={style}>
-              {children}
+            {dialogContent()}
+            <div class={buildClassName('modal-content custom-scroll', contentClassName())} style={style()}>
+              {children()}
             </div>
           </div>
         </div>
@@ -318,17 +320,19 @@ const Modal = (props: OwnProps) => {
   }
 
   return (
-    <Portal>
-      {isNativeDialog ? (
-        <dialog ref={nativeDialogRef} className={fullClassName} aria-modal="true">
-          {renderContent()}
-        </dialog>
-      ) : (
-        <div ref={divModalRef} className={fullClassName} tabIndex={-1} role="dialog">
-          {renderContent()}
-        </div>
-      )}
-    </Portal>
+    <Show when={shouldRender()}>
+      <Portal>
+        {props.isNativeDialog ? (
+          <dialog ref={nativeDialogRef} class={fullClassName()} aria-modal="true">
+            {renderContent()}
+          </dialog>
+        ) : (
+          <div ref={divModalRef} class={fullClassName()} tabIndex={-1} role="dialog">
+            {renderContent()}
+          </div>
+        )}
+      </Portal>
+    </Show>
   );
 };
 

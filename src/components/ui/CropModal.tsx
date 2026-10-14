@@ -1,4 +1,4 @@
-import { memo } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
 
 import useImageLoader from '../../hooks/useImageLoader';
 import useLang from '../../hooks/useLang';
@@ -17,22 +17,28 @@ type OwnProps = {
 const MAX_OUTPUT_SIZE = 1024;
 const MIN_OUTPUT_SIZE = 256;
 
-const CropModal = ({ file, onChange, onClose }: OwnProps) => {
+const CropModal = (props: OwnProps) => {
   const lang = useLang();
-  const { image } = useImageLoader(file);
-  const isOpen = Boolean(file) && Boolean(image);
+  const imageLoaderResult = createMemo(() => useImageLoader(() => props.file));
+  const image = () => imageLoaderResult().image;
+  const isOpen = createMemo(() => Boolean(props.file) && Boolean(image()));
   return (
     <Modal
-      isOpen={isOpen}
-      onClose={onClose}
+      isOpen={isOpen()}
+      onClose={props.onClose}
       title={lang('CropperTitle')}
       className="CropModal"
       hasCloseButton
       isCondensedHeader
     >
-      <ImageCropper onChange={onChange} image={image} maxOutputSize={MAX_OUTPUT_SIZE} minOutputSize={MIN_OUTPUT_SIZE} />
+      <ImageCropper
+        onChange={props.onChange}
+        image={image()}
+        maxOutputSize={MAX_OUTPUT_SIZE}
+        minOutputSize={MIN_OUTPUT_SIZE}
+      />
     </Modal>
   );
 };
 
-export default memo(CropModal);
+export default CropModal;

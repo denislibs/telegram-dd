@@ -1,5 +1,6 @@
-import { memo } from '../../lib/teact/teact';
+import { For, Show } from 'frameact/dom';
 import { withGlobal } from '../../global';
+import type { GlobalState } from '../../global/types';
 
 import type { ApiNotification } from '../../api/types';
 
@@ -12,20 +13,20 @@ type StateProps = {
   notifications: ApiNotification[];
 };
 
-const Notifications = ({ notifications }: StateProps) => {
-  if (!notifications.length) {
-    return undefined;
-  }
+const Notifications = () => {
+  const props = withGlobal({}, mapStateToProps);
 
   return (
-    <div id="Notifications">
-      {notifications.map((notification) => (
-        <Notification key={notification.localId} notification={notification} />
-      ))}
-    </div>
+    <Show when={props.notifications.length}>
+      <div id="Notifications">
+        <For each={props.notifications} keyed={(notification) => notification.localId}>
+          {(notification) => <Notification notification={notification()} />}
+        </For>
+      </div>
+    </Show>
   );
 };
 
-export default memo(
-  withGlobal((global): Complete<StateProps> => pick(selectTabState(global), ['notifications']))(Notifications),
-);
+const mapStateToProps = (global: GlobalState): Complete<StateProps> => pick(selectTabState(global), ['notifications']);
+
+export default Notifications;

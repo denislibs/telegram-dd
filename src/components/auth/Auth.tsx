@@ -1,6 +1,6 @@
 import '../../global/actions/initial';
 
-import { memo } from '../../lib/teact/teact';
+import { currentOrPrev } from 'frameact';
 import { getActions, withGlobal } from '../../global';
 
 import type { GlobalState } from '../../global/types';
@@ -8,7 +8,6 @@ import type { GlobalState } from '../../global/types';
 import { IS_TAURI } from '../../util/browser/globalEnvironment';
 import { IS_MAC_OS, PLATFORM_ENV } from '../../util/browser/windowEnvironment';
 
-import useCurrentOrPrev from '../../hooks/useCurrentOrPrev';
 import useHistoryBack from '../../hooks/useHistoryBack';
 
 import Transition from '../ui/Transition';
@@ -24,7 +23,8 @@ type StateProps = {
   authState: GlobalState['auth']['state'];
 };
 
-const Auth = ({ authState }: StateProps) => {
+const Auth = () => {
+  const props = withGlobal({}, mapStateToProps);
   const { returnToAuthPhoneNumber, goToAuthQrCode } = getActions();
 
   const isMobile = PLATFORM_ENV === 'iOS' || PLATFORM_ENV === 'Android';
@@ -38,17 +38,20 @@ const Auth = ({ authState }: StateProps) => {
   };
 
   useHistoryBack({
-    isActive:
-      (!isMobile && authState === 'authorizationStateWaitPhoneNumber') ||
-      (isMobile && authState === 'authorizationStateWaitQrCode'),
+    isActive: () =>
+      (!isMobile && props.authState === 'authorizationStateWaitPhoneNumber') ||
+      (isMobile && props.authState === 'authorizationStateWaitQrCode'),
     onBack: handleChangeAuthorizationMethod,
   });
 
   // For animation purposes
-  const renderingAuthState = useCurrentOrPrev(authState !== 'authorizationStateReady' ? authState : undefined, true);
+  const renderingAuthState = currentOrPrev(
+    () => (props.authState !== 'authorizationStateReady' ? props.authState : undefined),
+    { skipUndefined: true },
+  );
 
   function getScreen() {
-    switch (renderingAuthState) {
+    switch (renderingAuthState()) {
       case 'authorizationStateWaitCode':
         return <AuthCode />;
       case 'authorizationStateWaitPassword':
@@ -65,7 +68,7 @@ const Auth = ({ authState }: StateProps) => {
   }
 
   function getActiveKey() {
-    switch (renderingAuthState) {
+    switch (renderingAuthState()) {
       case 'authorizationStateWaitCode':
         return 0;
       case 'authorizationStateWaitPassword':
@@ -82,6 +85,7 @@ const Auth = ({ authState }: StateProps) => {
   }
 
   return (
+    // TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6)
     <Transition
       activeKey={getActiveKey()}
       name="fade"
@@ -93,10 +97,10 @@ const Auth = ({ authState }: StateProps) => {
   );
 };
 
-export default memo(
-  withGlobal((global): Complete<StateProps> => {
-    return {
-      authState: global.auth.state,
-    };
-  })(Auth),
-);
+const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
+  return {
+    authState: global.auth.state,
+  };
+};
+
+export default Auth;

@@ -1,4 +1,4 @@
-import { useEffect } from '../lib/teact/teact';
+import { onMount } from 'frameact';
 
 import {
   MIN_SCREEN_WIDTH_FOR_STATIC_LEFT_COLUMN,
@@ -72,9 +72,10 @@ initMediaQueryCache();
 handleMediaQueryChange();
 
 export default function useAppLayout() {
+  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
   const forceUpdate = useForceUpdate();
 
-  useEffect(() => callbacks.addCallback(forceUpdate), [forceUpdate]);
+  onMount(() => callbacks.addCallback(forceUpdate));
 
   return {
     isMobile,

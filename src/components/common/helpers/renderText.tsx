@@ -1,4 +1,4 @@
-import type { TeactNode } from '../../../lib/teact/teact';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import type { TextPart } from '../../../types';
 
@@ -34,9 +34,9 @@ export default function renderText(
   filters: Array<TextFilter> = ['emoji'],
   params?: {
     highlight?: string;
-    markdownPostProcessor?: (part: string) => TeactNode;
+    markdownPostProcessor?: (part: string) => JSX.Element;
   },
-): TeactNode[] {
+): JSX.Element[] {
   if (typeof part !== 'string') {
     return [part];
   }
@@ -86,7 +86,7 @@ export default function renderText(
   );
 }
 
-function escapeHtml(textParts: TextPart[], postProcessor?: (part: string) => TeactNode): TextPart[] {
+function escapeHtml(textParts: TextPart[], postProcessor?: (part: string) => JSX.Element): TextPart[] {
   const postProcess = postProcessor || ((part: string) => part);
 
   const divEl = document.createElement('div');
@@ -107,7 +107,7 @@ function replaceEmojis(
   textParts: TextPart[],
   size: 'big' | 'small',
   type: 'jsx' | 'html',
-  postProcessor?: (part: string) => TeactNode,
+  postProcessor?: (part: string) => JSX.Element,
 ): TextPart[] {
   const postProcess = postProcessor || ((part: string) => part);
 
@@ -140,7 +140,7 @@ function replaceEmojis(
           emojiResult.push(
             <img
               src={src}
-              className={`${className}${!isLoaded ? ' opacity-transition slow shown' : ''}`}
+              class={`${className}${!isLoaded ? ' opacity-transition slow shown' : ''}`}
               alt={emoji}
               data-path={src}
               draggable={false}
@@ -173,7 +173,7 @@ function replaceEmojis(
 function addLineBreaks(
   textParts: TextPart[],
   type: 'jsx' | 'html',
-  postProcessor?: (part: string) => TeactNode,
+  postProcessor?: (part: string) => JSX.Element,
 ): TextPart[] {
   const postProcess = postProcessor || ((part: string) => part);
 
@@ -204,7 +204,7 @@ function addLineBreaks(
 function addHighlight(
   textParts: TextPart[],
   highlight: string | undefined,
-  postProcessor?: (part: string) => TeactNode,
+  postProcessor?: (part: string) => JSX.Element,
 ): TextPart[] {
   const postProcess = postProcessor || ((part: string) => part);
 
@@ -224,7 +224,7 @@ function addHighlight(
     const newParts: TextPart[] = [];
     newParts.push(postProcess(part.substring(0, queryPosition)));
     newParts.push(
-      <span className="matching-text-highlight">
+      <span class="matching-text-highlight">
         {postProcess(part.substring(queryPosition, queryPosition + highlight.length))}
       </span>,
     );
@@ -238,7 +238,7 @@ const RE_LINK = new RegExp(`${RE_LINK_TEMPLATE}|${RE_MENTION_TEMPLATE}`, 'ig');
 function addLinks(
   textParts: TextPart[],
   allowOnlyTgLinks?: boolean,
-  postProcessor?: (part: string) => TeactNode,
+  postProcessor?: (part: string) => JSX.Element,
 ): TextPart[] {
   const postProcess = postProcessor || ((part: string) => part);
 
@@ -286,7 +286,7 @@ function addLinks(
 function replaceSimpleMarkdown(
   textParts: TextPart[],
   type: 'jsx' | 'html',
-  postProcessor?: (part: string) => TeactNode,
+  postProcessor?: (part: string) => JSX.Element,
 ): TextPart[] {
   // Currently supported only for JSX. If needed, add typings to support HTML as well.
   const postProcess = postProcessor || ((part: string) => part);

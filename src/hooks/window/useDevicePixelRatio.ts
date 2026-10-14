@@ -1,4 +1,4 @@
-import { useState } from '../../lib/teact/teact';
+import { createSignal, onMount } from 'frameact';
 
 import { createCallbackManager } from '../../util/callbacks';
 import useEffectOnce from '../useEffectOnce';
@@ -12,9 +12,9 @@ function createListener() {
 }
 
 export default function useDevicePixelRatio() {
-  const [dpr, setDpr] = useState(window.devicePixelRatio);
+  const [dpr, setDpr] = createSignal(window.devicePixelRatio);
 
-  useEffectOnce(() => {
+  onMount(() => {
     return callbacks.addCallback(() => {
       setDpr(window.devicePixelRatio);
     });

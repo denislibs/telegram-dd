@@ -1,5 +1,6 @@
-import type { TeactNode } from '../../../lib/teact/teact';
+import type { JSX } from 'frameact/jsx-runtime';
 import { getActions, withGlobal } from '../../../global';
+import type { GlobalState } from '../../../global/types';
 
 import type { ApiPeer } from '../../../api/types';
 import { ApiMessageEntityTypes } from '../../../api/types';
@@ -11,14 +12,15 @@ import useAppLayout from '../../../hooks/useAppLayout';
 type OwnProps = {
   userId?: string;
   username?: string;
-  children: TeactNode;
+  children: JSX.Element;
 };
 
 type StateProps = {
   userOrChat?: ApiPeer;
 };
 
-const MentionLink = ({ userId, username, userOrChat, children }: OwnProps & StateProps) => {
+const MentionLink = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const { openChat, openChatByUsername, closeStoryViewer, setShouldCloseRightColumn } = getActions();
 
   const { isMobile } = useAppLayout();
@@ -30,28 +32,30 @@ const MentionLink = ({ userId, username, userOrChat, children }: OwnProps & Stat
       });
     }
 
-    if (userOrChat) {
-      openChat({ id: userOrChat.id });
-    } else if (username) {
+    if (props.userOrChat) {
+      openChat({ id: props.userOrChat.id });
+    } else if (props.username) {
       closeStoryViewer();
-      openChatByUsername({ username: username.substring(1) });
+      openChatByUsername({ username: props.username.substring(1) });
     }
   };
 
   return (
     <a
       onClick={handleClick}
-      className="text-entity-link"
+      class="text-entity-link"
       dir="auto"
-      data-entity-type={userId ? ApiMessageEntityTypes.MentionName : ApiMessageEntityTypes.Mention}
+      data-entity-type={props.userId ? ApiMessageEntityTypes.MentionName : ApiMessageEntityTypes.Mention}
     >
-      {children}
+      {props.children}
     </a>
   );
 };
 
-export default withGlobal<OwnProps>((global, { userId }): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState, { userId }: OwnProps): Complete<StateProps> => {
   return {
     userOrChat: userId ? selectUser(global, userId) : undefined,
   };
-})(MentionLink);
+};
+
+export default MentionLink;

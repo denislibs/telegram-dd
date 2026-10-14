@@ -1,6 +1,5 @@
-import { useEffect } from '@teact';
+import { onMount, requestMutation } from 'frameact';
 
-import { requestMutation } from '../lib/fasterdom/fasterdom';
 import useLastCallback from './useLastCallback';
 
 const FILE_DRAG_TYPE = 'Files';
@@ -14,7 +13,7 @@ const FILE_DRAG_SESSION_GAP_MS = 1000;
 const FILE_HOVER_REARM_DISTANCE_PX = 4;
 
 export default function useFileHoverOpen() {
-  useEffect(() => {
+  onMount(() => {
     let candidateElement: HTMLElement | undefined;
     let candidateStartedAt = 0;
     let lastDragEventAt = 0;
@@ -116,13 +115,14 @@ export default function useFileHoverOpen() {
       window.removeEventListener('pagehide', resetState);
       resetState();
     };
-  }, []);
+  });
 }
 
+// TODO(codemod): useFileHoverOpenHandler: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export function useFileHoverOpenHandler(onFileHoverOpen?: NoneToVoidFunction) {
-  return useLastCallback((e: Event) => {
+  return (e: Event) => {
     handleFileHoverOpenEvent(e, onFileHoverOpen!);
-  });
+  };
 }
 
 export function handleFileHoverOpenEvent(e: Event, onFileHoverOpen: NoneToVoidFunction) {

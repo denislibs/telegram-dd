@@ -1,7 +1,8 @@
-import { useCallback, useMemo } from '../lib/teact/teact';
+import { createMemo } from 'frameact';
 
 import { debounce } from '../util/schedulers';
 
+// TODO(codemod): useDebouncedCallback: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useDebouncedCallback<T extends AnyToVoidFunction>(
   fn: T,
   deps: any[],
@@ -10,9 +11,9 @@ export default function useDebouncedCallback<T extends AnyToVoidFunction>(
   noLast = false,
 ) {
   // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps
-  const fnMemo = useCallback(fn, deps);
+  const fnMemo = fn;
 
-  return useMemo(() => {
+  return createMemo(() => {
     return debounce(fnMemo, ms, !noFirst, !noLast);
-  }, [fnMemo, ms, noFirst, noLast]);
+  });
 }

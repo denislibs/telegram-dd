@@ -1,9 +1,7 @@
-import type { FC } from '../../lib/teact/teact';
-import { useCallback, useMemo, useRef, useState } from '../../lib/teact/teact';
+import { createMemo, createSignal } from 'frameact';
+import { mergeProps } from 'frameact/dom';
 
 import type { IAnchorPosition } from '../../types';
-
-import useLastCallback from '../../hooks/useLastCallback';
 
 import Button from './Button';
 import Menu from './Menu';
@@ -30,49 +28,33 @@ type OwnProps = {
   autoClose?: boolean;
 };
 
-const DropdownMenu: FC<OwnProps> = ({
-  trigger,
-  className,
-  bubbleClassName,
-  children,
-  transformOriginX,
-  transformOriginY,
-  positionX = 'left',
-  positionY,
-  footer,
-  forceOpen,
-  withPortal,
-  onOpen,
-  onClose,
-  onTransitionEnd,
-  onMouseEnterBackdrop,
-  onHide,
-  autoClose = true,
-}) => {
-  const menuRef = useRef<HTMLDivElement>();
-  const triggerRef = useRef<HTMLDivElement>();
-  const [isOpen, setIsOpen] = useState(false);
-  const [menuAnchor, setMenuAnchor] = useState<IAnchorPosition | undefined>();
+const DropdownMenu = (rawProps: OwnProps) => {
+  const props = mergeProps({ positionX: 'left', autoClose: true }, rawProps) as OwnProps &
+    Required<Pick<OwnProps, 'positionX' | 'autoClose'>>;
+  let menuRef!: HTMLDivElement;
+  let triggerRef!: HTMLDivElement;
+  const [isOpen, setIsOpen] = createSignal(false);
+  const [menuAnchor, setMenuAnchor] = createSignal<IAnchorPosition | undefined>(undefined);
 
   const toggleIsOpen = () => {
-    if (!isOpen && withPortal && triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
+    if (!isOpen() && props.withPortal && triggerRef) {
+      const rect = triggerRef.getBoundingClientRect();
       setMenuAnchor({ x: rect.left, y: rect.bottom });
     }
 
-    setIsOpen(!isOpen);
+    setIsOpen(!isOpen());
 
-    if (isOpen) {
-      onClose?.();
+    if (isOpen()) {
+      props.onClose?.();
     } else {
-      onOpen?.();
+      props.onOpen?.();
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<any>) => {
-    const menu = menuRef.current;
+    const menu = menuRef;
 
-    if (!isOpen || e.keyCode !== 40 || !menu) {
+    if (!isOpen() || e.keyCode !== 40 || !menu) {
       return;
     }
 
@@ -84,13 +66,13 @@ const DropdownMenu: FC<OwnProps> = ({
     }
   };
 
-  const handleClose = useCallback(() => {
+  const handleClose = () => {
     setIsOpen(false);
-    onClose?.();
-  }, [onClose]);
+    props.onClose?.();
+  };
 
-  const triggerComponent: FC<{ onTrigger: () => void; isOpen?: boolean }> = useMemo(() => {
-    if (trigger) return trigger;
+  const triggerComponent: FC<{ onTrigger: () => void; isOpen?: boolean }> = createMemo(() => {
+    if (props.trigger) return props.trigger;
 
     return ({ onTrigger, isOpen: isMenuOpen }) => (
       <Button
@@ -103,40 +85,40 @@ const DropdownMenu: FC<OwnProps> = ({
         ariaLabel="More actions"
       />
     );
-  }, [trigger]);
+  });
 
-  const getTriggerElement = useLastCallback(() => triggerRef.current);
-  const getRootElement = useLastCallback(() => document.body);
-  const getMenuElement = useLastCallback(() => menuRef.current);
-  const getLayout = useLastCallback(() => ({ withPortal: true }));
+  const getTriggerElement = () => triggerRef;
+  const getRootElement = () => document.body;
+  const getMenuElement = () => menuRef;
+  const getLayout = () => ({ withPortal: true });
 
   return (
     <div
       ref={triggerRef}
-      className={`DropdownMenu ${className || ''}`}
+      class={`DropdownMenu ${props.className || ''}`}
       onKeyDown={handleKeyDown}
-      onTransitionEnd={onTransitionEnd}
+      onTransitionEnd={props.onTransitionEnd}
     >
-      {triggerComponent({ onTrigger: toggleIsOpen, isOpen })}
+      {triggerComponent()({ onTrigger: toggleIsOpen, isOpen: isOpen() })}
 
       <Menu
         ref={menuRef}
-        isOpen={isOpen || Boolean(forceOpen)}
-        className={className || ''}
-        bubbleClassName={bubbleClassName || ''}
-        transformOriginX={transformOriginX}
-        transformOriginY={transformOriginY}
-        positionX={positionX}
-        positionY={positionY}
-        footer={footer}
-        autoClose={autoClose}
-        withPortal={withPortal}
+        isOpen={isOpen() || Boolean(props.forceOpen)}
+        className={props.className || ''}
+        bubbleClassName={props.bubbleClassName || ''}
+        transformOriginX={props.transformOriginX}
+        transformOriginY={props.transformOriginY}
+        positionX={props.positionX}
+        positionY={props.positionY}
+        footer={props.footer}
+        autoClose={props.autoClose}
+        withPortal={props.withPortal}
         onClose={handleClose}
-        onCloseAnimationEnd={onHide}
-        onMouseEnterBackdrop={onMouseEnterBackdrop}
-        {...(withPortal && menuAnchor
+        onCloseAnimationEnd={props.onHide}
+        onMouseEnterBackdrop={props.onMouseEnterBackdrop}
+        {...(props.withPortal && menuAnchor()
           ? {
-              anchor: menuAnchor,
+              anchor: menuAnchor(),
               getTriggerElement,
               getRootElement,
               getMenuElement,
@@ -144,7 +126,7 @@ const DropdownMenu: FC<OwnProps> = ({
             }
           : undefined)}
       >
-        {children}
+        {props.children}
       </Menu>
     </div>
   );

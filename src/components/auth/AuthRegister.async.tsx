@@ -1,13 +1,13 @@
-import { Bundles } from '../../util/moduleLoader';
+import { lazy } from 'frameact/dom';
 
-import useModuleLoader from '../../hooks/useModuleLoader';
+import { Bundles, loadBundle } from '../../util/moduleLoader';
 
 import Loading from '../ui/Loading';
 
-const AuthRegisterAsync = () => {
-  const AuthRegister = useModuleLoader(Bundles.Auth, 'AuthRegister');
+const AuthRegister = lazy(() => loadBundle(Bundles.Auth).then((m) => ({ default: m.AuthRegister })));
 
-  return AuthRegister ? <AuthRegister /> : <Loading />;
+const AuthRegisterAsync = () => {
+  return <AuthRegister />;
 };
 
 export default AuthRegisterAsync;

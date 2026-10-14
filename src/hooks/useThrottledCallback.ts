@@ -1,9 +1,10 @@
-import { useCallback, useMemo } from '../lib/teact/teact';
+import { createMemo } from 'frameact';
 
 import type { Scheduler } from '../util/schedulers';
 
 import { throttle, throttleWith } from '../util/schedulers';
 
+// TODO(codemod): useThrottledCallback: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useThrottledCallback<T extends AnyToVoidFunction>(
   fn: T,
   deps: any[],
@@ -11,13 +12,13 @@ export default function useThrottledCallback<T extends AnyToVoidFunction>(
   noFirst = false,
 ) {
   // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps
-  const fnMemo = useCallback(fn, deps);
+  const fnMemo = fn;
 
-  return useMemo(() => {
+  return createMemo(() => {
     if (typeof msOrSchedulerFn === 'number') {
       return throttle(fnMemo, msOrSchedulerFn, !noFirst);
     } else {
       return throttleWith(msOrSchedulerFn, fnMemo);
     }
-  }, [fnMemo, msOrSchedulerFn, noFirst]);
+  });
 }

@@ -1,13 +1,11 @@
-import { useRef } from '../lib/teact/teact';
-
 import generateUniqueId from '../util/generateUniqueId';
 
 export default function useUniqueId() {
-  const idRef = useRef<string>();
+  let idRef: string | undefined;
 
-  if (!idRef.current) {
-    idRef.current = generateUniqueId();
+  if (!idRef) {
+    idRef = generateUniqueId();
   }
 
-  return idRef.current;
+  return idRef;
 }

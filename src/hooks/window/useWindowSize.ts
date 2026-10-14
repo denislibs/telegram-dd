@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from '../../lib/teact/teact';
+import { createMemo, createSignal, onMount } from 'frameact';
 
 import { throttle } from '../../util/schedulers';
 import windowSize from '../../util/windowSize';
@@ -8,12 +8,12 @@ const THROTTLE = 250;
 
 export default function useWindowSize() {
   const { width: initialWidth, height: initialHeight } = windowSize.get();
-  const [width, setWidth] = useState(initialWidth);
-  const [height, setHeight] = useState(initialHeight);
-  const [isResizing, setIsResizing] = useState(false);
+  const [width, setWidth] = createSignal(initialWidth);
+  const [height, setHeight] = createSignal(initialHeight);
+  const [isResizing, setIsResizing] = createSignal(false);
   const setIsResizingDebounced = useDebouncedCallback(setIsResizing, [setIsResizing], THROTTLE, true);
 
-  useEffect(() => {
+  onMount(() => {
     const throttledSetIsResizing = throttle(
       () => {
         setIsResizing(true);
@@ -43,7 +43,7 @@ export default function useWindowSize() {
     return () => {
       window.removeEventListener('resize', handleResize);
     };
-  }, [setIsResizingDebounced]);
+  });
 
-  return useMemo(() => ({ width, height, isResizing }), [height, isResizing, width]);
+  return createMemo(() => ({ width: width(), height: height(), isResizing: isResizing() }));
 }

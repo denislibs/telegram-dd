@@ -1,6 +1,7 @@
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import type { ElementRef, TeactNode } from '../../lib/teact/teact';
-import { useRef, useState } from '../../lib/teact/teact';
+import { createMemo, createSignal } from 'frameact';
+import { mergeProps, Show } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import type { IconName } from '../../types/icons';
 
@@ -9,7 +10,6 @@ import buildClassName from '../../util/buildClassName';
 import buildStyle from '../../util/buildStyle';
 
 import { useFileHoverOpenHandler } from '../../hooks/useFileHoverOpen';
-import useLastCallback from '../../hooks/useLastCallback';
 import useOldLang from '../../hooks/useOldLang';
 
 import Icon from '../common/icons/Icon';
@@ -20,9 +20,9 @@ import Spinner from './Spinner';
 import './Button.scss';
 
 export type OwnProps = {
-  ref?: ElementRef<HTMLButtonElement | HTMLAnchorElement>;
+  ref?: (el: HTMLButtonElement | HTMLAnchorElement) => void;
   type?: 'button' | 'submit' | 'reset';
-  children?: TeactNode;
+  children?: JSX.Element;
   size?: 'default' | 'smaller' | 'tiny';
   color?:
     | 'primary'
@@ -93,137 +93,99 @@ export type OwnProps = {
 // Longest animation duration;
 const CLICKED_TIMEOUT = 400;
 
-const Button = ({
-  ref,
-  type = 'button',
-  id,
-  children,
-  size = 'default',
-  color = 'primary',
-  backgroundImage,
-  className,
-  round,
-  pill,
-  badge,
-  fluid,
-  inline,
-  isText,
-  isLoading,
-  isShiny,
-  withPremiumGradient,
-  withSparkleEffect,
-  noSparkleAnimation,
-  ariaLabel,
-  ariaControls,
-  ariaSelected,
-  hasPopup,
-  href,
-  download,
-  disabled,
-  nonInteractive,
-  allowDisabledClick,
-  noFastClick = color === 'danger',
-  ripple,
-  faded,
-  tabIndex,
-  isRtl,
-  isRectangular,
-  noPreventDefault,
-  noClickTransitionReset,
-  shouldStopPropagation,
-  noForcedUpperCase,
-  style,
-  autoFocus,
-  iconName,
-  iconAlignment = 'start',
-  iconClassName,
-  iconHasPremiumBadge,
-  onClick,
-  onContextMenu,
-  onMouseDown,
-  onMouseUp,
-  onMouseEnter,
-  onMouseLeave,
-  onFocus,
-  onTransitionEnd,
-  onFileHoverOpen,
-}: OwnProps) => {
-  let elementRef = useRef<HTMLButtonElement | HTMLAnchorElement>();
-  if (ref) {
-    elementRef = ref;
+const Button = (rawProps: OwnProps) => {
+  const props = mergeProps(
+    {
+      type: 'button',
+      size: 'default',
+      color: 'primary',
+      get noFastClick() {
+        return props.color === 'danger';
+      },
+      iconAlignment: 'start',
+    },
+    rawProps,
+  ) as OwnProps & Required<Pick<OwnProps, 'type' | 'size' | 'color' | 'noFastClick' | 'iconAlignment'>>;
+  let elementRef!: HTMLButtonElement | HTMLAnchorElement;
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (props.ref) {
+    // TODO(codemod): "elementRef" was a ref object and is reassigned here (a forwarded ref?): use a callback ref
+    elementRef = props.ref;
   }
 
   const lang = useOldLang();
 
-  const [isClicked, setIsClicked] = useState(false);
-  const handleFileHoverOpen = useFileHoverOpenHandler(onFileHoverOpen);
+  const [isClicked, setIsClicked] = createSignal(false);
+  const handleFileHoverOpen = useFileHoverOpenHandler(props.onFileHoverOpen);
 
-  const isNotInteractive = disabled || nonInteractive;
+  const isNotInteractive = createMemo(() => props.disabled || props.nonInteractive);
 
-  const fullClassName = buildClassName(
-    'Button',
-    className,
-    size,
-    color,
-    round && 'round',
-    pill && 'pill',
-    fluid && 'fluid',
-    badge && 'badge',
-    isNotInteractive && 'disabled',
-    nonInteractive && 'non-interactive',
-    allowDisabledClick && 'click-allowed',
-    isText && 'text',
-    isLoading && 'loading',
-    ripple && 'has-ripple',
-    faded && 'faded',
-    isClicked && 'clicked',
-    backgroundImage && 'with-image',
-    isShiny && 'shiny',
-    withPremiumGradient && 'premium',
-    isRectangular && 'rectangular',
-    noForcedUpperCase && 'no-upper-case',
-    inline && 'inline',
-    Boolean(iconName && children) && `content-with-icon-${iconAlignment}`,
+  const fullClassName = createMemo(() =>
+    buildClassName(
+      'Button',
+      props.className,
+      props.size,
+      props.color,
+      props.round && 'round',
+      props.pill && 'pill',
+      props.fluid && 'fluid',
+      props.badge && 'badge',
+      isNotInteractive() && 'disabled',
+      props.nonInteractive && 'non-interactive',
+      props.allowDisabledClick && 'click-allowed',
+      props.isText && 'text',
+      props.isLoading && 'loading',
+      props.ripple && 'has-ripple',
+      props.faded && 'faded',
+      isClicked() && 'clicked',
+      props.backgroundImage && 'with-image',
+      props.isShiny && 'shiny',
+      props.withPremiumGradient && 'premium',
+      props.isRectangular && 'rectangular',
+      props.noForcedUpperCase && 'no-upper-case',
+      props.inline && 'inline',
+      Boolean(props.iconName && props.children) && `content-with-icon-${props.iconAlignment}`,
+    ),
   );
 
-  const handleClick = useLastCallback((e: ReactMouseEvent<HTMLButtonElement, MouseEvent>) => {
-    if ((allowDisabledClick || !isNotInteractive) && onClick) {
-      onClick(e);
+  const handleClick = (e: ReactMouseEvent<HTMLButtonElement, MouseEvent>) => {
+    if ((props.allowDisabledClick || !isNotInteractive()) && props.onClick) {
+      props.onClick(e);
     }
 
-    if (shouldStopPropagation) e.stopPropagation();
+    if (props.shouldStopPropagation) e.stopPropagation();
 
-    if (noClickTransitionReset) return;
+    if (props.noClickTransitionReset) return;
 
     setIsClicked(true);
     setTimeout(() => {
       setIsClicked(false);
     }, CLICKED_TIMEOUT);
-  });
+  };
 
-  const handleMouseDown = useLastCallback((e: ReactMouseEvent<HTMLButtonElement>) => {
-    if (!noPreventDefault) e.preventDefault();
+  const handleMouseDown = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    if (!props.noPreventDefault) e.preventDefault();
 
-    if ((allowDisabledClick || !isNotInteractive) && onMouseDown) {
-      onMouseDown(e);
+    if ((props.allowDisabledClick || !isNotInteractive()) && props.onMouseDown) {
+      props.onMouseDown(e);
     }
 
-    if (!IS_TOUCH_ENV && e.button === MouseButton.Main && !noFastClick) {
+    if (!IS_TOUCH_ENV && e.button === MouseButton.Main && !props.noFastClick) {
       handleClick(e);
     }
-  });
+  };
 
   const renderIcon = () => {
-    if (!iconName) return undefined;
-    return <Icon name={iconName} className={iconClassName} hasPremiumBadge={iconHasPremiumBadge} />;
+    if (!props.iconName) return undefined;
+    return <Icon name={props.iconName} className={props.iconClassName} hasPremiumBadge={props.iconHasPremiumBadge} />;
   };
 
   const renderContent = () => {
-    if (isLoading) {
+    if (props.isLoading) {
       return (
-        <div className="loading-content">
-          <span dir={isRtl ? 'auto' : undefined}>{lang('Cache.ClearProgress')}</span>
-          <Spinner color={isText ? 'blue' : 'white'} />
+        <div class="loading-content">
+          <span dir={props.isRtl ? 'auto' : undefined}>{lang('Cache.ClearProgress')}</span>
+          <Spinner color={props.isText ? 'blue' : 'white'} />
         </div>
       );
     }
@@ -231,84 +193,88 @@ const Button = ({
     const icon = renderIcon();
 
     if (!icon) {
-      return children;
+      return props.children;
     }
 
-    if (!children) {
+    if (!props.children) {
       return icon;
     }
 
     return (
-      <div className={`with-icon-${iconAlignment}`}>
+      <div class={`with-icon-${props.iconAlignment}`}>
         {icon}
-        {children}
+        {props.children}
       </div>
     );
   };
 
   const content = (
     <>
-      {withSparkleEffect && <Sparkles preset="button" noAnimation={noSparkleAnimation} />}
+      {props.withSparkleEffect && <Sparkles preset="button" noAnimation={props.noSparkleAnimation} />}
       {renderContent()}
-      {!isNotInteractive && ripple && <RippleEffect />}
+      {!isNotInteractive() && props.ripple && <RippleEffect />}
     </>
   );
 
-  if (href) {
-    return (
-      <a
-        ref={elementRef as ElementRef<HTMLAnchorElement>}
-        id={id}
-        className={fullClassName}
-        href={href}
-        title={ariaLabel}
-        download={download}
-        tabIndex={tabIndex}
-        autoFocus={autoFocus}
-        dir={isRtl ? 'rtl' : undefined}
-        aria-label={ariaLabel}
-        aria-controls={ariaControls}
-        style={style}
-        onTransitionEnd={onTransitionEnd}
-        data-file-hover-open={onFileHoverOpen ? true : undefined}
-        onFileHoverOpen={onFileHoverOpen ? handleFileHoverOpen : undefined}
-        target="_blank"
-        rel="noreferrer"
+  return (
+    <Show
+      when={!props.href}
+      fallback={
+        <a
+          ref={elementRef as HTMLAnchorElement}
+          id={props.id}
+          class={fullClassName()}
+          href={props.href}
+          title={props.ariaLabel}
+          download={props.download}
+          tabIndex={props.tabIndex}
+          autoFocus={props.autoFocus}
+          dir={props.isRtl ? 'rtl' : undefined}
+          aria-label={props.ariaLabel}
+          aria-controls={props.ariaControls}
+          style={props.style}
+          onTransitionEnd={props.onTransitionEnd}
+          data-file-hover-open={props.onFileHoverOpen ? true : undefined}
+          onFileHoverOpen={props.onFileHoverOpen ? handleFileHoverOpen : undefined}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {content}
+        </a>
+      }
+    >
+      <button
+        ref={elementRef as HTMLButtonElement}
+        id={props.id}
+        type={props.type}
+        class={fullClassName()}
+        onClick={IS_TOUCH_ENV || props.noFastClick ? handleClick : undefined}
+        onContextMenu={props.onContextMenu}
+        onMouseDown={handleMouseDown}
+        onMouseUp={props.onMouseUp}
+        onMouseEnter={props.onMouseEnter && !isNotInteractive() ? props.onMouseEnter : undefined}
+        onMouseLeave={props.onMouseLeave && !isNotInteractive() ? props.onMouseLeave : undefined}
+        onTransitionEnd={props.onTransitionEnd}
+        onFocus={props.onFocus && !isNotInteractive() ? props.onFocus : undefined}
+        data-file-hover-open={props.onFileHoverOpen ? true : undefined}
+        onFileHoverOpen={props.onFileHoverOpen ? handleFileHoverOpen : undefined}
+        disabled={props.disabled && !props.allowDisabledClick}
+        autoFocus={props.autoFocus}
+        aria-label={props.ariaLabel}
+        aria-controls={props.ariaControls}
+        aria-haspopup={props.hasPopup}
+        aria-selected={props.ariaSelected}
+        title={props.ariaLabel}
+        tabIndex={props.tabIndex}
+        dir={props.isRtl ? 'rtl' : undefined}
+        style={
+          buildStyle(props.style, props.backgroundImage && `background-image: url(${props.backgroundImage})`) ||
+          undefined
+        }
       >
         {content}
-      </a>
-    );
-  }
-
-  return (
-    <button
-      ref={elementRef as ElementRef<HTMLButtonElement>}
-      id={id}
-      type={type}
-      className={fullClassName}
-      onClick={IS_TOUCH_ENV || noFastClick ? handleClick : undefined}
-      onContextMenu={onContextMenu}
-      onMouseDown={handleMouseDown}
-      onMouseUp={onMouseUp}
-      onMouseEnter={onMouseEnter && !isNotInteractive ? onMouseEnter : undefined}
-      onMouseLeave={onMouseLeave && !isNotInteractive ? onMouseLeave : undefined}
-      onTransitionEnd={onTransitionEnd}
-      onFocus={onFocus && !isNotInteractive ? onFocus : undefined}
-      data-file-hover-open={onFileHoverOpen ? true : undefined}
-      onFileHoverOpen={onFileHoverOpen ? handleFileHoverOpen : undefined}
-      disabled={disabled && !allowDisabledClick}
-      autoFocus={autoFocus}
-      aria-label={ariaLabel}
-      aria-controls={ariaControls}
-      aria-haspopup={hasPopup}
-      aria-selected={ariaSelected}
-      title={ariaLabel}
-      tabIndex={tabIndex}
-      dir={isRtl ? 'rtl' : undefined}
-      style={buildStyle(style, backgroundImage && `background-image: url(${backgroundImage})`) || undefined}
-    >
-      {content}
-    </button>
+      </button>
+    </Show>
   );
 };
 

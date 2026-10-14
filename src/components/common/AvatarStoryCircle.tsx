@@ -1,5 +1,7 @@
-import { memo, useLayoutEffect, useMemo, useRef } from '../../lib/teact/teact';
+import { createMemo, createMutationEffect } from 'frameact';
+import { Show } from 'frameact/dom';
 import { withGlobal } from '../../global';
+import type { GlobalState } from '../../global/types';
 
 import type { ApiTypeStory } from '../../api/types';
 import type { ThemeKey } from '../../types';
@@ -41,31 +43,21 @@ const LARGE_SIZE = 4 * REM;
 const GAP_PERCENT_EXTRA = 10;
 const EXTRA_GAP_ANGLE = Math.PI / 4;
 
-function AvatarStoryCircle({
-  size,
-  className,
-  peerStories,
-  storyIds,
-  lastReadId,
-  withExtraGap,
-  extraGapPercent,
-  appTheme,
-  colors,
-  style,
-}: OwnProps & StateProps) {
-  const ref = useRef<HTMLCanvasElement>();
+function AvatarStoryCircle(ownProps: OwnProps) {
+  const props = withGlobal(ownProps, mapStateToProps);
+  let ref!: HTMLCanvasElement;
 
   const dpr = useDevicePixelRatio();
 
-  const isLarge = size > LARGE_SIZE;
-  const strokeWidth = isLarge ? STROKE_WIDTH_LARGE : STROKE_WIDTH;
-  const adaptedSize = size + strokeWidth + (isLarge ? 0.25 * REM : 0); // Add extra gap space for large avatars
+  const isLarge = createMemo(() => props.size > LARGE_SIZE);
+  const strokeWidth = createMemo(() => (isLarge() ? STROKE_WIDTH_LARGE : STROKE_WIDTH));
+  const adaptedSize = createMemo(() => props.size + strokeWidth() + (isLarge() ? 0.25 * REM : 0)); // Add extra gap space for large avatars
 
-  const values = useMemo(() => {
-    return (storyIds || []).reduce(
+  const values = createMemo(() => {
+    return (props.storyIds || []).reduce(
       (acc, id) => {
         acc.total += 1;
-        if (lastReadId && id <= lastReadId) {
+        if (props.lastReadId && id <= props.lastReadId) {
           acc.read += 1;
         }
 
@@ -73,80 +65,82 @@ function AvatarStoryCircle({
       },
       { total: 0, read: 0 },
     );
-  }, [lastReadId, storyIds]);
+  });
 
-  const isCloseFriend = useMemo(() => {
-    if (!peerStories || !storyIds?.length) {
+  // TODO(codemod): dependency on a container (peerStories) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
+  const isCloseFriend = createMemo(() => {
+    if (!props.peerStories || !props.storyIds?.length) {
       return false;
     }
 
-    return storyIds.some((id) => {
-      const story = peerStories[id];
+    return props.storyIds.some((id) => {
+      const story = props.peerStories[id];
       if (!story || !('isForCloseFriends' in story)) {
         return false;
       }
-      const isRead = lastReadId && story.id <= lastReadId;
+      const isRead = props.lastReadId && story.id <= props.lastReadId;
       return story.isForCloseFriends && !isRead;
     });
-  }, [lastReadId, peerStories, storyIds]);
+  });
 
-  useLayoutEffect(() => {
-    if (!ref.current) {
-      return;
-    }
-
-    drawGradientCircle({
-      canvas: ref.current,
-      size: adaptedSize,
-      strokeWidth,
-      segmentsCount: values.total,
-      colorStops: colors || (isCloseFriend ? GREEN : BLUE),
-      readSegmentsCount: values.read,
-      withExtraGap,
-      extraGapPercent,
-      readSegmentColor: appTheme === 'dark' ? DARK_GRAY : GRAY,
+  createMutationEffect(
+    () => [
+      props.appTheme,
+      isCloseFriend(),
+      adaptedSize(),
+      values().read,
+      values().total,
+      props.withExtraGap,
+      props.extraGapPercent,
       dpr,
-    });
-  }, [
-    appTheme,
-    isCloseFriend,
-    adaptedSize,
-    values.read,
-    values.total,
-    withExtraGap,
-    extraGapPercent,
-    dpr,
-    colors,
-    size,
-    strokeWidth,
-  ]);
+      props.colors,
+      props.size,
+      strokeWidth(),
+    ],
+    ([, isCloseFriend, adaptedSize, , , , , , , , strokeWidth]) => {
+      if (!ref) {
+        return;
+      }
 
-  if (!values.total) {
-    return undefined;
-  }
+      drawGradientCircle({
+        canvas: ref,
+        size: adaptedSize,
+        strokeWidth,
+        segmentsCount: values().total,
+        colorStops: props.colors || (isCloseFriend ? GREEN : BLUE),
+        readSegmentsCount: values().read,
+        withExtraGap: props.withExtraGap,
+        extraGapPercent: props.extraGapPercent,
+        readSegmentColor: props.appTheme === 'dark' ? DARK_GRAY : GRAY,
+        dpr,
+      });
+    },
+  );
 
   return (
-    <canvas
-      ref={ref}
-      className={buildClassName('story-circle', className)}
-      style={buildStyle(`max-width: ${adaptedSize}px`, `max-height: ${adaptedSize}px`, style)}
-    />
+    <Show when={values().total}>
+      <canvas
+        ref={ref}
+        class={buildClassName('story-circle', props.className)}
+        style={buildStyle(`max-width: ${adaptedSize()}px`, `max-height: ${adaptedSize()}px`, props.style)}
+      />
+    </Show>
   );
 }
 
-export default memo(
-  withGlobal<OwnProps>((global, { peerId }): Complete<StateProps> => {
-    const peerStories = selectPeerStories(global, peerId);
-    const appTheme = selectTheme(global);
+const mapStateToProps = (global: GlobalState, { peerId }: OwnProps): Complete<StateProps> => {
+  const peerStories = selectPeerStories(global, peerId);
+  const appTheme = selectTheme(global);
 
-    return {
-      peerStories: peerStories?.byId,
-      storyIds: peerStories?.orderedIds,
-      lastReadId: peerStories?.lastReadId,
-      appTheme,
-    };
-  })(AvatarStoryCircle),
-);
+  return {
+    peerStories: peerStories?.byId,
+    storyIds: peerStories?.orderedIds,
+    lastReadId: peerStories?.lastReadId,
+    appTheme,
+  };
+};
+
+export default AvatarStoryCircle;
 
 export function drawGradientCircle({
   canvas,

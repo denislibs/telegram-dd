@@ -1,6 +1,9 @@
-import { getActions, getGlobal, withGlobal } from '../../global';
+import { createMemo, onMount } from 'frameact';
 
-import type { TabState } from '../../global/types';
+import { getActions, getGlobal, withGlobal } from '../../global';
+import { createShowTransition } from '../../lib/kit';
+
+import type { GlobalState, TabState } from '../../global/types';
 import { ApiMediaFormat } from '../../api/types';
 
 import { FOLDERS_POSITION_LEFT } from '../../config';
@@ -15,9 +18,7 @@ import * as mediaLoader from '../../util/mediaLoader';
 import { Bundles, loadModule } from '../../util/moduleLoader';
 import { pause } from '../../util/schedulers';
 
-import useEffectOnce from '../../hooks/useEffectOnce';
 import useFlag from '../../hooks/useFlag';
-import useShowTransitionDeprecated from '../../hooks/useShowTransitionDeprecated';
 
 import appStyles from '../App.module.scss';
 import styles from './UiLoader.module.scss';
@@ -103,29 +104,21 @@ const preloadTasks = {
   inactive: () => {},
 };
 
-const UiLoader = ({
-  page,
-  children,
-  isRightColumnShown,
-  shouldSkipHistoryAnimations,
-  leftColumnWidth,
-  isFoldersSidebarShown,
-  uiReadyState,
-  hasCachedChats,
-}: OwnProps & StateProps) => {
+const UiLoader = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const { setIsUiReady } = getActions();
 
   const [isReady, markReady] = useFlag();
-  const isReloading = isReady && uiReadyState === 0;
-  const { shouldRender: shouldRenderMask, transitionClassNames } = useShowTransitionDeprecated(
-    !isReady || isReloading,
-    undefined,
-    true,
-    'fast',
-    page === 'main' && hasCachedChats,
-  );
+  const isReloading = createMemo(() => isReady() && props.uiReadyState === 0);
+  // TODO(codemod): useShowTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element (transitionClassNames/hasOpenClass are gone)
+  const { shouldRender: shouldRenderMask, transitionClassNames } = createShowTransition({
+    isOpen: () => !isReady() || isReloading(),
+    noMountTransition: true,
+    className: 'fast',
+    noCloseTransition: () => props.page === 'main' && props.hasCachedChats,
+  });
 
-  useEffectOnce(() => {
+  onMount(() => {
     let timeout: number | undefined;
 
     const safePreload = async (currentPage: UiLoaderPage) => {
@@ -140,8 +133,8 @@ const UiLoader = ({
     };
 
     Promise.all([
-      loadRequiredBundle(page),
-      Promise.race([pause(MAX_PRELOAD_DELAY), page ? safePreload(page) : Promise.resolve()]),
+      loadRequiredBundle(props.page),
+      Promise.race([pause(MAX_PRELOAD_DELAY), props.page ? safePreload(props.page) : Promise.resolve()]),
     ]).then(() => {
       markReady();
       setIsUiReady({ uiReadyState: 1 });
@@ -163,20 +156,23 @@ const UiLoader = ({
 
   return (
     <>
-      {children}
-      {shouldRenderMask && (isReloading || !shouldSkipHistoryAnimations) && Boolean(page) && (
-        <div className={buildClassName(styles.mask, isReloading && styles.outgoing, transitionClassNames)}>
-          {page === 'main' ? (
-            <div className={buildClassName(styles.main, isFoldersSidebarShown && styles.foldersSidebarVisible)}>
-              {isFoldersSidebarShown && <div className={styles.foldersSidebar} />}
-              <div className={styles.left} style={leftColumnWidth ? `width: ${leftColumnWidth}px` : undefined} />
-              <div className={styles.middle} />
-              {isRightColumnShown && <div className={styles.right} />}
+      {props.children}
+      {shouldRenderMask() && (isReloading() || !props.shouldSkipHistoryAnimations) && Boolean(props.page) && (
+        <div class={buildClassName(styles.mask, isReloading() && styles.outgoing, transitionClassNames)}>
+          {props.page === 'main' ? (
+            <div class={buildClassName(styles.main, props.isFoldersSidebarShown && styles.foldersSidebarVisible)}>
+              {props.isFoldersSidebarShown && <div class={styles.foldersSidebar} />}
+              <div
+                class={styles.left}
+                style={props.leftColumnWidth ? `width: ${props.leftColumnWidth}px` : undefined}
+              />
+              <div class={styles.middle} />
+              {props.isRightColumnShown && <div class={styles.right} />}
             </div>
-          ) : page === 'inactive' || page === 'lock' ? (
-            <div className={buildClassName(styles.blank, appStyles.bg)} />
+          ) : props.page === 'inactive' || props.page === 'lock' ? (
+            <div class={buildClassName(styles.blank, appStyles.bg)} />
           ) : (
-            <div className={styles.blank} />
+            <div class={styles.blank} />
           )}
         </div>
       )}
@@ -184,7 +180,7 @@ const UiLoader = ({
   );
 };
 
-export default withGlobal<OwnProps>((global, { isMobile }): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState, { isMobile }: OwnProps): Complete<StateProps> => {
   const tabState = selectTabState(global);
 
   const { foldersPosition } = selectSharedSettings(global);
@@ -197,4 +193,6 @@ export default withGlobal<OwnProps>((global, { isMobile }): Complete<StateProps>
     leftColumnWidth: global.leftColumnWidth,
     isFoldersSidebarShown: foldersPosition === FOLDERS_POSITION_LEFT && !isMobile && selectAreFoldersPresent(global),
   };
-})(UiLoader);
+};
+
+export default UiLoader;

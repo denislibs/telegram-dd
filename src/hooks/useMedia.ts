@@ -1,4 +1,4 @@
-import { useEffect } from '../lib/teact/teact';
+import { createEffect } from 'frameact';
 
 import { ApiMediaFormat } from '../api/types';
 
@@ -8,6 +8,7 @@ import * as mediaLoader from '../util/mediaLoader';
 import useSelector from './data/useSelector';
 import useForceUpdate from './useForceUpdate';
 
+// TODO(codemod): useMedia: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 const useMedia = (
   mediaHash: string | false | undefined,
   noLoad = false,
@@ -22,23 +23,27 @@ const useMedia = (
       : mediaLoader.getFromMemory(mediaHash)
     : undefined;
 
+  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
   const forceUpdate = useForceUpdate();
   const isSynced = useSelector(selectIsSynced);
 
-  useEffect(() => {
-    if (!noLoad && mediaHash && !mediaData) {
-      const startedAt = Date.now();
+  createEffect(
+    () => [noLoad, mediaHash, mediaData, mediaFormat, cacheBuster, delay, isSynced()],
+    ([, , , , , , isSynced]) => {
+      if (!noLoad && mediaHash && !mediaData) {
+        const startedAt = Date.now();
 
-      mediaLoader.fetch(mediaHash, mediaFormat).then(() => {
-        const spentTime = Date.now() - startedAt;
-        if (!delay || spentTime >= delay) {
-          forceUpdate();
-        } else {
-          setTimeout(forceUpdate, delay - spentTime);
-        }
-      });
-    }
-  }, [noLoad, mediaHash, mediaData, mediaFormat, cacheBuster, delay, isSynced]);
+        mediaLoader.fetch(mediaHash, mediaFormat).then(() => {
+          const spentTime = Date.now() - startedAt;
+          if (!delay || spentTime >= delay) {
+            forceUpdate();
+          } else {
+            setTimeout(forceUpdate, delay - spentTime);
+          }
+        });
+      }
+    },
+  );
 
   return mediaData;
 };

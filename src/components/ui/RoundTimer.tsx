@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from '../../lib/teact/teact';
+import { createEffect, createSignal } from 'frameact';
 
 import buildClassName from '../../util/buildClassName';
 import { formatCountdownShort } from '../../util/dates/oldDateFormat';
@@ -19,25 +19,31 @@ type OwnProps = {
 const UPDATE_FREQUENCY = 1000;
 const TIMER_RADIUS = 14;
 
-const RoundTimer = ({ duration, className, onEnd }: OwnProps) => {
-  const [timeLeft, setTimeLeft] = useState(duration);
+const RoundTimer = (props: OwnProps) => {
+  const [timeLeft, setTimeLeft] = createSignal(props.duration);
   const lang = useOldLang();
 
-  useInterval(() => setTimeLeft((prev) => prev - 1), timeLeft > 0 ? UPDATE_FREQUENCY : undefined);
+  useInterval(() => setTimeLeft((prev) => prev - 1), timeLeft() > 0 ? UPDATE_FREQUENCY : undefined);
 
-  useEffect(() => {
-    if (timeLeft <= 0) {
-      onEnd?.();
-    }
-  }, [timeLeft, onEnd]);
+  createEffect(
+    () => [timeLeft(), props.onEnd],
+    ([timeLeft]) => {
+      if (timeLeft <= 0) {
+        props.onEnd?.();
+      }
+    },
+  );
 
-  useEffect(() => {
-    setTimeLeft(duration);
-  }, [duration]);
+  createEffect(
+    () => props.duration,
+    () => {
+      setTimeLeft(props.duration);
+    },
+  );
 
   return (
-    <div className={buildClassName(styles.root, className)}>
-      <svg className={styles.svg} width="32px" height="32px">
+    <div class={buildClassName(styles.root, props.className)}>
+      <svg class={styles.svg} width="32px" height="32px">
         <circle
           cx="16"
           cy="16"
@@ -45,13 +51,13 @@ const RoundTimer = ({ duration, className, onEnd }: OwnProps) => {
           transform="rotate(-90, 16, 16)"
           pathLength="100"
           stroke-dasharray="100"
-          stroke-dashoffset={100 - ((timeLeft - 1) / duration) * 100} // Show it one step further due to animation
-          className={styles.circle}
+          stroke-dashoffset={100 - ((timeLeft() - 1) / props.duration) * 100} // Show it one step further due to animation
+          class={styles.circle}
         />
       </svg>
-      <AnimatedCounter className={styles.text} text={formatCountdownShort(lang, timeLeft * 1000)} />
+      <AnimatedCounter className={styles.text} text={formatCountdownShort(lang, timeLeft() * 1000)} />
     </div>
   );
 };
 
-export default memo(RoundTimer);
+export default RoundTimer;

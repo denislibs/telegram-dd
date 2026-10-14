@@ -1,4 +1,4 @@
-import { useEffect, useState } from '../../lib/teact/teact';
+import { createEffect, createSignal } from 'frameact';
 
 import { createCallbackManager } from '../../util/callbacks';
 
@@ -6,26 +6,30 @@ const BALANCE_BAR_MODAL_SELECTOR = '.Modal.with-balance-bar';
 
 const balanceBarCallbacks = createCallbackManager();
 
+// TODO(codemod): useIsTopmostBalanceBarModal: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useIsTopmostBalanceBarModal(ref: { current?: HTMLElement }, isActive?: boolean) {
-  const [isTopmost, setIsTopmost] = useState(true);
+  const [isTopmost, setIsTopmost] = createSignal(true);
 
-  useEffect(() => {
-    if (!isActive) return undefined;
+  createEffect(
+    () => [isActive, ref],
+    () => {
+      if (!isActive) return undefined;
 
-    const updateIsTopmost = () => {
-      setIsTopmost(checkIsTopmostBalanceBarModal(ref.current));
-    };
+      const updateIsTopmost = () => {
+        setIsTopmost(checkIsTopmostBalanceBarModal(ref.current));
+      };
 
-    updateIsTopmost();
+      updateIsTopmost();
 
-    const unsubscribe = balanceBarCallbacks.addCallback(updateIsTopmost);
-    balanceBarCallbacks.runCallbacks();
-
-    return () => {
-      unsubscribe();
+      const unsubscribe = balanceBarCallbacks.addCallback(updateIsTopmost);
       balanceBarCallbacks.runCallbacks();
-    };
-  }, [isActive, ref]);
+
+      return () => {
+        unsubscribe();
+        balanceBarCallbacks.runCallbacks();
+      };
+    },
+  );
 
   return isTopmost;
 }

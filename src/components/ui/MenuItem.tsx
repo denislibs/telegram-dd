@@ -1,4 +1,6 @@
-import type { TeactNode } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import { mergeProps, Show } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import type { IconName } from '../../types/icons';
 
@@ -7,16 +9,15 @@ import buildClassName from '../../util/buildClassName';
 
 import useAppLayout from '../../hooks/useAppLayout';
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
 
 import Icon from '../common/icons/Icon';
 
 import './MenuItem.scss';
 
 export type MenuItemProps = {
-  customIcon?: TeactNode;
+  customIcon?: JSX.Element;
   className?: string;
-  children: TeactNode;
+  children: JSX.Element;
   href?: string;
   rel?: string;
   target?: string;
@@ -42,128 +43,113 @@ export type MenuItemProps = {
 );
 
 type TextProps = {
-  children: TeactNode;
+  children: JSX.Element;
   className?: string;
 };
 
-const MenuItem = (props: MenuItemProps) => {
-  const {
-    icon,
-    isCharIcon,
-    customIcon,
-    className,
-    children,
-    href,
-    target,
-    download,
-    disabled,
-    destructive,
-    ariaLabel,
-    withWrap,
-    rel = 'noopener noreferrer',
-    withPreventDefaultOnMouseDown,
-    hasIconPremiumBadge,
-    clickArg,
-    onClick,
-    onContextMenu,
-  } = props;
+const MenuItem = (rawProps: MenuItemProps) => {
+  const props = mergeProps({ rel: 'noopener noreferrer' }, rawProps) as MenuItemProps &
+    Required<Pick<MenuItemProps, 'rel'>>;
 
   const lang = useLang();
   const { isTouchScreen } = useAppLayout();
-  const handleClick = useLastCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (disabled || !onClick) {
+  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (props.disabled || !props.onClick) {
       e.preventDefault();
       return;
     }
-    onClick(e, clickArg);
-  });
+    props.onClick(e, props.clickArg);
+  };
 
-  const handleKeyDown = useLastCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.keyCode !== 13 && e.keyCode !== 32) {
       return;
     }
 
-    if (disabled || !onClick) {
+    if (props.disabled || !props.onClick) {
       e.preventDefault();
 
       return;
     }
-    onClick(e, clickArg);
-  });
-  const handleMouseDown = useLastCallback((e: React.SyntheticEvent<HTMLDivElement | HTMLAnchorElement>) => {
-    if (withPreventDefaultOnMouseDown) {
+    props.onClick(e, props.clickArg);
+  };
+  const handleMouseDown = (e: React.SyntheticEvent<HTMLDivElement | HTMLAnchorElement>) => {
+    if (props.withPreventDefaultOnMouseDown) {
       e.preventDefault();
     }
-  });
+  };
 
-  const fullClassName = buildClassName(
-    'MenuItem',
-    className,
-    disabled && 'disabled',
-    destructive && 'destructive',
-    !isTouchScreen && 'compact',
-    withWrap && 'wrap',
-    !icon && !customIcon && 'text-only',
+  const fullClassName = createMemo(() =>
+    buildClassName(
+      'MenuItem',
+      props.className,
+      props.disabled && 'disabled',
+      props.destructive && 'destructive',
+      !isTouchScreen && 'compact',
+      props.withWrap && 'wrap',
+      !props.icon && !props.customIcon && 'text-only',
+    ),
   );
 
   const content = (
     <>
-      {!customIcon && icon && (
+      {!props.customIcon && props.icon && (
         <Icon
-          name={isCharIcon ? 'char' : icon}
-          character={isCharIcon ? icon : undefined}
-          hasPremiumBadge={hasIconPremiumBadge}
+          name={props.isCharIcon ? 'char' : props.icon}
+          character={props.isCharIcon ? props.icon : undefined}
+          hasPremiumBadge={props.hasIconPremiumBadge}
         />
       )}
-      {customIcon}
-      {children}
+      {props.customIcon}
+      {props.children}
     </>
   );
 
-  if (href && !disabled) {
-    return (
-      <a
-        tabIndex={0}
-        className={fullClassName}
-        href={href}
-        download={download}
-        aria-label={ariaLabel}
-        title={ariaLabel}
-        target={target || (href.startsWith(window.location.origin) || IS_TEST ? '_self' : '_blank')}
-        rel={rel}
-        dir={lang.isRtl ? 'rtl' : undefined}
-        onClick={onClick}
+  return (
+    <Show
+      when={!(props.href && !props.disabled)}
+      fallback={
+        <a
+          tabIndex={0}
+          class={fullClassName()}
+          href={props.href}
+          download={props.download}
+          aria-label={props.ariaLabel}
+          title={props.ariaLabel}
+          target={props.target || (props.href.startsWith(window.location.origin) || IS_TEST ? '_self' : '_blank')}
+          rel={props.rel}
+          dir={lang.isRtl ? 'rtl' : undefined}
+          onClick={props.onClick}
+          onMouseDown={handleMouseDown}
+        >
+          {content}
+        </a>
+      }
+    >
+      <div
+        role="menuitem"
+        tabIndex={props.disabled ? -1 : 0}
+        class={fullClassName()}
+        onClick={handleClick}
+        onKeyDown={handleKeyDown}
         onMouseDown={handleMouseDown}
+        onContextMenu={props.onContextMenu}
+        aria-label={props.ariaLabel}
+        title={props.ariaLabel}
+        dir={lang.isRtl ? 'rtl' : undefined}
       >
         {content}
-      </a>
-    );
-  }
-
-  return (
-    <div
-      role="menuitem"
-      tabIndex={disabled ? -1 : 0}
-      className={fullClassName}
-      onClick={handleClick}
-      onKeyDown={handleKeyDown}
-      onMouseDown={handleMouseDown}
-      onContextMenu={onContextMenu}
-      aria-label={ariaLabel}
-      title={ariaLabel}
-      dir={lang.isRtl ? 'rtl' : undefined}
-    >
-      {content}
-    </div>
+      </div>
+    </Show>
   );
 };
 
-function MenuItemTitle({ children, className }: TextProps) {
-  return <span className={buildClassName('menuItemTitle', className)}>{children}</span>;
+function MenuItemTitle(props: TextProps) {
+  return <span class={buildClassName('menuItemTitle', props.className)}>{props.children}</span>;
 }
 
-function MenuItemSubtitle({ children, className }: TextProps) {
-  return <span className={buildClassName('menuItemSubtitle', className)}>{children}</span>;
+function MenuItemSubtitle(props: TextProps) {
+  return <span class={buildClassName('menuItemSubtitle', props.className)}>{props.children}</span>;
 }
 
 export default MenuItem;

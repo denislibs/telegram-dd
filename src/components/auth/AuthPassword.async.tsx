@@ -1,13 +1,13 @@
-import { Bundles } from '../../util/moduleLoader';
+import { lazy } from 'frameact/dom';
 
-import useModuleLoader from '../../hooks/useModuleLoader';
+import { Bundles, loadBundle } from '../../util/moduleLoader';
 
 import Loading from '../ui/Loading';
 
-const AuthPasswordAsync = () => {
-  const AuthPassword = useModuleLoader(Bundles.Auth, 'AuthPassword');
+const AuthPassword = lazy(() => loadBundle(Bundles.Auth).then((m) => ({ default: m.AuthPassword })));
 
-  return AuthPassword ? <AuthPassword /> : <Loading />;
+const AuthPasswordAsync = () => {
+  return <AuthPassword />;
 };
 
 export default AuthPasswordAsync;

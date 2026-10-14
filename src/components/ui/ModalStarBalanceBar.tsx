@@ -1,5 +1,8 @@
-import { memo } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import { Show } from 'frameact/dom';
 import { getActions, withGlobal } from '../../global';
+import { createShowTransition } from '../../lib/kit';
+import type { GlobalState } from '../../global/types';
 
 import type { ApiStarsAmount, ApiTonAmount } from '../../api/types';
 
@@ -10,8 +13,6 @@ import { formatStarsAsIcon, formatTonAsIcon, NEXT_ARROW_REPLACEMENT } from '../.
 
 import useIsTopmostBalanceBarModal from '../../hooks/element/useIsTopmostBalanceBarModal';
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
-import useShowTransition from '../../hooks/useShowTransition';
 
 import Link from './Link';
 
@@ -29,93 +30,84 @@ export type StateProps = {
   tonUsdRate?: number;
 };
 
-function ModalStarBalanceBar({
-  starBalance,
-  tonBalance,
-  tonUsdRate,
-  isModalOpen,
-  currency,
-  onCloseAnimationEnd,
-}: StateProps & OwnProps) {
+function ModalStarBalanceBar() {
+  const props = withGlobal({}, mapStateToProps);
   const { openStarsBalanceModal } = getActions();
 
   const lang = useLang();
-  const isTonMode = currency === 'TON';
-  const currentBalance = isTonMode ? tonBalance : starBalance;
-  const isOpen = isModalOpen ? Boolean(currentBalance) : false;
+  const isTonMode = createMemo(() => props.currency === 'TON');
+  const currentBalance = createMemo(() => (isTonMode() ? props.tonBalance : props.starBalance));
+  const isOpen = createMemo(() => (props.isModalOpen ? Boolean(currentBalance()) : false));
 
-  const { ref, shouldRender } = useShowTransition({
-    isOpen,
-    onCloseAnimationEnd,
-    withShouldRender: true,
+  const { ref, shouldRender } = createShowTransition({
+    isOpen: () => isOpen(),
+    onCloseAnimationEnd: props.onCloseAnimationEnd,
   });
 
-  const isTopmost = useIsTopmostBalanceBarModal(ref, Boolean(shouldRender && currentBalance));
+  const isTopmost = useIsTopmostBalanceBarModal(ref, () => Boolean(shouldRender() && currentBalance()));
 
-  const handleGetMoreStars = useLastCallback(() => {
-    openStarsBalanceModal(isTonMode ? { currency: 'TON' } : {});
-  });
-
-  if (!shouldRender || !currentBalance) {
-    return undefined;
-  }
+  const handleGetMoreStars = () => {
+    openStarsBalanceModal(isTonMode() ? { currency: 'TON' } : {});
+  };
 
   return (
-    <div className={buildClassName(styles.root, !isTopmost && styles.hidden)} ref={ref}>
-      <div>
-        {isTonMode
-          ? lang(
-              'ModalStarsBalanceBarDescription',
-              {
-                stars: formatTonAsIcon(lang, convertTonFromNanos(currentBalance.amount)),
-              },
-              {
+    <Show when={!(!shouldRender() || !currentBalance())}>
+      <div class={buildClassName(styles.root, !isTopmost && styles.hidden)} ref={ref}>
+        <div>
+          {isTonMode()
+            ? lang(
+                'ModalStarsBalanceBarDescription',
+                {
+                  stars: formatTonAsIcon(lang, convertTonFromNanos(currentBalance().amount)),
+                },
+                {
+                  withNodes: true,
+                  withMarkdown: true,
+                },
+              )
+            : lang(
+                'ModalStarsBalanceBarDescription',
+                {
+                  stars: formatStarsAsIcon(lang, formatStarsAmount(lang, currentBalance() as ApiStarsAmount)),
+                },
+                {
+                  withNodes: true,
+                  withMarkdown: true,
+                },
+              )}
+        </div>
+        <div>
+          {isTonMode() && Boolean(props.tonUsdRate) && (
+            <div class={styles.tonInUsdDescription} style="color: var(--color-text-secondary)">
+              {`≈ ${formatCurrencyAsString(
+                convertTonToUsd((currentBalance() as ApiTonAmount).amount, props.tonUsdRate, true),
+                'USD',
+                lang.code,
+              )}`}
+            </div>
+          )}
+          {!isTonMode() && (
+            <Link className={styles.getMoreStarsLink} isPrimary onClick={handleGetMoreStars}>
+              {lang('GetMoreStarsLinkText', undefined, {
                 withNodes: true,
-                withMarkdown: true,
-              },
-            )
-          : lang(
-              'ModalStarsBalanceBarDescription',
-              {
-                stars: formatStarsAsIcon(lang, formatStarsAmount(lang, currentBalance as ApiStarsAmount)),
-              },
-              {
-                withNodes: true,
-                withMarkdown: true,
-              },
-            )}
+                specialReplacement: NEXT_ARROW_REPLACEMENT,
+              })}
+            </Link>
+          )}
+        </div>
       </div>
-      <div>
-        {isTonMode && Boolean(tonUsdRate) && (
-          <div className={styles.tonInUsdDescription} style="color: var(--color-text-secondary)">
-            {`≈ ${formatCurrencyAsString(
-              convertTonToUsd((currentBalance as ApiTonAmount).amount, tonUsdRate, true),
-              'USD',
-              lang.code,
-            )}`}
-          </div>
-        )}
-        {!isTonMode && (
-          <Link className={styles.getMoreStarsLink} isPrimary onClick={handleGetMoreStars}>
-            {lang('GetMoreStarsLinkText', undefined, {
-              withNodes: true,
-              specialReplacement: NEXT_ARROW_REPLACEMENT,
-            })}
-          </Link>
-        )}
-      </div>
-    </div>
+    </Show>
   );
 }
 
-export default memo(
-  withGlobal((global): Complete<StateProps> => {
-    const { stars, ton } = global;
+const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
+  const { stars, ton } = global;
 
-    return {
-      starBalance: stars?.balance,
-      tonBalance: ton?.balance,
-      tonUsdRate: global.appConfig.tonUsdRate,
-    };
-  })(ModalStarBalanceBar),
-);
+  return {
+    starBalance: stars?.balance,
+    tonBalance: ton?.balance,
+    tonUsdRate: global.appConfig.tonUsdRate,
+  };
+};
+
+export default ModalStarBalanceBar;

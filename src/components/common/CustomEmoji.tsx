@@ -1,8 +1,7 @@
-import type { ElementRef } from '../../lib/teact/teact';
-import { memo, useRef, useState } from '../../lib/teact/teact';
+import { createMemo, createSignal } from 'frameact';
+import { mergeProps } from 'frameact/dom';
 import { getGlobal } from '../../global';
 
-import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 import { ApiMessageEntityTypes, type ApiSticker } from '../../api/types';
 
 import { selectIsAlwaysHighPriorityEmoji } from '../../global/selectors';
@@ -10,7 +9,6 @@ import buildClassName from '../../util/buildClassName';
 import safePlay from '../../util/safePlay';
 
 import useDynamicColorListener from '../../hooks/stickers/useDynamicColorListener';
-import useLastCallback from '../../hooks/useLastCallback';
 import useCustomEmoji from './hooks/useCustomEmoji';
 
 import StickerView from './StickerView';
@@ -20,7 +18,7 @@ import styles from './CustomEmoji.module.scss';
 import blankImg from '../../assets/blank.png';
 
 type OwnProps = {
-  ref?: ElementRef<HTMLDivElement>;
+  ref?: (el: HTMLDivElement) => void;
   className?: string;
   style?: string;
   size?: number;
@@ -31,8 +29,8 @@ type OwnProps = {
   shouldNotLoop?: boolean;
   isSelectable?: boolean;
   withSharedAnimation?: boolean;
-  sharedCanvasRef?: ElementRef<HTMLCanvasElement>;
-  sharedCanvasHqRef?: ElementRef<HTMLCanvasElement>;
+  sharedCanvasRef?: (el: HTMLCanvasElement) => void;
+  sharedCanvasHqRef?: (el: HTMLCanvasElement) => void;
   withTranslucentThumb?: boolean;
   shouldPreloadPreview?: boolean;
   skipPreview?: boolean;
@@ -57,119 +55,105 @@ type OwnProps = {
 
 const STICKER_SIZE = 20;
 
-const CustomEmoji = ({
-  ref,
-  documentId,
-  sticker,
-  className,
-  style,
-  size = STICKER_SIZE,
-  isBig,
-  noPlay,
-  noVideoOnMobile,
-  loopLimit,
-  shouldNotLoop,
-  isSelectable,
-  withSharedAnimation,
-  sharedCanvasRef,
-  sharedCanvasHqRef,
-  withTranslucentThumb,
-  shouldPreloadPreview,
-  skipPreview,
-  noPlaceholder,
-  forceAlways,
-  forceOnHeavyAnimation,
-  forceTextColor,
-  observeIntersectionForLoading,
-  observeIntersectionForPlaying,
-  onClick,
-  onAnimationEnd,
-}: OwnProps) => {
-  let containerRef = useRef<HTMLDivElement>();
-  if (ref) {
-    containerRef = ref;
+const CustomEmoji = (rawProps: OwnProps) => {
+  const props = mergeProps({ size: STICKER_SIZE }, rawProps) as OwnProps & Required<Pick<OwnProps, 'size'>>;
+  let containerRef!: HTMLDivElement;
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (props.ref) {
+    // TODO(codemod): "containerRef" was a ref object and is reassigned here (a forwarded ref?): use a callback ref
+    containerRef = props.ref;
   }
 
   // An alternative to `withGlobal` to avoid adding numerous global containers
-  const { customEmoji: customEmojiFromDocumentId, canPlay } = useCustomEmoji(documentId);
-  const customEmoji = customEmojiFromDocumentId || sticker;
+  const customEmojiResult = createMemo(() => useCustomEmoji(() => props.documentId));
+  const customEmojiFromDocumentId = () => customEmojiResult().customEmoji;
+  const canPlay = () => customEmojiResult().canPlay;
+  const customEmoji = createMemo(() => customEmojiFromDocumentId() || props.sticker);
 
-  const loopCountRef = useRef(0);
-  const [shouldPlay, setShouldPlay] = useState(true);
+  let loopCountRef = 0;
+  const [shouldPlay, setShouldPlay] = createSignal(true);
 
-  const hasCustomColor = forceTextColor || customEmoji?.shouldUseTextColor;
-  const customColor = useDynamicColorListener(containerRef, undefined, !hasCustomColor);
+  const hasCustomColor = createMemo(() => props.forceTextColor || customEmoji()?.shouldUseTextColor);
+  const customColor = useDynamicColorListener(
+    () => containerRef,
+    undefined,
+    () => !hasCustomColor(),
+  );
 
-  const handleVideoEnded = useLastCallback((e) => {
-    if (!loopLimit) return;
+  const handleVideoEnded = (e) => {
+    if (!props.loopLimit) return;
 
-    loopCountRef.current += 1;
+    loopCountRef += 1;
 
-    if (loopCountRef.current >= loopLimit) {
+    if (loopCountRef >= props.loopLimit) {
       setShouldPlay(false);
       e.currentTarget.currentTime = 0;
     } else {
       // Loop manually
       safePlay(e.currentTarget);
     }
-  });
+  };
 
-  const handleStickerLoop = useLastCallback(() => {
-    if (!loopLimit) return;
+  const handleStickerLoop = () => {
+    if (!props.loopLimit) return;
 
-    loopCountRef.current += 1;
+    loopCountRef += 1;
 
-    if (loopCountRef.current >= loopLimit) {
+    if (loopCountRef >= props.loopLimit) {
       setShouldPlay(false);
     }
-  });
+  };
 
-  const isHq = customEmoji?.stickerSetInfo && selectIsAlwaysHighPriorityEmoji(getGlobal(), customEmoji.stickerSetInfo);
+  const isHq = createMemo(
+    () => customEmoji()?.stickerSetInfo && selectIsAlwaysHighPriorityEmoji(getGlobal(), customEmoji().stickerSetInfo),
+  );
 
   return (
     <div
       ref={containerRef}
-      className={buildClassName(styles.root, className, 'custom-emoji', 'emoji')}
-      onClick={onClick}
-      onAnimationEnd={onAnimationEnd}
+      class={buildClassName(styles.root, props.className, 'custom-emoji', 'emoji')}
+      onClick={props.onClick}
+      onAnimationEnd={props.onAnimationEnd}
       data-entity-type={ApiMessageEntityTypes.CustomEmoji}
-      data-document-id={documentId}
-      data-alt={customEmoji?.emoji}
-      style={style}
+      data-document-id={props.documentId}
+      data-alt={customEmoji()?.emoji}
+      style={props.style}
     >
-      {isSelectable && (
+      {props.isSelectable && (
         <img
-          className={styles.highlightCatch}
+          class={styles.highlightCatch}
           src={blankImg}
-          alt={customEmoji?.emoji}
+          alt={customEmoji()?.emoji}
           data-entity-type={ApiMessageEntityTypes.CustomEmoji}
-          data-document-id={documentId}
+          data-document-id={props.documentId}
           draggable={false}
         />
       )}
-      {!customEmoji ? (
-        !noPlaceholder && <div className={buildClassName(styles.placeholder)} draggable={false} />
+      {!customEmoji() ? (
+        !props.noPlaceholder && <div class={buildClassName(styles.placeholder)} draggable={false} />
       ) : (
         <StickerView
-          containerRef={containerRef}
-          sticker={customEmoji}
-          isSmall={!isBig}
-          size={size}
-          noPlay={noPlay || !(shouldPlay && canPlay)}
-          noVideoOnMobile={noVideoOnMobile}
+          containerRef={(el) => {
+            containerRef = el;
+          }}
+          sticker={customEmoji()}
+          isSmall={!props.isBig}
+          size={props.size}
+          noPlay={props.noPlay || !(shouldPlay() && canPlay())}
+          noVideoOnMobile={props.noVideoOnMobile}
           thumbClassName={styles.thumb}
           fullMediaClassName={styles.media}
-          shouldLoop={!shouldNotLoop}
-          loopLimit={loopLimit}
-          skipPreview={skipPreview}
-          shouldPreloadPreview={!skipPreview && (shouldPreloadPreview || noPlay || !canPlay)}
-          forceOnHeavyAnimation={forceOnHeavyAnimation}
-          forceAlways={forceAlways}
-          observeIntersectionForLoading={observeIntersectionForLoading}
-          observeIntersectionForPlaying={observeIntersectionForPlaying}
-          withSharedAnimation={withSharedAnimation}
-          sharedCanvasRef={isHq ? sharedCanvasHqRef : sharedCanvasRef}
-          withTranslucentThumb={withTranslucentThumb}
+          shouldLoop={!props.shouldNotLoop}
+          loopLimit={props.loopLimit}
+          skipPreview={props.skipPreview}
+          shouldPreloadPreview={!props.skipPreview && (props.shouldPreloadPreview || props.noPlay || !canPlay())}
+          forceOnHeavyAnimation={props.forceOnHeavyAnimation}
+          forceAlways={props.forceAlways}
+          observeIntersectionForLoading={props.observeIntersectionForLoading}
+          observeIntersectionForPlaying={props.observeIntersectionForPlaying}
+          withSharedAnimation={props.withSharedAnimation}
+          sharedCanvasRef={isHq() ? props.sharedCanvasHqRef : props.sharedCanvasRef}
+          withTranslucentThumb={props.withTranslucentThumb}
           onVideoEnded={handleVideoEnded}
           onAnimatedStickerLoop={handleStickerLoop}
           customColor={customColor}
@@ -179,4 +163,4 @@ const CustomEmoji = ({
   );
 };
 
-export default memo(CustomEmoji);
+export default CustomEmoji;

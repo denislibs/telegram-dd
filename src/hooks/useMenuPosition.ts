@@ -1,10 +1,8 @@
-import type { ElementRef } from '../lib/teact/teact';
-import { useLayoutEffect } from '../lib/teact/teact';
-import { addExtraClass, removeExtraClass, setExtraStyles } from '../lib/teact/teact-dom';
+import { createMutationEffect, requestForcedReflow } from 'frameact';
+import { addExtraClass, removeExtraClass, setExtraStyles } from 'frameact/dom';
 
 import type { IAnchorPosition } from '../types';
 
-import { requestForcedReflow } from '../lib/fasterdom/fasterdom';
 import { useStateRef } from './useStateRef';
 
 interface StaticPositionOptions {
@@ -49,36 +47,41 @@ const EMPTY_RECT = {
   top: 0,
 };
 
+// TODO(codemod): useMenuPosition: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useMenuPosition(
   isOpen: boolean,
-  containerRef: ElementRef<HTMLDivElement>,
-  bubbleRef: ElementRef<HTMLDivElement>,
+  containerRef: (el: HTMLDivElement) => void,
+  bubbleRef: (el: HTMLDivElement) => void,
   options: MenuPositionOptions,
 ) {
+  // TODO(codemod): useStateRef: a handler reads the current value through the accessor; replace ref.current with the accessor call
   const optionsRef = useStateRef(options);
 
-  useLayoutEffect(() => {
-    if (!isOpen) return;
+  createMutationEffect(
+    () => [isOpen, containerRef, bubbleRef, optionsRef],
+    () => {
+      if (!isOpen) return;
 
-    const options2 = optionsRef.current;
+      const options2 = optionsRef.current;
 
-    if (!('getTriggerElement' in options2)) {
-      applyStaticOptions(containerRef, bubbleRef, options2);
-    } else {
-      requestForcedReflow(() => {
-        const staticOptions = processDynamically(containerRef, bubbleRef, options2);
+      if (!('getTriggerElement' in options2)) {
+        applyStaticOptions(containerRef, bubbleRef, options2);
+      } else {
+        requestForcedReflow(() => {
+          const staticOptions = processDynamically(containerRef, bubbleRef, options2);
 
-        return () => {
-          applyStaticOptions(containerRef, bubbleRef, staticOptions);
-        };
-      });
-    }
-  }, [isOpen, containerRef, bubbleRef, optionsRef]);
+          return () => {
+            applyStaticOptions(containerRef, bubbleRef, staticOptions);
+          };
+        });
+      }
+    },
+  );
 }
 
 function applyStaticOptions(
-  containerRef: ElementRef<HTMLDivElement>,
-  bubbleRef: ElementRef<HTMLDivElement>,
+  containerRef: (el: HTMLDivElement) => void,
+  bubbleRef: (el: HTMLDivElement) => void,
   {
     positionX = 'left',
     positionY = 'top',
@@ -118,8 +121,8 @@ function applyStaticOptions(
 }
 
 function processDynamically(
-  containerRef: ElementRef<HTMLDivElement>,
-  bubbleRef: ElementRef<HTMLDivElement>,
+  containerRef: (el: HTMLDivElement) => void,
+  bubbleRef: (el: HTMLDivElement) => void,
   {
     anchor,
     positionY: requestedPositionY,
