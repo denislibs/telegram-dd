@@ -240,7 +240,7 @@ re-derive them. The short version:
 - `useMemo` → `createMemo`. `useCallback`, `useLastCallback` and `memo` become plain functions.
 - `useRef` → a `let` variable ([§4.3](#43-props-refs-and-events)).
 - `teactFastList` / `teactOrderKey` → `<ManualFor orderKey>`.
-- `value=` / `checked=` on a native `<input>` / `<textarea>` / `<select>` (with or without `teactExperimentControlled`) → `use:value={() => …}` / `use:checked={() => …}`; a component's `value` prop stays. The handler must still update the source, or the input is rolled back. `installControlledInputListeners()` (`src/lib/kit/controlledInputs.ts`) must have run, and tests call it after `delegateEvents`.
+- `value=` / `checked=` on a native `<input>` / `<textarea>` / `<select>` (with or without `teactExperimentControlled`) → `use:value={() => …}` / `use:checked={() => …}`; a component's `value` prop stays. The handler must still update the source, or the input is rolled back.
 - `className=` → `class=`.
 
 ### 4.2 App-specific mapping
@@ -297,9 +297,10 @@ takes accessors instead of values, and returns accessors. Keeping the `use*` nam
   the closure value from before the write. Keep `const was = x()` before the write (`DropdownMenu`, `AuthCode`).
   `pnpm exec tsx scripts/slice/readAfterSet.ts` lists the pairs.
 - **A handler prop of an element is bound once**: forward it as `(e) => props.x?.(e)` (codemod `forwardedHandlers`).
-- **Heavy animations: ask the chain.** `getIsHeavyAnimating()` is the root scope only and `watchHeavyAnimation` hears only the
-  scope of its subtree; tt's global hook heard everything. `util/heavyAnimationChain.ts` checks and watches the whole chain
-  (until the engine fix).
+- **Heavy animations: capture the scope in the body.** `getIsHeavyAnimating()` is the root scope only; `watchHeavyAnimation` /
+  `onHeavyAnimation` hear the scope AND its ancestors up to the root (tt's global hook heard everything). Call
+  `watchHeavyAnimation` in the component body (an apply has no owner: `currentHeavyAnimationScope()` there is the root) and
+  keep the state in a flag set by it when an effect body needs a current-state check.
 - **`onChange` is `onInput`.** teact fires `onChange` of every element except `<select>` on the `input` event;
   frameact's is the native `change`. The codemod renames it on intrinsic elements; check components that forward both.
 - **DOM attribute names**: `autocomplete`, `autoplay`, `playsinline`, `spellcheck`… (codemod `attributes`). A component

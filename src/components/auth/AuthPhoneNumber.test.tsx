@@ -6,7 +6,6 @@ import { disableStrict, enableStrict, setHandler, suppressStrict } from 'frameac
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { setGlobal } from '../../global';
 
-import { installControlledInputListeners } from '../../lib/kit/controlledInputs';
 import { container, useDomHarness } from '../../lib/kit/testing/dom';
 import { flushMicrotasks } from '../../lib/kit/testing/micro';
 import { INITIAL_GLOBAL_STATE } from '../../global/initialState';
@@ -29,7 +28,6 @@ beforeAll(() => {
 beforeEach(() => {
   violations.length = 0;
   delegateEvents(['click', 'input', 'keydown']);
-  installControlledInputListeners();
   enableStrict();
   setHandler((error) => violations.push(`${error.kind} ${error.detail} [${error.phase}]`));
 });

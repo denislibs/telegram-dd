@@ -41,8 +41,8 @@
       "maxRatio": 0.77
     },
     "src/components/common/AnimatedSticker.tsx": {
-      "reason": "Lottie lifecycle re-expressed for a run-once component: forwarded ref as a callback, useHeavyAnimation(isDisabled) as watchHeavyAnimation with guards, useSyncEffect colour as a memo, init as a measure effect (see the Deviation comments). The heavy-animation scope chain (util/heavyAnimationChain.ts) and the props memo for applies add to it.",
-      "maxRatio": 0.72
+      "reason": "Lottie lifecycle re-expressed for a run-once component: forwarded ref as a callback, useHeavyAnimation(isDisabled) as watchHeavyAnimation with guards, useSyncEffect colour as a memo, init as a measure effect (see the Deviation comments). The heavy-animation state flag (applies have no owner to ask the scope) and the props memo for applies add to it.",
+      "maxRatio": 0.69
     },
     "src/components/common/Avatar.tsx": {
       "reason": "Reactive media selection: imageHash/videoHash/content/specialIcon become memos over the entity proxy, useMedia/useThumbnail return accessors, containerRef is a callback ref (see Deviation comments).",
