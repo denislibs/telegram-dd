@@ -1,11 +1,20 @@
-// FOUNDATION STUB: the plain-text formatters are telegram-tt's code; the `*AsIcon` formatters (they return JSX with
-// `<StarIcon>`/`<GramIcon>` nodes) and the arrow replacements are ported with the components (T6) and return text here.
-// Copied from telegram-tt src/util/localization/format.tsx
 import type { ApiTypeCurrencyAmount } from '../../api/types';
+import type { LangFn } from './types';
 
-import { TON_CURRENCY_CODE } from '../../config';
-import { convertTonFromNanos, formatTonFromNanos, formatTonShortFromNanos } from '../formatCurrency';
-import type { LangFn } from '.';
+import { STARS_ICON_PLACEHOLDER, TON_CURRENCY_CODE } from '../../config';
+import { convertTonFromNanos, formatTonFromNanos, formatTonShortFromNanos } from '../../util/formatCurrency';
+import buildClassName from '../buildClassName';
+
+import GramIcon from '../../components/common/icons/GramIcon';
+import Icon from '../../components/common/icons/Icon';
+import StarIcon from '../../components/common/icons/StarIcon';
+
+export const NEXT_ARROW_REPLACEMENT = {
+  '>': <Icon name="next-link" className="link-arrow-icon" />,
+};
+export const PREVIOUS_ARROW_REPLACEMENT = {
+  '<': <Icon name="previous-link" className="link-arrow-icon" />,
+};
 
 export function formatStarsAsText(lang: LangFn, amount: number) {
   return lang('StarsAmountText', { amount }, { pluralValue: amount });
@@ -32,24 +41,73 @@ export function formatTonAsIcon(
     shouldConvertFromNanos?: boolean;
     isMono?: boolean;
     withIconLast?: boolean;
-  },
-) {
-  const formattedAmount = options?.shouldConvertFromNanos ? convertTonFromNanos(Number(amount)) : amount;
-  return lang('GramAmount', { amount: formattedAmount });
+  }) {
+  const {
+    className, containerClassName, withWrapper, shouldConvertFromNanos, isMono, withIconLast,
+  } = options || {};
+  const formattedAmount = shouldConvertFromNanos ? convertTonFromNanos(Number(amount)) : amount;
+  const icon = (
+    <GramIcon
+      isMono={isMono}
+      className={buildClassName('in-text-icon', withIconLast && 'in-text-icon-last', className)}
+    />
+  );
+  const key = withIconLast ? 'GramAmountIconLast' : 'GramAmount';
+
+  if (containerClassName || withWrapper) {
+    return (
+      <span className={containerClassName}>
+        {lang(key, { amount: formattedAmount }, {
+          withNodes: true,
+          specialReplacement: {
+            '💎': icon,
+          },
+        })}
+      </span>
+    );
+  }
+
+  return lang(key, { amount: formattedAmount }, {
+    withNodes: true,
+    specialReplacement: {
+      '💎': icon,
+    },
+  });
 }
 
-export function formatStarsAsIcon(
-  lang: LangFn,
-  amount: number | string,
-  options?: {
-    asFont?: boolean;
-    className?: string;
-    containerClassName?: string;
-    withWrapper?: boolean;
-    withIconLast?: boolean;
-  },
-) {
-  return lang(options?.withIconLast ? 'StarsAmountIconLast' : 'StarsAmount', { amount });
+export function formatStarsAsIcon(lang: LangFn, amount: number | string, options?: {
+  asFont?: boolean;
+  className?: string;
+  containerClassName?: string;
+  withWrapper?: boolean;
+  withIconLast?: boolean;
+}) {
+  const { asFont, className, containerClassName, withWrapper, withIconLast } = options || {};
+  const iconClassName = buildClassName(withIconLast && 'in-text-icon-last', className);
+  const icon = asFont
+    ? <Icon name="star" className={buildClassName('in-text-icon', iconClassName)} />
+    : <StarIcon type="gold" className={iconClassName} size="adaptive" />;
+  const key = withIconLast ? 'StarsAmountIconLast' : 'StarsAmount';
+
+  if (containerClassName || withWrapper) {
+    return (
+      <span className={containerClassName}>
+        {lang(key, { amount }, {
+          withNodes: true,
+          specialReplacement: {
+            [STARS_ICON_PLACEHOLDER]: icon,
+          },
+        })}
+      </span>
+    );
+  }
+
+  return lang(key, { amount }, {
+    withNodes: true,
+    specialReplacement: {
+      [STARS_ICON_PLACEHOLDER]: icon,
+    },
+  });
 }
 
 export function formatCurrencyAmountAsText(lang: LangFn, currencyAmount: ApiTypeCurrencyAmount) {

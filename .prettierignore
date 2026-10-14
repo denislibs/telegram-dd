@@ -44,3 +44,8 @@ src/components/common/helpers/documentInfo.ts
 src/components/common/helpers/gifts.ts
 src/components/common/helpers/mediaDimensions.ts
 src/components/middle/helpers/calculateMiddleFooterTransforms.ts
+
+# The auth slice's styles and assets, ported verbatim (byte-identical SCSS keeps every diff against tt readable)
+*.scss
+src/styles
+src/assets

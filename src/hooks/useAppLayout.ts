@@ -1,7 +1,5 @@
-// FOUNDATION STUB (no hook): the module-level breakpoint state and `getIsMobile`/`getIsTablet`/
-// `getIsWebAppsFullscreenSupported` are telegram-tt's code (the global layer calls them from actions, reducers and the
-// cache); the `useAppLayout()` hook itself (teact `useEffect`/`useForceUpdate`) is ported with the components (T6).
-// Copied from telegram-tt src/hooks/useAppLayout.ts
+import { useEffect } from '../lib/teact/teact';
+
 import {
   MIN_SCREEN_WIDTH_FOR_STATIC_LEFT_COLUMN,
   MOBILE_SCREEN_LANDSCAPE_MAX_HEIGHT,
@@ -11,6 +9,7 @@ import {
 import { IS_IOS } from '../util/browser/windowEnvironment';
 import { createCallbackManager } from '../util/callbacks';
 import { updateSizes } from '../util/windowSize';
+import useForceUpdate from './useForceUpdate';
 
 type MediaQueryCacheKey = 'mobile' | 'tablet' | 'landscape' | 'touch';
 
@@ -72,4 +71,16 @@ function initMediaQueryCache() {
 initMediaQueryCache();
 handleMediaQueryChange();
 
-export { callbacks as appLayoutCallbacks, isLandscape, isTouchScreen };
+export default function useAppLayout() {
+  const forceUpdate = useForceUpdate();
+
+  useEffect(() => callbacks.addCallback(forceUpdate), [forceUpdate]);
+
+  return {
+    isMobile,
+    isTablet,
+    isLandscape,
+    isDesktop: !isMobile && !isTablet,
+    isTouchScreen,
+  };
+}

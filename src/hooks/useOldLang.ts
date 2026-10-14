@@ -1,5 +1,19 @@
-// FOUNDATION STUB (types only): the hook is ported with the app layer (T6); the global layer needs the `OldLangFn` type.
-// Copied from telegram-tt src/hooks/useOldLang.ts
-import type * as langProvider from '../util/oldLangProvider';
+import * as langProvider from '../util/oldLangProvider';
+import useEffectOnce from './useEffectOnce';
+import useForceUpdate from './useForceUpdate';
 
 export type OldLangFn = langProvider.LangFn;
+/**
+ * @deprecated
+ */
+const useOldLang = (): OldLangFn => {
+  const forceUpdate = useForceUpdate();
+
+  useEffectOnce(() => {
+    return langProvider.addCallback(forceUpdate);
+  });
+
+  return langProvider.getTranslationFn();
+};
+
+export default useOldLang;
