@@ -7,6 +7,8 @@
     "src/@types/global.d.ts",
     "dev",
     "plugins",
+    "tests",
+    "scripts",
     "*.config.ts",
     "src/lib/gramjs/tl/generateModules.ts",
     "src/lib/gramjs/tl/types-generator"

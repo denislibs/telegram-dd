@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 24
+
+jobs:
+  check:
+    name: check + unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check # oxlint + prettier + tsc + vite build
+      - run: pnpm test # vitest
+
+  # Browser gates against our app: strict e2e (console / page errors / failed requests / stricterdom), a11y (axe),
+  # perf (leaks + long tasks under 4x CPU throttling on a production build). See docs/quality-gates.md.
+  browser:
+    name: browser gates (e2e, a11y, perf)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: npx playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - run: pnpm test:a11y
+      - run: pnpm test:perf
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-browser-gates
+          path: |
+            test-results/
+            playwright-report*/
+          retention-days: 7
+
+  # Optional: needs a clone of telegram-tt (reference/) and `npm install` of its copy, so it never blocks a merge.
+  visual-vs-tt:
+    name: visual vs telegram-tt (optional)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Clone the telegram-tt reference at the baseline commit
+        run: |
+          baseline=$(grep -oE '@ `[0-9a-f]{40}`' docs/porting-guide.md | head -1 | grep -oE '[0-9a-f]{40}')
+          git clone https://github.com/Ajaxy/telegram-tt.git reference/telegram-tt
+          git -C reference/telegram-tt checkout "$baseline"
+      - run: pnpm install --frozen-lockfile
+      - run: npx playwright install --with-deps chromium
+      - run: pnpm test:visual
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-diffs
+          path: |
+            tests/visual/__diff__/
+            playwright-report-visual/
+          retention-days: 7

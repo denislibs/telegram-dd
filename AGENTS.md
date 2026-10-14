@@ -21,6 +21,7 @@ pnpm install
 pnpm dev                         # Vite dev server on http://localhost:1234 (stricterdom on)
 pnpm check                       # oxlint + prettier --check + tsc + vite build
 pnpm format                      # prettier --write
+pnpm test:e2e | test:a11y | test:perf | test:visual   # browser quality gates (docs/quality-gates.md); first: pnpm playwright:install
 pnpm framework:update            # move the submodule to frameact's latest main
 ```
 
@@ -39,6 +40,9 @@ Toolchain: Vite 8, TypeScript 7 (native `tsc`), oxlint, prettier, pnpm 10, Node 
   `src/vendor/frameact/docs/llms-full.md`.
 - **Frame phases**: layout reads only in measure / forced-reflow effects or event handlers, DOM writes only in mutate.
   The dev server runs with `enableStrict()`: a stricterdom violation in the console is a bug to fix, not to suppress.
+- **Quality gates**: besides `pnpm check`, a ported screen passes the browser gates (strict e2e with zero console /
+  stricterdom problems, visual diff vs tt, no leaks, no long tasks, axe): [`docs/quality-gates.md`](docs/quality-gates.md).
+  Every e2e test imports `test` from `tests/e2e/fixtures.ts`.
 - **Animations**: use `frameact/kit` (`Transition`, `ShowTransition`, `InfiniteScroll`, `createScrollAnchor`) with tt's
   class contracts and stylesheets; blocking animations go through heavy-animation scopes.
 

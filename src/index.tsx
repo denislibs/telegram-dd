@@ -5,9 +5,15 @@ import './util/browser/windowEnvironment';
 import { render } from 'frameact/dom';
 import { enableStrict } from 'frameact/stricterdom';
 
+import { installStrictViolationRecorder } from './dev/stricterdomRecorder';
+
 import App from './components/App';
 
-if (import.meta.env.DEV) enableStrict();
+if (import.meta.env.DEV) {
+  enableStrict();
+  // Violations are also collected on `window.__strictViolations` for the e2e gate (tests/e2e/fixtures.ts).
+  installStrictViolationRecorder();
+}
 
 render(() => <App />, document.getElementById('root')!);
 

@@ -24,3 +24,8 @@ index.html
 dev
 plugins
 postcss.config.ts
+
+# browser gates output
+test-results
+playwright-report*
+tests/visual/__diff__
