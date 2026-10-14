@@ -1,8 +1,8 @@
-import { memo, useEffect, useMemo, useRef, useState } from '@teact';
+import { createEffect, createMemo, createSignal } from 'frameact';
 import { getActions } from '../../../global';
+import { depsOf } from '../../../util/effectDeps';
 
 import type { GlobalState } from '../../../global/types';
-import type { FolderEditDispatch } from '../../../hooks/reducers/useFoldersReducer';
 import { LeftColumnContent } from '../../../types';
 
 import {
@@ -24,7 +24,6 @@ import { useFolderManagerForOrderedIds } from '../../../hooks/useFolderManager';
 import { useHotkeys } from '../../../hooks/useHotkeys';
 import useInfiniteScroll from '../../../hooks/useInfiniteScroll';
 import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
-import useLastCallback from '../../../hooks/useLastCallback';
 import useOrderDiff from './hooks/useOrderDiff';
 
 import InfiniteScroll from '../../ui/InfiniteScroll';
@@ -58,214 +57,211 @@ type OwnProps = {
 const INTERSECTION_THROTTLE = 200;
 const RESERVED_HOTKEYS = new Set(['9', '0']);
 
-const ChatList = ({
-  className,
-  folderType,
-  folderId,
-  isActive,
-  isForumPanelOpen,
-  canDisplayArchive,
-  archiveSettings,
-  isMainList,
-  withTags,
-  isFoldersSidebarShown,
-  isStoryRibbonShown,
-  foldersDispatch,
-  noAbsolutePositioning,
-  noVirtualization,
-  noScrollRestore,
-  noFastList,
-  scrollContainerClosest,
-  onScroll,
-}: OwnProps) => {
+const ChatList = (props: OwnProps) => {
   const { openChat, openNextChat, closeForumPanel, closeCommunityPanel, toggleStoryRibbon, openLeftColumnContent } =
     getActions();
-  const containerRef = useRef<HTMLDivElement>();
-  const [panesHeight, setPanesHeight] = useState(0);
+  let containerRef!: HTMLDivElement;
+  const [panesHeight, setPanesHeight] = createSignal(0);
 
-  const isArchived = folderType === 'archived';
-  const isAllFolder = folderType === 'all';
-  const isSaved = folderType === 'saved';
-  const resolvedFolderId = isAllFolder
-    ? ALL_FOLDER_ID
-    : isArchived
-      ? ARCHIVED_FOLDER_ID
-      : isSaved
-        ? SAVED_FOLDER_ID
-        : folderId!;
+  const isArchived = createMemo(() => props.folderType === 'archived');
+  const isAllFolder = createMemo(() => props.folderType === 'all');
+  const isSaved = createMemo(() => props.folderType === 'saved');
+  const resolvedFolderId = createMemo(() =>
+    isAllFolder() ? ALL_FOLDER_ID : isArchived() ? ARCHIVED_FOLDER_ID : isSaved() ? SAVED_FOLDER_ID : props.folderId!,
+  );
 
-  const shouldDisplayArchive = isAllFolder && canDisplayArchive && archiveSettings;
+  const shouldDisplayArchive = createMemo(() => isAllFolder() && props.canDisplayArchive && props.archiveSettings);
 
-  const orderedIds = useFolderManagerForOrderedIds(resolvedFolderId);
+  const orderedIds = useFolderManagerForOrderedIds(() => resolvedFolderId());
   usePeerStoriesPolling(orderedIds);
 
   const chatsHeight = (orderedIds?.length || 0) * CHAT_HEIGHT_PX;
-  const archiveHeight = shouldDisplayArchive
-    ? archiveSettings?.isMinimized
-      ? ARCHIVE_MINIMIZED_HEIGHT
-      : CHAT_HEIGHT_PX
-    : 0;
+  const archiveHeight = createMemo(() =>
+    shouldDisplayArchive() ? (props.archiveSettings?.isMinimized ? ARCHIVE_MINIMIZED_HEIGHT : CHAT_HEIGHT_PX) : 0,
+  );
 
-  const {
-    orderDiffById,
-    shiftDiff,
-    getAnimationType,
-    onReorderAnimationEnd: onReorderAnimationEnd,
-  } = useOrderDiff(orderedIds, panesHeight);
+  const orderDiffResult = createMemo(() => useOrderDiff(orderedIds, () => panesHeight()));
+  const orderDiffById = () => orderDiffResult().orderDiffById;
+  const shiftDiff = () => orderDiffResult().shiftDiff;
+  const getAnimationType = () => orderDiffResult().getAnimationType;
+  const onReorderAnimationEnd = () => orderDiffResult().onReorderAnimationEnd;
 
-  const chatListSlice = noVirtualization ? Math.max(CHAT_LIST_SLICE, orderedIds?.length || 0) : CHAT_LIST_SLICE;
-  const [viewportIds, getMore] = useInfiniteScroll(undefined, orderedIds, undefined, chatListSlice);
+  const chatListSlice = createMemo(() =>
+    props.noVirtualization ? Math.max(CHAT_LIST_SLICE, orderedIds?.length || 0) : CHAT_LIST_SLICE,
+  );
+  const [viewportIds, getMore] = useInfiniteScroll(
+    undefined,
+    () => orderedIds,
+    undefined,
+    () => chatListSlice(),
+  );
 
   // Support <Alt>+<Up/Down> to navigate between chats
-  useHotkeys(
-    useMemo(
-      () =>
-        isActive && orderedIds?.length
-          ? {
-              'Alt+ArrowUp': (e: KeyboardEvent) => {
-                e.preventDefault();
-                openNextChat({ targetIndexDelta: -1, orderedIds });
-              },
-              'Alt+ArrowDown': (e: KeyboardEvent) => {
-                e.preventDefault();
-                openNextChat({ targetIndexDelta: 1, orderedIds });
-              },
-            }
-          : undefined,
-      [isActive, orderedIds],
+  useHotkeys(() =>
+    createMemo(() =>
+      props.isActive && orderedIds?.length
+        ? {
+            'Alt+ArrowUp': (e: KeyboardEvent) => {
+              e.preventDefault();
+              openNextChat({ targetIndexDelta: -1, orderedIds });
+            },
+            'Alt+ArrowDown': (e: KeyboardEvent) => {
+              e.preventDefault();
+              openNextChat({ targetIndexDelta: 1, orderedIds });
+            },
+          }
+        : undefined,
     ),
   );
 
   // Support <Cmd>+<Digit> to navigate between chats
-  useEffect(() => {
-    if (!isActive || isSaved || !orderedIds || !IS_APP) {
-      return undefined;
-    }
-
-    function handleKeyDown(e: KeyboardEvent) {
-      if (((IS_MAC_OS && e.metaKey) || (!IS_MAC_OS && e.ctrlKey)) && e.code.startsWith('Digit')) {
-        const [, digit] = e.code.match(/Digit(\d)/) || [];
-        if (!digit || RESERVED_HOTKEYS.has(digit)) return;
-
-        const isArchiveInList = shouldDisplayArchive && archiveSettings && !archiveSettings.isMinimized;
-
-        const shift = isArchiveInList ? -1 : 0;
-        const position = Number(digit) + shift - 1;
-
-        if (isArchiveInList && position === -1) {
-          if (isMainList) openLeftColumnContent({ contentKey: LeftColumnContent.Archived });
-          return;
-        }
-
-        if (position > orderedIds!.length - 1) return;
-
-        openChat({ id: orderedIds![position], shouldReplaceHistory: true });
+  // TODO(codemod): dependency on a container (archiveSettings) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)
+  createEffect(
+    depsOf(
+      () =>
+        [
+          props.archiveSettings,
+          isSaved(),
+          props.isActive,
+          openChat,
+          openNextChat,
+          orderedIds,
+          shouldDisplayArchive(),
+          props.isMainList,
+        ] as const,
+    ),
+    ([archiveSettings2, isSaved2, isActive2, , , , shouldDisplayArchive2, isMainList2]) => {
+      if (!isActive2 || isSaved2 || !orderedIds || !IS_APP) {
+        return undefined;
       }
-    }
 
-    document.addEventListener('keydown', handleKeyDown);
+      function handleKeyDown(e: KeyboardEvent) {
+        if (((IS_MAC_OS && e.metaKey) || (!IS_MAC_OS && e.ctrlKey)) && e.code.startsWith('Digit')) {
+          const [, digit] = e.code.match(/Digit(\d)/) || [];
+          if (!digit || RESERVED_HOTKEYS.has(digit)) return;
 
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [archiveSettings, isSaved, isActive, openChat, openNextChat, orderedIds, shouldDisplayArchive, isMainList]);
+          const isArchiveInList = shouldDisplayArchive2 && archiveSettings2 && !archiveSettings2.isMinimized;
+
+          const shift = isArchiveInList ? -1 : 0;
+          const position = Number(digit) + shift - 1;
+
+          if (isArchiveInList && position === -1) {
+            if (isMainList2) openLeftColumnContent({ contentKey: LeftColumnContent.Archived });
+            return;
+          }
+
+          if (position > orderedIds!.length - 1) return;
+
+          openChat({ id: orderedIds![position], shouldReplaceHistory: true });
+        }
+      }
+
+      document.addEventListener('keydown', handleKeyDown);
+
+      return () => {
+        document.removeEventListener('keydown', handleKeyDown);
+      };
+    },
+  );
 
   const { observe } = useIntersectionObserver({
-    rootRef: containerRef,
+    rootRef: () => containerRef,
     throttleMs: INTERSECTION_THROTTLE,
   });
 
-  const handleArchivedClick = useLastCallback(() => {
+  const handleArchivedClick = () => {
     openLeftColumnContent({ contentKey: LeftColumnContent.Archived });
     closeForumPanel();
     closeCommunityPanel();
-  });
+  };
 
-  const handleShowStoryRibbon = useLastCallback(() => {
-    toggleStoryRibbon({ isShown: true, isArchived });
-  });
+  const handleShowStoryRibbon = () => {
+    toggleStoryRibbon({ isShown: true, isArchived: isArchived() });
+  };
 
-  const handleHideStoryRibbon = useLastCallback(() => {
-    toggleStoryRibbon({ isShown: false, isArchived });
-  });
+  const handleHideStoryRibbon = () => {
+    toggleStoryRibbon({ isShown: false, isArchived: isArchived() });
+  };
 
   useTopOverscroll({
-    containerRef,
+    containerRef: () => containerRef,
     onOverscroll: handleShowStoryRibbon,
     onReset: handleHideStoryRibbon,
-    isDisabled: isSaved,
-    isOverscrolled: isStoryRibbonShown,
+    isDisabled: () => isSaved(),
+    isOverscrolled: () => props.isStoryRibbonShown,
   });
 
   function renderChats() {
-    const viewportOffset = orderedIds!.indexOf(viewportIds![0]);
+    const viewportOffset = orderedIds!.indexOf(viewportIds()![0]);
 
-    const pinnedCount = getPinnedChatsCount(resolvedFolderId) || 0;
+    const pinnedCount = getPinnedChatsCount(resolvedFolderId()) || 0;
 
-    return viewportIds!.map((id, i) => {
+    return viewportIds()!.map((id, i) => {
       const isPinned = viewportOffset + i < pinnedCount;
-      const offsetTop = noAbsolutePositioning
+      const offsetTop = props.noAbsolutePositioning
         ? undefined
-        : panesHeight + archiveHeight + (viewportOffset + i) * CHAT_HEIGHT_PX;
+        : panesHeight() + archiveHeight() + (viewportOffset + i) * CHAT_HEIGHT_PX;
 
       return (
         <Chat
-          key={id}
-          teactOrderKey={isPinned ? i : getOrderKey(id, isSaved)}
+          teactOrderKey={isPinned ? i : getOrderKey(id, isSaved())}
           chatId={id}
           isPinned={isPinned}
-          folderId={folderId}
-          isSavedDialog={isSaved}
-          animationType={getAnimationType(id)}
-          orderDiff={orderDiffById[id]}
-          shiftDiff={shiftDiff}
-          onReorderAnimationEnd={onReorderAnimationEnd}
+          folderId={props.folderId}
+          isSavedDialog={isSaved()}
+          animationType={getAnimationType()(id)}
+          orderDiff={orderDiffById()[id]}
+          shiftDiff={shiftDiff()}
+          onReorderAnimationEnd={onReorderAnimationEnd()}
           offsetTop={offsetTop}
           observeIntersection={observe}
-          withTags={withTags}
-          isFoldersSidebarShown={isFoldersSidebarShown}
+          withTags={props.withTags}
+          isFoldersSidebarShown={props.isFoldersSidebarShown}
         />
       );
     });
   }
 
-  const totalHeight = chatsHeight + archiveHeight + panesHeight;
+  const totalHeight = createMemo(() => chatsHeight + archiveHeight() + panesHeight());
 
   return (
     <InfiniteScroll
-      className={buildClassName('chat-list custom-scroll', isForumPanelOpen && 'forum-panel-open', className)}
+      className={buildClassName(
+        'chat-list custom-scroll',
+        props.isForumPanelOpen && 'forum-panel-open',
+        props.className,
+      )}
       ref={containerRef}
-      items={viewportIds}
+      items={viewportIds()}
       itemSelector=".ListItem:not(.chat-item-archive)"
       preloadBackwards={CHAT_LIST_SLICE}
-      withAbsolutePositioning={!noAbsolutePositioning}
-      maxHeight={!noAbsolutePositioning ? totalHeight : undefined}
-      scrollContainerClosest={scrollContainerClosest}
-      noScrollRestore={noScrollRestore}
-      noFastList={noFastList}
+      withAbsolutePositioning={!props.noAbsolutePositioning}
+      maxHeight={!props.noAbsolutePositioning ? totalHeight() : undefined}
+      scrollContainerClosest={props.scrollContainerClosest}
+      noScrollRestore={props.noScrollRestore}
+      noFastList={props.noFastList}
       onLoadMore={getMore}
-      onScroll={onScroll}
+      onScroll={props.onScroll}
     >
-      {!isSaved && <ChatListPanes key="panes" noBanners={!isAllFolder} onHeightChange={setPanesHeight} />}
-      {shouldDisplayArchive && (
+      {!isSaved() && <ChatListPanes noBanners={!isAllFolder()} onHeightChange={setPanesHeight} />}
+      {shouldDisplayArchive() && (
         <Archive
-          key="archive"
-          archiveSettings={archiveSettings}
+          archiveSettings={props.archiveSettings}
           onClick={handleArchivedClick}
-          animationType={getAnimationType(ARCHIVE_ANIMATION_ID)}
-          offsetTop={panesHeight}
-          isFoldersSidebarShown={isFoldersSidebarShown}
+          animationType={getAnimationType()(ARCHIVE_ANIMATION_ID)}
+          offsetTop={panesHeight()}
+          isFoldersSidebarShown={props.isFoldersSidebarShown}
         />
       )}
-      {viewportIds?.length ? (
+      {viewportIds()?.length ? (
         renderChats()
-      ) : viewportIds && !viewportIds.length && !isSaved ? (
-        <EmptyFolder folderId={folderId} folderType={folderType} foldersDispatch={foldersDispatch!} />
+      ) : viewportIds() && !viewportIds().length && !isSaved() ? (
+        <EmptyFolder folderId={props.folderId} folderType={props.folderType} foldersDispatch={props.foldersDispatch!} />
       ) : (
-        <Loading key="loading" />
+        <Loading />
       )}
     </InfiniteScroll>
   );
 };
 
-export default memo(ChatList);
+export default ChatList;

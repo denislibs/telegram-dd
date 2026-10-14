@@ -1,5 +1,6 @@
-import { useCallback, useLayoutEffect, useMemo, useRef } from '../../../../lib/teact/teact';
+import { createMemo, createMutationEffect, requestMutation } from 'frameact';
 import { getActions } from '../../../../global';
+import { depsOf } from '../../../../util/effectDeps';
 
 import type {
   ApiChat,
@@ -10,11 +11,9 @@ import type {
   ApiTypingStatus,
   StatefulMediaContent,
 } from '../../../../api/types';
-import type { ObserveFn } from '../../../../hooks/useIntersectionObserver';
 import type { CommunityMember } from './useCommunityMembers';
 
 import { CHAT_HEIGHT_PX } from '../../../../config';
-import { requestMutation } from '../../../../lib/fasterdom/fasterdom';
 import {
   getMessageIsSpoiler,
   getMessageRoundVideo,
@@ -34,7 +33,6 @@ import useMessageMediaHash from '../../../../hooks/media/useMessageMediaHash';
 import useThumbnail from '../../../../hooks/media/useThumbnail';
 import useEnsureStory from '../../../../hooks/useEnsureStory';
 import useLang from '../../../../hooks/useLang';
-import useLastCallback from '../../../../hooks/useLastCallback';
 import useMedia from '../../../../hooks/useMedia';
 
 import Avatar from '../../../common/Avatar';
@@ -56,6 +54,7 @@ function getLatestTypingStatusTimestamp(typingStatusByPeerId?: Record<string, Ap
   return timestamps.length ? Math.max(...timestamps) : undefined;
 }
 
+// TODO(codemod): useChatListEntry: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useChatListEntry({
   chat,
   topicIds,
@@ -105,28 +104,26 @@ export default function useChatListEntry({
   const { openChat } = getActions();
 
   const lang = useLang();
-  const ref = useRef<HTMLDivElement>();
+  let ref!: HTMLDivElement;
 
-  const communityItems = useMemo(
-    () =>
-      communityMembers?.map(({ id, title, peer, isUnread }) => ({
-        key: id,
-        title,
-        isUnread,
-        icon: <Avatar peer={peer} size="micro" className={styles.avatar} />,
-      })),
-    [communityMembers],
+  const communityItems = createMemo(() =>
+    communityMembers?.map(({ id, title, peer, isUnread }) => ({
+      key: id,
+      title,
+      isUnread,
+      icon: <Avatar peer={peer} size="micro" className={styles.avatar} />,
+    })),
   );
 
   // Mirrors a forum opening its unread topic
-  const handleCommunityMemberClick = useLastCallback(() => {
-    const mainCommunityMember = communityItems?.[0];
+  const handleCommunityMemberClick = () => {
+    const mainCommunityMember = communityItems()?.[0];
     if (!mainCommunityMember?.isUnread) return false;
 
     openChat({ id: mainCommunityMember.key, shouldReplaceHistory: true }, { forceOnHeavyAnimation: true });
 
     return true;
-  });
+  };
 
   const storyData = lastMessage?.content.storyData;
   const shouldTryLoadingStory = statefulMediaContent && !statefulMediaContent.story;
@@ -143,7 +140,7 @@ export default function useChatListEntry({
   const mediaBlobUrl = useMedia(mediaHasPreview ? mediaHash : undefined);
   const isRoundVideo = Boolean(lastMessage && getMessageRoundVideo(lastMessage));
 
-  const renderLastMessageOrTyping = useCallback(() => {
+  const renderLastMessageOrTyping = () => {
     const latestTypingStatusTimestamp = getLatestTypingStatusTimestamp(typingStatusByPeerId);
 
     if (
@@ -170,9 +167,9 @@ export default function useChatListEntry({
 
     if (canDisplayDraft) {
       return (
-        <p className="last-message" dir={lang.isRtl ? 'auto' : 'ltr'}>
-          <span className="draft">{lang('ChatDraftPrefix')}</span>
-          <span className="last-message-summary" dir="auto">
+        <p class="last-message" dir={lang.isRtl ? 'auto' : 'ltr'}>
+          <span class="draft">{lang('ChatDraftPrefix')}</span>
+          <span class="last-message-summary" dir="auto">
             {renderTextWithEntities({
               text: draft.text?.text || '',
               entities: draft.text?.entities,
@@ -193,43 +190,27 @@ export default function useChatListEntry({
     const senderName = lastMessageSender ? getMessageSenderName(lang, senderChatId, lastMessageSender) : undefined;
 
     return (
-      <p className="last-message shared-canvas-container" dir={lang.isRtl ? 'auto' : 'ltr'}>
+      <p class="last-message shared-canvas-container" dir={lang.isRtl ? 'auto' : 'ltr'}>
         {senderName && (
           <>
-            <span className="sender-name">{renderText(senderName)}</span>
-            <span className="colon">:</span>
+            <span class="sender-name">{renderText(senderName)}</span>
+            <span class="colon">:</span>
           </>
         )}
         {!isSavedDialog && lastMessage.forwardInfo && <Icon name="share-filled" className="chat-prefix-icon" />}
         {lastMessage.replyInfo?.type === 'story' && <Icon name="story-reply" className="chat-prefix-icon" />}
-        <span className="last-message-summary" dir="auto">
+        <span class="last-message-summary" dir="auto">
           {renderSummary(lastMessage, observeIntersection, mediaBlobUrl || mediaThumbnail, isRoundVideo)}
         </span>
       </p>
     );
-  }, [
-    chat,
-    chatId,
-    draft,
-    isRoundVideo,
-    isTopic,
-    lang,
-    lastMessage,
-    lastMessageSender,
-    lastMessageTopic,
-    mediaBlobUrl,
-    mediaThumbnail,
-    observeIntersection,
-    typingStatusByPeerId,
-    isSavedDialog,
-    isPreview,
-  ]);
+  };
 
   function renderSubtitle() {
     if (chat && isChatCommunity(chat)) {
       return (
         <ChatGroupedLastMessage
-          items={communityItems}
+          items={communityItems()}
           hasTags={hasTags}
           renderLastMessage={renderLastMessageOrTyping}
           onMainItemClick={handleCommunityMemberClick}
@@ -254,79 +235,83 @@ export default function useChatListEntry({
   }
 
   // Sets animation excess values when `orderDiff` changes and then resets excess values to animate
-  useLayoutEffect(() => {
-    const element = ref.current;
+  createMutationEffect(
+    depsOf(() => [withInterfaceAnimations, orderDiff, shiftDiff, animationType, onReorderAnimationEnd]),
+    () => {
+      const element = ref;
 
-    if (!withInterfaceAnimations || !element) {
-      return;
-    }
+      if (!withInterfaceAnimations || !element) {
+        return;
+      }
 
-    let isCancelled = false;
+      let isCancelled = false;
 
-    // Clear stale transitions before setting the compensating transform
-    element.classList.remove('animate-opacity', 'animate-transform');
-    element.style.opacity = '';
-    element.style.transform = '';
+      // Clear stale transitions before setting the compensating transform
+      element.classList.remove('animate-opacity', 'animate-transform');
+      element.style.opacity = '';
+      element.style.transform = '';
 
-    const notifyAnimationEnd = () => {
-      if (isCancelled) return;
-      requestMutation(() => {
+      const notifyAnimationEnd = () => {
         if (isCancelled) return;
-        element.classList.remove('animate-opacity', 'animate-transform');
-        element.style.opacity = '';
-        element.style.transform = '';
-      });
-      onReorderAnimationEnd?.();
-    };
+        requestMutation(() => {
+          if (isCancelled) return;
+          element.classList.remove('animate-opacity', 'animate-transform');
+          element.style.opacity = '';
+          element.style.transform = '';
+        });
+        onReorderAnimationEnd?.();
+      };
 
-    // TODO Refactor animation: create `useListAnimation` that owns `orderDiff` and `animationType`
-    if (animationType === ChatAnimationTypes.Opacity) {
-      element.style.opacity = '0';
+      // TODO Refactor animation: create `useListAnimation` that owns `orderDiff` and `animationType`
+      if (animationType === ChatAnimationTypes.Opacity) {
+        element.style.opacity = '0';
 
-      requestMutation(() => {
-        if (isCancelled) return;
-        element.classList.add('animate-opacity');
-        element.style.opacity = '1';
+        requestMutation(() => {
+          if (isCancelled) return;
+          element.classList.add('animate-opacity');
+          element.style.opacity = '1';
 
-        waitStartingTransitionsEnd(element).then(notifyAnimationEnd);
-      });
-    }
+          waitStartingTransitionsEnd(element).then(notifyAnimationEnd);
+        });
+      }
 
-    if (animationType === ChatAnimationTypes.Move) {
-      element.style.transform = `translate3d(0, ${-orderDiff * CHAT_HEIGHT_PX - shiftDiff}px, 0)`;
+      if (animationType === ChatAnimationTypes.Move) {
+        element.style.transform = `translate3d(0, ${-orderDiff * CHAT_HEIGHT_PX - shiftDiff}px, 0)`;
 
-      requestMutation(() => {
-        if (isCancelled) return;
-        element.classList.add('animate-transform');
-        element.style.transform = '';
+        requestMutation(() => {
+          if (isCancelled) return;
+          element.classList.add('animate-transform');
+          element.style.transform = '';
 
-        waitStartingTransitionsEnd(element).then(notifyAnimationEnd);
-      });
-    }
+          waitStartingTransitionsEnd(element).then(notifyAnimationEnd);
+        });
+      }
 
-    if (animationType === ChatAnimationTypes.Shift) {
-      element.style.transform = `translate3d(0, ${-shiftDiff}px, 0)`;
+      if (animationType === ChatAnimationTypes.Shift) {
+        element.style.transform = `translate3d(0, ${-shiftDiff}px, 0)`;
 
-      requestMutation(() => {
-        if (isCancelled) return;
-        element.classList.add('animate-transform');
-        element.style.transform = '';
+        requestMutation(() => {
+          if (isCancelled) return;
+          element.classList.add('animate-transform');
+          element.style.transform = '';
 
-        waitStartingTransitionsEnd(element).then(notifyAnimationEnd);
-      });
-    }
+          waitStartingTransitionsEnd(element).then(notifyAnimationEnd);
+        });
+      }
 
-    if (animationType === ChatAnimationTypes.None) {
-      return;
-    }
+      if (animationType === ChatAnimationTypes.None) {
+        return;
+      }
 
-    return () => {
-      isCancelled = true;
-    };
-  }, [withInterfaceAnimations, orderDiff, shiftDiff, animationType, onReorderAnimationEnd]);
+      return () => {
+        isCancelled = true;
+      };
+    },
+  );
 
   return {
     renderSubtitle,
+    // TODO(codemod): "ref" was a ref object passed as a value: pass an accessor (() => ref) or a callback ref
     ref,
   };
 }
@@ -348,15 +333,11 @@ function renderSummary(message: ApiMessage, observeIntersection?: ObserveFn, blo
   const isSpoiler = getMessageIsSpoiler(message);
 
   return (
-    <span className="media-preview">
+    <span class="media-preview">
       <img
         src={blobUrl}
         alt=""
-        className={buildClassName(
-          'media-preview--image',
-          isRoundVideo && 'round',
-          isSpoiler && 'media-preview-spoiler',
-        )}
+        class={buildClassName('media-preview--image', isRoundVideo && 'round', isSpoiler && 'media-preview-spoiler')}
         draggable={false}
       />
       {getMessageVideo(message) && <Icon name="play" />}

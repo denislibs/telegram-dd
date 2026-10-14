@@ -1,8 +1,3 @@
-import type { FC } from '../../lib/teact/teact';
-import { memo } from '../../lib/teact/teact';
-
-import type { ConnectionStatus } from '../../hooks/useConnectionStatus';
-
 import useOldLang from '../../hooks/useOldLang';
 
 import Button from '../ui/Button';
@@ -17,15 +12,16 @@ type OwnProps = {
   onClick?: NoneToVoidFunction;
 };
 
-const ConnectionStatusOverlay: FC<OwnProps> = ({ connectionStatus, connectionStatusText, onClick }) => {
+const ConnectionStatusOverlay = (props: OwnProps) => {
   const lang = useOldLang();
 
   return (
-    <div id="ConnectionStatusOverlay" dir={lang.isRtl ? 'rtl' : undefined} onClick={onClick}>
+    <div id="ConnectionStatusOverlay" dir={lang.isRtl ? 'rtl' : undefined} onClick={(e) => props.onClick?.(e)}>
       <Spinner color="black" />
-      <div className="state-text">
-        <Transition activeKey={connectionStatus} name="slideFade">
-          {connectionStatusText}
+      <div class="state-text">
+        {/* TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6) */}
+        <Transition activeKey={props.connectionStatus} name="slideFade">
+          {props.connectionStatusText}
         </Transition>
       </div>
       <Button round size="tiny" color="translucent-black" iconName="close" />
@@ -33,4 +29,4 @@ const ConnectionStatusOverlay: FC<OwnProps> = ({ connectionStatus, connectionSta
   );
 };
 
-export default memo(ConnectionStatusOverlay);
+export default ConnectionStatusOverlay;

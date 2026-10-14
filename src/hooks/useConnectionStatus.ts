@@ -11,6 +11,7 @@ export enum ConnectionStatus {
 
 type ConnectionStatusPosition = 'overlay' | 'minimized' | 'middleHeader' | 'none';
 
+// TODO(codemod): useConnectionStatus: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useConnectionStatus(
   lang: LangFn,
   connectionState: GlobalState['connectionState'],

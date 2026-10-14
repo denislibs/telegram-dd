@@ -1,4 +1,5 @@
-import { type TeactNode, useMemo } from '../lib/teact/teact';
+import { createMemo } from 'frameact';
+import type { JSX } from 'frameact/jsx-runtime';
 import { getActions, getGlobal } from '../global';
 
 import type { MenuItemContextAction } from '../components/ui/ListItem';
@@ -46,6 +47,7 @@ type Params = {
     }
 );
 
+// TODO(codemod): useFolderTabs: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 const useFolderTabs = (params: Params) => {
   const { sidebarMode, orderedFolderIds, chatFoldersById, maxFolders, noEmoticons, isReadOnly } = params;
 
@@ -64,7 +66,7 @@ const useFolderTabs = (params: Params) => {
     setSharedSettingOption,
   } = getActions();
 
-  const allChatsFolder: ApiChatFolder = useMemo(() => {
+  const allChatsFolder: ApiChatFolder = createMemo(() => {
     return {
       id: ALL_FOLDER_ID,
       title: { text: orderedFolderIds?.[0] === ALL_FOLDER_ID ? lang('FilterAllChatsShort') : lang('FilterAllChats') },
@@ -72,9 +74,9 @@ const useFolderTabs = (params: Params) => {
       excludedChatIds: MEMO_EMPTY_ARRAY,
       emoticon: '💬',
     } satisfies ApiChatFolder;
-  }, [orderedFolderIds, lang]);
+  });
 
-  const displayedFolders = useMemo(() => {
+  const displayedFolders = createMemo(() => {
     return orderedFolderIds
       ? orderedFolderIds
           .map((id) => {
@@ -86,27 +88,28 @@ const useFolderTabs = (params: Params) => {
           })
           .filter(Boolean)
       : undefined;
-  }, [chatFoldersById, allChatsFolder, orderedFolderIds]);
+  });
 
   const folderUnreadChatsCountersById = useFolderManagerForUnreadChatsByFolder();
-  const handleReadAllChats = useLastCallback((folderId: number) => {
+  const handleReadAllChats = (folderId: number) => {
     const unreadChatIds = folderUnreadChatsCountersById[folderId];
     if (!unreadChatIds?.length) return;
 
     unreadChatIds.forEach((chatId) => {
       markChatMessagesRead({ id: chatId });
     });
-  });
+  };
 
   const folderCountersById = useFolderManagerForUnreadCounters();
-  const folderTabs = useMemo(() => {
-    if (!displayedFolders || !displayedFolders.length) {
+  const folderTabs = createMemo(() => {
+    if (!displayedFolders() || !displayedFolders().length) {
       return undefined;
     }
 
-    return displayedFolders.map((folder, i) => {
+    return displayedFolders().map((folder, i) => {
       const { id, title } = folder;
       const isBlocked = id !== ALL_FOLDER_ID && i > maxFolders - 1;
+      // TODO(codemod): getGlobal() in a memo / JSX is a one-time read: use useGlobal() (store contract §12.4)
       const canShareFolder = selectCanShareFolder(getGlobal(), id);
       const contextActions: MenuItemContextAction[] = [];
 
@@ -228,7 +231,7 @@ const useFolderTabs = (params: Params) => {
         }
       }
 
-      const folderName: TeactNode[] | string = renderTextWithEntities(folderNameOptions);
+      const folderName: JSX.Element[] | string = renderTextWithEntities(folderNameOptions);
 
       return {
         id,
@@ -241,21 +244,7 @@ const useFolderTabs = (params: Params) => {
         noTitleAnimations: folder.noTitleAnimations,
       } satisfies TabWithProperties;
     });
-  }, [
-    displayedFolders,
-    maxFolders,
-    folderCountersById,
-    lang,
-    chatFoldersById,
-    maxChatLists,
-    folderInvitesById,
-    maxFolderInvites,
-    folderUnreadChatsCountersById,
-    isReadOnly,
-    sidebarMode,
-    isMobile,
-    noEmoticons,
-  ]);
+  });
 
   return {
     displayedFolders,

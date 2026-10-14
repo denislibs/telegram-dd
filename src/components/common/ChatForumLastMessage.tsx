@@ -1,10 +1,9 @@
-import type { TeactNode } from '../../lib/teact/teact';
-import { memo, useCallback, useMemo } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import type { JSX } from 'frameact/jsx-runtime';
 import { getActions } from '../../global';
 
 import type { ApiChat } from '../../api/types';
 import type { GlobalState } from '../../global/types';
-import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 import type { GroupedLastMessageItem } from './ChatGroupedLastMessage';
 
 import { getOrderedTopics } from '../../global/helpers';
@@ -14,7 +13,6 @@ import { buildCollectionByCallback, mapTruthyValues } from '../../util/iteratees
 
 import { useShallowSelector } from '../../hooks/data/useSelector';
 import { getIsMobile } from '../../hooks/useAppLayout';
-import useLastCallback from '../../hooks/useLastCallback';
 
 import ChatGroupedLastMessage from './ChatGroupedLastMessage';
 import TopicIcon from './TopicIcon';
@@ -23,78 +21,72 @@ type OwnProps = {
   chat: ApiChat;
   topicIds?: number[];
   hasTags?: boolean;
-  renderLastMessage: () => TeactNode | undefined;
+  renderLastMessage: () => JSX.Element | undefined;
   observeIntersection?: ObserveFn;
 };
 
 const MAX_TOPICS = 3;
 
-const ChatForumLastMessage = ({ chat, topicIds, hasTags, renderLastMessage, observeIntersection }: OwnProps) => {
+const ChatForumLastMessage = (props: OwnProps) => {
   const { openThread } = getActions();
 
-  const topicsThreadSelector = useCallback(
-    (global: GlobalState) => {
-      return buildCollectionByCallback(topicIds || [], (tId) => [tId, selectThread(global, chat.id, tId)]);
-    },
-    [chat.id, topicIds],
-  );
+  const topicsThreadSelector = (global: GlobalState) => {
+    return buildCollectionByCallback(props.topicIds || [], (tId) => [tId, selectThread(global, props.chat.id, tId)]);
+  };
   const topicsThreads = useShallowSelector(topicsThreadSelector);
 
-  const topicsSelector = useCallback(
-    (global: GlobalState) => {
-      return topicIds?.map((tId) => selectTopic(global, chat.id, tId)).filter(Boolean);
-    },
-    [chat.id, topicIds],
-  );
+  const topicsSelector = (global: GlobalState) => {
+    return props.topicIds?.map((tId) => selectTopic(global, props.chat.id, tId)).filter(Boolean);
+  };
   const topics = useShallowSelector(topicsSelector);
 
-  const orderedTopics = useMemo(() => {
-    if (!topics) {
+  const orderedTopics = createMemo(() => {
+    if (!topics()) {
       return undefined;
     }
 
-    const topicsThreadInfos = mapTruthyValues(topicsThreads, (t) => t?.threadInfo);
+    const topicsThreadInfos = mapTruthyValues(topicsThreads(), (t) => t?.threadInfo);
 
-    return getOrderedTopics(topics, topicsThreadInfos, undefined, true).slice(0, MAX_TOPICS);
-  }, [topics, topicsThreads]);
+    return getOrderedTopics(topics(), topicsThreadInfos, undefined, true).slice(0, MAX_TOPICS);
+  });
 
-  const items = useMemo((): GroupedLastMessageItem[] | undefined => {
-    return orderedTopics?.map((topic) => ({
+  const items = createMemo((): GroupedLastMessageItem[] | undefined => {
+    return orderedTopics()?.map((topic) => ({
       key: topic.id,
       title: topic.title,
-      isUnread: Boolean(topicsThreads[topic.id]?.readState?.unreadCount),
-      icon: <TopicIcon topic={topic} observeIntersection={observeIntersection} />,
+      isUnread: Boolean(topicsThreads()[topic.id]?.readState?.unreadCount),
+      icon: <TopicIcon topic={topic} observeIntersection={props.observeIntersection} />,
     }));
-  }, [orderedTopics, topicsThreads, observeIntersection]);
+  });
 
-  const handleMainItemClick = useLastCallback(() => {
-    const lastActiveTopic = orderedTopics?.[0];
+  const handleMainItemClick = () => {
+    const lastActiveTopic = orderedTopics()?.[0];
     if (!lastActiveTopic) return false;
     if (
-      topicsThreads[lastActiveTopic.id]?.readState?.unreadCount === 0 ||
-      (chat.isForumAsMessages && !chat.isBotForum)
+      topicsThreads()[lastActiveTopic.id]?.readState?.unreadCount === 0 ||
+      (props.chat.isForumAsMessages && !props.chat.isBotForum)
     ) {
       return false;
     }
 
     openThread({
-      chatId: chat.id,
+      chatId: props.chat.id,
       threadId: lastActiveTopic.id,
       shouldReplaceHistory: true,
       noForumTopicPanel: getIsMobile(),
     });
 
     return true;
-  });
+  };
 
   return (
     <ChatGroupedLastMessage
-      items={items}
-      hasTags={hasTags}
-      renderLastMessage={renderLastMessage}
+      items={items()}
+      hasTags={props.hasTags}
+      renderLastMessage={props.renderLastMessage}
       onMainItemClick={handleMainItemClick}
     />
   );
 };
 
-export default memo(ChatForumLastMessage);
+export default ChatForumLastMessage;

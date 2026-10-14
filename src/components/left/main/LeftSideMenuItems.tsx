@@ -1,4 +1,4 @@
-import { memo, useMemo } from '../../../lib/teact/teact';
+import { createMemo } from 'frameact';
 import { getActions, withGlobal } from '../../../global';
 
 import type { ApiUser } from '../../../api/types';
@@ -33,7 +33,6 @@ import { getSystemTheme } from '../../../util/systemTheme';
 import useFlag from '../../../hooks/useFlag';
 import { useFolderManagerForUnreadCounters } from '../../../hooks/useFolderManager';
 import useLang from '../../../hooks/useLang';
-import useLastCallback from '../../../hooks/useLastCallback';
 
 import AttachBotItem from '../../middle/composer/AttachBotItem';
 import ConfirmDialog from '../../ui/ConfirmDialog';
@@ -66,26 +65,8 @@ type StateProps = {
   walletBotId?: string;
 } & Pick<GlobalState, 'currentUserId' | 'archiveSettings'>;
 
-const LeftSideMenuItems = ({
-  currentUserId,
-  archiveSettings,
-  animationLevel,
-  theme,
-  canInstall,
-  attachBots,
-  currentUser,
-  accountsTotalLimit,
-  hasPasscode,
-  isWalletAvailable,
-  walletBotId,
-  onSelectArchived,
-  onSelectContacts,
-  onSelectSettings,
-  onBotMenuOpened,
-  onBotMenuClosed,
-  onSwitchAccount,
-  footer,
-}: OwnProps & StateProps) => {
+const LeftSideMenuItems = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const {
     openChat,
     setSharedSettingOption,
@@ -99,44 +80,50 @@ const LeftSideMenuItems = ({
   const lang = useLang();
   const [isSwitchToWebKDialogOpen, openSwitchToWebKDialog, closeSwitchToWebKDialog] = useFlag();
 
-  const animationLevelValue =
-    animationLevel !== ANIMATION_LEVEL_MIN ? (animationLevel === ANIMATION_LEVEL_MAX ? 'max' : 'mid') : 'min';
+  const animationLevelValue = createMemo(() =>
+    props.animationLevel !== ANIMATION_LEVEL_MIN
+      ? props.animationLevel === ANIMATION_LEVEL_MAX
+        ? 'max'
+        : 'mid'
+      : 'min',
+  );
 
   const withOtherVersions = !IS_TAURI && (window.location.hostname === PRODUCTION_HOSTNAME || IS_TEST);
 
   const archivedUnreadChatsCount = useFolderManagerForUnreadCounters()[ARCHIVED_FOLDER_ID]?.chatsCount || 0;
 
-  const bots = useMemo(
-    () =>
-      Object.values(attachBots).filter((bot) => bot.isForSideMenu && !(isWalletAvailable && bot.id === walletBotId)),
-    [attachBots, isWalletAvailable, walletBotId],
+  // TODO(codemod): dependency on a container (attachBots) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
+  const bots = createMemo(() =>
+    Object.values(props.attachBots).filter(
+      (bot) => bot.isForSideMenu && !(props.isWalletAvailable && bot.id === props.walletBotId),
+    ),
   );
 
-  const handleOpenWallet = useLastCallback(() => {
+  const handleOpenWallet = () => {
     openWalletModal();
-  });
+  };
 
-  const handleSelectMyProfile = useLastCallback(() => {
-    openChatWithInfo({ id: currentUserId, shouldReplaceHistory: true, isOwnProfile: true });
-  });
+  const handleSelectMyProfile = () => {
+    openChatWithInfo({ id: props.currentUserId, shouldReplaceHistory: true, isOwnProfile: true });
+  };
 
-  const handleSelectSaved = useLastCallback(() => {
-    openChat({ id: currentUserId, shouldReplaceHistory: true });
-  });
+  const handleSelectSaved = () => {
+    openChat({ id: props.currentUserId, shouldReplaceHistory: true });
+  };
 
-  const handleDarkModeToggle = useLastCallback((e: React.SyntheticEvent<HTMLElement>) => {
+  const handleDarkModeToggle = (e: React.SyntheticEvent<HTMLElement>) => {
     e.stopPropagation();
-    const newTheme = theme === 'light' ? 'dark' : 'light';
+    const newTheme = props.theme === 'light' ? 'dark' : 'light';
     const shouldUseSystemTheme = newTheme === getSystemTheme();
 
     setSharedSettingOption({ theme: newTheme });
     setSharedSettingOption({ shouldUseSystemTheme });
-  });
+  };
 
-  const handleAnimationLevelChange = useLastCallback((e: React.SyntheticEvent<HTMLElement>) => {
+  const handleAnimationLevelChange = (e: React.SyntheticEvent<HTMLElement>) => {
     e.stopPropagation();
 
-    let newLevel = animationLevel + 1;
+    let newLevel = props.animationLevel + 1;
     if (newLevel > ANIMATION_LEVEL_MAX) {
       newLevel = ANIMATION_LEVEL_MIN;
     }
@@ -149,44 +136,44 @@ const LeftSideMenuItems = ({
 
     setSharedSettingOption({ animationLevel: newLevel as AnimationLevel, wasAnimationLevelSetManually: true });
     updatePerformanceSettings(performanceSettings);
-  });
+  };
 
-  const handleChangelogClick = useLastCallback(() => {
+  const handleChangelogClick = () => {
     window.open(BETA_CHANGELOG_URL, '_blank', 'noopener,noreferrer');
-  });
+  };
 
-  const handleSwitchToWebK = useLastCallback((e: React.SyntheticEvent<HTMLElement>) => {
+  const handleSwitchToWebK = (e: React.SyntheticEvent<HTMLElement>) => {
     e.preventDefault();
-    if (hasPasscode) {
+    if (props.hasPasscode) {
       openSwitchToWebKDialog();
       return;
     }
 
     switchPermanentWebVersion('K');
-  });
+  };
 
-  const handleOpenPasscodeSettings = useLastCallback(() => {
+  const handleOpenPasscodeSettings = () => {
     closeSwitchToWebKDialog();
     openSettingsScreen({ screen: SettingsScreens.PasscodeTurnOff });
-  });
+  };
 
-  const handleOpenTipsChat = useLastCallback(() => {
+  const handleOpenTipsChat = () => {
     openChatByUsername({ username: lang('TelegramFeaturesUsername') });
-  });
+  };
 
-  const handleBugReportClick = useLastCallback(() => {
+  const handleBugReportClick = () => {
     openUrl({ url: FEEDBACK_URL });
-  });
+  };
 
   return (
     <>
-      {IS_MULTIACCOUNT_SUPPORTED && currentUser && (
+      {IS_MULTIACCOUNT_SUPPORTED && props.currentUser && (
         <>
           <AccountMenuItems
-            currentUser={currentUser}
-            totalLimit={accountsTotalLimit}
-            onSelectCurrent={onSelectSettings}
-            onSwitchAccount={onSwitchAccount}
+            currentUser={props.currentUser}
+            totalLimit={props.accountsTotalLimit}
+            onSelectCurrent={props.onSelectSettings}
+            onSwitchAccount={props.onSwitchAccount}
           />
           <MenuSeparator />
         </>
@@ -197,50 +184,50 @@ const LeftSideMenuItems = ({
       <MenuItem icon="saved-messages" onClick={handleSelectSaved}>
         {lang('MenuSavedMessages')}
       </MenuItem>
-      {archiveSettings.isHidden && (
-        <MenuItem icon="archive" onClick={onSelectArchived}>
-          <span className="menu-item-name">{lang('MenuArchivedChats')}</span>
-          {archivedUnreadChatsCount > 0 && <div className="right-badge">{archivedUnreadChatsCount}</div>}
+      {props.archiveSettings.isHidden && (
+        <MenuItem icon="archive" onClick={props.onSelectArchived}>
+          <span class="menu-item-name">{lang('MenuArchivedChats')}</span>
+          {archivedUnreadChatsCount > 0 && <div class="right-badge">{archivedUnreadChatsCount}</div>}
         </MenuItem>
       )}
-      <MenuItem icon="group" onClick={onSelectContacts}>
+      <MenuItem icon="group" onClick={props.onSelectContacts}>
         {lang('MenuContacts')}
       </MenuItem>
-      {isWalletAvailable && (
+      {props.isWalletAvailable && (
         <MenuItem icon="gram-outline" onClick={handleOpenWallet}>
           {lang('WalletMenuItem')}
         </MenuItem>
       )}
-      {bots.map((bot) => (
+      {bots().map((bot) => (
         <AttachBotItem
           bot={bot}
-          theme={theme}
+          theme={props.theme}
           isInSideMenu
           canShowNew
-          onMenuOpened={onBotMenuOpened}
-          onMenuClosed={onBotMenuClosed}
+          onMenuOpened={props.onBotMenuOpened}
+          onMenuClosed={props.onBotMenuClosed}
         />
       ))}
-      <MenuItem icon="settings" onClick={onSelectSettings}>
+      <MenuItem icon="settings" onClick={props.onSelectSettings}>
         {lang('MenuSettings')}
       </MenuItem>
       <NestedMenuItem
         icon="more"
-        footer={footer}
+        footer={props.footer}
         submenu={
           <>
             <MenuItem icon="darkmode" onClick={handleDarkModeToggle}>
-              <span className="menu-item-name">{lang('MenuNightMode')}</span>
+              <span class="menu-item-name">{lang('MenuNightMode')}</span>
               <Switcher
                 id="darkmode"
-                label={lang(theme === 'dark' ? 'AriaMenuDisableNightMode' : 'AriaMenuEnableNightMode')}
-                checked={theme === 'dark'}
+                label={lang(props.theme === 'dark' ? 'AriaMenuDisableNightMode' : 'AriaMenuEnableNightMode')}
+                checked={props.theme === 'dark'}
                 noAnimation
               />
             </MenuItem>
             <MenuItem icon="animations" onClick={handleAnimationLevelChange}>
-              <span className="menu-item-name capitalize">{lang('MenuUIFeaturesSwitch')}</span>
-              <Toggle value={animationLevelValue} />
+              <span class="menu-item-name capitalize">{lang('MenuUIFeaturesSwitch')}</span>
+              <Toggle value={animationLevelValue()} />
             </MenuItem>
             <MenuSeparator />
             <MenuItem icon="help" onClick={handleOpenTipsChat}>
@@ -259,7 +246,7 @@ const LeftSideMenuItems = ({
                 {lang('MenuSwitchToK')}
               </MenuItem>
             )}
-            {canInstall && (
+            {props.canInstall && (
               <MenuItem icon="install" onClick={getPromptInstall()}>
                 {lang('MenuInstallApp')}
               </MenuItem>
@@ -270,7 +257,7 @@ const LeftSideMenuItems = ({
         {lang('MenuMore')}
       </NestedMenuItem>
       <ConfirmDialog
-        isOpen={isSwitchToWebKDialogOpen}
+        isOpen={isSwitchToWebKDialogOpen()}
         title={lang('MenuSwitchToK')}
         text={lang('PasscodeSwitchToKInfo')}
         confirmLabel={lang('Continue')}
@@ -281,25 +268,25 @@ const LeftSideMenuItems = ({
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global): Complete<StateProps> => {
-    const tabState = selectTabState(global);
-    const { currentUserId, archiveSettings } = global;
-    const { animationLevel } = selectSharedSettings(global);
-    const attachBots = global.attachMenu.bots;
+const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
+  const tabState = selectTabState(global);
+  const { currentUserId, archiveSettings } = global;
+  const { animationLevel } = selectSharedSettings(global);
+  const attachBots = global.attachMenu.bots;
 
-    return {
-      currentUserId,
-      currentUser: selectUser(global, currentUserId!),
-      theme: selectTheme(global),
-      animationLevel,
-      canInstall: Boolean(tabState.canInstall),
-      archiveSettings,
-      attachBots,
-      walletBotId: selectWalletBotId(global),
-      accountsTotalLimit: selectPremiumLimit(global, 'moreAccounts'),
-      hasPasscode: global.passcode.hasPasscode,
-      isWalletAvailable: Boolean(global.appConfig.isWalletAvailable),
-    };
-  })(LeftSideMenuItems),
-);
+  return {
+    currentUserId,
+    currentUser: selectUser(global, currentUserId!),
+    theme: selectTheme(global),
+    animationLevel,
+    canInstall: Boolean(tabState.canInstall),
+    archiveSettings,
+    attachBots,
+    walletBotId: selectWalletBotId(global),
+    accountsTotalLimit: selectPremiumLimit(global, 'moreAccounts'),
+    hasPasscode: global.passcode.hasPasscode,
+    isWalletAvailable: Boolean(global.appConfig.isWalletAvailable),
+  };
+};
+
+export default LeftSideMenuItems;

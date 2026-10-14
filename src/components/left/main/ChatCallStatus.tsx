@@ -1,6 +1,3 @@
-import type { FC } from '../../../lib/teact/teact';
-import { memo } from '../../../lib/teact/teact';
-
 import buildClassName from '../../../util/buildClassName';
 
 import styles from './ChatCallStatus.module.scss';
@@ -11,16 +8,22 @@ type OwnProps = {
   isMobile?: boolean;
 };
 
-const ChatCallStatus: FC<OwnProps> = ({ isSelected, isActive, isMobile }) => {
+const ChatCallStatus = (props: OwnProps) => {
   return (
-    <div className={buildClassName(styles.root, isActive && styles.active, isSelected && !isMobile && styles.selected)}>
-      <div className={styles.indicator}>
-        <div className={styles.indicatorInner} />
-        <div className={styles.indicatorInner} />
-        <div className={styles.indicatorInner} />
+    <div
+      class={buildClassName(
+        styles.root,
+        props.isActive && styles.active,
+        props.isSelected && !props.isMobile && styles.selected,
+      )}
+    >
+      <div class={styles.indicator}>
+        <div class={styles.indicatorInner} />
+        <div class={styles.indicatorInner} />
+        <div class={styles.indicatorInner} />
       </div>
     </div>
   );
 };
 
-export default memo(ChatCallStatus);
+export default ChatCallStatus;

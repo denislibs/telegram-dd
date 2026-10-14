@@ -1,4 +1,4 @@
-import { memo } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
 
 import type { ApiMessage, ApiMessageOutgoingStatus } from '../../api/types';
 
@@ -18,16 +18,18 @@ type OwnProps = {
   draftDate?: number;
 };
 
-const LastMessageMeta = ({ className, message, outgoingStatus, draftDate }: OwnProps) => {
+const LastMessageMeta = (props: OwnProps) => {
   const lang = useOldLang();
 
-  const shouldUseDraft = draftDate && draftDate > message.date;
+  const shouldUseDraft = createMemo(() => props.draftDate && props.draftDate > props.message.date);
   return (
-    <div className={buildClassName('LastMessageMeta', className)}>
-      {outgoingStatus && !shouldUseDraft && <MessageOutgoingStatus status={outgoingStatus} />}
-      <span className="time">{formatPastTimeShort(lang, (shouldUseDraft ? draftDate : message.date) * 1000)}</span>
+    <div class={buildClassName('LastMessageMeta', props.className)}>
+      {props.outgoingStatus && !shouldUseDraft() && <MessageOutgoingStatus status={props.outgoingStatus} />}
+      <span class="time">
+        {formatPastTimeShort(lang, (shouldUseDraft() ? props.draftDate : props.message.date) * 1000)}
+      </span>
     </div>
   );
 };
 
-export default memo(LastMessageMeta);
+export default LastMessageMeta;

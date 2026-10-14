@@ -1,34 +1,40 @@
-import { useRef } from '../lib/teact/teact';
+import { createEffect } from 'frameact';
 
 import useForceUpdate from './useForceUpdate';
 import useLastCallback from './useLastCallback';
 import useSyncEffect from './useSyncEffect';
 
+// TODO(codemod): useForumPanelRender: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useForumPanelRender(isForumPanelOpen = false) {
-  const shouldRenderForumPanelRef = useRef(isForumPanelOpen);
-  const isAnimationStartedRef = useRef(false);
+  let shouldRenderForumPanelRef = isForumPanelOpen;
+  let isAnimationStartedRef = false;
+  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
   const forceUpdate = useForceUpdate();
 
-  useSyncEffect(() => {
-    if (isForumPanelOpen) {
-      shouldRenderForumPanelRef.current = true;
-    }
-  }, [isForumPanelOpen]);
+  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
+  createEffect(
+    () => isForumPanelOpen,
+    () => {
+      if (isForumPanelOpen) {
+        shouldRenderForumPanelRef = true;
+      }
+    },
+  );
 
-  const handleForumPanelAnimationEnd = useLastCallback(() => {
-    shouldRenderForumPanelRef.current = false;
-    isAnimationStartedRef.current = false;
+  const handleForumPanelAnimationEnd = () => {
+    shouldRenderForumPanelRef = false;
+    isAnimationStartedRef = false;
     forceUpdate();
-  });
+  };
 
-  const handleForumPanelAnimationStart = useLastCallback(() => {
-    isAnimationStartedRef.current = true;
+  const handleForumPanelAnimationStart = () => {
+    isAnimationStartedRef = true;
     forceUpdate();
-  });
+  };
 
   return {
-    shouldRenderForumPanel: shouldRenderForumPanelRef.current,
-    isAnimationStarted: isAnimationStartedRef.current,
+    shouldRenderForumPanel: shouldRenderForumPanelRef,
+    isAnimationStarted: isAnimationStartedRef,
     handleForumPanelAnimationEnd,
     handleForumPanelAnimationStart,
   };

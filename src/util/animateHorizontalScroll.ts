@@ -1,6 +1,6 @@
 import { getGlobal } from '../global';
 
-import { requestMutation } from '../lib/fasterdom/fasterdom';
+import { requestMutation } from 'frameact';
 import { selectCanAnimateInterface } from '../global/selectors';
 import { animate } from './animation';
 

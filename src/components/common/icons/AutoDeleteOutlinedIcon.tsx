@@ -1,4 +1,4 @@
-import { memo } from '../../../lib/teact/teact';
+import { createMemo } from 'frameact';
 
 import buildClassName from '../../../util/buildClassName';
 import { formatAutoDeleteBadgePeriod } from '../helpers/autoDeletePeriods';
@@ -14,21 +14,21 @@ type OwnProps = {
 
 // Line-style counterpart of `AutoDeleteIcon` tinted via `currentColor`; a period of 0 renders as a plain clock.
 // Composes the font-icon classes manually because `Icon` cannot host the overlay label.
-function AutoDeleteOutlinedIcon({ period, className }: OwnProps) {
+function AutoDeleteOutlinedIcon(props: OwnProps) {
   const lang = useLang();
 
-  const periodText = period ? formatAutoDeleteBadgePeriod(lang, period) : undefined;
-  const iconName = periodText === undefined ? 'auto-delete-clock' : 'auto-delete-empty';
+  const periodText = createMemo(() => (props.period ? formatAutoDeleteBadgePeriod(lang, props.period) : undefined));
+  const iconName = createMemo(() => (periodText() === undefined ? 'auto-delete-clock' : 'auto-delete-empty'));
 
   return (
-    <i className={buildClassName('icon', `icon-${iconName}`, styles.root, className)} aria-hidden>
-      {periodText !== undefined && (
-        <span className={styles.label} dir="ltr">
-          {periodText}
+    <i class={buildClassName('icon', `icon-${iconName()}`, styles.root, props.className)} aria-hidden>
+      {periodText() !== undefined && (
+        <span class={styles.label} dir="ltr">
+          {periodText()}
         </span>
       )}
     </i>
   );
 }
 
-export default memo(AutoDeleteOutlinedIcon);
+export default AutoDeleteOutlinedIcon;

@@ -1,4 +1,4 @@
-import { type TeactNode } from '../../../../lib/teact/teact';
+import type { JSX } from 'frameact/jsx-runtime';
 import { getActions } from '../../../../global';
 
 import type { ApiMessage } from '../../../../api/types';
@@ -24,9 +24,9 @@ import styles from '../ActionMessage.module.scss';
 
 type SuffixKey<T, K extends keyof T> = `${K & string}You` extends keyof T ? T[`${K & string}You`] : never;
 type VariablesForKey<K extends LangKey> = K extends RegularLangKeyWithVariables
-  ? LangPairWithVariables<TeactNode | undefined>[K] | SuffixKey<LangPairWithVariables, K>
+  ? LangPairWithVariables<JSX.Element | undefined>[K] | SuffixKey<LangPairWithVariables, K>
   : K extends PluralLangKeyWithVariables
-    ? LangPairPluralWithVariables<TeactNode | undefined>[K] | SuffixKey<LangPairPluralWithVariables, K>
+    ? LangPairPluralWithVariables<JSX.Element | undefined>[K] | SuffixKey<LangPairPluralWithVariables, K>
     : undefined;
 
 export function translateWithYou<K extends LangKey>(
@@ -40,7 +40,7 @@ export function translateWithYou<K extends LangKey>(
     withMarkdown?: boolean;
     renderTextFilters?: string[];
   },
-): TeactNode {
+): JSX.Element {
   const { pluralValue, asText, withMarkdown, renderTextFilters } = options || {};
   const translationKey = isYou ? (`${key}You` as LangKey) : key;
 
@@ -123,7 +123,7 @@ export function renderPeerLink(peerId: string | undefined, text: string, asPrevi
 
 export function renderMessageLink(
   targetMessage: ApiMessage | undefined,
-  text: TeactNode,
+  text: JSX.Element,
   asPreview: boolean | undefined,
   params?: {
     noEllipsis?: boolean;
@@ -147,7 +147,7 @@ export function renderMessageLink(
   );
 }
 
-export function renderTopicLink(chatId: string, topicId: number, content: TeactNode, asPreview?: boolean) {
+export function renderTopicLink(chatId: string, topicId: number, content: JSX.Element, asPreview?: boolean) {
   if (asPreview) return content;
 
   return (

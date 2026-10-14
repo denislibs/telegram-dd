@@ -1,5 +1,7 @@
-import { memo, type TeactNode } from '../../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import type { JSX } from 'frameact/jsx-runtime';
 import { getActions, getGlobal, withGlobal } from '../../../global';
+import type { GlobalState } from '../../../global/types';
 
 import type { ApiChat, ApiMessage, ApiPeer } from '../../../api/types';
 
@@ -53,7 +55,6 @@ import {
 } from './helpers/messageActions';
 
 import useLang from '../../../hooks/useLang';
-import useLastCallback from '../../../hooks/useLastCallback';
 import useOldLang from '../../../hooks/useOldLang';
 
 import CustomEmoji from '../../common/CustomEmoji';
@@ -83,86 +84,78 @@ const DEFAULT_TOPIC_ICON_ID = '0';
 
 const UNSUPPORTED_LANG_KEY = 'ActionUnsupported';
 
-const ActionMessageText = ({
-  message,
-  currentUserId,
-  sender,
-  chat,
-  replyMessage,
-  tonUsdRate,
-  walletCurrency,
-  walletCurrencyRate,
-  isInsideTopic,
-  asPreview,
-}: OwnProps & StateProps) => {
+const ActionMessageText = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const { openTelegramLink, openUrl } = getActions();
-  const { chatId, isOutgoing } = message;
-  const action = message.content.action!;
+  const source = createMemo(() => props.message);
+  const chatId = () => source().chatId;
+  const isOutgoing = () => source().isOutgoing;
+  const action = createMemo(() => props.message.content.action!);
 
   const lang = useLang();
   const oldLang = useOldLang();
 
-  function renderStrong(text: TeactNode) {
-    if (asPreview) return text;
-    return <span className={styles.strong}>{text}</span>;
+  function renderStrong(text: JSX.Element) {
+    if (props.asPreview) return text;
+    return <span class={styles.strong}>{text}</span>;
   }
 
-  const renderActionText = useLastCallback(() => {
+  const renderActionText = () => {
     const global = getGlobal();
 
-    const isServiceNotificationsChat = chatId === SERVICE_NOTIFICATIONS_USER_ID;
-    const isSavedMessages = chatId === currentUserId;
+    const isServiceNotificationsChat = chatId() === SERVICE_NOTIFICATIONS_USER_ID;
+    const isSavedMessages = chatId() === props.currentUserId;
 
-    const isChannel = chat && isChatChannel(chat);
-    const senderTitle = sender && getPeerTitle(lang, sender);
-    const chatTitle = chat && getPeerTitle(lang, chat);
+    const isChannel = props.chat && isChatChannel(props.chat);
+    const senderTitle = props.sender && getPeerTitle(lang, props.sender);
+    const chatTitle = props.chat && getPeerTitle(lang, props.chat);
 
     const userFallbackText = lang('ActionFallbackUser');
     const chatFallbackText = lang('ActionFallbackChat');
     const channelFallbackText = lang('ActionFallbackChannel');
 
-    const senderLink = renderPeerLink(sender?.id, senderTitle || userFallbackText, asPreview);
-    const chatLink = renderPeerLink(chat?.id, chatTitle || chatFallbackText, asPreview);
+    const senderLink = renderPeerLink(props.sender?.id, senderTitle || userFallbackText, props.asPreview);
+    const chatLink = renderPeerLink(props.chat?.id, chatTitle || chatFallbackText, props.asPreview);
 
-    switch (action.type) {
+    switch (action().type) {
       case 'pinMessage': {
-        if (replyMessage) {
-          const formattedText = getMessageTextWithFallback(lang, replyMessage);
+        if (props.replyMessage) {
+          const formattedText = getMessageTextWithFallback(lang, props.replyMessage);
           if (formattedText) {
             const textLink = renderMessageLink(
-              replyMessage,
+              props.replyMessage,
               renderTextWithEntities({
                 text: formattedText.text,
                 entities: formattedText.entities,
                 asPreview: true,
               }),
-              asPreview,
+              props.asPreview,
             );
 
-            return translateWithYou(lang, 'ActionPinnedText', isOutgoing, { text: textLink, from: senderLink });
+            return translateWithYou(lang, 'ActionPinnedText', isOutgoing(), { text: textLink, from: senderLink });
           }
 
-          const mediaValue = getPinnedMediaValue(lang, replyMessage);
+          const mediaValue = getPinnedMediaValue(lang, props.replyMessage);
           if (mediaValue) {
-            const messageLink = renderMessageLink(replyMessage, mediaValue, asPreview);
-            return translateWithYou(lang, 'ActionPinnedMedia', isOutgoing, { from: senderLink, media: messageLink });
+            const messageLink = renderMessageLink(props.replyMessage, mediaValue, props.asPreview);
+            return translateWithYou(lang, 'ActionPinnedMedia', isOutgoing(), { from: senderLink, media: messageLink });
           }
         }
 
-        return translateWithYou(lang, 'ActionPinnedNotFound', isOutgoing, { from: senderLink });
+        return translateWithYou(lang, 'ActionPinnedNotFound', isOutgoing(), { from: senderLink });
       }
 
       case 'gameScore': {
-        const { score } = action;
+        const { score } = action();
 
-        const gameTitle = replyMessage?.content.game?.title;
-        const gameLink = gameTitle && renderMessageLink(replyMessage, renderText(gameTitle), asPreview);
+        const gameTitle = props.replyMessage?.content.game?.title;
+        const gameLink = gameTitle && renderMessageLink(props.replyMessage, renderText(gameTitle), props.asPreview);
 
         if (gameLink) {
           return translateWithYou(
             lang,
             'ActionGameScore',
-            isOutgoing,
+            isOutgoing(),
             { from: senderLink, count: score, game: gameLink },
             { pluralValue: score },
           );
@@ -171,18 +164,18 @@ const ActionMessageText = ({
         return translateWithYou(
           lang,
           'ActionGameScoreNoGame',
-          isOutgoing,
+          isOutgoing(),
           { from: senderLink, count: score },
           { pluralValue: score },
         );
       }
 
       case 'chatJoinedViaCommunity': {
-        const community = selectChat(global, action.communityId);
+        const community = selectChat(global, action().communityId);
         const communityLink = renderPeerLink(
-          action.communityId,
+          action().communityId,
           community ? getPeerTitle(lang, community)! : chatFallbackText,
-          asPreview,
+          props.asPreview,
         );
         return lang('ActionJoinedViaCommunity', { from: senderLink, community: communityLink }, { withNodes: true });
       }
@@ -191,13 +184,17 @@ const ActionMessageText = ({
         return lang('ActionUserJoinedByLink', { from: senderLink }, { withNodes: true });
 
       case 'chatJoinedByRequest':
-        return translateWithYou(lang, 'ActionJoinedByRequest', isOutgoing, { from: senderLink });
+        return translateWithYou(lang, 'ActionJoinedByRequest', isOutgoing(), { from: senderLink });
 
       case 'channelJoined': {
-        const { isViaRequest, inviterId } = action;
+        const { isViaRequest, inviterId } = action();
         const inviter = inviterId ? selectPeer(global, inviterId) : undefined;
-        if (inviter && inviterId !== currentUserId) {
-          const inviterLink = renderPeerLink(inviterId, getPeerTitle(lang, inviter) || userFallbackText, asPreview);
+        if (inviter && inviterId !== props.currentUserId) {
+          const inviterLink = renderPeerLink(
+            inviterId,
+            getPeerTitle(lang, inviter) || userFallbackText,
+            props.asPreview,
+          );
           return lang('ActionAddYou', { from: inviterLink }, { withNodes: true });
         }
 
@@ -205,48 +202,48 @@ const ActionMessageText = ({
       }
 
       case 'chatEditTitle': {
-        const { title } = action;
+        const { title } = action();
         if (isChannel) return lang('ActionChangedTitleChannel', { title });
-        return translateWithYou(lang, 'ActionChangedTitle', isOutgoing, { title, from: senderLink });
+        return translateWithYou(lang, 'ActionChangedTitle', isOutgoing(), { title, from: senderLink });
       }
 
       case 'chatDeletePhoto':
         return isChannel
           ? lang('ActionRemovedPhotoChannel')
-          : translateWithYou(lang, 'ActionRemovedPhoto', isOutgoing, { from: senderLink });
+          : translateWithYou(lang, 'ActionRemovedPhoto', isOutgoing(), { from: senderLink });
 
       case 'chatEditPhoto':
         return isChannel
           ? lang('ActionChangedPhotoChannel')
-          : translateWithYou(lang, 'ActionChangedPhoto', isOutgoing, { from: senderLink });
+          : translateWithYou(lang, 'ActionChangedPhoto', isOutgoing(), { from: senderLink });
 
       case 'chatCreate': {
-        const { title } = action;
+        const { title } = action();
         return lang('ActionCreatedChat', { title, from: senderLink }, { withNodes: true });
       }
 
       case 'channelCreate': {
-        const { title } = action;
+        const { title } = action();
         return isChannel
           ? lang('ActionCreatedChannel')
-          : translateWithYou(lang, 'ActionCreatedChat', isOutgoing, { title, from: senderLink });
+          : translateWithYou(lang, 'ActionCreatedChat', isOutgoing(), { title, from: senderLink });
       }
 
       case 'chatMigrateTo': {
-        const { channelId } = action;
+        const { channelId } = action();
         const channel = selectChat(global, channelId)!;
-        const channelLink = renderPeerLink(channelId, getPeerTitle(lang, channel)!, asPreview);
+        const channelLink = renderPeerLink(channelId, getPeerTitle(lang, channel)!, props.asPreview);
         return lang('ActionMigratedTo', { chat: channelLink }, { withNodes: true });
       }
 
       case 'channelMigrateFrom': {
-        const { chatId: originalChatId, title } = action;
-        const originalChatLink = renderPeerLink(originalChatId, title || chatFallbackText, asPreview);
+        const { chatId: originalChatId, title } = action();
+        const originalChatLink = renderPeerLink(originalChatId, title || chatFallbackText, props.asPreview);
         return lang('ActionMigratedFrom', { chat: originalChatLink }, { withNodes: true });
       }
 
       case 'changeCommunity': {
-        const { communityId } = action;
+        const { communityId } = action();
         if (!communityId) {
           return lang('ActionRemovedFromCommunity', { from: senderLink }, { withNodes: true });
         }
@@ -255,15 +252,15 @@ const ActionMessageText = ({
         const communityLink = renderPeerLink(
           communityId,
           community ? getPeerTitle(lang, community)! : chatFallbackText,
-          asPreview,
+          props.asPreview,
         );
         return lang('ActionAddedToCommunity', { from: senderLink, community: communityLink }, { withNodes: true });
       }
 
       case 'topicCreate': {
-        const { title, iconColor, iconEmojiId } = action;
+        const { title, iconColor, iconEmojiId } = action();
 
-        const topicId = selectThreadIdFromMessage(global, message);
+        const topicId = selectThreadIdFromMessage(global, props.message);
 
         const topicLinkContent = (
           <>
@@ -276,15 +273,15 @@ const ActionMessageText = ({
             {renderText(title)}
           </>
         );
-        const topicLink = renderTopicLink(chatId, Number(topicId), topicLinkContent, asPreview);
+        const topicLink = renderTopicLink(chatId(), Number(topicId), topicLinkContent, props.asPreview);
         return lang('ActionTopicCreated', { topic: topicLink }, { withNodes: true });
       }
 
       case 'topicEdit': {
-        const { iconEmojiId, isClosed, isHidden, title } = action;
+        const { iconEmojiId, isClosed, isHidden, title } = action();
 
-        const topicId = selectThreadIdFromMessage(global, message);
-        const currentTopic = selectTopic(global, chatId, topicId);
+        const topicId = selectThreadIdFromMessage(global, props.message);
+        const currentTopic = selectTopic(global, chatId(), topicId);
         const topicLinkContent = (
           <>
             {iconEmojiId && iconEmojiId !== DEFAULT_TOPIC_ICON_ID ? (
@@ -301,17 +298,17 @@ const ActionMessageText = ({
             {renderText(title || currentTopic?.title || lang('ActionTopicPlaceholder'))}
           </>
         );
-        const topicLink = renderTopicLink(chatId, Number(topicId), topicLinkContent, asPreview);
+        const topicLink = renderTopicLink(chatId(), Number(topicId), topicLinkContent, props.asPreview);
 
         const topicPlaceholderLink = renderTopicLink(
-          chatId,
+          chatId(),
           Number(topicId),
           lang('ActionTopicPlaceholder'),
-          asPreview,
+          props.asPreview,
         );
 
         if (isClosed !== undefined) {
-          if (isInsideTopic) {
+          if (props.isInsideTopic) {
             return lang(isClosed ? 'ActionTopicClosedInside' : 'ActionTopicReopenedInside');
           }
 
@@ -323,7 +320,7 @@ const ActionMessageText = ({
         }
 
         if (isHidden !== undefined) {
-          if (isInsideTopic) {
+          if (props.isInsideTopic) {
             return lang(isHidden ? 'ActionTopicHiddenInside' : 'ActionTopicUnhiddenInside');
           }
           return lang(
@@ -371,58 +368,58 @@ const ActionMessageText = ({
         return translateWithYou(
           lang,
           'ActionBoostApply',
-          isOutgoing,
-          { from: senderLink, count: action.boosts },
-          { pluralValue: action.boosts },
+          isOutgoing(),
+          { from: senderLink, count: action().boosts },
+          { pluralValue: action().boosts },
         );
 
       case 'chatAddUser': {
-        const { userIds } = action;
+        const { userIds } = action();
 
-        if (sender?.id === userIds[0]) {
-          return translateWithYou(lang, 'ActionUserJoined', isOutgoing, { from: senderLink });
+        if (props.sender?.id === userIds[0]) {
+          return translateWithYou(lang, 'ActionUserJoined', isOutgoing(), { from: senderLink });
         }
 
         if (userIds.length === 1) {
           const user = selectPeer(global, userIds[0]);
           const userTitle = (user && getPeerTitle(lang, user)) || userFallbackText;
-          const userLink = renderPeerLink(user?.id, userTitle, asPreview);
-          return translateWithYou(lang, 'ActionAddUser', isOutgoing, { from: senderLink, user: userLink });
+          const userLink = renderPeerLink(user?.id, userTitle, props.asPreview);
+          return translateWithYou(lang, 'ActionAddUser', isOutgoing(), { from: senderLink, user: userLink });
         }
 
         const users = userIds.map((userId) => selectPeer(global, userId)).filter(Boolean);
 
         if (!users.length) {
-          return translateWithYou(lang, 'ActionAddUser', isOutgoing, { from: senderLink, user: userFallbackText });
+          return translateWithYou(lang, 'ActionAddUser', isOutgoing(), { from: senderLink, user: userFallbackText });
         }
 
         const userLinks = users.map((user) =>
-          renderPeerLink(user.id, getPeerTitle(lang, user) || userFallbackText, asPreview),
+          renderPeerLink(user.id, getPeerTitle(lang, user) || userFallbackText, props.asPreview),
         );
 
-        return translateWithYou(lang, 'ActionAddUsersMany', isOutgoing, {
+        return translateWithYou(lang, 'ActionAddUsersMany', isOutgoing(), {
           from: senderLink,
           users: conjuctionWithNodes(lang, userLinks),
         });
       }
 
       case 'chatDeleteUser': {
-        const { userId } = action;
-        if (sender?.id === userId) {
-          return translateWithYou(lang, 'ActionUserLeft', isOutgoing, { from: senderLink });
+        const { userId } = action();
+        if (props.sender?.id === userId) {
+          return translateWithYou(lang, 'ActionUserLeft', isOutgoing(), { from: senderLink });
         }
 
         const user = selectPeer(global, userId);
         const userTitle = (user && getPeerTitle(lang, user)) || userFallbackText;
-        const userLink = renderPeerLink(user?.id, userTitle, asPreview);
-        return translateWithYou(lang, 'ActionKickUser', isOutgoing, { from: senderLink, user: userLink });
+        const userLink = renderPeerLink(user?.id, userTitle, props.asPreview);
+        return translateWithYou(lang, 'ActionKickUser', isOutgoing(), { from: senderLink, user: userLink });
       }
 
       case 'requestedPeer': {
-        const { peerIds } = action;
+        const { peerIds } = action();
         const peerLinks = peerIds.map((peerId) => {
           const peer = selectPeer(global, peerId);
-          return renderPeerLink(peerId, (peer && getPeerTitle(lang, peer)) || userFallbackText, asPreview);
+          return renderPeerLink(peerId, (peer && getPeerTitle(lang, peer)) || userFallbackText, props.asPreview);
         });
         return lang(
           'ActionRequestedPeer',
@@ -435,11 +432,11 @@ const ActionMessageText = ({
       }
 
       case 'botAllowed': {
-        const { app, domain, isAttachMenu, isFromRequest } = action;
+        const { app, domain, isAttachMenu, isFromRequest } = action();
         if (isAttachMenu) return lang('ActionAttachMenuBotAllowed');
         if (isFromRequest) return lang('ActionWebappBotAllowed');
         if (app) {
-          const senderUsername = sender && getMainUsername(sender);
+          const senderUsername = props.sender && getMainUsername(props.sender);
           const link = senderUsername && `${TME_LINK_PREFIX + senderUsername}/${app.shortName}`;
           const appLink = link ? (
             <Link onClick={() => openTelegramLink({ url: link })}>{app.title}</Link>
@@ -458,7 +455,7 @@ const ActionMessageText = ({
       }
 
       case 'giveawayLaunch': {
-        const { stars } = action;
+        const { stars } = action();
 
         if (stars) {
           return lang(
@@ -476,7 +473,7 @@ const ActionMessageText = ({
       }
 
       case 'giveawayResults': {
-        const { winnersCount, isStars, unclaimedCount } = action;
+        const { winnersCount, isStars, unclaimedCount } = action();
         if (!winnersCount) return lang('ActionGiveawayResultsNone');
         if (unclaimedCount) {
           return lang(isStars ? 'ActionGiveawayResultsStarsSome' : 'ActionGiveawayResultsSome');
@@ -493,38 +490,45 @@ const ActionMessageText = ({
         return lang('WalletConnectRequest');
 
       case 'gramTransfer': {
-        const formattedAmount = formatTonFromNanos(action.amount);
+        const formattedAmount = formatTonFromNanos(action().amount);
         const [whole, fraction] = formattedAmount.split('.');
         const groupedAmount = fraction ? `${lang.number(Number(whole))}.${fraction}` : lang.number(Number(whole));
         const amount = renderStrong(
           lang('GramAmountText', { amount: groupedAmount }, { pluralValue: Number(formattedAmount) }),
         );
-        const fiat = formatTonInFiat(action.amount, tonUsdRate, walletCurrency!, walletCurrencyRate, lang.code, {
-          isInNanos: true,
-        });
+        const fiat = formatTonInFiat(
+          action().amount,
+          props.tonUsdRate,
+          props.walletCurrency!,
+          props.walletCurrencyRate,
+          lang.code,
+          {
+            isInNanos: true,
+          },
+        );
         const worth = fiat ? `${NBSP}${lang('ActionGramTransferWorth', { fiat })}` : '';
 
         // The service chat reports transfers from senders the server does not name, so the text names no sender
         if (isServiceNotificationsChat) {
-          return asPreview
+          return props.asPreview
             ? lang('ActionGramReceivedPreview', { amount }, { withNodes: true })
             : lang('ActionGramReceivedText', { amount, worth }, { withNodes: true });
         }
 
         // In a private chat the counterparty of an outgoing transfer is the chat itself
-        const from = isOutgoing ? chatLink : senderLink;
+        const from = isOutgoing() ? chatLink : senderLink;
 
-        if (asPreview) {
-          return translateWithYou(lang, 'ActionGramTransferPreview', isOutgoing, { from, amount });
+        if (props.asPreview) {
+          return translateWithYou(lang, 'ActionGramTransferPreview', isOutgoing(), { from, amount });
         }
 
-        return translateWithYou(lang, 'ActionGramTransferText', isOutgoing, { from, amount, worth });
+        return translateWithYou(lang, 'ActionGramTransferText', isOutgoing(), { from, amount, worth });
       }
 
       case 'giftStars':
       case 'giftPremium':
       case 'giftTon': {
-        const { amount, currency, cryptoAmount, cryptoCurrency, type } = action;
+        const { amount, currency, cryptoAmount, cryptoCurrency, type } = action();
 
         const price = formatCurrency(lang, amount, currency, { asFontIcon: true });
         const cryptoPrice =
@@ -535,16 +539,19 @@ const ActionMessageText = ({
         if (isServiceNotificationsChat) {
           return lang('ActionGiftTextCostAnonymous', { cost }, { withNodes: true });
         }
-        return translateWithYou(lang, 'ActionGiftTextCost', isOutgoing, { from: senderLink, cost: renderStrong(cost) });
+        return translateWithYou(lang, 'ActionGiftTextCost', isOutgoing(), {
+          from: senderLink,
+          cost: renderStrong(cost),
+        });
       }
 
       case 'prizeStars':
       case 'giftCode': {
-        return translateWithYou(lang, 'ActionGiftTextUnknown', isOutgoing, undefined);
+        return translateWithYou(lang, 'ActionGiftTextUnknown', isOutgoing(), undefined);
       }
 
       case 'groupCall': {
-        const { duration } = action;
+        const { duration } = action();
         const durationText = duration ? formatShortDuration(lang, duration) : undefined;
         if (durationText) {
           if (isChannel) {
@@ -562,7 +569,7 @@ const ActionMessageText = ({
       }
 
       case 'groupCallScheduled': {
-        const { scheduleDate } = action;
+        const { scheduleDate } = action();
         const formattedDate = formatDateTimeToString(scheduleDate * 1000, lang.code, true);
 
         if (isChannel) return lang('ActionGroupCallScheduledChannel', { date: formattedDate });
@@ -570,36 +577,39 @@ const ActionMessageText = ({
       }
 
       case 'inviteToGroupCall': {
-        const { userIds } = action;
+        const { userIds } = action();
 
         if (userIds.length === 1) {
           const user = selectPeer(global, userIds[0]);
           const userTitle = (user && getPeerTitle(lang, user)) || userFallbackText;
-          const userLink = renderPeerLink(user?.id, userTitle, asPreview);
-          return translateWithYou(lang, 'ActionVideoInvited', isOutgoing, { from: senderLink, user: userLink });
+          const userLink = renderPeerLink(user?.id, userTitle, props.asPreview);
+          return translateWithYou(lang, 'ActionVideoInvited', isOutgoing(), { from: senderLink, user: userLink });
         }
 
         const users = userIds.map((userId) => selectPeer(global, userId)).filter(Boolean);
 
         if (!users.length) {
-          return translateWithYou(lang, 'ActionVideoInvited', isOutgoing, { from: senderLink, user: userFallbackText });
+          return translateWithYou(lang, 'ActionVideoInvited', isOutgoing(), {
+            from: senderLink,
+            user: userFallbackText,
+          });
         }
 
         const userLinks = users.map((user) =>
-          renderPeerLink(user.id, getPeerTitle(lang, user) || userFallbackText, asPreview),
+          renderPeerLink(user.id, getPeerTitle(lang, user) || userFallbackText, props.asPreview),
         );
 
-        return translateWithYou(lang, 'ActionVideoInvitedMany', isOutgoing, {
+        return translateWithYou(lang, 'ActionVideoInvitedMany', isOutgoing(), {
           from: senderLink,
           users: conjuctionWithNodes(lang, userLinks),
         });
       }
 
       case 'paymentSent': {
-        const { currency, totalAmount, isRecurringInit, isRecurringUsed } = action;
+        const { currency, totalAmount, isRecurringInit, isRecurringUsed } = action();
 
         const cost = renderStrong(formatCurrency(lang, totalAmount, currency, { asFontIcon: true }));
-        const invoice = replyMessage && getMessageInvoice(replyMessage);
+        const invoice = props.replyMessage && getMessageInvoice(props.replyMessage);
         const invoiceTitle = invoice?.title;
 
         if (isRecurringUsed) {
@@ -617,40 +627,49 @@ const ActionMessageText = ({
         if (isRecurringInit) {
           return lang(
             'ActionPaymentInitRecurringFor',
-            { amount: cost, user: chatLink, invoice: renderMessageLink(replyMessage, invoiceTitle, asPreview) },
+            {
+              amount: cost,
+              user: chatLink,
+              invoice: renderMessageLink(props.replyMessage, invoiceTitle, props.asPreview),
+            },
             { withNodes: true },
           );
         }
 
         return lang(
           'ActionPaymentDoneFor',
-          { amount: cost, user: chatLink, invoice: renderMessageLink(replyMessage, invoiceTitle, asPreview) },
+          {
+            amount: cost,
+            user: chatLink,
+            invoice: renderMessageLink(props.replyMessage, invoiceTitle, props.asPreview),
+          },
           { withNodes: true },
         );
       }
 
       case 'paymentRefunded': {
-        const { currency, totalAmount, peerId } = action;
+        const { currency, totalAmount, peerId } = action();
         const peer = selectPeer(global, peerId);
         const peerTitle = (peer && getPeerTitle(lang, peer)) || userFallbackText;
-        const peerLink = renderPeerLink(peer?.id, peerTitle, asPreview);
+        const peerLink = renderPeerLink(peer?.id, peerTitle, props.asPreview);
         const amount = formatCurrency(lang, totalAmount, currency, { asFontIcon: true });
 
         return lang('ActionPaymentRefunded', { peer: peerLink, amount }, { withNodes: true });
       }
 
       case 'starGift': {
-        const { gift, alreadyPaidUpgradeStars, peerId, savedId, fromId, isPrepaidUpgrade, isAuctionAcquired } = action;
+        const { gift, alreadyPaidUpgradeStars, peerId, savedId, fromId, isPrepaidUpgrade, isAuctionAcquired } =
+          action();
         const isToChannel = Boolean(peerId && savedId);
 
-        const fromPeer = fromId ? selectPeer(global, fromId) : sender;
+        const fromPeer = fromId ? selectPeer(global, fromId) : props.sender;
         const fromTitle = (fromPeer && getPeerTitle(lang, fromPeer)) || userFallbackText;
-        const fromLink = renderPeerLink(fromPeer?.id, fromTitle, asPreview);
+        const fromLink = renderPeerLink(fromPeer?.id, fromTitle, props.asPreview);
 
         const toPeer = peerId ? selectPeer(global, peerId) : undefined;
         const toTitle =
           (toPeer && getPeerTitle(lang, toPeer)) || (isToChannel ? channelFallbackText : userFallbackText);
-        const toLink = renderPeerLink(toPeer?.id, toTitle, asPreview);
+        const toLink = renderPeerLink(toPeer?.id, toTitle, props.asPreview);
 
         const starsAmount = gift.stars + (alreadyPaidUpgradeStars || 0);
         const cost = renderStrong(formatStarsAsText(lang, starsAmount));
@@ -662,18 +681,18 @@ const ActionMessageText = ({
         if (isPrepaidUpgrade && gift.upgradeStars) {
           const upgradeCost = renderStrong(formatStarsAsText(lang, gift.upgradeStars));
 
-          return translateWithYou(lang, 'ActionStarGiftPrepaidUpgrade', isOutgoing, {
-            peer: isOutgoing ? toLink : senderLink,
+          return translateWithYou(lang, 'ActionStarGiftPrepaidUpgrade', isOutgoing(), {
+            peer: isOutgoing() ? toLink : senderLink,
             cost: upgradeCost,
           });
         }
 
         if (isToChannel) {
           const channelPeer = selectPeer(global, peerId!);
-          const isYou = fromPeer?.id === currentUserId;
+          const isYou = fromPeer?.id === props.currentUserId;
 
           const channelTitle = (channelPeer && getPeerTitle(lang, channelPeer)) || channelFallbackText;
-          const channelLink = renderPeerLink(peerId, channelTitle, asPreview);
+          const channelLink = renderPeerLink(peerId, channelTitle, props.asPreview);
           return translateWithYou(lang, 'ActionStarGiftSentChannel', isYou, {
             user: fromLink,
             channel: channelLink,
@@ -689,7 +708,7 @@ const ActionMessageText = ({
           return lang('ActionStarGiftSelfBought', { cost }, { withNodes: true });
         }
 
-        if (isOutgoing) {
+        if (isOutgoing()) {
           return lang('ActionStarGiftSent', { cost }, { withNodes: true });
         }
 
@@ -708,27 +727,27 @@ const ActionMessageText = ({
           transferStars,
           isPrepaidUpgrade,
           isFromOffer,
-        } = action;
+        } = action();
 
         const isToChannel = Boolean(peerId && savedId);
 
-        const fromPeer = fromId ? selectPeer(global, fromId) : sender;
+        const fromPeer = fromId ? selectPeer(global, fromId) : props.sender;
         const fromTitle = (fromPeer && getPeerTitle(lang, fromPeer)) || userFallbackText;
-        const fromLink = renderPeerLink(fromPeer?.id, fromTitle, asPreview);
+        const fromLink = renderPeerLink(fromPeer?.id, fromTitle, props.asPreview);
 
         const toPeer = peerId ? selectPeer(global, peerId) : undefined;
         const toTitle =
           (toPeer && getPeerTitle(lang, toPeer)) || (isToChannel ? channelFallbackText : userFallbackText);
-        const toLink = renderPeerLink(toPeer?.id, toTitle, asPreview);
+        const toLink = renderPeerLink(toPeer?.id, toTitle, props.asPreview);
 
         if (isFromOffer && resaleAmount) {
           const giftName = lang('GiftUnique', { title: gift.title, number: gift.number });
           const amountText = formatCurrencyAmountAsText(lang, resaleAmount);
 
-          const formattedAmountText = asPreview ? amountText : renderStrong(amountText);
-          const formattedGiftName = asPreview ? giftName : renderStrong(giftName);
+          const formattedAmountText = props.asPreview ? amountText : renderStrong(amountText);
+          const formattedGiftName = props.asPreview ? giftName : renderStrong(giftName);
 
-          if (isOutgoing) {
+          if (isOutgoing()) {
             return lang(
               'ActionStarGiftSoldFromOffer',
               { user: chatLink, gift: formattedGiftName, cost: formattedAmountText },
@@ -744,7 +763,7 @@ const ActionMessageText = ({
         }
 
         if (isPrepaidUpgrade) {
-          if (isOutgoing) {
+          if (isOutgoing()) {
             return lang('ActionStarGiftPrepaidUpgradedYou');
           }
           return lang('ActionStarGiftPrepaidUpgraded', { user: toLink }, { withNodes: true });
@@ -754,7 +773,7 @@ const ActionMessageText = ({
           const amountText = formatCurrencyAmountAsText(lang, resaleAmount);
 
           return lang(
-            isOutgoing
+            isOutgoing()
               ? 'ApiMessageMessageActionResaleStarGiftUniqueOutgoing'
               : 'ApiMessageMessageActionResaleStarGiftUniqueIncoming',
             {
@@ -767,11 +786,11 @@ const ActionMessageText = ({
 
         if (isToChannel) {
           const channelPeer = selectPeer(global, peerId!);
-          const isYou = fromPeer?.id === currentUserId;
+          const isYou = fromPeer?.id === props.currentUserId;
           const isAnonymous = fromPeer?.id === SERVICE_NOTIFICATIONS_USER_ID;
 
           const channelTitle = (channelPeer && getPeerTitle(lang, channelPeer)) || channelFallbackText;
-          const channelLink = renderPeerLink(peerId, channelTitle, asPreview);
+          const channelLink = renderPeerLink(peerId, channelTitle, props.asPreview);
 
           if (isUpgrade) {
             return translateWithYou(lang, 'ActionStarGiftUpgradedChannel', isYou, {
@@ -801,7 +820,7 @@ const ActionMessageText = ({
               'ApiMessageMessageActionResaleStarGiftUniqueOutgoing',
               {
                 gift: lang('GiftUnique', { title: gift.title, number: gift.number }),
-                stars: asPreview ? amountText : renderStrong(amountText),
+                stars: props.asPreview ? amountText : renderStrong(amountText),
               },
               { withNodes: true },
             );
@@ -810,7 +829,7 @@ const ActionMessageText = ({
         }
 
         if (isUpgrade) {
-          if (isOutgoing) {
+          if (isOutgoing()) {
             return lang('ActionStarGiftUpgradedMine', { user: chatLink }, { withNodes: true });
           }
 
@@ -822,7 +841,7 @@ const ActionMessageText = ({
         }
 
         if ((isTransferred || transferStars) && !resaleAmount) {
-          if (sender?.id === SERVICE_NOTIFICATIONS_USER_ID) {
+          if (props.sender?.id === SERVICE_NOTIFICATIONS_USER_ID) {
             return lang('ActionStarGiftTransferredUnknown');
           }
 
@@ -830,14 +849,14 @@ const ActionMessageText = ({
             return lang('ActionStarGiftTransferredSelf');
           }
 
-          if (isOutgoing) {
+          if (isOutgoing()) {
             return lang('ActionStarGiftTransferredMine', { user: chatLink }, { withNodes: true });
           }
 
           return lang('ActionStarGiftTransferred', { user: senderLink }, { withNodes: true });
         }
 
-        if (isOutgoing) {
+        if (isOutgoing()) {
           return lang('ActionGiftUniqueSent');
         }
 
@@ -845,32 +864,32 @@ const ActionMessageText = ({
       }
 
       case 'suggestProfilePhoto': {
-        const actionPeer = (isOutgoing ? chat : sender)!;
+        const actionPeer = (isOutgoing() ? props.chat : props.sender)!;
         const actionPeerLink = renderPeerLink(
           actionPeer.id,
           getPeerTitle(lang, actionPeer) || userFallbackText,
-          asPreview,
+          props.asPreview,
         );
 
-        return translateWithYou(lang, 'ActionSuggestedPhoto', isOutgoing, { user: actionPeerLink });
+        return translateWithYou(lang, 'ActionSuggestedPhoto', isOutgoing(), { user: actionPeerLink });
       }
 
       case 'suggestBirthday': {
-        const actionPeer = (isOutgoing ? chat : sender)!;
+        const actionPeer = (isOutgoing() ? props.chat : props.sender)!;
         const actionPeerLink = renderPeerLink(
           actionPeer.id,
           getPeerTitle(lang, actionPeer) || userFallbackText,
-          asPreview,
+          props.asPreview,
         );
 
-        return translateWithYou(lang, 'ActionSuggestedBirthday', isOutgoing, { user: actionPeerLink });
+        return translateWithYou(lang, 'ActionSuggestedBirthday', isOutgoing(), { user: actionPeerLink });
       }
 
       case 'webViewDataSent':
-        return lang('ActionWebviewDataDone', { text: action.text });
+        return lang('ActionWebviewDataDone', { text: action().text });
 
       case 'expired': {
-        const { isRoundVideo, isVoice } = action;
+        const { isRoundVideo, isVoice } = action();
         if (isVoice) return lang('ActionExpiredVoice');
         if (isRoundVideo) return lang('ActionExpiredVideo');
 
@@ -881,19 +900,19 @@ const ActionMessageText = ({
         return lang('ActionHistoryCleared');
 
       case 'setMessagesTtl': {
-        const { period, autoSettingFromId } = action;
+        const { period, autoSettingFromId } = action();
 
         if (period === 0) {
           if (isChannel) return lang('ActionTTLChannelDisabled');
 
-          return isOutgoing
+          return isOutgoing()
             ? lang('ActionTTLYouDisabled')
             : lang('ActionTTLDisabled', { from: senderLink }, { withNodes: true });
         }
 
         const time = formatCountdown(lang, period);
         if (autoSettingFromId) {
-          if (autoSettingFromId === currentUserId) {
+          if (autoSettingFromId === props.currentUserId) {
             return lang('AutoDeleteGlobalActionFromYou', { time });
           }
 
@@ -902,7 +921,7 @@ const ActionMessageText = ({
           const autoSettingFromLink = renderPeerLink(
             autoSettingFrom?.id,
             autoSettingFromTitle || userFallbackText,
-            asPreview,
+            props.asPreview,
           );
 
           return lang('AutoDeleteGlobalAction', { from: autoSettingFromLink, time }, { withNodes: true });
@@ -910,22 +929,22 @@ const ActionMessageText = ({
 
         if (isChannel) return lang('ActionTTLChannelChanged', { time });
 
-        return isOutgoing
+        return isOutgoing()
           ? lang('ActionTTLYouChanged', { time })
           : lang('ActionTTLChanged', { from: senderLink, time }, { withNodes: true });
       }
 
       case 'screenshotTaken':
-        return translateWithYou(lang, 'ActionScreenshotTaken', isOutgoing, { from: senderLink });
+        return translateWithYou(lang, 'ActionScreenshotTaken', isOutgoing(), { from: senderLink });
 
       case 'contactSignUp':
         return lang('ActionUserRegistered', { from: senderLink }, { withNodes: true });
 
       case 'customAction':
-        return action.message;
+        return action().message;
 
       case 'paidMessagesPrice': {
-        const { stars, isAllowedInChannel } = action;
+        const { stars, isAllowedInChannel } = action();
         if (stars === 0) {
           if (isChannel) {
             return lang(
@@ -934,12 +953,12 @@ const ActionMessageText = ({
               { withNodes: true },
             );
           }
-          return translateWithYou(lang, 'ActionPaidMessagePriceFree', isOutgoing, { peer: senderLink });
+          return translateWithYou(lang, 'ActionPaidMessagePriceFree', isOutgoing(), { peer: senderLink });
         }
         return translateWithYou(
           lang,
           'ActionPaidMessagePrice',
-          isOutgoing,
+          isOutgoing(),
           {
             peer: senderLink,
             amount: formatStarsAsText(lang, stars),
@@ -949,11 +968,11 @@ const ActionMessageText = ({
       }
 
       case 'paidMessagesRefunded': {
-        const { stars } = action;
-        const user = selectPeer(global, chatId);
+        const { stars } = action();
+        const user = selectPeer(global, chatId());
         const userTitle = (user && getPeerTitle(lang, user)) || userFallbackText;
 
-        const key = isOutgoing
+        const key = isOutgoing()
           ? 'ApiMessageActionPaidMessagesRefundedOutgoing'
           : 'ApiMessageActionPaidMessagesRefundedIncoming';
 
@@ -968,13 +987,13 @@ const ActionMessageText = ({
       }
 
       case 'suggestedPostSuccess': {
-        const { amount: price } = action;
+        const { amount: price } = action();
         const currency = price?.currency || STARS_CURRENCY_CODE;
         const amount = price?.amount || 0;
 
-        const channel = chat?.isMonoforum ? selectMonoforumChannel(global, chatId) : chat;
+        const channel = props.chat?.isMonoforum ? selectMonoforumChannel(global, chatId()) : props.chat;
         const channelTitle = channel && getPeerTitle(lang, channel);
-        const channelLink = renderPeerLink(channel?.id, channelTitle || channelFallbackText, asPreview);
+        const channelLink = renderPeerLink(channel?.id, channelTitle || channelFallbackText, props.asPreview);
 
         const formattedAmount =
           currency === TON_CURRENCY_CODE
@@ -991,19 +1010,19 @@ const ActionMessageText = ({
         );
       }
       case 'suggestedPostRefund': {
-        const { payerInitiated } = action;
+        const { payerInitiated } = action();
 
-        const postSender = replyMessage ? selectSender(global, replyMessage) : sender;
+        const postSender = props.replyMessage ? selectSender(global, props.replyMessage) : props.sender;
         const postSenderTitle = postSender && getPeerTitle(lang, postSender);
-        const postSenderLink = renderPeerLink(postSender?.id, postSenderTitle || userFallbackText, asPreview);
+        const postSenderLink = renderPeerLink(postSender?.id, postSenderTitle || userFallbackText, props.asPreview);
 
-        const price = replyMessage?.suggestedPostInfo?.price;
+        const price = props.replyMessage?.suggestedPostInfo?.price;
         const currency = price?.currency || STARS_CURRENCY_CODE;
         const amount = price?.amount || 0;
 
-        const channel = chat?.isMonoforum ? selectMonoforumChannel(global, chatId) : chat;
+        const channel = props.chat?.isMonoforum ? selectMonoforumChannel(global, chatId()) : props.chat;
         const channelTitle = channel && getPeerTitle(lang, channel);
-        const channelLink = renderPeerLink(channel?.id, channelTitle || channelFallbackText, asPreview);
+        const channelLink = renderPeerLink(channel?.id, channelTitle || channelFallbackText, props.asPreview);
 
         const formattedAmount =
           currency === TON_CURRENCY_CODE
@@ -1033,24 +1052,24 @@ const ActionMessageText = ({
         );
       }
       case 'suggestedPostApproval': {
-        const { isRejected, isBalanceTooLow, rejectComment } = action;
+        const { isRejected, isBalanceTooLow, rejectComment } = action();
 
         if (isRejected) {
           return translateWithYou(
             lang,
             rejectComment ? 'SuggestedPostRejectedWithReason' : 'SuggestedPostRejected',
-            isOutgoing,
+            isOutgoing(),
             { peer: senderLink },
             { withMarkdown: true },
           );
         }
 
         if (isBalanceTooLow) {
-          const replyMessageSender = replyMessage ? selectSender(global, replyMessage) : sender;
+          const replyMessageSender = props.replyMessage ? selectSender(global, props.replyMessage) : props.sender;
           const replyPeerTitle = replyMessageSender && getPeerTitle(lang, replyMessageSender);
-          const userLink = renderPeerLink(replyMessageSender?.id, replyPeerTitle || userFallbackText, asPreview);
+          const userLink = renderPeerLink(replyMessageSender?.id, replyPeerTitle || userFallbackText, props.asPreview);
 
-          const currency = replyMessage?.suggestedPostInfo?.price?.currency || STARS_CURRENCY_CODE;
+          const currency = props.replyMessage?.suggestedPostInfo?.price?.currency || STARS_CURRENCY_CODE;
           const currencyName = currency === TON_CURRENCY_CODE ? lang('CurrencyGram') : lang('CurrencyStars');
 
           return lang(
@@ -1063,11 +1082,11 @@ const ActionMessageText = ({
           );
         }
 
-        const channel = chat?.isMonoforum ? selectMonoforumChannel(global, chatId) : chat;
+        const channel = props.chat?.isMonoforum ? selectMonoforumChannel(global, chatId()) : props.chat;
         const channelTitle = channel && getPeerTitle(lang, channel);
-        const channelLink = renderPeerLink(channel?.id, channelTitle || channelFallbackText, asPreview);
+        const channelLink = renderPeerLink(channel?.id, channelTitle || channelFallbackText, props.asPreview);
 
-        const { scheduleDate } = action;
+        const { scheduleDate } = action();
         if (scheduleDate) {
           const publishDate = formatScheduledDateTime(scheduleDate, lang, oldLang);
           const isPostPublished = scheduleDate <= getServerTime();
@@ -1075,7 +1094,7 @@ const ActionMessageText = ({
           return translateWithYou(
             lang,
             isPostPublished ? 'SuggestedPostPublished' : 'SuggestedPostPublishSchedule',
-            isOutgoing,
+            isOutgoing(),
             { peer: channelLink, date: publishDate },
             { withMarkdown: true },
           );
@@ -1084,11 +1103,11 @@ const ActionMessageText = ({
         return lang(UNSUPPORTED_LANG_KEY);
       }
       case 'todoCompletions': {
-        const { completedIds, incompletedIds } = action;
+        const { completedIds, incompletedIds } = action();
 
         let completedItem;
         let incompletedItem;
-        const { todo } = replyMessage ? getMessageContent(replyMessage) : {};
+        const { todo } = props.replyMessage ? getMessageContent(props.replyMessage) : {};
         if (todo) {
           const todoItems = todo.todo.items;
           completedItem = todoItems.find((item) => completedIds.includes(item.id));
@@ -1099,16 +1118,16 @@ const ActionMessageText = ({
           const incompletedTaskTitle = incompletedItem.title;
 
           const incompletedTaskLink = renderMessageLink(
-            replyMessage,
+            props.replyMessage,
             renderTextWithEntities({
               text: incompletedTaskTitle.text,
               entities: incompletedTaskTitle.entities,
               asPreview: true,
             }),
-            asPreview,
+            props.asPreview,
           );
 
-          return translateWithYou(lang, 'MessageActionTodoCompletionsAsNotDone', isOutgoing, {
+          return translateWithYou(lang, 'MessageActionTodoCompletionsAsNotDone', isOutgoing(), {
             peer: senderLink,
             task: incompletedTaskLink,
           });
@@ -1117,16 +1136,16 @@ const ActionMessageText = ({
         if (completedItem) {
           const completedTaskTitle = completedItem.title;
           const completedTaskLink = renderMessageLink(
-            replyMessage,
+            props.replyMessage,
             renderTextWithEntities({
               text: completedTaskTitle.text,
               entities: completedTaskTitle.entities,
               asPreview: true,
             }),
-            asPreview,
+            props.asPreview,
           );
 
-          return translateWithYou(lang, 'MessageActionTodoCompletionsAsDone', isOutgoing, {
+          return translateWithYou(lang, 'MessageActionTodoCompletionsAsDone', isOutgoing(), {
             peer: senderLink,
             task: completedTaskLink,
           });
@@ -1141,15 +1160,15 @@ const ActionMessageText = ({
             { pluralValue: completedIds.length },
           );
           const completedLink = renderMessageLink(
-            replyMessage,
+            props.replyMessage,
             renderTextWithEntities({
               text: completedText,
               asPreview: true,
             }),
-            asPreview,
+            props.asPreview,
             { noEllipsis: true },
           );
-          return translateWithYou(lang, 'MessageActionTodoCompletionsAsDone', isOutgoing, {
+          return translateWithYou(lang, 'MessageActionTodoCompletionsAsDone', isOutgoing(), {
             peer: senderLink,
             task: completedLink,
           });
@@ -1163,48 +1182,48 @@ const ActionMessageText = ({
           { pluralValue: incompletedIds.length },
         );
         const incompletedLink = renderMessageLink(
-          replyMessage,
+          props.replyMessage,
           renderTextWithEntities({
             text: incompletedText,
             asPreview: true,
           }),
-          asPreview,
+          props.asPreview,
           { noEllipsis: true },
         );
 
-        return translateWithYou(lang, 'MessageActionTodoCompletionsAsNotDone', isOutgoing, {
+        return translateWithYou(lang, 'MessageActionTodoCompletionsAsNotDone', isOutgoing(), {
           peer: senderLink,
           task: incompletedLink,
         });
       }
 
       case 'todoAppendTasks': {
-        const { items } = action;
-        const { todo } = replyMessage ? getMessageContent(replyMessage) : {};
+        const { items } = action();
+        const { todo } = props.replyMessage ? getMessageContent(props.replyMessage) : {};
 
         const listTitle = todo?.todo.title.text || '';
         const listLink = renderMessageLink(
-          replyMessage,
+          props.replyMessage,
           renderTextWithEntities({
             text: listTitle,
             asPreview: true,
           }),
-          asPreview,
+          props.asPreview,
         );
 
         if (items.length === 1) {
           const taskTitle = items[0].title;
           const taskLink = renderMessageLink(
-            replyMessage,
+            props.replyMessage,
             renderTextWithEntities({
               text: taskTitle.text,
               entities: taskTitle.entities,
               asPreview: true,
             }),
-            asPreview,
+            props.asPreview,
           );
 
-          return translateWithYou(lang, 'MessageActionAppendTodo', isOutgoing, {
+          return translateWithYou(lang, 'MessageActionAppendTodo', isOutgoing(), {
             peer: senderLink,
             task: taskLink,
             list: listLink,
@@ -1219,16 +1238,16 @@ const ActionMessageText = ({
           { pluralValue: items.length },
         );
         const tasksLink = renderMessageLink(
-          replyMessage,
+          props.replyMessage,
           renderTextWithEntities({
             text: tasksText,
             asPreview: true,
           }),
-          asPreview,
+          props.asPreview,
           { noEllipsis: true },
         );
 
-        return translateWithYou(lang, 'MessageActionAppendTodoMultiple', isOutgoing, {
+        return translateWithYou(lang, 'MessageActionAppendTodoMultiple', isOutgoing(), {
           peer: senderLink,
           tasks: tasksLink,
           list: listLink,
@@ -1238,19 +1257,19 @@ const ActionMessageText = ({
       case 'pollAppendAnswer':
       case 'pollDeleteAnswer': {
         const optionLink = renderMessageLink(
-          replyMessage,
+          props.replyMessage,
           renderTextWithEntities({
-            text: action.answer.text.text,
-            entities: action.answer.text.entities,
+            text: action().answer.text.text,
+            entities: action().answer.text.entities,
             asPreview: true,
           }),
-          asPreview,
+          props.asPreview,
         );
 
         return translateWithYou(
           lang,
-          action.type === 'pollAppendAnswer' ? 'MessageActionPollAppendAnswer' : 'MessageActionPollDeleteAnswer',
-          isOutgoing,
+          action().type === 'pollAppendAnswer' ? 'MessageActionPollAppendAnswer' : 'MessageActionPollDeleteAnswer',
+          isOutgoing(),
           {
             peer: senderLink,
             option: optionLink,
@@ -1259,55 +1278,55 @@ const ActionMessageText = ({
       }
 
       case 'phoneCall': // Rendered as a regular message, but considered an action for the summary
-        return lang(getCallMessageKey(action, isOutgoing));
+        return lang(getCallMessageKey(action(), isOutgoing()));
 
       case 'noForwardsToggle': {
-        const { prevValue, newValue } = action;
+        const { prevValue, newValue } = action();
         if (newValue && newValue === prevValue) {
           return lang('ActionSharingStillDisabled');
         }
-        return translateWithYou(lang, newValue ? 'ActionSharingDisabled' : 'ActionSharingEnabled', isOutgoing, {
+        return translateWithYou(lang, newValue ? 'ActionSharingDisabled' : 'ActionSharingEnabled', isOutgoing(), {
           from: senderLink,
         });
       }
 
       case 'noForwardsRequest': {
-        return isOutgoing
+        return isOutgoing()
           ? lang('NoForwardsRequestYouTitle')
           : lang('NoForwardsRequestTitle', { user: senderLink }, { withNodes: true });
       }
 
       case 'newCreatorPending': {
-        const { newCreatorId } = action;
+        const { newCreatorId } = action();
         const newCreator = selectPeer(global, newCreatorId);
         const newCreatorTitle = (newCreator && getPeerTitle(lang, newCreator)) || userFallbackText;
-        const newCreatorLink = renderPeerLink(newCreator?.id, newCreatorTitle, asPreview);
+        const newCreatorLink = renderPeerLink(newCreator?.id, newCreatorTitle, props.asPreview);
         return lang('ActionNewCreatorPending', { user: newCreatorLink, from: senderLink }, { withNodes: true });
       }
 
       case 'changeCreator': {
-        const { newCreatorId } = action;
+        const { newCreatorId } = action();
         const newCreator = selectPeer(global, newCreatorId);
         const newCreatorTitle = (newCreator && getPeerTitle(lang, newCreator)) || userFallbackText;
-        const newCreatorLink = renderPeerLink(newCreator?.id, newCreatorTitle, asPreview);
+        const newCreatorLink = renderPeerLink(newCreator?.id, newCreatorTitle, props.asPreview);
         return lang('ActionChangeCreator', { user: newCreatorLink, from: senderLink }, { withNodes: true });
       }
 
       case 'starGiftPurchaseOffer': {
-        const { gift, price } = action;
+        const { gift, price } = action();
 
-        const peer = isOutgoing ? chat : sender;
+        const peer = isOutgoing() ? props.chat : props.sender;
         const peerTitle = (peer && getPeerTitle(lang, peer)) || userFallbackText;
-        const peerLink = renderPeerLink(peer?.id, peerTitle, asPreview);
+        const peerLink = renderPeerLink(peer?.id, peerTitle, props.asPreview);
 
         const giftName = lang('GiftUnique', { title: gift.title, number: gift.number });
         const priceText = formatCurrencyAmountAsText(lang, price);
 
-        const formattedGiftName = asPreview ? giftName : renderStrong(giftName);
-        const formattedPriceText = asPreview ? priceText : renderStrong(priceText);
+        const formattedGiftName = props.asPreview ? giftName : renderStrong(giftName);
+        const formattedPriceText = props.asPreview ? priceText : renderStrong(priceText);
 
         return lang(
-          isOutgoing ? 'ActionStarGiftOfferOutgoing' : 'ActionStarGiftOfferIncoming',
+          isOutgoing() ? 'ActionStarGiftOfferOutgoing' : 'ActionStarGiftOfferIncoming',
           {
             peer: peerLink,
             cost: formattedPriceText,
@@ -1318,20 +1337,20 @@ const ActionMessageText = ({
       }
 
       case 'starGiftPurchaseOfferDeclined': {
-        const { gift, price } = action;
+        const { gift, price } = action();
 
-        const peer = isOutgoing ? chat : sender;
+        const peer = isOutgoing() ? props.chat : props.sender;
         const peerTitle = (peer && getPeerTitle(lang, peer)) || userFallbackText;
-        const peerLink = renderPeerLink(peer?.id, peerTitle, asPreview);
+        const peerLink = renderPeerLink(peer?.id, peerTitle, props.asPreview);
 
         const giftName = lang('GiftUnique', { title: gift.title, number: gift.number });
         const priceText = formatCurrencyAmountAsText(lang, price);
 
-        const formattedGiftName = asPreview ? giftName : renderStrong(giftName);
-        const formattedPriceText = asPreview ? priceText : renderStrong(priceText);
+        const formattedGiftName = props.asPreview ? giftName : renderStrong(giftName);
+        const formattedPriceText = props.asPreview ? priceText : renderStrong(priceText);
 
         return lang(
-          isOutgoing ? 'ActionStarGiftOfferDeclinedOutgoing' : 'ActionStarGiftOfferDeclinedIncoming',
+          isOutgoing() ? 'ActionStarGiftOfferDeclinedOutgoing' : 'ActionStarGiftOfferDeclinedIncoming',
           {
             peer: peerLink,
             gift: formattedGiftName,
@@ -1344,30 +1363,30 @@ const ActionMessageText = ({
       default:
         return lang(UNSUPPORTED_LANG_KEY);
     }
-  });
+  };
 
   return renderActionText();
 };
 
-export default memo(
-  withGlobal<OwnProps>((global, { message }): Complete<StateProps> => {
-    const chat = selectChat(global, message.chatId);
-    const sender = selectSender(global, message);
+const mapStateToProps = (global: GlobalState, { message }: OwnProps): Complete<StateProps> => {
+  const chat = selectChat(global, message.chatId);
+  const sender = selectSender(global, message);
 
-    const isGramTransfer = message.content.action?.type === 'gramTransfer';
-    const { replyToMsgId, replyToPeerId } = getMessageReplyInfo(message) || {};
-    const replyMessage = replyToMsgId
-      ? selectChatMessage(global, replyToPeerId || message.chatId, replyToMsgId)
-      : undefined;
+  const isGramTransfer = message.content.action?.type === 'gramTransfer';
+  const { replyToMsgId, replyToPeerId } = getMessageReplyInfo(message) || {};
+  const replyMessage = replyToMsgId
+    ? selectChatMessage(global, replyToPeerId || message.chatId, replyToMsgId)
+    : undefined;
 
-    return {
-      currentUserId: global.currentUserId,
-      replyMessage,
-      chat,
-      sender,
-      tonUsdRate: isGramTransfer ? global.appConfig.tonUsdRate : undefined,
-      walletCurrency: isGramTransfer ? selectWalletCurrency(global) : undefined,
-      walletCurrencyRate: isGramTransfer ? selectWalletCurrencyRate(global) : undefined,
-    };
-  })(ActionMessageText),
-);
+  return {
+    currentUserId: global.currentUserId,
+    replyMessage,
+    chat,
+    sender,
+    tonUsdRate: isGramTransfer ? global.appConfig.tonUsdRate : undefined,
+    walletCurrency: isGramTransfer ? selectWalletCurrency(global) : undefined,
+    walletCurrencyRate: isGramTransfer ? selectWalletCurrencyRate(global) : undefined,
+  };
+};
+
+export default ActionMessageText;

@@ -1,5 +1,7 @@
-import type { TeactNode } from '../../lib/teact/teact';
-import { memo, useEffect, useRef, useState } from '../../lib/teact/teact';
+import { createEffect, createMemo, createSignal } from 'frameact';
+import { For, Show } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
+import { depsOf } from '../../util/effectDeps';
 
 import type { IAnchorPosition } from '../../types';
 import type { MenuItemContextAction } from './ListItem';
@@ -13,7 +15,6 @@ import renderText from '../common/helpers/renderText';
 import { handleFileHoverOpenEvent } from '../../hooks/useFileHoverOpen';
 import useFlag from '../../hooks/useFlag';
 import useHorizontalScroll from '../../hooks/useHorizontalScroll';
-import useLastCallback from '../../hooks/useLastCallback';
 import useResizeObserver from '../../hooks/useResizeObserver';
 import useScrollToActiveTab from '../../hooks/useScrollToActiveTab';
 
@@ -39,38 +40,29 @@ type OwnProps = {
   withFadeMask?: boolean;
   fadeMaskClassName?: string;
   onSwitchTab: (index: number) => void;
-  renderExtra?: (tab: TabWithProperties, index: number) => TeactNode;
+  renderExtra?: (tab: TabWithProperties, index: number) => JSX.Element;
   onFileHoverOpen?: (index: number) => void;
 };
 
-const TabList = ({
-  tabs,
-  activeTab,
-  className,
-  tabClassName,
-  indicatorClassName,
-  centered,
-  stretched,
-  itemAlignment,
-  withFadeMask,
-  fadeMaskClassName,
-  renderExtra,
-  onSwitchTab,
-  onFileHoverOpen,
-}: OwnProps) => {
-  const containerRef = useRef<HTMLDivElement>();
-  const clipPathContainerRef = useRef<HTMLDivElement>();
-  const [clipPath, setClipPath] = useState<string>('');
+const TabList = (props: OwnProps) => {
+  let containerRef!: HTMLDivElement;
+  let clipPathContainerRef!: HTMLDivElement;
+  const [clipPath, setClipPath] = createSignal<string>('');
   const [isMenuOpen, openMenu, closeMenu] = useFlag();
-  const [menuAnchor, setMenuAnchor] = useState<IAnchorPosition | undefined>();
-  const [menuTabIndex, setMenuTabIndex] = useState<number | undefined>();
-  const menuTargetRef = useRef<HTMLElement>();
+  const [menuAnchor, setMenuAnchor] = createSignal<IAnchorPosition | undefined>(undefined);
+  const [menuTabIndex, setMenuTabIndex] = createSignal<number | undefined>(undefined);
+  let menuTargetRef!: HTMLElement;
 
-  useHorizontalScroll(containerRef, !tabs.length, true);
+  useHorizontalScroll(
+    () => containerRef,
+    () => !props.tabs.length,
+    true,
+  );
 
-  const updateClipPath = useLastCallback(() => {
-    const clipPathContainer = clipPathContainerRef.current;
-    const activeTabEl = activeTab >= 0 && (clipPathContainer?.childNodes[activeTab] as HTMLElement | undefined);
+  const updateClipPath = () => {
+    const clipPathContainer = clipPathContainerRef;
+    const activeTabEl =
+      props.activeTab >= 0 && (clipPathContainer?.childNodes[props.activeTab] as HTMLElement | undefined);
 
     if (clipPathContainer && activeTabEl && clipPathContainer.offsetWidth > 0) {
       const { offsetLeft, offsetWidth } = activeTabEl;
@@ -79,56 +71,58 @@ const TabList = ({
       const right = (((containerWidth - (offsetLeft + offsetWidth)) / containerWidth) * 100).toFixed(1);
 
       setClipPath(`inset(0.25rem ${right}% 0.25rem ${left}% round var(--tab-radius))`);
-    } else if (activeTab < 0) {
+    } else if (props.activeTab < 0) {
       setClipPath('inset(0 100% 0 100%)');
     }
-  });
+  };
 
-  useEffect(() => {
-    updateClipPath();
-  }, [activeTab, tabs]);
+  createEffect(
+    depsOf(() => [props.activeTab, props.tabs] as const),
+    ([activeTab2, tabs2]) => {
+      updateClipPath();
+    },
+  );
 
-  useResizeObserver(clipPathContainerRef, updateClipPath);
+  useResizeObserver(() => clipPathContainerRef, updateClipPath);
 
-  useScrollToActiveTab(containerRef, activeTab);
+  useScrollToActiveTab(
+    () => containerRef,
+    () => props.activeTab,
+  );
 
-  const handleTabClick = useLastCallback((index: number) => {
-    onSwitchTab(index);
-  });
+  const handleTabClick = (index: number) => {
+    props.onSwitchTab(index);
+  };
 
-  const handleFileHoverOpen = useLastCallback((index: number, e: Event) => {
-    handleFileHoverOpenEvent(e, () => onFileHoverOpen!(index));
-  });
+  const handleFileHoverOpen = (index: number, e: Event) => {
+    handleFileHoverOpenEvent(e, () => props.onFileHoverOpen!(index));
+  };
 
-  const handleContextMenu = useLastCallback((index: number, e: React.MouseEvent) => {
-    const actions = tabs[index]?.contextActions;
+  const handleContextMenu = (index: number, e: React.MouseEvent) => {
+    const actions = props.tabs[index]?.contextActions;
     if (!actions?.length) return;
     e.preventDefault();
-    menuTargetRef.current = e.currentTarget as HTMLElement;
+    menuTargetRef = e.currentTarget as HTMLElement;
     setMenuTabIndex(index);
     setMenuAnchor({ x: e.clientX, y: e.clientY });
     openMenu();
-  });
+  };
 
-  const handleMenuClose = useLastCallback(() => {
+  const handleMenuClose = () => {
     closeMenu();
-  });
+  };
 
-  const handleMenuHide = useLastCallback(() => {
+  const handleMenuHide = () => {
     setMenuAnchor(undefined);
     setMenuTabIndex(undefined);
-  });
+  };
 
-  const getTriggerElement = useLastCallback(() => menuTargetRef.current);
-  const getRootElement = useLastCallback(() => containerRef.current);
-  const getMenuElement = useLastCallback(() =>
-    containerRef.current?.querySelector<HTMLElement>('.TabList-context-menu .bubble'),
-  );
-  const getLayout = useLastCallback(() => ({ withPortal: true }));
+  const getTriggerElement = () => menuTargetRef;
+  const getRootElement = () => containerRef;
+  const getMenuElement = () => containerRef?.querySelector<HTMLElement>('.TabList-context-menu .bubble');
+  const getLayout = () => ({ withPortal: true });
 
-  if (!tabs.length) return undefined;
-
-  const hasContextActions = tabs.some((tab) => tab.contextActions?.length);
+  const hasContextActions = createMemo(() => props.tabs.some((tab) => tab.contextActions?.length));
 
   const renderTab = (tab: TabWithProperties, index: number) => {
     const customEmojiId =
@@ -137,110 +131,120 @@ const TabList = ({
 
     return (
       <div
-        key={tab.id ?? index}
-        className={buildClassName(
+        class={buildClassName(
           styles.tab,
-          tabClassName,
-          itemAlignment === 'vertical' && styles.vertical,
-          stretched && styles.stretched,
+          props.tabClassName,
+          props.itemAlignment === 'vertical' && styles.vertical,
+          props.stretched && styles.stretched,
         )}
         onClick={() => handleTabClick(index)}
-        data-file-hover-open={onFileHoverOpen ? true : undefined}
-        onFileHoverOpen={onFileHoverOpen ? (e) => handleFileHoverOpen(index, e) : undefined}
-        onContextMenu={hasContextActions ? (e) => handleContextMenu(index, e) : undefined}
+        data-file-hover-open={props.onFileHoverOpen ? true : undefined}
+        onFileHoverOpen={props.onFileHoverOpen ? (e) => handleFileHoverOpen(index, e) : undefined}
+        onContextMenu={hasContextActions() ? (e) => handleContextMenu(index, e) : undefined}
       >
-        {stringEmoticon && <span className={styles.tabEmoji}>{stringEmoticon}</span>}
+        {stringEmoticon && <span class={styles.tabEmoji}>{stringEmoticon}</span>}
         {customEmojiId && (
           <CustomEmoji documentId={customEmojiId} className={styles.tabEmoji} size={EMOJI_SIZE} shouldNotLoop />
         )}
         {tab.icon && <Icon name={tab.icon} className={styles.tabIcon} />}
         {typeof tab.title === 'string' ? renderText(tab.title) : tab.title}
-        {renderExtra?.(tab, index)}
+        {props.renderExtra?.(tab, index)}
         {tab.isBlocked && <Icon name="lock-filled" className={styles.lockIcon} />}
       </div>
     );
   };
 
-  const contextActions = menuTabIndex !== undefined ? tabs[menuTabIndex]?.contextActions : undefined;
+  const contextActions = createMemo(() =>
+    menuTabIndex() !== undefined ? props.tabs[menuTabIndex()]?.contextActions : undefined,
+  );
 
   const tabListElement = (
     <div
       ref={containerRef}
-      className={buildClassName(
+      class={buildClassName(
         'TabList',
         styles.container,
-        withFadeMask && styles.withFadeMask,
-        centered && styles.centered,
-        itemAlignment === 'vertical' && styles.vertical,
-        className,
-        clipPath && styles.ready,
+        props.withFadeMask && styles.withFadeMask,
+        props.centered && styles.centered,
+        props.itemAlignment === 'vertical' && styles.vertical,
+        props.className,
+        clipPath() && styles.ready,
       )}
     >
-      {tabs.map(renderTab)}
+      {props.tabs.map(renderTab)}
 
       <div
         ref={clipPathContainerRef}
-        className={buildClassName(
+        class={buildClassName(
           styles.activeIndicator,
-          centered && styles.centered,
-          stretched && styles.stretched,
-          indicatorClassName,
+          props.centered && styles.centered,
+          props.stretched && styles.stretched,
+          props.indicatorClassName,
         )}
-        style={clipPath ? `clip-path: ${clipPath}` : undefined}
+        style={clipPath() ? `clip-path: ${clipPath()}` : undefined}
         aria-hidden
       >
-        {tabs.map(renderTab)}
+        {props.tabs.map(renderTab)}
       </div>
     </div>
   );
 
-  const menuElement = contextActions && menuAnchor !== undefined && (
-    <Menu
-      isOpen={isMenuOpen}
-      anchor={menuAnchor}
-      getTriggerElement={getTriggerElement}
-      getRootElement={getRootElement}
-      getMenuElement={getMenuElement}
-      getLayout={getLayout}
-      className="TabList-context-menu"
-      autoClose
-      onClose={handleMenuClose}
-      onCloseAnimationEnd={handleMenuHide}
-      withPortal
-    >
-      {contextActions.map((action: MenuItemContextAction) =>
-        'isSeparator' in action ? (
-          <MenuSeparator key={action.key || `separator-${contextActions.indexOf(action)}`} />
-        ) : (
-          <MenuItem
-            key={action.title}
-            icon={action.icon}
-            destructive={action.destructive}
-            disabled={!action.handler}
-            onClick={action.handler}
-          >
-            {renderText(action.title)}
-          </MenuItem>
-        ),
-      )}
-    </Menu>
+  const menuElement = createMemo(
+    () =>
+      contextActions() &&
+      menuAnchor() !== undefined && (
+        <Menu
+          isOpen={isMenuOpen()}
+          anchor={menuAnchor()}
+          getTriggerElement={getTriggerElement}
+          getRootElement={getRootElement}
+          getMenuElement={getMenuElement}
+          getLayout={getLayout}
+          className="TabList-context-menu"
+          autoClose
+          onClose={handleMenuClose}
+          onCloseAnimationEnd={handleMenuHide}
+          withPortal
+        >
+          <For each={contextActions()}>
+            {(action: MenuItemContextAction) =>
+              'isSeparator' in action ? (
+                // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show>
+                <MenuSeparator key={action.key || `separator-${contextActions().indexOf(action)}`} />
+              ) : (
+                <MenuItem
+                  icon={action.icon}
+                  destructive={action.destructive}
+                  disabled={!action.handler}
+                  onClick={action.handler}
+                >
+                  {renderText(action.title)}
+                </MenuItem>
+              )
+            }
+          </For>
+        </Menu>
+      ),
   );
 
-  if (!withFadeMask) {
-    return (
-      <>
-        {tabListElement}
-        {menuElement}
-      </>
-    );
-  }
-
   return (
-    <>
-      <div className={buildClassName(styles.fadeMaskWrapper, fadeMaskClassName)}>{tabListElement}</div>
-      {menuElement}
-    </>
+    <Show when={props.tabs.length}>
+      <Show
+        when={props.withFadeMask}
+        fallback={
+          <>
+            {tabListElement}
+            {menuElement()}
+          </>
+        }
+      >
+        <>
+          <div class={buildClassName(styles.fadeMaskWrapper, props.fadeMaskClassName)}>{tabListElement}</div>
+          {menuElement()}
+        </>
+      </Show>
+    </Show>
   );
 };
 
-export default memo(TabList);
+export default TabList;

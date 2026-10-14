@@ -1,4 +1,4 @@
-import { useRef } from '../lib/teact/teact';
+import { createMemo, previous } from 'frameact';
 
 import { LoadMoreDirection } from '../types';
 
@@ -12,6 +12,7 @@ type LoadMoreBackwards = (args: { offsetId?: string | number }) => void;
 
 const DEFAULT_LIST_SLICE = 30;
 
+// TODO(codemod): useInfiniteScroll: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 const useInfiniteScroll = <ListId extends string | number>(
   loadMoreBackwards?: LoadMoreBackwards,
   listIds?: ListId[],
@@ -19,38 +20,46 @@ const useInfiniteScroll = <ListId extends string | number>(
   listSlice = DEFAULT_LIST_SLICE,
   initialOffsetId?: ListId,
 ): [ListId[]?, GetMore?, number?] => {
-  const requestParamsRef = useRef<{
-    direction?: LoadMoreDirection;
-    offsetId?: ListId;
-  }>();
+  let requestParamsRef:
+    | {
+        direction?: LoadMoreDirection;
+        offsetId?: ListId;
+      }
+    | undefined;
 
-  const currentStateRef = useRef<{ viewportIds: ListId[]; isOnTop: boolean; offset: number } | undefined>();
-  if (!currentStateRef.current && listIds && !isDisabled) {
+  let currentStateRef: { viewportIds: ListId[]; isOnTop: boolean; offset: number } | undefined;
+  if (!currentStateRef && listIds && !isDisabled) {
     const { newViewportIds, newIsOnTop, fromOffset } = getViewportSlice(
       listIds,
       LoadMoreDirection.Forwards,
       listSlice,
       initialOffsetId !== undefined && listIds.includes(initialOffsetId) ? initialOffsetId : listIds[0],
     );
-    currentStateRef.current = { viewportIds: newViewportIds, isOnTop: newIsOnTop, offset: fromOffset };
+    currentStateRef = { viewportIds: newViewportIds, isOnTop: newIsOnTop, offset: fromOffset };
   }
 
+  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
   const forceUpdate = useForceUpdate();
 
   if (isDisabled) {
-    requestParamsRef.current = {};
+    requestParamsRef = {};
   }
 
-  const prevListIds = usePreviousDeprecated(listIds);
-  const prevIsDisabled = usePreviousDeprecated(isDisabled);
-  const prevInitialOffsetId = usePreviousDeprecated(initialOffsetId);
-  const hasInitialOffsetChanged = initialOffsetId !== prevInitialOffsetId;
-  if (listIds && !isDisabled && (listIds !== prevListIds || isDisabled !== prevIsDisabled || hasInitialOffsetChanged)) {
-    const { viewportIds, isOnTop } = currentStateRef.current || {};
+  const prevListIds = previous(() => listIds);
+  const prevIsDisabled = previous(() => isDisabled);
+  const prevInitialOffsetId = previous(() => initialOffsetId);
+  const hasInitialOffsetChanged = createMemo(() => initialOffsetId !== prevInitialOffsetId());
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (
+    listIds &&
+    !isDisabled &&
+    (listIds !== prevListIds() || isDisabled !== prevIsDisabled() || hasInitialOffsetChanged())
+  ) {
+    const { viewportIds, isOnTop } = currentStateRef || {};
     const shouldAnchorToInitial =
       initialOffsetId !== undefined &&
       listIds.includes(initialOffsetId) &&
-      (hasInitialOffsetChanged || isDisabled !== prevIsDisabled);
+      (hasInitialOffsetChanged() || isDisabled !== prevIsDisabled());
     const currentMiddleId = viewportIds && !isOnTop ? viewportIds[Math.round(viewportIds.length / 2)] : undefined;
     const defaultOffsetId = shouldAnchorToInitial
       ? initialOffsetId
@@ -59,63 +68,61 @@ const useInfiniteScroll = <ListId extends string | number>(
         : listIds[0];
     const { offsetId = defaultOffsetId, direction = LoadMoreDirection.Forwards } = shouldAnchorToInitial
       ? {}
-      : requestParamsRef.current || {};
+      : requestParamsRef || {};
     const currentSlice =
       viewportIds && direction === LoadMoreDirection.Forwards && offsetId === listIds[0]
         ? Math.max(listSlice, viewportIds.length)
         : listSlice;
     const { newViewportIds, newIsOnTop, fromOffset } = getViewportSlice(listIds, direction, currentSlice, offsetId);
 
-    requestParamsRef.current = {};
+    requestParamsRef = {};
 
     if (!viewportIds || !areSortedArraysEqual(viewportIds, newViewportIds)) {
-      currentStateRef.current = { viewportIds: newViewportIds, isOnTop: newIsOnTop, offset: fromOffset };
+      currentStateRef = { viewportIds: newViewportIds, isOnTop: newIsOnTop, offset: fromOffset };
     }
   } else if (!listIds) {
-    currentStateRef.current = undefined;
+    currentStateRef = undefined;
   }
 
-  const getMore: GetMore = useLastCallback(
-    ({ direction, noScroll }: { direction: LoadMoreDirection; noScroll?: boolean }) => {
-      const { viewportIds } = currentStateRef.current || {};
+  const getMore: GetMore = ({ direction, noScroll }: { direction: LoadMoreDirection; noScroll?: boolean }) => {
+    const { viewportIds } = currentStateRef || {};
 
-      const offsetId = viewportIds
-        ? direction === LoadMoreDirection.Backwards
-          ? viewportIds[viewportIds.length - 1]
-          : viewportIds[0]
-        : undefined;
+    const offsetId = viewportIds
+      ? direction === LoadMoreDirection.Backwards
+        ? viewportIds[viewportIds.length - 1]
+        : viewportIds[0]
+      : undefined;
 
-      if (!listIds) {
-        if (loadMoreBackwards) {
-          loadMoreBackwards({ offsetId });
-        }
-
-        return;
-      }
-
-      const { newViewportIds, areSomeLocal, areAllLocal, newIsOnTop, fromOffset } = getViewportSlice(
-        listIds,
-        direction,
-        listSlice,
-        offsetId,
-      );
-
-      if (areSomeLocal && !(viewportIds && areSortedArraysEqual(viewportIds, newViewportIds))) {
-        currentStateRef.current = { viewportIds: newViewportIds, isOnTop: newIsOnTop, offset: fromOffset };
-        forceUpdate();
-      }
-
-      if (!areAllLocal && loadMoreBackwards) {
-        if (!noScroll) {
-          requestParamsRef.current = { ...requestParamsRef.current, direction, offsetId };
-        }
-
+    if (!listIds) {
+      if (loadMoreBackwards) {
         loadMoreBackwards({ offsetId });
       }
-    },
-  );
 
-  return isDisabled ? [listIds] : [currentStateRef.current?.viewportIds, getMore, currentStateRef.current?.offset];
+      return;
+    }
+
+    const { newViewportIds, areSomeLocal, areAllLocal, newIsOnTop, fromOffset } = getViewportSlice(
+      listIds,
+      direction,
+      listSlice,
+      offsetId,
+    );
+
+    if (areSomeLocal && !(viewportIds && areSortedArraysEqual(viewportIds, newViewportIds))) {
+      currentStateRef = { viewportIds: newViewportIds, isOnTop: newIsOnTop, offset: fromOffset };
+      forceUpdate();
+    }
+
+    if (!areAllLocal && loadMoreBackwards) {
+      if (!noScroll) {
+        requestParamsRef = { ...requestParamsRef, direction, offsetId };
+      }
+
+      loadMoreBackwards({ offsetId });
+    }
+  };
+
+  return isDisabled ? [listIds] : [currentStateRef?.viewportIds, getMore, currentStateRef?.offset];
 };
 
 function getViewportSlice<ListId extends string | number>(

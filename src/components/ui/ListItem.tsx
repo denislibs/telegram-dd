@@ -1,9 +1,9 @@
-import type { ElementRef, TeactNode } from '../../lib/teact/teact';
-import { useRef } from '../../lib/teact/teact';
+import { createMemo, requestMeasure } from 'frameact';
+import { For } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import type { IconName } from '../../types/icons';
 
-import { requestMeasure } from '../../lib/fasterdom/fasterdom';
 import { IS_TOUCH_ENV, MouseButton } from '../../util/browser/windowEnvironment';
 import buildClassName from '../../util/buildClassName';
 import renderText from '../common/helpers/renderText';
@@ -13,7 +13,6 @@ import { useFastClick } from '../../hooks/useFastClick';
 import { useFileHoverOpenHandler } from '../../hooks/useFileHoverOpen';
 import useFlag from '../../hooks/useFlag';
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
 
 import Icon from '../common/icons/Icon';
 import IconBackdrop, { type IconBackdropColor } from '../gili/primitives/IconBackdrop';
@@ -40,15 +39,15 @@ type MenuItemContextActionSeparator = {
 export type MenuItemContextAction = MenuItemContextActionItem | MenuItemContextActionSeparator;
 
 interface OwnProps {
-  ref?: ElementRef<HTMLDivElement>;
-  buttonRef?: ElementRef<HTMLDivElement | HTMLAnchorElement>;
+  ref?: (el: HTMLDivElement) => void;
+  buttonRef?: (el: HTMLDivElement | HTMLAnchorElement) => void;
   icon?: IconName;
   iconClassName?: string;
   iconBg?: IconBackdropColor;
-  leftElement?: TeactNode;
+  leftElement?: JSX.Element;
   secondaryIcon?: IconName;
   secondaryIconClassName?: string;
-  rightElement?: TeactNode;
+  rightElement?: JSX.Element;
   buttonClassName?: string;
   className?: string;
   style?: string;
@@ -78,229 +77,215 @@ interface OwnProps {
   onFileHoverOpen?: NoneToVoidFunction;
 }
 
-const ListItem = ({
-  ref,
-  buttonRef,
-  icon,
-  iconClassName,
-  iconBg,
-  leftElement,
-  buttonClassName,
-  menuBubbleClassName,
-  secondaryIcon,
-  secondaryIconClassName,
-  rightElement,
-  className,
-  style,
-  children,
-  disabled,
-  allowDisabledClick,
-  ripple,
-  narrow,
-  inactive,
-  focus,
-  destructive,
-  withPrimaryColor,
-  multiline,
-  isStatic,
-  allowSelection,
-  withColorTransition,
-  contextActions,
-  withPortalForMenu,
-  href,
-  nonInteractive,
-  onClick,
-  clickArg,
-  onMouseDown,
-  onContextMenu,
-  onSecondaryIconClick,
-  onFileHoverOpen,
-}: OwnProps) => {
-  let containerRef = useRef<HTMLDivElement>();
-  if (ref) {
-    containerRef = ref;
+const ListItem = (props: OwnProps) => {
+  let containerRef!: HTMLDivElement;
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (props.ref) {
+    // TODO(codemod): "containerRef" was a ref object and is reassigned here (a forwarded ref?): use a callback ref
+    containerRef = props.ref;
   }
-  const menuRef = useRef<HTMLDivElement>();
+  let menuRef!: HTMLDivElement;
   const [isTouched, markIsTouched, unmarkIsTouched] = useFlag();
-  const handleFileHoverOpen = useFileHoverOpenHandler(onFileHoverOpen);
+  const handleFileHoverOpen = useFileHoverOpenHandler(props.onFileHoverOpen);
 
-  const {
-    isContextMenuOpen,
-    contextMenuAnchor,
-    handleBeforeContextMenu,
-    handleContextMenu,
-    handleContextMenuClose,
-    handleContextMenuHide,
-  } = useContextMenuHandlers(containerRef, !contextActions);
+  const contextMenuHandlersResult = createMemo(() =>
+    useContextMenuHandlers(
+      () => containerRef,
+      () => !props.contextActions,
+    ),
+  );
+  const isContextMenuOpen = () => contextMenuHandlersResult().isContextMenuOpen;
+  const contextMenuAnchor = () => contextMenuHandlersResult().contextMenuAnchor;
+  const handleBeforeContextMenu = () => contextMenuHandlersResult().handleBeforeContextMenu;
+  const handleContextMenu = () => contextMenuHandlersResult().handleContextMenu;
+  const handleContextMenuClose = () => contextMenuHandlersResult().handleContextMenuClose;
+  const handleContextMenuHide = () => contextMenuHandlersResult().handleContextMenuHide;
 
-  const getTriggerElement = useLastCallback(() => containerRef.current);
-  const getRootElement = useLastCallback(() => containerRef.current!.closest('.custom-scroll'));
-  const getMenuElement = useLastCallback(() => menuRef.current);
-  const getLayout = useLastCallback(() => ({ withPortal: withPortalForMenu }));
+  const getTriggerElement = () => containerRef;
+  const getRootElement = () => containerRef!.closest('.custom-scroll');
+  const getMenuElement = () => menuRef;
+  const getLayout = () => ({ withPortal: props.withPortalForMenu });
 
-  const handleClickEvent = useLastCallback((e: React.MouseEvent<HTMLElement, MouseEvent>) => {
+  const handleClickEvent = (e: React.MouseEvent<HTMLElement, MouseEvent>) => {
     const hasModifierKey = e.ctrlKey || e.metaKey || e.shiftKey;
     if (!hasModifierKey && e.button === MouseButton.Main) {
-      if (href && !onClick) return; // Allow default behavior for opening links
+      if (props.href && !props.onClick) return; // Allow default behavior for opening links
       e.preventDefault();
     }
-  });
+  };
 
-  const handleClick = useLastCallback((e: React.MouseEvent<HTMLElement, MouseEvent>) => {
-    if (disabled && !allowDisabledClick) {
+  const handleClick = (e: React.MouseEvent<HTMLElement, MouseEvent>) => {
+    if (props.disabled && !props.allowDisabledClick) {
       return;
     }
 
-    if (href) {
+    if (props.href) {
       // Allow default behavior for opening links in new tab
       const hasModifierKey = e.ctrlKey || e.metaKey || e.shiftKey;
       if ((hasModifierKey && e.button === MouseButton.Main) || e.button === MouseButton.Auxiliary) {
         return;
       }
 
-      if (onClick) e.preventDefault();
+      if (props.onClick) e.preventDefault();
     }
 
-    if (!onClick) return;
+    if (!props.onClick) return;
 
-    onClick(e, clickArg);
+    props.onClick(e, props.clickArg);
 
-    if (IS_TOUCH_ENV && !ripple) {
+    if (IS_TOUCH_ENV && !props.ripple) {
       markIsTouched();
       requestMeasure(unmarkIsTouched);
     }
-  });
+  };
 
-  const { handleClick: handleSecondaryIconClick, handleMouseDown: handleSecondaryIconMouseDown } = useFastClick(
-    (e: React.MouseEvent<HTMLButtonElement>) => {
-      if ((disabled && !allowDisabledClick) || e.button !== 0 || (!onSecondaryIconClick && !contextActions)) return;
+  const fastClickResult = createMemo(() =>
+    useFastClick((e: React.MouseEvent<HTMLButtonElement>) => {
+      if (
+        (props.disabled && !props.allowDisabledClick) ||
+        e.button !== 0 ||
+        (!props.onSecondaryIconClick && !props.contextActions)
+      )
+        return;
 
       e.stopPropagation();
 
-      if (onSecondaryIconClick) {
-        onSecondaryIconClick(e);
+      if (props.onSecondaryIconClick) {
+        props.onSecondaryIconClick(e);
       } else {
-        handleContextMenu(e);
+        handleContextMenu()(e);
       }
-    },
+    }),
   );
+  const handleSecondaryIconClick = () => fastClickResult().handleClick;
+  const handleSecondaryIconMouseDown = () => fastClickResult().handleMouseDown;
 
-  const handleMouseDown = useLastCallback((e: React.MouseEvent<HTMLElement, MouseEvent>) => {
-    if (inactive || IS_TOUCH_ENV) {
+  const handleMouseDown = (e: React.MouseEvent<HTMLElement, MouseEvent>) => {
+    if (props.inactive || IS_TOUCH_ENV) {
       return;
     }
-    if (contextActions && (e.button === MouseButton.Secondary || !onClick)) {
-      handleBeforeContextMenu(e);
+    if (props.contextActions && (e.button === MouseButton.Secondary || !props.onClick)) {
+      handleBeforeContextMenu()(e);
     }
     if (e.button === MouseButton.Main) {
-      if (!onClick) {
-        handleContextMenu(e);
+      if (!props.onClick) {
+        handleContextMenu()(e);
       } else {
         handleClick(e);
       }
     }
-  });
+  };
 
   const lang = useLang();
 
-  const fullClassName = buildClassName(
-    'ListItem',
-    className,
-    allowSelection && 'allow-selection',
-    ripple && 'has-ripple',
-    narrow && 'narrow',
-    disabled && 'disabled',
-    allowDisabledClick && 'click-allowed',
-    inactive && 'inactive',
-    contextMenuAnchor && 'has-menu-open',
-    focus && 'focus',
-    destructive && 'destructive',
-    withPrimaryColor && 'primary',
-    multiline && 'multiline',
-    isStatic && 'is-static',
-    withColorTransition && 'with-color-transition',
+  const fullClassName = createMemo(() =>
+    buildClassName(
+      'ListItem',
+      props.className,
+      props.allowSelection && 'allow-selection',
+      props.ripple && 'has-ripple',
+      props.narrow && 'narrow',
+      props.disabled && 'disabled',
+      props.allowDisabledClick && 'click-allowed',
+      props.inactive && 'inactive',
+      contextMenuAnchor() && 'has-menu-open',
+      props.focus && 'focus',
+      props.destructive && 'destructive',
+      props.withPrimaryColor && 'primary',
+      props.multiline && 'multiline',
+      props.isStatic && 'is-static',
+      props.withColorTransition && 'with-color-transition',
+    ),
   );
 
-  const ButtonElementTag = href ? 'a' : 'div';
+  const ButtonElementTag = createMemo(() => (props.href ? 'a' : 'div'));
 
   return (
     <div
       ref={containerRef}
-      className={fullClassName}
+      class={fullClassName()}
       dir={lang.isRtl ? 'rtl' : undefined}
-      style={style}
-      onMouseDown={onMouseDown}
-      data-file-hover-open={onFileHoverOpen ? true : undefined}
-      onFileHoverOpen={onFileHoverOpen ? handleFileHoverOpen : undefined}
+      style={props.style}
+      onMouseDown={(e) => props.onMouseDown?.(e)}
+      data-file-hover-open={props.onFileHoverOpen ? true : undefined}
+      onFileHoverOpen={props.onFileHoverOpen ? handleFileHoverOpen : undefined}
     >
+      {/* TODO(codemod): <ButtonElementTag> is a reactive value now: render it with <Dynamic component={ButtonElementTag()}> */}
       <ButtonElementTag
-        className={buildClassName('ListItem-button', isTouched && 'active', buttonClassName)}
-        role={!isStatic && !href ? 'button' : undefined}
-        href={href}
+        className={buildClassName('ListItem-button', isTouched() && 'active', props.buttonClassName)}
+        role={!props.isStatic && !props.href ? 'button' : undefined}
+        href={props.href}
         // @ts-expect-error TS requires specific types for refs
-        ref={buttonRef}
-        rel={href ? 'noopener noreferrer' : undefined}
-        tabIndex={!isStatic ? 0 : undefined}
-        onClick={!inactive && IS_TOUCH_ENV ? handleClick : handleClickEvent}
+        ref={props.buttonRef}
+        rel={props.href ? 'noopener noreferrer' : undefined}
+        tabIndex={!props.isStatic ? 0 : undefined}
+        onClick={!props.inactive && IS_TOUCH_ENV ? handleClick : handleClickEvent}
         onMouseDown={handleMouseDown}
-        onContextMenu={onContextMenu || (!inactive && contextActions ? handleContextMenu : undefined)}
-        aria-disabled={disabled || undefined}
+        onContextMenu={
+          props.onContextMenu || (!props.inactive && props.contextActions ? handleContextMenu() : undefined)
+        }
+        aria-disabled={props.disabled || undefined}
       >
-        {!disabled && !inactive && ripple && <RippleEffect />}
-        {leftElement}
-        {icon &&
-          (iconBg ? (
-            <IconBackdrop className={buildClassName('ListItem-main-icon', iconClassName)} color={iconBg} icon={icon} />
+        {!props.disabled && !props.inactive && props.ripple && <RippleEffect />}
+        {props.leftElement}
+        {props.icon &&
+          (props.iconBg ? (
+            <IconBackdrop
+              className={buildClassName('ListItem-main-icon', props.iconClassName)}
+              color={props.iconBg}
+              icon={props.icon}
+            />
           ) : (
-            <Icon name={icon} className={buildClassName('ListItem-main-icon', iconClassName)} />
+            <Icon name={props.icon} className={buildClassName('ListItem-main-icon', props.iconClassName)} />
           ))}
-        {multiline && <div className="multiline-item">{children}</div>}
-        {!multiline && children}
-        {secondaryIcon && (
+        {props.multiline && <div class="multiline-item">{props.children}</div>}
+        {!props.multiline && props.children}
+        {props.secondaryIcon && (
           <Button
-            nonInteractive={nonInteractive}
-            className={buildClassName('secondary-icon', secondaryIconClassName)}
+            nonInteractive={props.nonInteractive}
+            className={buildClassName('secondary-icon', props.secondaryIconClassName)}
             round
             color="translucent"
             size="smaller"
-            onClick={handleSecondaryIconClick}
-            onMouseDown={handleSecondaryIconMouseDown}
-            iconName={secondaryIcon}
+            onClick={handleSecondaryIconClick()}
+            onMouseDown={handleSecondaryIconMouseDown()}
+            iconName={props.secondaryIcon}
           />
         )}
-        {rightElement}
+        {props.rightElement}
       </ButtonElementTag>
-      {contextActions && contextMenuAnchor !== undefined && (
+      {props.contextActions && contextMenuAnchor() !== undefined && (
         <Menu
           ref={menuRef}
-          isOpen={isContextMenuOpen}
-          anchor={contextMenuAnchor}
+          isOpen={isContextMenuOpen()}
+          anchor={contextMenuAnchor()}
           getTriggerElement={getTriggerElement}
           getRootElement={getRootElement}
           getMenuElement={getMenuElement}
           getLayout={getLayout}
           className="ListItem-context-menu with-menu-transitions"
           autoClose
-          onClose={handleContextMenuClose}
-          onCloseAnimationEnd={handleContextMenuHide}
-          withPortal={withPortalForMenu}
-          bubbleClassName={menuBubbleClassName}
+          onClose={handleContextMenuClose()}
+          onCloseAnimationEnd={handleContextMenuHide()}
+          withPortal={props.withPortalForMenu}
+          bubbleClassName={props.menuBubbleClassName}
         >
-          {contextActions.map((action) =>
-            'isSeparator' in action ? (
-              <MenuSeparator key={action.key || 'separator'} />
-            ) : (
-              <MenuItem
-                key={action.title}
-                icon={action.icon}
-                destructive={action.destructive}
-                disabled={!action.handler}
-                onClick={action.handler}
-              >
-                <span className="list-item-ellipsis">{renderText(action.title)}</span>
-              </MenuItem>
-            ),
-          )}
+          <For each={props.contextActions}>
+            {(action) =>
+              'isSeparator' in action ? (
+                <MenuSeparator />
+              ) : (
+                <MenuItem
+                  icon={action.icon}
+                  destructive={action.destructive}
+                  disabled={!action.handler}
+                  onClick={action.handler}
+                >
+                  <span class="list-item-ellipsis">{renderText(action.title)}</span>
+                </MenuItem>
+              )
+            }
+          </For>
         </Menu>
       )}
     </div>

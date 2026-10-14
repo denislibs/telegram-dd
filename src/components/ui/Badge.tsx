@@ -1,5 +1,3 @@
-import { memo } from '../../lib/teact/teact';
-
 import buildClassName from '../../util/buildClassName';
 
 import AnimatedCounter from '../common/AnimatedCounter';
@@ -13,15 +11,19 @@ type OwnProps = {
   isAlternateColor?: boolean;
 };
 
-const Badge = ({ text, className, isAlternateColor }: OwnProps) => {
+const Badge = (props: OwnProps) => {
   return (
     <ShowTransition
-      className={buildClassName(styles.root, isAlternateColor ? styles.alternate : styles.default, className)}
-      isOpen={Boolean(text)}
+      className={buildClassName(
+        styles.root,
+        props.isAlternateColor ? styles.alternate : styles.default,
+        props.className,
+      )}
+      isOpen={Boolean(props.text)}
     >
-      {text && <AnimatedCounter text={text} />}
+      {props.text && <AnimatedCounter text={props.text} />}
     </ShowTransition>
   );
 };
 
-export default memo(Badge);
+export default Badge;

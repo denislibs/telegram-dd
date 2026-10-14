@@ -1,12 +1,10 @@
-import type { FC } from '../../../lib/teact/teact';
-import { memo, useMemo, useState } from '../../../lib/teact/teact';
+import { createMemo, createSignal } from 'frameact';
 import { getActions } from '../../../global';
 
 import type { ApiAttachBot } from '../../../api/types';
 import type { IAnchorPosition, ThemeKey, ThreadId } from '../../../types';
 
 import useFlag from '../../../hooks/useFlag';
-import useLastCallback from '../../../hooks/useLastCallback';
 import useOldLang from '../../../hooks/useOldLang';
 
 import Menu from '../../ui/Menu';
@@ -24,81 +22,73 @@ type OwnProps = {
   onMenuClosed: VoidFunction;
 };
 
-const AttachBotItem: FC<OwnProps> = ({
-  bot,
-  theme,
-  chatId,
-  threadId,
-  isInSideMenu,
-  canShowNew,
-  onMenuOpened,
-  onMenuClosed,
-}) => {
+const AttachBotItem = (props: OwnProps) => {
   const { callAttachBot, toggleAttachBot } = getActions();
 
   const lang = useOldLang();
 
-  const icon = useMemo(() => {
-    return bot.icons.find(({ name }) => name === 'default_static')?.document;
-  }, [bot.icons]);
+  const icon = createMemo(() => {
+    return props.bot.icons.find(({ name }) => name === 'default_static')?.document;
+  });
 
   const [isMenuOpen, openMenu, closeMenu] = useFlag();
-  const [menuPosition, setMenuPosition] = useState<IAnchorPosition | undefined>(undefined);
+  const [menuPosition, setMenuPosition] = createSignal<IAnchorPosition | undefined>(undefined);
 
-  const handleContextMenu = useLastCallback((e: React.UIEvent) => {
+  const handleContextMenu = (e: React.UIEvent) => {
     e.preventDefault();
     const rect = e.currentTarget.getBoundingClientRect();
     setMenuPosition({ x: rect.right, y: rect.bottom });
-    onMenuOpened();
+    props.onMenuOpened();
     openMenu();
-  });
+  };
 
-  const handleClick = useLastCallback(() => {
-    if (isInSideMenu) {
+  const handleClick = () => {
+    if (props.isInSideMenu) {
       callAttachBot({
-        bot,
+        bot: props.bot,
         isFromSideMenu: true,
       });
     } else {
       callAttachBot({
-        bot,
-        chatId: chatId!,
-        threadId,
+        bot: props.bot,
+        chatId: props.chatId!,
+        threadId: props.threadId,
       });
     }
-  });
+  };
 
-  const handleCloseMenu = useLastCallback(() => {
+  const handleCloseMenu = () => {
     closeMenu();
-    onMenuClosed();
-  });
+    props.onMenuClosed();
+  };
 
-  const handleCloseAnimationEnd = useLastCallback(() => {
+  const handleCloseAnimationEnd = () => {
     setMenuPosition(undefined);
-  });
+  };
 
-  const handleRemoveBot = useLastCallback(() => {
+  const handleRemoveBot = () => {
     toggleAttachBot({
-      botId: bot.id,
+      botId: props.bot.id,
       isEnabled: false,
     });
-  });
+  };
 
   return (
+    // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show>
     <MenuItem
-      key={bot.id}
-      customIcon={icon && <AttachBotIcon icon={icon} theme={theme} />}
-      icon={!icon ? 'bots' : undefined}
+      key={props.bot.id}
+      customIcon={icon() && <AttachBotIcon icon={icon()} theme={props.theme} />}
+      icon={!icon() ? 'bots' : undefined}
       onClick={handleClick}
       onContextMenu={handleContextMenu}
     >
-      {bot.shortName}
-      {canShowNew && bot.isDisclaimerNeeded && <span className="menu-item-badge">{lang('New')}</span>}
-      {menuPosition && (
+      {props.bot.shortName}
+      {props.canShowNew && props.bot.isDisclaimerNeeded && <span class="menu-item-badge">{lang('New')}</span>}
+      {menuPosition() && (
         <Menu
-          isOpen={isMenuOpen}
+          isOpen={isMenuOpen()}
           positionX="right"
-          style={`left: ${menuPosition.x}px;top: ${menuPosition.y}px;`}
+          style={`left: ${menuPosition().x}px;top: ${menuPosition().y}px;`}
           className="bot-attach-context-menu"
           autoClose
           withPortal
@@ -114,4 +104,4 @@ const AttachBotItem: FC<OwnProps> = ({
   );
 };
 
-export default memo(AttachBotItem);
+export default AttachBotItem;

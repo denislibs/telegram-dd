@@ -1,8 +1,7 @@
-import { memo, useMemo } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
 import { getActions } from '../../global';
 
 import type { ApiPeer } from '../../api/types';
-import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 import type { CustomPeer } from '../../types';
 
 import { EMOJI_STATUS_LOOP_LIMIT } from '../../config';
@@ -21,7 +20,6 @@ import stopEvent from '../../util/stopEvent';
 import renderText from './helpers/renderText';
 
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
 import useOldLang from '../../hooks/useOldLang';
 
 import Marquee from '../ui/Marquee';
@@ -56,141 +54,130 @@ type OwnProps = {
   observeIntersection?: ObserveFn;
 };
 
-const FullNameTitle = ({
-  className,
-  style,
-  isScrolling,
-  isScrollingPaused,
-  peer,
-  noVerified,
-  noFake,
-  withEmojiStatus,
-  emojiStatusSize,
-  isSavedMessages,
-  isSavedDialog,
-  noLoopLimit,
-  canCopyTitle,
-  iconElement,
-  isMonoforum,
-  monoforumBadgeClassName,
-  withStatusTextColor,
-  onEmojiStatusClick,
-  observeIntersection,
-}: OwnProps) => {
+const FullNameTitle = (props: OwnProps) => {
   const { showNotification } = getActions();
 
   const oldLang = useOldLang();
   const lang = useLang();
 
-  const realPeer = 'id' in peer ? peer : undefined;
-  const customPeer = 'isCustomPeer' in peer ? peer : undefined;
-  const isUser = realPeer && isApiPeerUser(realPeer);
-  const title = realPeer && (isUser ? getUserFullName(realPeer) : getChatTitle(oldLang, realPeer));
-  const isPremium = (isUser && realPeer.isPremium) || customPeer?.isPremium;
-  const canShowEmojiStatus = withEmojiStatus && !isSavedMessages;
-  const emojiStatus =
-    realPeer?.emojiStatus ||
-    (customPeer?.emojiStatusId ? { type: 'regular', documentId: customPeer.emojiStatusId } : undefined);
+  const realPeer = createMemo(() => ('id' in props.peer ? props.peer : undefined));
+  const customPeer = createMemo(() => ('isCustomPeer' in props.peer ? props.peer : undefined));
+  const isUser = createMemo(() => realPeer() && isApiPeerUser(realPeer()));
+  const title = createMemo(
+    () => realPeer() && (isUser() ? getUserFullName(realPeer()) : getChatTitle(oldLang, realPeer())),
+  );
+  const isPremium = createMemo(() => (isUser() && realPeer().isPremium) || customPeer()?.isPremium);
+  const canShowEmojiStatus = createMemo(() => props.withEmojiStatus && !props.isSavedMessages);
+  const emojiStatus = createMemo(
+    () =>
+      realPeer()?.emojiStatus ||
+      (customPeer()?.emojiStatusId ? { type: 'regular', documentId: customPeer().emojiStatusId } : undefined),
+  );
 
-  const handleTitleClick = useLastCallback((e) => {
-    if (!title || !canCopyTitle) {
+  const handleTitleClick = (e) => {
+    if (!title() || !props.canCopyTitle) {
       return;
     }
 
     stopEvent(e);
-    copyTextToClipboard(title);
-    showNotification({ message: `${isUser ? 'User' : 'Chat'} name was copied` });
-  });
+    copyTextToClipboard(title());
+    showNotification({ message: `${isUser() ? 'User' : 'Chat'} name was copied` });
+  };
 
-  const specialTitle = useMemo(() => {
-    if (customPeer) {
-      return renderText(customPeer.title || oldLang(customPeer.titleKey!));
+  const specialTitle = createMemo(() => {
+    if (customPeer()) {
+      return renderText(customPeer().title || oldLang(customPeer().titleKey!));
     }
 
-    if (isSavedMessages) {
-      return oldLang(isSavedDialog ? 'MyNotes' : 'SavedMessages');
+    if (props.isSavedMessages) {
+      return oldLang(props.isSavedDialog ? 'MyNotes' : 'SavedMessages');
     }
 
-    if (isAnonymousForwardsChat(realPeer!.id)) {
+    if (isAnonymousForwardsChat(realPeer()!.id)) {
       return oldLang('AnonymousForward');
     }
 
-    if (isChatWithRepliesBot(realPeer!.id)) {
+    if (isChatWithRepliesBot(realPeer()!.id)) {
       return oldLang('RepliesTitle');
     }
 
-    if (isChatWithVerificationCodesBot(realPeer!.id)) {
+    if (isChatWithVerificationCodesBot(realPeer()!.id)) {
       return oldLang('VerifyCodesNotifications');
     }
 
     return undefined;
-  }, [customPeer, isSavedDialog, isSavedMessages, oldLang, realPeer]);
-  const botVerificationIconId = !isSavedMessages && !isSavedDialog ? realPeer?.botVerificationIconId : undefined;
-  const renderedTitle = useMemo(() => specialTitle || renderText(title || ''), [specialTitle, title]);
+  });
+  const botVerificationIconId = createMemo(() =>
+    !props.isSavedMessages && !props.isSavedDialog ? realPeer()?.botVerificationIconId : undefined,
+  );
+  const renderedTitle = createMemo(() => specialTitle() || renderText(title() || ''));
 
   return (
     <div
-      className={buildClassName('title', styles.root, className)}
-      style={buildStyle(emojiStatusSize ? `--_status-size: ${emojiStatusSize}px` : undefined, style)}
+      class={buildClassName('title', styles.root, props.className)}
+      style={buildStyle(props.emojiStatusSize ? `--_status-size: ${props.emojiStatusSize}px` : undefined, props.style)}
     >
-      {botVerificationIconId && (
+      {botVerificationIconId() && (
         <CustomEmoji
-          documentId={botVerificationIconId}
-          size={emojiStatusSize}
-          loopLimit={!noLoopLimit ? EMOJI_STATUS_LOOP_LIMIT : undefined}
-          observeIntersectionForLoading={observeIntersection}
+          documentId={botVerificationIconId()}
+          size={props.emojiStatusSize}
+          loopLimit={!props.noLoopLimit ? EMOJI_STATUS_LOOP_LIMIT : undefined}
+          observeIntersectionForLoading={props.observeIntersection}
         />
       )}
       <h3
         dir="auto"
         role="button"
-        className={buildClassName('fullName', styles.fullName, canCopyTitle && styles.canCopy)}
+        class={buildClassName('fullName', styles.fullName, props.canCopyTitle && styles.canCopy)}
         onClick={handleTitleClick}
       >
-        {isScrolling ? <Marquee paused={isScrollingPaused}>{renderedTitle}</Marquee> : renderedTitle}
+        {props.isScrolling ? <Marquee paused={props.isScrollingPaused}>{renderedTitle()}</Marquee> : renderedTitle()}
       </h3>
-      {!iconElement && peer && (
+      {!props.iconElement && props.peer && (
         <>
-          {!noVerified && peer?.isVerified && <VerifiedIcon />}
-          {!noFake && peer?.fakeType && <FakeIcon fakeType={peer.fakeType} />}
-          {canShowEmojiStatus && emojiStatus && (
+          {!props.noVerified && props.peer?.isVerified && <VerifiedIcon />}
+          {!props.noFake && props.peer?.fakeType && <FakeIcon fakeType={props.peer.fakeType} />}
+          {canShowEmojiStatus() && emojiStatus() && (
+            // TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6)
             <Transition
               className={styles.statusTransition}
               slideClassName={styles.statusTransitionSlide}
-              activeKey={Number(emojiStatus.documentId)}
+              activeKey={Number(emojiStatus().documentId)}
               name="slideFade"
               direction={-1}
               shouldCleanup
             >
               <GiftEffectWrapper
-                withSparkles={emojiStatus.type === 'collectible'}
+                withSparkles={emojiStatus().type === 'collectible'}
                 sparklesClassName="statusSparkles"
                 sparklesColor={
-                  emojiStatus.type === 'collectible' && !withStatusTextColor ? emojiStatus.textColor : undefined
+                  emojiStatus().type === 'collectible' && !props.withStatusTextColor
+                    ? emojiStatus().textColor
+                    : undefined
                 }
               >
                 <CustomEmoji
-                  className={buildClassName('no-selection', !withStatusTextColor && styles.statusPrimaryColor)}
-                  documentId={emojiStatus.documentId}
-                  size={emojiStatusSize}
-                  loopLimit={!noLoopLimit ? EMOJI_STATUS_LOOP_LIMIT : undefined}
-                  observeIntersectionForLoading={observeIntersection}
-                  onClick={onEmojiStatusClick}
+                  className={buildClassName('no-selection', !props.withStatusTextColor && styles.statusPrimaryColor)}
+                  documentId={emojiStatus().documentId}
+                  size={props.emojiStatusSize}
+                  loopLimit={!props.noLoopLimit ? EMOJI_STATUS_LOOP_LIMIT : undefined}
+                  observeIntersectionForLoading={props.observeIntersection}
+                  onClick={props.onEmojiStatusClick}
                 />
               </GiftEffectWrapper>
             </Transition>
           )}
-          {canShowEmojiStatus && !emojiStatus && isPremium && <StarIcon />}
-          {isMonoforum && (
-            <div className={buildClassName(styles.monoforumBadge, monoforumBadgeClassName)}>
+          {canShowEmojiStatus() && !emojiStatus() && isPremium() && <StarIcon />}
+          {props.isMonoforum && (
+            <div class={buildClassName(styles.monoforumBadge, props.monoforumBadgeClassName)}>
               {lang('MonoforumBadge')}
             </div>
           )}
         </>
       )}
-      {iconElement}
+      {props.iconElement}
     </div>
   );
 };
 
-export default memo(FullNameTitle);
+export default FullNameTitle;

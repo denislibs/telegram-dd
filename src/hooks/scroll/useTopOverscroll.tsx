@@ -1,6 +1,6 @@
-import { type ElementRef, useEffect, useRef, useSignal } from '@teact';
+import { createEffect, createSignal, requestMutation } from 'frameact';
+import { depsOf } from '../../util/effectDeps';
 
-import { requestMutation } from '../../lib/fasterdom/fasterdom';
 import stopEvent from '../../util/stopEvent';
 import useEffectWithPrevDeps from '../useEffectWithPrevDeps';
 import useLastCallback from '../useLastCallback';
@@ -31,6 +31,7 @@ const initialActiveScrollContext: ActiveScrollContext = {
   timeout: undefined,
 };
 
+// TODO(codemod): useTopOverscroll: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useTopOverscroll({
   containerRef,
   isOverscrolled,
@@ -38,39 +39,39 @@ export default function useTopOverscroll({
   onOverscroll,
   onReset,
 }: {
-  containerRef: ElementRef<HTMLDivElement>;
+  containerRef: (el: HTMLDivElement) => void;
   isOverscrolled?: boolean;
   onOverscroll?: AnyToVoidFunction;
   onReset?: AnyToVoidFunction;
   isDisabled?: boolean;
 }) {
-  const [getState, setState] = useSignal<State>('normal');
-  const activeScrollRef = useRef<ActiveScrollContext>({ ...initialActiveScrollContext });
-  const transitionTimeoutRef = useRef<number | undefined>();
-  const touchStartYRef = useRef<number | undefined>();
+  const [getState, setState] = createSignal<State>('normal');
+  let activeScrollRef: ActiveScrollContext = { ...initialActiveScrollContext };
+  let transitionTimeoutRef: number | undefined;
+  let touchStartYRef: number | undefined;
 
-  const triggerOverscroll = useLastCallback(() => {
-    clearTimeout(transitionTimeoutRef.current);
+  const triggerOverscroll = () => {
+    clearTimeout(transitionTimeoutRef);
     setState('overscroll');
     onOverscroll?.();
-  });
+  };
 
-  const triggerReset = useLastCallback(() => {
+  const triggerReset = () => {
     setState('animating');
-    transitionTimeoutRef.current = window.setTimeout(() => {
+    transitionTimeoutRef = window.setTimeout(() => {
       setState('normal');
     }, TRANSITION_DURATION);
     onReset?.();
-  });
+  };
 
-  const scheduleResetActiveScroll = useLastCallback((timeout: number) => {
-    clearTimeout(activeScrollRef.current.timeout);
-    activeScrollRef.current.timeout = window.setTimeout(() => {
-      activeScrollRef.current = { ...initialActiveScrollContext };
+  const scheduleResetActiveScroll = (timeout: number) => {
+    clearTimeout(activeScrollRef.timeout);
+    activeScrollRef.timeout = window.setTimeout(() => {
+      activeScrollRef = { ...initialActiveScrollContext };
     }, timeout);
-  });
+  };
 
-  const handleWheel = useLastCallback((e: WheelEvent) => {
+  const handleWheel = (e: WheelEvent) => {
     const container = containerRef.current;
     if (!container || e.defaultPrevented) {
       return;
@@ -78,9 +79,9 @@ export default function useTopOverscroll({
 
     const { deltaY } = e;
     const { scrollTop } = container;
-    const state = getState();
+    const state = getState()();
 
-    const activeScroll = activeScrollRef.current;
+    const activeScroll = activeScrollRef;
     const lastAverageDelta = activeScroll.lastAverageDelta;
 
     const isStarting =
@@ -91,14 +92,14 @@ export default function useTopOverscroll({
       activeScroll.resetStartTopAt = undefined;
     }
 
-    const lastDeltas = activeScrollRef.current.lastDeltas.slice(); // Copy
+    const lastDeltas = activeScrollRef.lastDeltas.slice(); // Copy
     lastDeltas.push(deltaY);
     if (lastDeltas.length > LAST_DELTA_COUNT) {
       lastDeltas.shift();
     }
-    activeScrollRef.current.lastDeltas = lastDeltas;
+    activeScrollRef.lastDeltas = lastDeltas;
     const currentAverageDelta = lastDeltas.reduce((a, b) => a + b, 0) / lastDeltas.length;
-    activeScrollRef.current.lastAverageDelta = currentAverageDelta;
+    activeScrollRef.lastAverageDelta = currentAverageDelta;
 
     const isNewInput = Math.abs(currentAverageDelta) - Math.abs(lastAverageDelta) > NEW_INPUT_DELTA_THRESHOLD;
 
@@ -130,28 +131,28 @@ export default function useTopOverscroll({
       stopEvent(e);
       return;
     }
-  });
+  };
 
-  const handleTouchStart = useLastCallback((e: TouchEvent) => {
+  const handleTouchStart = (e: TouchEvent) => {
     const container = containerRef.current;
     if (!container || e.touches.length !== 1) return;
 
     const { scrollTop } = container;
-    const state = getState();
+    const state = getState()();
 
     // Register touch start position when at top or in overscroll state
     if (scrollTop === 0 || state === 'overscroll') {
-      touchStartYRef.current = e.touches[0].clientY;
+      touchStartYRef = e.touches[0].clientY;
     }
-  });
+  };
 
-  const handleTouchMove = useLastCallback((e: TouchEvent) => {
+  const handleTouchMove = (e: TouchEvent) => {
     const container = containerRef.current;
-    const startY = touchStartYRef.current;
+    const startY = touchStartYRef;
     if (!container || startY === undefined || e.touches.length !== 1) return;
 
     const { scrollTop } = container;
-    const state = getState();
+    const state = getState()();
     const currentY = e.touches[0].clientY;
     const deltaY = currentY - startY;
 
@@ -162,83 +163,96 @@ export default function useTopOverscroll({
     // If we're at the top and dragging down by more than trigger distance
     if (scrollTop === 0 && deltaY > DRAG_TRIGGER_DISTANCE && state !== 'overscroll') {
       triggerOverscroll();
-      touchStartYRef.current = undefined; // Reset to prevent multiple triggers
+      touchStartYRef = undefined; // Reset to prevent multiple triggers
       return;
     }
 
     // If we're overscrolled and dragging up by more than trigger distance, reset
     if (state === 'overscroll' && deltaY < -DRAG_TRIGGER_DISTANCE) {
       triggerReset();
-      touchStartYRef.current = undefined; // Reset to prevent multiple triggers
+      touchStartYRef = undefined; // Reset to prevent multiple triggers
       return;
     }
-  });
+  };
 
-  const handleTouchEnd = useLastCallback(() => {
-    touchStartYRef.current = undefined;
-  });
+  const handleTouchEnd = () => {
+    touchStartYRef = undefined;
+  };
 
-  useEffect(() => {
-    const container = containerRef.current;
-    if (isDisabled || !container) return;
-    requestMutation(() => {
-      container.classList.add(OVERSCROLL_CONTAINER_CLASS);
-    });
-
-    return () => {
+  createEffect(
+    depsOf(() => [containerRef, isDisabled]),
+    () => {
+      const container = containerRef.current;
+      if (isDisabled || !container) return;
       requestMutation(() => {
-        container.classList.remove(OVERSCROLL_CONTAINER_CLASS);
+        container.classList.add(OVERSCROLL_CONTAINER_CLASS);
       });
-    };
-  }, [containerRef, isDisabled]);
 
-  useEffect(() => {
-    const container = containerRef.current;
-    if (isDisabled || !container) return;
-    requestMutation(() => {
-      container.classList.toggle(NO_TOUCH_CONTAINER_CLASS, getState() !== 'normal');
-    });
+      return () => {
+        requestMutation(() => {
+          container.classList.remove(OVERSCROLL_CONTAINER_CLASS);
+        });
+      };
+    },
+  );
 
-    return () => {
+  createEffect(
+    depsOf(() => [containerRef, isDisabled, getState()] as const),
+    ([, , getState2]) => {
+      const container = containerRef.current;
+      if (isDisabled || !container) return;
       requestMutation(() => {
-        container.classList.remove(NO_TOUCH_CONTAINER_CLASS);
+        container.classList.toggle(NO_TOUCH_CONTAINER_CLASS, getState2() !== 'normal');
       });
-    };
-  }, [containerRef, isDisabled, getState]);
 
-  useEffectWithPrevDeps(
-    ([prevIsOverscrolled]) => {
+      return () => {
+        requestMutation(() => {
+          container.classList.remove(NO_TOUCH_CONTAINER_CLASS);
+        });
+      };
+    },
+  );
+
+  createEffect(
+    depsOf(() => [isOverscrolled, getState(), setState]),
+    (_deps, prev) => {
+      const [prevIsOverscrolled] = prev ?? [];
       if (prevIsOverscrolled === isOverscrolled) return;
-      if (!isOverscrolled && getState() === 'animating') {
+      if (!isOverscrolled && getState()() === 'animating') {
         return; // We're animating towards this state
       }
 
       setState(isOverscrolled ? 'overscroll' : 'normal');
     },
-    [isOverscrolled, getState, setState],
   );
 
-  useEffect(() => {
-    const container = containerRef.current;
-    if (isDisabled || !container) {
-      return undefined;
-    }
+  createEffect(
+    depsOf(
+      () =>
+        [containerRef, handleWheel, handleTouchStart, handleTouchMove, handleTouchEnd, getState(), isDisabled] as const,
+    ),
+    ([, , , , , getState2]) => {
+      const container = containerRef.current;
+      if (isDisabled || !container) {
+        return undefined;
+      }
 
-    container.addEventListener('wheel', handleWheel, { passive: getState() === 'normal' });
-    container.addEventListener('touchstart', handleTouchStart, { passive: true });
-    container.addEventListener('touchmove', handleTouchMove, { passive: true });
-    container.addEventListener('touchend', handleTouchEnd, { passive: true });
-    container.addEventListener('touchcancel', handleTouchEnd, { passive: true });
+      container.addEventListener('wheel', handleWheel, { passive: getState2() === 'normal' });
+      container.addEventListener('touchstart', handleTouchStart, { passive: true });
+      container.addEventListener('touchmove', handleTouchMove, { passive: true });
+      container.addEventListener('touchend', handleTouchEnd, { passive: true });
+      container.addEventListener('touchcancel', handleTouchEnd, { passive: true });
 
-    return () => {
-      container.removeEventListener('wheel', handleWheel);
-      container.removeEventListener('touchstart', handleTouchStart);
-      container.removeEventListener('touchmove', handleTouchMove);
-      container.removeEventListener('touchend', handleTouchEnd);
-      container.removeEventListener('touchcancel', handleTouchEnd);
+      return () => {
+        container.removeEventListener('wheel', handleWheel);
+        container.removeEventListener('touchstart', handleTouchStart);
+        container.removeEventListener('touchmove', handleTouchMove);
+        container.removeEventListener('touchend', handleTouchEnd);
+        container.removeEventListener('touchcancel', handleTouchEnd);
 
-      const activeScroll = activeScrollRef.current;
-      if (activeScroll?.timeout) clearTimeout(activeScroll.timeout);
-    };
-  }, [containerRef, handleWheel, handleTouchStart, handleTouchMove, handleTouchEnd, getState, isDisabled]);
+        const activeScroll = activeScrollRef;
+        if (activeScroll?.timeout) clearTimeout(activeScroll.timeout);
+      };
+    },
+  );
 }

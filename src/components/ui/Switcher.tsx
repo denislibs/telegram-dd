@@ -1,8 +1,7 @@
-import { memo } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import { mergeProps } from 'frameact/dom';
 
 import buildClassName from '../../util/buildClassName';
-
-import useLastCallback from '../../hooks/useLastCallback';
 
 import './Switcher.scss';
 
@@ -18,32 +17,35 @@ type OwnProps = {
   onCheck?: (isChecked: boolean) => void;
 };
 
-const Switcher = ({ id, name, value, label, checked = false, disabled, inactive, noAnimation, onCheck }: OwnProps) => {
-  const handleChange = useLastCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    onCheck?.(e.currentTarget.checked);
-  });
+const Switcher = (rawProps: OwnProps) => {
+  const props = mergeProps({ checked: false }, rawProps) as OwnProps & Required<Pick<OwnProps, 'checked'>>;
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    props.onCheck?.(e.currentTarget.checked);
+  };
 
-  const className = buildClassName(
-    'Switcher',
-    disabled && 'disabled',
-    inactive && 'inactive',
-    noAnimation && 'no-animation',
+  const className = createMemo(() =>
+    buildClassName(
+      'Switcher',
+      props.disabled && 'disabled',
+      props.inactive && 'inactive',
+      props.noAnimation && 'no-animation',
+    ),
   );
 
   return (
-    <label className={className} title={label}>
+    <label class={className()} title={props.label}>
       <input
         type="checkbox"
-        id={id}
-        name={name}
-        value={value}
-        checked={checked}
-        disabled={disabled}
-        onChange={handleChange}
+        id={props.id}
+        name={props.name}
+        value={props.value}
+        use:checked={() => props.checked}
+        disabled={props.disabled}
+        onInput={handleChange}
       />
-      <span className="widget" />
+      <span class="widget" />
     </label>
   );
 };
 
-export default memo(Switcher);
+export default Switcher;

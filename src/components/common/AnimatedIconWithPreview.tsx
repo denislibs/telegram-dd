@@ -1,4 +1,6 @@
-import { memo, useRef } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import { splitProps } from 'frameact/dom';
+import { createMediaTransition } from '../../lib/kit';
 
 import type { OwnProps as AnimatedIconProps } from './AnimatedIcon';
 
@@ -7,8 +9,6 @@ import buildStyle from '../../util/buildStyle';
 
 import useDynamicColorListener from '../../hooks/stickers/useDynamicColorListener';
 import useFlag from '../../hooks/useFlag';
-import useLastCallback from '../../hooks/useLastCallback';
-import useMediaTransitionDeprecated from '../../hooks/useMediaTransitionDeprecated';
 
 import AnimatedIcon from './AnimatedIcon';
 
@@ -26,64 +26,75 @@ const ANIMATION_DURATION = 300;
 const loadedPreviewUrls = new Set();
 
 function AnimatedIconWithPreview(props: OwnProps) {
-  const { previewUrl, thumbDataUri, className, shouldUseTextColor, noPreviewTransition, ...otherProps } = props;
+  const [, otherProps] = splitProps(props, [
+    'previewUrl',
+    'thumbDataUri',
+    'className',
+    'shouldUseTextColor',
+    'noPreviewTransition',
+    'size',
+  ]);
 
-  const rootRef = useRef<HTMLDivElement>();
-  const customColor = useDynamicColorListener(rootRef, undefined, !shouldUseTextColor);
+  let rootRef!: HTMLDivElement;
+  const customColor = useDynamicColorListener(
+    () => rootRef,
+    undefined,
+    () => !props.shouldUseTextColor,
+  );
 
-  const [isThumbOpen, , unmarkThumbOpen] = useFlag(Boolean(thumbDataUri));
-  const thumbClassNames = useMediaTransitionDeprecated(isThumbOpen);
+  const [isThumbOpen, , unmarkThumbOpen] = useFlag(Boolean(props.thumbDataUri));
+  // TODO(codemod): useMediaTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element
+  const thumbClassNames = createMemo(() => createMediaTransition({ hasMediaData: () => Boolean(isThumbOpen()) }));
 
   const [isPreviewOpen, markPreviewOpen, unmarkPreviewOpen] = useFlag(
-    Boolean(noPreviewTransition) || loadedPreviewUrls.has(previewUrl),
+    Boolean(props.noPreviewTransition) || loadedPreviewUrls.has(props.previewUrl),
   );
-  const previewClassNames = useMediaTransitionDeprecated(isPreviewOpen);
+  // TODO(codemod): useMediaTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element
+  const previewClassNames = createMemo(() => createMediaTransition({ hasMediaData: () => Boolean(isPreviewOpen()) }));
 
   const [isAnimationReady, markAnimationReady] = useFlag(false);
 
-  const handlePreviewLoad = useLastCallback(() => {
+  const handlePreviewLoad = () => {
     markPreviewOpen();
-    loadedPreviewUrls.add(previewUrl);
-  });
+    loadedPreviewUrls.add(props.previewUrl);
+  };
 
-  const handleAnimationReady = useLastCallback(() => {
+  const handleAnimationReady = () => {
     unmarkThumbOpen();
     unmarkPreviewOpen();
     setTimeout(markAnimationReady, ANIMATION_DURATION);
-  });
-
-  const { size } = props;
+  };
 
   return (
     <div
       ref={rootRef}
-      className={buildClassName(className, styles.root)}
-      style={buildStyle(size !== undefined && `width: ${size}px; height: ${size}px;`)}
+      class={buildClassName(props.className, styles.root)}
+      style={buildStyle(props.size !== undefined && `width: ${props.size}px; height: ${props.size}px;`)}
     >
-      {thumbDataUri && !isAnimationReady && (
-        <img src={thumbDataUri} className={buildClassName(styles.preview, thumbClassNames)} draggable={false} />
+      {props.thumbDataUri && !isAnimationReady() && (
+        <img src={props.thumbDataUri} class={buildClassName(styles.preview, thumbClassNames())} draggable={false} />
       )}
-      {previewUrl &&
-        !isAnimationReady &&
-        (shouldUseTextColor ? (
+      {props.previewUrl &&
+        !isAnimationReady() &&
+        (props.shouldUseTextColor ? (
           <div
-            className={buildClassName(styles.preview, styles.textColorPreview)}
-            style={`mask-image: url(${previewUrl})`}
+            class={buildClassName(styles.preview, styles.textColorPreview)}
+            style={`mask-image: url(${props.previewUrl})`}
           />
         ) : (
           <img
-            src={previewUrl}
-            className={buildClassName(styles.preview, !noPreviewTransition && previewClassNames)}
+            src={props.previewUrl}
+            class={buildClassName(styles.preview, !props.noPreviewTransition && previewClassNames())}
             draggable={false}
             onLoad={handlePreviewLoad}
           />
         ))}
       {/* Without a color the sticker canvas would paint the original tgs colors before the filter appears */}
-      {(!shouldUseTextColor || customColor) && (
+      {(!props.shouldUseTextColor || customColor) && (
         <AnimatedIcon {...otherProps} color={customColor} onLoad={handleAnimationReady} />
       )}
     </div>
   );
 }
 
-export default memo(AnimatedIconWithPreview);
+export default AnimatedIconWithPreview;

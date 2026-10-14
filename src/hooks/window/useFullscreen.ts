@@ -1,5 +1,4 @@
-import type { ElementRef } from '../../lib/teact/teact';
-import { useEffect, useLayoutEffect, useState } from '../../lib/teact/teact';
+import { createSignal, onMount } from 'frameact';
 
 import { IS_TAURI } from '../../util/browser/globalEnvironment';
 import { IS_IOS } from '../../util/browser/windowEnvironment';
@@ -9,15 +8,16 @@ type CallbackType = (isPlayed: boolean) => void;
 
 const prop = getBrowserFullscreenElementProp();
 
+// TODO(codemod): useFullscreen: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useFullscreen<T extends HTMLElement>(
-  elRef: ElementRef<T>,
+  elRef: (el: T) => void,
   exitCallback?: CallbackType,
   enterCallback?: CallbackType,
 ): ReturnType {
-  const [isFullscreen, setIsFullscreen] = useState(Boolean(prop && document[prop]));
+  const [isFullscreen, setIsFullscreen] = createSignal(Boolean(prop && document[prop]));
 
   const setFullscreen = () => {
-    if (!elRef.current || !(prop || IS_IOS) || isFullscreen) {
+    if (!elRef.current || !(prop || IS_IOS) || isFullscreen()) {
       return;
     }
     safeRequestFullscreen(elRef.current);
@@ -32,7 +32,7 @@ export default function useFullscreen<T extends HTMLElement>(
     setIsFullscreen(false);
   };
 
-  useLayoutEffect(() => {
+  onMount(() => {
     const element = elRef.current;
     const listener = () => {
       const isEnabled = Boolean(prop && document[prop]);
@@ -75,7 +75,7 @@ export default function useFullscreen<T extends HTMLElement>(
       }
     };
     // eslint-disable-next-line
-  }, []);
+  });
 
   if (!prop && !IS_IOS) {
     return [false];
@@ -85,9 +85,9 @@ export default function useFullscreen<T extends HTMLElement>(
 }
 
 export const useFullscreenStatus = () => {
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = createSignal(false);
 
-  useEffect(() => {
+  onMount(() => {
     const listener = () => {
       setIsFullscreen(checkIfFullscreen());
     };
@@ -118,7 +118,7 @@ export const useFullscreenStatus = () => {
       document.removeEventListener('webkitfullscreenchange', listener, false);
       document.removeEventListener('mozfullscreenchange', listener, false);
     };
-  }, []);
+  });
 
   return isFullscreen;
 };

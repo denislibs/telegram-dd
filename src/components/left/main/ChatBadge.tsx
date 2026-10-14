@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo } from '../../../lib/teact/teact';
+import { createMemo } from 'frameact';
 import { getActions } from '../../../global';
 
 import type { GlobalState } from '../../../global/types';
@@ -15,9 +15,7 @@ import { formatIntegerCompact } from '../../../util/textFormat';
 import { extractCurrentThemeParams } from '../../../util/themeStyle';
 
 import useSelector, { useShallowSelector } from '../../../hooks/data/useSelector';
-import useDerivedState from '../../../hooks/useDerivedState';
 import useLang from '../../../hooks/useLang';
-import useLastCallback from '../../../hooks/useLastCallback';
 import useShowTransitionSwap from '../../../hooks/useShowTransitionSwap';
 
 import AnimatedCounter from '../../common/AnimatedCounter';
@@ -45,211 +43,193 @@ type OwnProps = {
   badgeClassName?: string;
 };
 
-const ChatBadge = ({
-  topic,
-  chat,
-  isPinned,
-  isMuted,
-  shouldShowOnlyMostImportant,
-  wasTopicOpened,
-  forceHidden,
-  forceUnreadCount,
-  isSavedDialog,
-  hasMiniApp,
-  isSelected,
-  isOnAvatar,
-  transitionClassName,
-  badgeClassName,
-}: OwnProps) => {
+const ChatBadge = (props: OwnProps) => {
   const { requestMainWebView } = getActions();
 
   const lang = useLang();
 
-  const readStateSelector = useCallback(
-    (global: GlobalState) => {
-      return selectThreadReadState(global, chat.id, topic?.id || MAIN_THREAD_ID);
-    },
-    [chat.id, topic?.id],
-  );
+  const readStateSelector = (global: GlobalState) => {
+    return selectThreadReadState(global, props.chat.id, props.topic?.id || MAIN_THREAD_ID);
+  };
 
   const readState = useSelector(readStateSelector);
 
-  const {
-    unreadMentionsCount: stateUnreadMentionsCount = 0,
-    unreadPollVotesCount: stateUnreadPollVotesCount = 0,
-    unreadReactionsCount: stateUnreadReactionsCount = 0,
-    unreadCount: stateUnreadCount = 0,
-    hasUnreadMark,
-  } = readState || {};
+  const source = createMemo(() => readState() || {});
+  const stateUnreadMentionsCount = () =>
+    source().unreadMentionsCount === undefined ? 0 : source().unreadMentionsCount;
+  const stateUnreadPollVotesCount = () =>
+    source().unreadPollVotesCount === undefined ? 0 : source().unreadPollVotesCount;
+  const stateUnreadReactionsCount = () =>
+    source().unreadReactionsCount === undefined ? 0 : source().unreadReactionsCount;
+  const stateUnreadCount = () => (source().unreadCount === undefined ? 0 : source().unreadCount);
+  const hasUnreadMark = () => source().hasUnreadMark;
 
-  const topicsInfoSelector = useCallback(
-    (global: GlobalState) => {
-      return selectTopicsInfo(global, chat.id);
-    },
-    [chat.id],
-  );
+  const topicsInfoSelector = (global: GlobalState) => {
+    return selectTopicsInfo(global, props.chat.id);
+  };
   const topicsInfo = useShallowSelector(topicsInfoSelector);
-  const { listedTopicIds, topicsById } = topicsInfo || {};
+  const source2 = createMemo(() => topicsInfo() || {});
+  const listedTopicIds = () => source2().listedTopicIds;
+  const topicsById = () => source2().topicsById;
 
-  const topicsReadStateSelector = useCallback(
-    (global: GlobalState) => {
-      return buildCollectionByCallback(listedTopicIds || [], (tId) => [
-        tId,
-        selectThreadReadState(global, chat.id, tId),
-      ]);
-    },
-    [chat.id, listedTopicIds],
-  );
+  const topicsReadStateSelector = (global: GlobalState) => {
+    return buildCollectionByCallback(listedTopicIds() || [], (tId) => [
+      tId,
+      selectThreadReadState(global, props.chat.id, tId),
+    ]);
+  };
   const topicsReadStates = useShallowSelector(topicsReadStateSelector);
 
-  const isTopicUnopened = !isPinned && topic && !wasTopicOpened;
-  const isForum = chat.isForum && !topic;
-  const topicsWithUnreadIds = useMemo(
-    () => (isForum && listedTopicIds ? listedTopicIds.filter((tId) => topicsReadStates[tId]?.unreadCount) : undefined),
-    [listedTopicIds, isForum, topicsReadStates],
+  const isTopicUnopened = createMemo(() => !props.isPinned && props.topic && !props.wasTopicOpened);
+  const isForum = createMemo(() => props.chat.isForum && !props.topic);
+  const topicsWithUnreadIds = createMemo(() =>
+    isForum() && listedTopicIds() ? listedTopicIds().filter((tId) => topicsReadStates()[tId]?.unreadCount) : undefined,
   );
-  const topicsWithUnreadMentionsIds = useMemo(
-    () =>
-      isForum && listedTopicIds
-        ? listedTopicIds.filter((tId) => topicsReadStates[tId]?.unreadMentionsCount)
-        : undefined,
-    [listedTopicIds, isForum, topicsReadStates],
+  const topicsWithUnreadMentionsIds = createMemo(() =>
+    isForum() && listedTopicIds()
+      ? listedTopicIds().filter((tId) => topicsReadStates()[tId]?.unreadMentionsCount)
+      : undefined,
   );
-  const topicsWithUnreadPollVotesIds = useMemo(
-    () =>
-      isForum && listedTopicIds
-        ? listedTopicIds.filter((tId) => topicsReadStates[tId]?.unreadPollVotesCount)
-        : undefined,
-    [listedTopicIds, isForum, topicsReadStates],
+  const topicsWithUnreadPollVotesIds = createMemo(() =>
+    isForum() && listedTopicIds()
+      ? listedTopicIds().filter((tId) => topicsReadStates()[tId]?.unreadPollVotesCount)
+      : undefined,
   );
-  const topicsWithUnreadReactionsIds = useMemo(
-    () =>
-      isForum && listedTopicIds
-        ? listedTopicIds.filter((tId) => topicsReadStates[tId]?.unreadReactionsCount)
-        : undefined,
-    [listedTopicIds, isForum, topicsReadStates],
+  const topicsWithUnreadReactionsIds = createMemo(() =>
+    isForum() && listedTopicIds()
+      ? listedTopicIds().filter((tId) => topicsReadStates()[tId]?.unreadReactionsCount)
+      : undefined,
   );
-  const topicsWithStatefulUnreadIds = useMemo(() => {
-    if (!isForum) {
+  const topicsWithStatefulUnreadIds = createMemo(() => {
+    if (!isForum()) {
       return undefined;
     }
 
     const allTopicIds = [
-      ...(topicsWithUnreadIds || []),
-      ...(topicsWithUnreadPollVotesIds || []),
-      ...(topicsWithUnreadReactionsIds || []),
+      ...(topicsWithUnreadIds() || []),
+      ...(topicsWithUnreadPollVotesIds() || []),
+      ...(topicsWithUnreadReactionsIds() || []),
     ];
 
     return allTopicIds.length ? [...new Set(allTopicIds)] : [];
-  }, [isForum, topicsWithUnreadIds, topicsWithUnreadPollVotesIds, topicsWithUnreadReactionsIds]);
+  });
 
-  const unreadCount = forceUnreadCount ?? (isForum ? topicsWithUnreadIds?.length : stateUnreadCount);
-  const unreadMentionsCount = isForum ? topicsWithUnreadMentionsIds?.length : stateUnreadMentionsCount;
-  const unreadPollVotesCount = isForum ? topicsWithUnreadPollVotesIds?.length : stateUnreadPollVotesCount;
-  const unreadReactionsCount = isForum ? topicsWithUnreadReactionsIds?.length : stateUnreadReactionsCount;
+  const unreadCount = createMemo(
+    () => props.forceUnreadCount ?? (isForum() ? topicsWithUnreadIds()?.length : stateUnreadCount()),
+  );
+  const unreadMentionsCount = createMemo(() =>
+    isForum() ? topicsWithUnreadMentionsIds()?.length : stateUnreadMentionsCount(),
+  );
+  const unreadPollVotesCount = createMemo(() =>
+    isForum() ? topicsWithUnreadPollVotesIds()?.length : stateUnreadPollVotesCount(),
+  );
+  const unreadReactionsCount = createMemo(() =>
+    isForum() ? topicsWithUnreadReactionsIds()?.length : stateUnreadReactionsCount(),
+  );
 
-  const shouldBeUnMuted = useMemo(() => {
-    if (!isForum) {
-      return !isMuted || topic?.notifySettings.mutedUntil === 0;
+  const shouldBeUnMuted = createMemo(() => {
+    if (!isForum()) {
+      return !props.isMuted || props.topic?.notifySettings.mutedUntil === 0;
     }
 
-    if (!topicsWithStatefulUnreadIds?.length) {
-      return !isMuted;
+    if (!topicsWithStatefulUnreadIds()?.length) {
+      return !props.isMuted;
     }
 
-    if (isMuted) {
-      return topicsWithStatefulUnreadIds.some((tId) => topicsById?.[tId]?.notifySettings.mutedUntil === 0);
+    if (props.isMuted) {
+      return topicsWithStatefulUnreadIds().some((tId) => topicsById()?.[tId]?.notifySettings.mutedUntil === 0);
     }
 
-    const isEveryUnreadMuted = topicsWithStatefulUnreadIds.every((tId) => {
-      const mutedUntil = topicsById?.[tId]?.notifySettings.mutedUntil;
+    const isEveryUnreadMuted = topicsWithStatefulUnreadIds().every((tId) => {
+      const mutedUntil = topicsById()?.[tId]?.notifySettings.mutedUntil;
       return mutedUntil && mutedUntil > getServerTime();
     });
 
     return !isEveryUnreadMuted;
-  }, [isForum, isMuted, topicsById, topic?.notifySettings.mutedUntil, topicsWithStatefulUnreadIds]);
+  });
 
-  const isUnread = Boolean((unreadCount || hasUnreadMark) && !isSavedDialog);
+  const isUnread = createMemo(() => Boolean((unreadCount() || hasUnreadMark()) && !props.isSavedDialog));
 
-  const resolvedForceHidden = useDerivedState(
-    () => (isSignal(forceHidden) ? forceHidden() : forceHidden),
-    [forceHidden],
+  const resolvedForceHidden = createMemo(() => (isSignal(props.forceHidden) ? props.forceHidden() : props.forceHidden));
+  const isShown = createMemo(
+    () =>
+      !resolvedForceHidden() &&
+      Boolean(
+        unreadCount() ||
+        unreadMentionsCount() ||
+        unreadPollVotesCount() ||
+        hasUnreadMark() ||
+        props.isPinned ||
+        unreadReactionsCount() ||
+        isTopicUnopened() ||
+        props.hasMiniApp,
+      ),
   );
-  const isShown =
-    !resolvedForceHidden &&
-    Boolean(
-      unreadCount ||
-      unreadMentionsCount ||
-      unreadPollVotesCount ||
-      hasUnreadMark ||
-      isPinned ||
-      unreadReactionsCount ||
-      isTopicUnopened ||
-      hasMiniApp,
-    );
 
-  const contentCategory =
-    isUnread || unreadMentionsCount || unreadReactionsCount || unreadPollVotesCount || isTopicUnopened
+  const contentCategory = createMemo(() =>
+    isUnread() || unreadMentionsCount() || unreadReactionsCount() || unreadPollVotesCount() || isTopicUnopened()
       ? 'active'
-      : hasMiniApp
+      : props.hasMiniApp
         ? 'miniapp'
-        : isPinned
+        : props.isPinned
           ? 'pinned'
-          : 'none';
-  const effectiveIsOpen = useShowTransitionSwap(isShown, contentCategory);
+          : 'none',
+  );
+  // TODO(codemod): useShowTransitionSwap: build on createShowTransition
+  const effectiveIsOpen = useShowTransitionSwap(isShown(), contentCategory());
 
-  const handleOpenApp = useLastCallback((e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
+  const handleOpenApp = (e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
     e.stopPropagation();
 
     const theme = extractCurrentThemeParams();
     requestMainWebView({
-      botId: chat.id,
-      peerId: chat.id,
+      botId: props.chat.id,
+      peerId: props.chat.id,
       theme,
     });
-  });
+  };
 
   function renderContent() {
-    const baseClassName = buildClassName(styles.badge, badgeClassName);
-    const statefulClassName = buildClassName(baseClassName, !shouldBeUnMuted && styles.muted);
+    const baseClassName = buildClassName(styles.badge, props.badgeClassName);
+    const statefulClassName = buildClassName(baseClassName, !shouldBeUnMuted() && styles.muted);
 
-    const unreadReactionsElement = unreadReactionsCount && (
-      <div className={buildClassName(statefulClassName, styles.reaction, styles.round)}>
+    const unreadReactionsElement = unreadReactionsCount() && (
+      <div class={buildClassName(statefulClassName, styles.reaction, styles.round)}>
         <Icon name="heart" />
       </div>
     );
 
-    const unreadPollVotesElement = unreadPollVotesCount && (
-      <div className={buildClassName(statefulClassName, styles.poll, styles.round)}>
+    const unreadPollVotesElement = unreadPollVotesCount() && (
+      <div class={buildClassName(statefulClassName, styles.poll, styles.round)}>
         <Icon name="poll-badge" />
       </div>
     );
 
-    const unreadMentionsElement = unreadMentionsCount && (
-      <div className={buildClassName(baseClassName, styles.mention, styles.round)}>
+    const unreadMentionsElement = unreadMentionsCount() && (
+      <div class={buildClassName(baseClassName, styles.mention, styles.round)}>
         <Icon name="mention" />
       </div>
     );
 
-    const unopenedTopicElement = isTopicUnopened && (
-      <div className={buildClassName(statefulClassName, styles.unopened)} />
+    const unopenedTopicElement = isTopicUnopened() && (
+      <div class={buildClassName(statefulClassName, styles.unopened)} />
     );
 
-    const unreadCountElement = isUnread ? (
-      <div className={buildClassName(statefulClassName, styles.unread)}>
-        {!hasUnreadMark && <AnimatedCounter text={formatIntegerCompact(lang, unreadCount!)} />}
+    const unreadCountElement = isUnread() ? (
+      <div class={buildClassName(statefulClassName, styles.unread)}>
+        {!hasUnreadMark() && <AnimatedCounter text={formatIntegerCompact(lang, unreadCount()!)} />}
       </div>
     ) : undefined;
 
-    const pinnedElement = isPinned && (
-      <div className={buildClassName(baseClassName, styles.pinned)}>
+    const pinnedElement = props.isPinned && (
+      <div class={buildClassName(baseClassName, styles.pinned)}>
         <Icon name="pin-filled" />
       </div>
     );
 
-    const miniAppButton = hasMiniApp && (
+    const miniAppButton = props.hasMiniApp && (
       <Button
-        color={isSelected ? 'secondary' : 'primary'}
+        color={props.isSelected ? 'secondary' : 'primary'}
         className={buildClassName(baseClassName, styles.miniapp)}
         pill
         size="tiny"
@@ -275,16 +255,16 @@ const ChatBadge = ({
       visiblePinnedElement,
     ].filter(Boolean);
 
-    if (isSavedDialog) return pinnedElement;
+    if (props.isSavedDialog) return pinnedElement;
 
     // Show only if empty or have pinned icon
-    if (hasMiniApp && (elements.length === 0 || visiblePinnedElement)) return miniAppButton;
+    if (props.hasMiniApp && (elements.length === 0 || visiblePinnedElement)) return miniAppButton;
 
     if (elements.length === 0) return undefined;
 
     if (elements.length === 1) return elements[0];
 
-    if (shouldShowOnlyMostImportant) {
+    if (props.shouldShowOnlyMostImportant) {
       const importanceOrderedElements = [
         unreadPollVotesElement,
         unreadReactionsElement,
@@ -295,7 +275,7 @@ const ChatBadge = ({
       return importanceOrderedElements[0];
     }
 
-    return <div className={styles.wrapper}>{elements}</div>;
+    return <div class={styles.wrapper}>{elements}</div>;
   }
 
   return (
@@ -303,9 +283,9 @@ const ChatBadge = ({
       isCustom
       className={buildClassName(
         styles.transition,
-        isSelected && styles.selected,
-        isOnAvatar && styles.onAvatar,
-        transitionClassName,
+        props.isSelected && styles.selected,
+        props.isOnAvatar && styles.onAvatar,
+        props.transitionClassName,
       )}
       isOpen={effectiveIsOpen}
     >
@@ -314,4 +294,4 @@ const ChatBadge = ({
   );
 };
 
-export default memo(ChatBadge);
+export default ChatBadge;

@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from '../lib/teact/teact';
+import { createMemo } from 'frameact';
 import { getActions } from '../global';
 
 import type { MenuItemContextAction } from '../components/ui/ListItem';
@@ -16,6 +16,7 @@ import { buildCollectionByCallback, compact } from '../util/iteratees';
 import useSelector, { useShallowSelector } from './data/useSelector';
 import useLang from './useLang';
 
+// TODO(codemod): useChatContextActions: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 const useChatContextActions = (
   {
     chat,
@@ -69,43 +70,31 @@ const useChatContextActions = (
   const { isSelf } = user || {};
   const isServiceNotifications = user?.id === SERVICE_NOTIFICATIONS_USER_ID;
 
-  const topicsReadStateSelector = useCallback(
-    (global: GlobalState) => {
-      if (!chat?.id) return undefined;
-      return buildCollectionByCallback(topicIds || [], (tId) => [tId, selectThreadReadState(global, chat?.id, tId)]);
-    },
-    [chat?.id, topicIds],
-  );
+  const topicsReadStateSelector = (global: GlobalState) => {
+    if (!chat?.id) return undefined;
+    return buildCollectionByCallback(topicIds || [], (tId) => [tId, selectThreadReadState(global, chat?.id, tId)]);
+  };
   const topicsReadStates = useShallowSelector(topicsReadStateSelector);
 
-  const chatReadStateSelector = useCallback(
-    (global: GlobalState) => {
-      if (!chat?.id) return undefined;
-      return selectThreadReadState(global, chat.id, MAIN_THREAD_ID);
-    },
-    [chat?.id],
-  );
+  const chatReadStateSelector = (global: GlobalState) => {
+    if (!chat?.id) return undefined;
+    return selectThreadReadState(global, chat.id, MAIN_THREAD_ID);
+  };
   const chatReadState = useSelector(chatReadStateSelector);
 
-  const isLinkedCommunityCollapsedSelector = useCallback(
-    (global: GlobalState) => {
-      const communityId = chat?.linkedCommunityId;
-      return Boolean(communityId && selectChat(global, communityId)?.isCollapsedInDialogs);
-    },
-    [chat?.linkedCommunityId],
-  );
+  const isLinkedCommunityCollapsedSelector = (global: GlobalState) => {
+    const communityId = chat?.linkedCommunityId;
+    return Boolean(communityId && selectChat(global, communityId)?.isCollapsedInDialogs);
+  };
   const isLinkedCommunityCollapsed = useSelector(isLinkedCommunityCollapsedSelector);
 
-  const isResolvedPinnedSelector = useCallback(
-    (global: GlobalState) => {
-      if (isPinned !== undefined || !isInCommunityPanel || !chat) return isPinned;
-      return selectIsChatPinned(global, chat.id, isChatArchived(chat) ? ARCHIVED_FOLDER_ID : undefined);
-    },
-    [chat, isInCommunityPanel, isPinned],
-  );
+  const isResolvedPinnedSelector = (global: GlobalState) => {
+    if (isPinned !== undefined || !isInCommunityPanel || !chat) return isPinned;
+    return selectIsChatPinned(global, chat.id, isChatArchived(chat) ? ARCHIVED_FOLDER_ID : undefined);
+  };
   const isResolvedPinned = useSelector(isResolvedPinnedSelector);
 
-  const deleteTitle = useMemo(() => {
+  const deleteTitle = createMemo(() => {
     if (!chat) return undefined;
 
     if (isSavedDialog) {
@@ -125,9 +114,9 @@ const useChatContextActions = (
     }
 
     return lang('GroupLeaveGroup');
-  }, [chat, isSavedDialog, lang]);
+  });
 
-  const preparedActions = useMemo(() => {
+  const preparedActions = createMemo(() => {
     if (!chat || isPreview) {
       return undefined;
     }
@@ -167,7 +156,7 @@ const useChatContextActions = (
       }
     };
 
-    const actionPin: MenuItemContextAction = isResolvedPinned
+    const actionPin: MenuItemContextAction = isResolvedPinned()
       ? {
           title: lang('ChatListUnpinFromTop'),
           icon: 'unpin',
@@ -179,9 +168,9 @@ const useChatContextActions = (
           handler: togglePinned,
         };
 
-    const actionDelete = deleteTitle
+    const actionDelete = deleteTitle()
       ? ({
-          title: deleteTitle,
+          title: deleteTitle(),
           icon: 'delete',
           destructive: true,
           handler: handleDelete,
@@ -222,9 +211,9 @@ const useChatContextActions = (
     }
 
     const actionMarkAsRead =
-      chatReadState?.unreadCount ||
-      chatReadState?.hasUnreadMark ||
-      Object.values(topicsReadStates || {}).some((readState) => readState?.unreadCount)
+      chatReadState()?.unreadCount ||
+      chatReadState()?.hasUnreadMark ||
+      Object.values(topicsReadStates() || {}).some((readState) => readState?.unreadCount)
         ? ({
             title: lang('ChatListContextMarkAsRead'),
             icon: 'readchats',
@@ -232,7 +221,7 @@ const useChatContextActions = (
           } satisfies MenuItemContextAction)
         : undefined;
     const actionMarkAsUnread =
-      !(chatReadState?.unreadCount || chatReadState?.hasUnreadMark) && !chat.isForum
+      !(chatReadState()?.unreadCount || chatReadState()?.hasUnreadMark) && !chat.isForum
         ? ({
             title: lang('ChatListContextMarkAsUnread'),
             icon: 'unread',
@@ -255,7 +244,7 @@ const useChatContextActions = (
       : undefined;
 
     const isInFolder = folderId !== undefined;
-    const canManageListPlacement = !(isInCommunityPanel && isLinkedCommunityCollapsed);
+    const canManageListPlacement = !(isInCommunityPanel && isLinkedCommunityCollapsed());
 
     return compact<MenuItemContextAction>([
       actionOpenInNewTab,
@@ -269,31 +258,7 @@ const useChatContextActions = (
       actionReport,
       actionDelete,
     ]);
-  }, [
-    chat,
-    isPreview,
-    lang,
-    isSavedDialog,
-    isResolvedPinned,
-    deleteTitle,
-    handleDelete,
-    canChangeFolder,
-    handleChatFolderChange,
-    isMuted,
-    handleUnmute,
-    handleMute,
-    isInSearch,
-    chatReadState,
-    topicsReadStates,
-    handleReport,
-    user,
-    folderId,
-    isSelf,
-    isServiceNotifications,
-    currentUserId,
-    isInCommunityPanel,
-    isLinkedCommunityCollapsed,
-  ]);
+  });
 
   return preparedActions;
 };

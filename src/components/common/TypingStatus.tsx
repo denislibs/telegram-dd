@@ -1,5 +1,5 @@
-import type { TeactNode } from '../../lib/teact/teact';
-import { memo, useCallback, useMemo } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import type { ApiTypingStatus } from '../../api/types';
 import type { GlobalState } from '../../global/types';
@@ -26,58 +26,56 @@ type OwnProps = {
 const ICON_SIZE = 1.125 * REM;
 const EYES_ICON_SIZE = 1.25 * REM;
 
-const TypingStatus = ({ typingStatusByPeerId, isPrivate }: OwnProps) => {
+const TypingStatus = (props: OwnProps) => {
   const lang = useLang();
-  const actionFallbackUser = lang('ActionFallbackUser');
-  const typingPeerIds = useMemo(() => Object.keys(typingStatusByPeerId), [typingStatusByPeerId]);
+  const actionFallbackUser = createMemo(() => lang('ActionFallbackUser'));
+  // TODO(codemod): dependency on a container (typingStatusByPeerId) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
+  const typingPeerIds = createMemo(() => Object.keys(props.typingStatusByPeerId));
 
-  const sortedTypingStatuses = useMemo(
-    () => Object.entries(typingStatusByPeerId).sort(([, a], [, b]) => b.timestamp - a.timestamp),
-    [typingStatusByPeerId],
+  // TODO(codemod): dependency on a container (typingStatusByPeerId) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
+  const sortedTypingStatuses = createMemo(() =>
+    Object.entries(props.typingStatusByPeerId).sort(([, a], [, b]) => b.timestamp - a.timestamp),
   );
 
-  const latestTypingStatusEntry = sortedTypingStatuses[0];
-  const latestPeerId = latestTypingStatusEntry?.[0];
-  const latestTypingStatus = latestTypingStatusEntry?.[1];
-  const shouldRenderGroupedTyping = typingPeerIds.length >= 2;
+  const latestTypingStatusEntry = createMemo(() => sortedTypingStatuses()[0]);
+  const latestPeerId = createMemo(() => latestTypingStatusEntry()?.[0]);
+  const latestTypingStatus = createMemo(() => latestTypingStatusEntry()?.[1]);
+  const shouldRenderGroupedTyping = createMemo(() => typingPeerIds().length >= 2);
 
-  const groupedPeersSelector = useCallback(
-    (global: GlobalState) => typingPeerIds.map((peerId) => selectPeer(global, peerId)),
-    [typingPeerIds],
-  );
+  const groupedPeersSelector = (global: GlobalState) => typingPeerIds().map((peerId) => selectPeer(global, peerId));
 
   const groupedPeers = useShallowSelector(groupedPeersSelector);
-  const latestPeerIndex = latestPeerId ? typingPeerIds.indexOf(latestPeerId) : -1;
-  const latestPeer = latestPeerIndex >= 0 ? groupedPeers[latestPeerIndex] : undefined;
+  const latestPeerIndex = createMemo(() => (latestPeerId() ? typingPeerIds().indexOf(latestPeerId()) : -1));
+  const latestPeer = createMemo(() => (latestPeerIndex() >= 0 ? groupedPeers()[latestPeerIndex()] : undefined));
 
-  const latestUserName = getTypingPeerName(lang, latestPeer, actionFallbackUser);
-  const groupedUserNames = useMemo(
-    () =>
-      typingPeerIds
-        .map((peerId, index) => ({
-          peerId,
-          name: getTypingPeerName(lang, groupedPeers[index], actionFallbackUser),
-        }))
-        .sort(compareTypingPeerNames)
-        .map(({ name }) => name),
-    [actionFallbackUser, groupedPeers, typingPeerIds, lang],
+  const latestUserName = createMemo(() => getTypingPeerName(lang, latestPeer(), actionFallbackUser()));
+  const groupedUserNames = createMemo(() =>
+    typingPeerIds()
+      .map((peerId, index) => ({
+        peerId,
+        name: getTypingPeerName(lang, groupedPeers()[index], actionFallbackUser()),
+      }))
+      .sort(compareTypingPeerNames)
+      .map(({ name }) => name),
   );
 
-  if (!latestTypingStatus) {
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (!latestTypingStatus()) {
     return undefined;
   }
 
-  const user = latestUserName;
-  let content: string | TeactNode;
+  const user = createMemo(() => latestUserName());
+  let content: string | JSX.Element;
 
-  if (shouldRenderGroupedTyping) {
-    if (sortedTypingStatuses.length === 2) {
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (shouldRenderGroupedTyping()) {
+    if (sortedTypingStatuses().length === 2) {
       content = lang(
         'UserTypingSeveral',
         {
           users: lang.conjunction([
-            groupedUserNames[0] || actionFallbackUser,
-            groupedUserNames[1] || actionFallbackUser,
+            groupedUserNames()[0] || actionFallbackUser(),
+            groupedUserNames()[1] || actionFallbackUser(),
           ]),
         },
         { withNodes: true },
@@ -86,23 +84,25 @@ const TypingStatus = ({ typingStatusByPeerId, isPrivate }: OwnProps) => {
       content = lang(
         'UserTypingMany',
         {
-          user: groupedUserNames[0] || actionFallbackUser,
-          count: lang.number(sortedTypingStatuses.length - 1),
+          user: groupedUserNames()[0] || actionFallbackUser(),
+          count: lang.number(sortedTypingStatuses().length - 1),
         },
-        { withNodes: true, pluralValue: sortedTypingStatuses.length - 1 },
+        { withNodes: true, pluralValue: sortedTypingStatuses().length - 1 },
       );
     }
-  } else if (isPrivate) {
-    content = getPrivateTypingStatusContent(lang, latestTypingStatus);
+  } else if (props.isPrivate) {
+    content = getPrivateTypingStatusContent(lang, latestTypingStatus());
   } else {
-    content = getGroupTypingStatusContent(lang, latestTypingStatus, user);
+    content = getGroupTypingStatusContent(lang, latestTypingStatus(), user());
   }
 
-  const shouldRenderTypingStatusIcon = shouldRenderGroupedTyping || shouldRenderTypingIcon(latestTypingStatus);
+  const shouldRenderTypingStatusIcon = createMemo(
+    () => shouldRenderGroupedTyping() || shouldRenderTypingIcon(latestTypingStatus()),
+  );
 
   return (
-    <span className={buildClassName(styles.typingStatus, 'typing-status')} dir={lang.isRtl ? 'rtl' : 'auto'}>
-      {shouldRenderTypingStatusIcon && (
+    <span class={buildClassName(styles.typingStatus, 'typing-status')} dir={lang.isRtl ? 'rtl' : 'auto'}>
+      {shouldRenderTypingStatusIcon() && (
         <AnimatedIconWithPreview
           className={styles.typingIcon}
           tgsUrl={LOCAL_TGS_URLS.Typing}
@@ -112,7 +112,7 @@ const TypingStatus = ({ typingStatusByPeerId, isPrivate }: OwnProps) => {
           shouldUseTextColor
         />
       )}
-      <span className={styles.content} dir="auto">
+      <span class={styles.content} dir="auto">
         {content}
       </span>
     </span>
@@ -210,4 +210,4 @@ function compareTypingPeerNames(a: { peerId: string; name: string }, b: { peerId
   return a.name.localeCompare(b.name) || a.peerId.localeCompare(b.peerId);
 }
 
-export default memo(TypingStatus);
+export default TypingStatus;

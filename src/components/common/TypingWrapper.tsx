@@ -1,14 +1,12 @@
-import type { TeactNode } from '../../lib/teact/teact';
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useUnmountCleanup } from '../../lib/teact/teact';
+import { createEffect, createMemo, createSignal, onDestroy, requestMutation } from 'frameact';
+import type { JSX } from 'frameact/jsx-runtime';
+import { depsOf } from '../../util/effectDeps';
 
 import type { ApiFormattedText } from '../../api/types';
 
-import { requestMutation } from '../../lib/fasterdom/fasterdom';
 import buildClassName from '../../util/buildClassName';
 import { LOCAL_TGS_PREVIEW_URLS, LOCAL_TGS_URLS } from './helpers/animatedAssets';
 import { REM } from './helpers/mediaDimensions';
-
-import useLastCallback from '../../hooks/useLastCallback';
 
 import AnimatedIconWithPreview from './AnimatedIconWithPreview';
 
@@ -20,7 +18,7 @@ type OwnProps = {
   noInitialAnimation?: boolean;
   shouldRenderPlaceholder: boolean;
   completionKey: number;
-  renderText: (text: ApiFormattedText) => TeactNode;
+  renderText: (text: ApiFormattedText) => JSX.Element;
   onCompleted?: NoneToVoidFunction;
 };
 
@@ -49,53 +47,46 @@ function getRunningProgress(animation: Animation | undefined, baseProgress: numb
   return baseProgress + (100 - baseProgress) * timing;
 }
 
-const TypingWrapper = ({
-  formattedText,
-  shouldAnimateMask,
-  noInitialAnimation,
-  shouldRenderPlaceholder,
-  completionKey,
-  renderText,
-  onCompleted,
-}: OwnProps) => {
-  const fullText = formattedText.text;
-  const initialRevealedLength = noInitialAnimation ? fullText.length : 0;
+const TypingWrapper = (props: OwnProps) => {
+  const fullText = createMemo(() => props.formattedText.text);
+  const initialRevealedLength = createMemo(() => (props.noInitialAnimation ? fullText().length : 0));
 
-  const ref = useRef<HTMLSpanElement>();
-  const animationRef = useRef<Animation>();
-  const progressRef = useRef(noInitialAnimation || !fullText ? 100 : 0);
-  const prevRevealedRef = useRef(initialRevealedLength);
-  const fullTextRef = useRef('');
+  let ref!: HTMLSpanElement;
+  let animationRef: Animation | undefined;
+  let progressRef = props.noInitialAnimation || !fullText() ? 100 : 0;
+  let prevRevealedRef = initialRevealedLength();
+  let fullTextRef = '';
 
-  const [revealedLength, setRevealedLength] = useState(initialRevealedLength);
-  const revealedLengthRef = useRef(initialRevealedLength);
-  const chunkTimerRef = useRef<number>();
-  const completedKeyRef = useRef<string>();
-  const prevFullTextRef = useRef(noInitialAnimation ? fullText : '');
+  const [revealedLength, setRevealedLength] = createSignal(initialRevealedLength());
+  let revealedLengthRef = initialRevealedLength();
+  let chunkTimerRef: number | undefined;
+  let completedKeyRef: string | undefined;
+  let prevFullTextRef = props.noInitialAnimation ? fullText() : '';
 
-  fullTextRef.current = fullText;
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  fullTextRef = fullText();
 
-  const stopAnimation = useLastCallback(() => {
-    animationRef.current?.cancel();
-    animationRef.current = undefined;
-  });
+  const stopAnimation = () => {
+    animationRef?.cancel();
+    animationRef = undefined;
+  };
 
-  const maybeNotifyCompleted = useLastCallback(() => {
-    const currentFullText = fullTextRef.current;
-    const currentCompletionKey = `${completionKey}:${currentFullText}`;
-    const isFullyRevealed = revealedLengthRef.current >= currentFullText.length;
-    const isMaskCompleted = !shouldAnimateMask || progressRef.current >= 100;
+  const maybeNotifyCompleted = () => {
+    const currentFullText = fullTextRef;
+    const currentCompletionKey = `${props.completionKey}:${currentFullText}`;
+    const isFullyRevealed = revealedLengthRef >= currentFullText.length;
+    const isMaskCompleted = !props.shouldAnimateMask || progressRef >= 100;
 
-    if (!isFullyRevealed || !isMaskCompleted || completedKeyRef.current === currentCompletionKey) {
+    if (!isFullyRevealed || !isMaskCompleted || completedKeyRef === currentCompletionKey) {
       return;
     }
 
-    completedKeyRef.current = currentCompletionKey;
-    onCompleted?.();
-  });
+    completedKeyRef = currentCompletionKey;
+    props.onCompleted?.();
+  };
 
-  const scheduleChunks = useLastCallback((from: number, to: number) => {
-    window.clearTimeout(chunkTimerRef.current);
+  const scheduleChunks = (from: number, to: number) => {
+    window.clearTimeout(chunkTimerRef);
 
     const delta = to - from;
     if (delta <= 0) return;
@@ -107,159 +98,165 @@ const TypingWrapper = ({
 
     const addChunk = () => {
       position = Math.min(position + CHUNK_SIZE, to);
-      revealedLengthRef.current = position;
+      revealedLengthRef = position;
       setRevealedLength(position);
 
       if (position < to) {
-        chunkTimerRef.current = window.setTimeout(addChunk, chunkInterval);
+        chunkTimerRef = window.setTimeout(addChunk, chunkInterval);
       } else {
-        chunkTimerRef.current = undefined;
+        chunkTimerRef = undefined;
       }
     };
 
     addChunk();
-  });
+  };
 
   // --- Chunking: spread incoming text over time ---
-  useEffect(() => {
-    if (fullText === prevFullTextRef.current) return;
-    prevFullTextRef.current = fullText;
+  createEffect(
+    depsOf(() => [fullText(), scheduleChunks, stopAnimation] as const),
+    ([fullText2]) => {
+      if (fullText2 === prevFullTextRef) return;
+      prevFullTextRef = fullText2;
 
-    const fullLen = fullText.length;
-    const revealed = revealedLengthRef.current;
+      const fullLen = fullText2.length;
+      const revealed = revealedLengthRef;
 
-    if (fullLen < revealed) {
-      window.clearTimeout(chunkTimerRef.current);
-      chunkTimerRef.current = undefined;
-      stopAnimation();
-      revealedLengthRef.current = fullLen;
-      prevRevealedRef.current = fullLen;
-      progressRef.current = 100;
-      setRevealedLength(fullLen);
+      if (fullLen < revealed) {
+        window.clearTimeout(chunkTimerRef);
+        chunkTimerRef = undefined;
+        stopAnimation();
+        revealedLengthRef = fullLen;
+        prevRevealedRef = fullLen;
+        progressRef = 100;
+        setRevealedLength(fullLen);
 
-      requestMutation(() => {
-        const element = ref.current;
-        if (!element) return;
+        requestMutation(() => {
+          const element = ref;
+          if (!element) return;
 
-        element.style.setProperty(SPREAD_CSS_PROPERTY, '0%');
-        element.style.setProperty(PROGRESS_CSS_PROPERTY, '100%');
-      });
-      return;
-    }
+          element.style.setProperty(SPREAD_CSS_PROPERTY, '0%');
+          element.style.setProperty(PROGRESS_CSS_PROPERTY, '100%');
+        });
+        return;
+      }
 
-    if (fullLen === revealed) {
-      return;
-    }
+      if (fullLen === revealed) {
+        return;
+      }
 
-    scheduleChunks(revealed, fullLen);
-  }, [fullText, scheduleChunks, stopAnimation]);
+      scheduleChunks(revealed, fullLen);
+    },
+  );
 
   // Completion depends on several refs, so we are calling check after every render to avoid locking the UI
-  useEffect(() => {
-    maybeNotifyCompleted();
-  });
+  // TODO(codemod): useEffect without a dependency array ran after every render: name the tracked reads in the compute half
+  createEffect(
+    () => undefined,
+    () => {
+      maybeNotifyCompleted();
+    },
+  );
 
   // --- Mask animation: smooth reveal of rendered content (layout effect to prevent flash) ---
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (!element) return;
+  // TODO(codemod): useLayoutEffect without a dependency array ran after every render: name the tracked reads in the compute half
+  createEffect(
+    () => undefined,
+    () => {
+      const element = ref;
+      if (!element) return;
 
-    const revealed = revealedLength;
-    const prevRevealed = prevRevealedRef.current;
-    if (revealed === prevRevealed) {
-      if (progressRef.current === 100) element.style.setProperty(PROGRESS_CSS_PROPERTY, '100%');
-      return;
-    }
+      const revealed = revealedLength();
+      const prevRevealed = prevRevealedRef;
+      if (revealed === prevRevealed) {
+        if (progressRef === 100) element.style.setProperty(PROGRESS_CSS_PROPERTY, '100%');
+        return;
+      }
 
-    prevRevealedRef.current = revealed;
+      prevRevealedRef = revealed;
 
-    if (!shouldAnimateMask) {
-      stopAnimation();
-      progressRef.current = 100;
-      element.style.setProperty(PROGRESS_CSS_PROPERTY, '100%');
-      return;
-    }
-
-    let progress = animationRef.current
-      ? getRunningProgress(animationRef.current, progressRef.current)
-      : progressRef.current;
-
-    stopAnimation();
-
-    if (revealed < prevRevealed) {
-      progress = 0;
-    } else if (prevRevealed && revealed) {
-      progress = Math.min((prevRevealed * progress) / revealed, 100);
-    } else if (!prevRevealed) {
-      progress = 0;
-    }
-
-    if (!revealed) {
-      progress = 100;
-    }
-
-    progressRef.current = progress;
-    const remaining = 100 - progress;
-    const spread = revealed ? (SPREAD_CHARS / revealed) * 100 : 0;
-
-    if (!revealed || remaining <= 0) {
-      progressRef.current = 100;
-      element.style.setProperty(PROGRESS_CSS_PROPERTY, '100%');
-      return;
-    }
-
-    element.style.setProperty(SPREAD_CSS_PROPERTY, `${spread}%`);
-    element.style.setProperty(PROGRESS_CSS_PROPERTY, `${progress}%`);
-
-    const animation = element.animate(
-      [{ [PROGRESS_CSS_PROPERTY]: `${progress}%` }, { [PROGRESS_CSS_PROPERTY]: '100%' }] as Keyframe[],
-      {
-        duration: HEADWAY_DURATION,
-        easing: 'linear',
-        fill: 'forwards',
-      },
-    );
-
-    animationRef.current = animation;
-
-    animation.onfinish = () => {
-      if (animationRef.current !== animation) return;
-
-      progressRef.current = 100;
-      animationRef.current = undefined;
-
-      requestMutation(() => {
+      if (!props.shouldAnimateMask) {
+        stopAnimation();
+        progressRef = 100;
         element.style.setProperty(PROGRESS_CSS_PROPERTY, '100%');
-      });
+        return;
+      }
 
-      maybeNotifyCompleted();
-    };
+      let progress = animationRef ? getRunningProgress(animationRef, progressRef) : progressRef;
 
-    animation.oncancel = () => {
-      if (animationRef.current !== animation) return;
-      animationRef.current = undefined;
-    };
-  });
+      stopAnimation();
 
-  useUnmountCleanup(() => {
-    window.clearTimeout(chunkTimerRef.current);
+      if (revealed < prevRevealed) {
+        progress = 0;
+      } else if (prevRevealed && revealed) {
+        progress = Math.min((prevRevealed * progress) / revealed, 100);
+      } else if (!prevRevealed) {
+        progress = 0;
+      }
+
+      if (!revealed) {
+        progress = 100;
+      }
+
+      progressRef = progress;
+      const remaining = 100 - progress;
+      const spread = revealed ? (SPREAD_CHARS / revealed) * 100 : 0;
+
+      if (!revealed || remaining <= 0) {
+        progressRef = 100;
+        element.style.setProperty(PROGRESS_CSS_PROPERTY, '100%');
+        return;
+      }
+
+      element.style.setProperty(SPREAD_CSS_PROPERTY, `${spread}%`);
+      element.style.setProperty(PROGRESS_CSS_PROPERTY, `${progress}%`);
+
+      const animation = element.animate(
+        [{ [PROGRESS_CSS_PROPERTY]: `${progress}%` }, { [PROGRESS_CSS_PROPERTY]: '100%' }] as Keyframe[],
+        {
+          duration: HEADWAY_DURATION,
+          easing: 'linear',
+          fill: 'forwards',
+        },
+      );
+
+      animationRef = animation;
+
+      animation.onfinish = () => {
+        if (animationRef !== animation) return;
+
+        progressRef = 100;
+        animationRef = undefined;
+
+        requestMutation(() => {
+          element.style.setProperty(PROGRESS_CSS_PROPERTY, '100%');
+        });
+
+        maybeNotifyCompleted();
+      };
+
+      animation.oncancel = () => {
+        if (animationRef !== animation) return;
+        animationRef = undefined;
+      };
+    },
+  );
+
+  onDestroy(() => {
+    window.clearTimeout(chunkTimerRef);
     stopAnimation();
   });
 
-  const truncatedText = useMemo(
-    () => ({
-      text: fullText.slice(0, revealedLength),
-      entities: formattedText.entities,
-    }),
-    [fullText, formattedText.entities, revealedLength],
-  );
-  const className = buildClassName(styles.root, !fullText && styles.fullyRevealed);
+  const truncatedText = createMemo(() => ({
+    text: fullText().slice(0, revealedLength()),
+    entities: props.formattedText.entities,
+  }));
+  const className = createMemo(() => buildClassName(styles.root, !fullText() && styles.fullyRevealed));
 
   return (
-    <span ref={ref} className={className}>
-      {renderText(truncatedText)}
-      {shouldRenderPlaceholder && (
-        <span key="typing-placeholder" className={styles.placeholder}>
+    <span ref={ref} class={className()}>
+      {props.renderText(truncatedText())}
+      {props.shouldRenderPlaceholder && (
+        <span class={styles.placeholder}>
           <AnimatedIconWithPreview
             tgsUrl={LOCAL_TGS_URLS.Writing}
             previewUrl={LOCAL_TGS_PREVIEW_URLS.Writing}
@@ -274,4 +271,4 @@ const TypingWrapper = ({
   );
 };
 
-export default memo(TypingWrapper);
+export default TypingWrapper;

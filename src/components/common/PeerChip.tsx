@@ -1,6 +1,7 @@
-import type { TeactNode } from '../../lib/teact/teact';
-import { memo } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import type { JSX } from 'frameact/jsx-runtime';
 import { withGlobal } from '../../global';
+import type { GlobalState } from '../../global/types';
 
 import type { ApiPeer } from '../../api/types';
 import type { CustomPeer, ThemeKey } from '../../types';
@@ -51,90 +52,84 @@ type StateProps = {
   isSavedMessages?: boolean;
 };
 
-const PeerChip = <T,>({
-  icon,
-  title,
-  size = 'medium',
-  isMinimized,
-  canClose,
-  isCloseNonDestructive,
-  clickArg,
-  peer,
-  mockPeer,
-  customPeer,
-  className,
-  itemClassName,
-  isSavedMessages,
-  withPeerColors,
-  withEmojiStatus,
-  theme,
-  onClick,
-}: OwnProps<T> & StateProps) => {
+const PeerChip = <T,>(ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const lang = useLang();
 
-  const apiPeer = mockPeer || peer;
-  const anyPeer = customPeer || apiPeer;
+  const apiPeer = createMemo(() => props.mockPeer || props.peer);
+  const anyPeer = createMemo(() => props.customPeer || apiPeer());
 
-  const { className: peerColorClass, style: peerColorStyle } = usePeerColor({
-    peer: anyPeer,
-    theme,
-  });
+  const peerColorResult = createMemo(() =>
+    usePeerColor({
+      peer: () => anyPeer(),
+      theme: () => props.theme,
+    }),
+  );
+  const peerColorClass = () => peerColorResult().className;
+  const peerColorStyle = () => peerColorResult().style;
 
-  const chat = apiPeer && isApiPeerChat(apiPeer) ? apiPeer : undefined;
+  const chat = createMemo(() => (apiPeer() && isApiPeerChat(apiPeer()) ? apiPeer() : undefined));
 
-  let iconElement: TeactNode | undefined;
-  let titleElement: TeactNode | undefined;
+  let iconElement: JSX.Element | undefined;
+  let titleElement: JSX.Element | undefined;
   let titleText: string | undefined;
 
-  if (icon && title) {
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (props.icon && props.title) {
     iconElement = (
-      <div className={styles.iconWrapper}>
-        <Icon name={icon} style={styles.icon} />
+      <div class={styles.iconWrapper}>
+        <Icon name={props.icon} style={styles.icon} />
       </div>
     );
 
-    titleElement = title;
-  } else if (anyPeer) {
-    iconElement = <Avatar className={styles.avatar} peer={anyPeer} size="small" isSavedMessages={isSavedMessages} />;
+    titleElement = props.title;
+  } else if (anyPeer()) {
+    iconElement = (
+      <Avatar className={styles.avatar} peer={anyPeer()} size="small" isSavedMessages={props.isSavedMessages} />
+    );
 
-    titleText = getPeerTitle(lang, anyPeer) || title;
-    titleElement = title || (
-      <FullNameTitle peer={anyPeer} isSavedMessages={isSavedMessages} withEmojiStatus={withEmojiStatus} />
+    titleText = getPeerTitle(lang, anyPeer()) || props.title;
+    titleElement = props.title || (
+      <FullNameTitle peer={anyPeer()} isSavedMessages={props.isSavedMessages} withEmojiStatus={props.withEmojiStatus} />
     );
   }
 
-  const fullClassName = buildClassName(
-    styles.root,
-    size === 'small' && styles.small,
-    (chat?.isForum || customPeer?.isAvatarSquare) && styles.squareAvatar,
-    isMinimized && styles.minimized,
-    canClose && styles.closeable,
-    isCloseNonDestructive && styles.nonDestructive,
-    !onClick && styles.notClickable,
-    withPeerColors && peerColorClass,
-    className,
+  const fullClassName = createMemo(() =>
+    buildClassName(
+      styles.root,
+      (props.size === undefined ? 'medium' : props.size) === 'small' && styles.small,
+      (chat()?.isForum || props.customPeer?.isAvatarSquare) && styles.squareAvatar,
+      props.isMinimized && styles.minimized,
+      props.canClose && styles.closeable,
+      props.isCloseNonDestructive && styles.nonDestructive,
+      !props.onClick && styles.notClickable,
+      props.withPeerColors && peerColorClass(),
+      props.className,
+    ),
   );
 
-  const chipSize = size === 'small' ? CHIP_SIZE_SMALL : CHIP_SIZE_MEDIUM;
+  const chipSize = createMemo(() =>
+    (props.size === undefined ? 'medium' : props.size) === 'small' ? CHIP_SIZE_SMALL : CHIP_SIZE_MEDIUM,
+  );
 
-  const style = buildStyle(`--chip-size: ${chipSize}px`, withPeerColors && peerColorStyle);
+  const style = createMemo(() => buildStyle(`--chip-size: ${chipSize()}px`, props.withPeerColors && peerColorStyle()));
 
   return (
     <div
-      className={fullClassName}
-      style={style}
-      onClick={() => onClick?.(clickArg!)}
-      title={isMinimized ? titleText : undefined}
+      class={fullClassName()}
+      style={style()}
+      onClick={() => props.onClick?.(props.clickArg!)}
+      title={props.isMinimized ? titleText : undefined}
       dir={lang.isRtl ? 'rtl' : undefined}
     >
       {iconElement}
-      {!isMinimized && (
-        <div className={buildClassName(styles.name, itemClassName)} dir="auto">
+      {!props.isMinimized && (
+        <div class={buildClassName(styles.name, props.itemClassName)} dir="auto">
           {titleElement}
         </div>
       )}
-      {canClose && (
-        <div className={styles.remove}>
+      {props.canClose && (
+        <div class={styles.remove}>
           <Icon name="close" />
         </div>
       )}
@@ -142,25 +137,25 @@ const PeerChip = <T,>({
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global, { peerId, forceShowSelf }): Complete<StateProps> => {
-    const theme = selectTheme(global);
-    if (!peerId) {
-      return {
-        peer: undefined,
-        isSavedMessages: undefined,
-        theme,
-      };
-    }
-
-    const peer = selectPeer(global, peerId);
-    const user = selectUser(global, peerId);
-    const isSavedMessages = !forceShowSelf && user && user.isSelf;
-
+const mapStateToProps = (global: GlobalState, { peerId, forceShowSelf }: OwnProps): Complete<StateProps> => {
+  const theme = selectTheme(global);
+  if (!peerId) {
     return {
-      peer,
-      isSavedMessages,
+      peer: undefined,
+      isSavedMessages: undefined,
       theme,
     };
-  })(PeerChip),
-) as <T>(props: OwnProps<T>) => ReturnType<typeof PeerChip<T>>;
+  }
+
+  const peer = selectPeer(global, peerId);
+  const user = selectUser(global, peerId);
+  const isSavedMessages = !forceShowSelf && user && user.isSelf;
+
+  return {
+    peer,
+    isSavedMessages,
+    theme,
+  };
+};
+
+export default PeerChip as <T>(props: OwnProps<T>) => ReturnType<typeof PeerChip<T>>;

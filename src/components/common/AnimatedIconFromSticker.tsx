@@ -1,4 +1,5 @@
-import { memo } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import { splitProps } from 'frameact/dom';
 
 import type { ApiSticker } from '../../api/types';
 import type { OwnProps as AnimatedIconProps } from './AnimatedIcon';
@@ -13,27 +14,30 @@ import AnimatedIconWithPreview from './AnimatedIconWithPreview';
 type OwnProps = Partial<AnimatedIconProps> & { sticker?: ApiSticker; noLoad?: boolean; forcePreview?: boolean };
 
 function AnimatedIconFromSticker(props: OwnProps) {
-  const { sticker, noLoad, forcePreview, fitzModifier, ...otherProps } = props;
+  const [, otherProps] = splitProps(props, ['sticker', 'noLoad', 'forcePreview', 'fitzModifier']);
 
-  const thumbDataUri = sticker?.thumbnail?.dataUri;
-  const localMediaHash = sticker && getStickerMediaHash(sticker, 'full');
+  const thumbDataUri = createMemo(() => props.sticker?.thumbnail?.dataUri);
+  const localMediaHash = createMemo(() => props.sticker && getStickerMediaHash(props.sticker, 'full'));
   const previewBlobUrl = useMedia(
-    sticker ? getStickerMediaHash(sticker, 'preview') : undefined,
-    Boolean(fitzModifier || (noLoad && !forcePreview)),
+    () => (props.sticker ? getStickerMediaHash(props.sticker, 'preview') : undefined),
+    () => Boolean(props.fitzModifier || (props.noLoad && !props.forcePreview)),
     ApiMediaFormat.BlobUrl,
   );
-  const tgsUrl = useMedia(localMediaHash, noLoad);
+  const tgsUrl = useMedia(
+    () => localMediaHash(),
+    () => props.noLoad,
+  );
 
   return (
     <AnimatedIconWithPreview
       tgsUrl={tgsUrl}
-      previewUrl={fitzModifier ? undefined : previewBlobUrl}
-      thumbDataUri={thumbDataUri}
-      fitzModifier={fitzModifier}
+      previewUrl={props.fitzModifier ? undefined : previewBlobUrl}
+      thumbDataUri={thumbDataUri()}
+      fitzModifier={props.fitzModifier}
 
       {...otherProps}
     />
   );
 }
 
-export default memo(AnimatedIconFromSticker);
+export default AnimatedIconFromSticker;

@@ -1,5 +1,3 @@
-import { memo } from '../../lib/teact/teact';
-
 import buildClassName from '../../util/buildClassName';
 
 import styles from './Toggle.module.scss';
@@ -8,13 +6,13 @@ interface OwnProps {
   value: 'min' | 'mid' | 'max';
 }
 
-function Toggle({ value }: OwnProps) {
+function Toggle(props: OwnProps) {
   return (
-    <div className={buildClassName(styles.root, 'Toggle')} aria-hidden>
-      <i className={buildClassName(styles.filler, styles[value])} />
-      <i className={buildClassName(styles.widget, styles[value])} />
+    <div class={buildClassName(styles.root, 'Toggle')} aria-hidden>
+      <i class={buildClassName(styles.filler, styles[props.value])} />
+      <i class={buildClassName(styles.widget, styles[props.value])} />
     </div>
   );
 }
 
-export default memo(Toggle);
+export default Toggle;

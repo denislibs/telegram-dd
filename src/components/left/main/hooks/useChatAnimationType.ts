@@ -1,4 +1,4 @@
-import { useMemo } from '../../../../lib/teact/teact';
+import { createMemo } from 'frameact';
 
 export enum ChatAnimationTypes {
   Shift,
@@ -9,12 +9,13 @@ export enum ChatAnimationTypes {
 
 export const ARCHIVE_ANIMATION_ID = 'archive';
 
+// TODO(codemod): useChatAnimationType: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export function useChatAnimationType<T extends number | string>(
   orderDiffById: Record<T, number>,
   isInitialRender: boolean,
   isShifted?: boolean,
 ) {
-  return useMemo(() => {
+  return createMemo(() => {
     if (isInitialRender) {
       return () => ChatAnimationTypes.None;
     }
@@ -43,5 +44,5 @@ export function useChatAnimationType<T extends number | string>(
 
       return ChatAnimationTypes.Move;
     };
-  }, [orderDiffById, isShifted, isInitialRender]);
+  });
 }

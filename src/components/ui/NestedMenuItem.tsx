@@ -1,16 +1,15 @@
-import { useEffect, useRef, useState, useUnmountCleanup } from '@teact';
-import type { TeactNode } from '../../lib/teact/teact';
+import { createEffect, createSignal, onDestroy, requestMeasure } from 'frameact';
+import type { JSX } from 'frameact/jsx-runtime';
+import { depsOf } from '../../util/effectDeps';
 
 import type { IAnchorPosition } from '../../types';
 import type { IconName } from '../../types/icons';
 
-import { requestMeasure } from '../../lib/fasterdom/fasterdom';
 import buildClassName from '../../util/buildClassName';
 import { REM } from '../common/helpers/mediaDimensions';
 
 import useFlag from '../../hooks/useFlag';
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
 import useUniqueId from '../../hooks/useUniqueId';
 import useWindowSize from '../../hooks/window/useWindowSize';
 
@@ -23,10 +22,10 @@ const CLOSE_TIMEOUT = 150;
 
 type OwnProps = {
   icon?: IconName;
-  customIcon?: TeactNode;
+  customIcon?: JSX.Element;
   submenuIcon?: IconName;
   className?: string;
-  children: TeactNode;
+  children: JSX.Element;
   submenu: React.ReactNode;
   submenuClassName?: string;
   disabled?: boolean;
@@ -36,43 +35,30 @@ type OwnProps = {
   hasIconPremiumBadge?: boolean;
 };
 
-const NestedMenuItem = ({
-  icon,
-  customIcon,
-  submenuIcon,
-  className,
-  children,
-  submenu,
-  submenuClassName,
-  disabled,
-  destructive,
-  ariaLabel,
-  footer,
-  hasIconPremiumBadge,
-}: OwnProps) => {
+const NestedMenuItem = (props: OwnProps) => {
   const lang = useLang();
 
-  const itemRef = useRef<HTMLDivElement>();
-  const closeTimeoutRef = useRef<number>();
-  const openTimeoutRef = useRef<number>();
+  let itemRef!: HTMLDivElement;
+  let closeTimeoutRef: number | undefined;
+  let openTimeoutRef: number | undefined;
   const submenuId = useUniqueId();
-  const isClosingRef = useRef(false);
+  let isClosingRef = false;
 
   const [isSubmenuOpen, openSubmenu, closeSubmenu] = useFlag(false);
 
-  useUnmountCleanup(() => {
-    clearTimeout(closeTimeoutRef.current);
-    clearTimeout(openTimeoutRef.current);
+  onDestroy(() => {
+    clearTimeout(closeTimeoutRef);
+    clearTimeout(openTimeoutRef);
   });
 
-  const [submenuAnchor, setSubmenuAnchor] = useState<IAnchorPosition>();
+  const [submenuAnchor, setSubmenuAnchor] = createSignal<IAnchorPosition | undefined>(undefined);
   const { isResizing } = useWindowSize();
 
-  const updateAnchor = useLastCallback(() => {
+  const updateAnchor = () => {
     requestMeasure(() => {
-      if (!itemRef.current) return;
+      if (!itemRef) return;
 
-      const rect = itemRef.current.getBoundingClientRect();
+      const rect = itemRef.getBoundingClientRect();
       const overlap = REM;
 
       setSubmenuAnchor({
@@ -82,61 +68,64 @@ const NestedMenuItem = ({
         height: rect.height,
       });
     });
-  });
+  };
 
-  useEffect(() => {
-    if (isSubmenuOpen && !isResizing) {
-      updateAnchor();
-    }
-  }, [isSubmenuOpen, lang.isRtl, updateAnchor, isResizing]);
+  createEffect(
+    depsOf(() => [isSubmenuOpen(), lang.isRtl, updateAnchor, isResizing] as const),
+    ([isSubmenuOpen2]) => {
+      if (isSubmenuOpen2 && !isResizing) {
+        updateAnchor();
+      }
+    },
+  );
 
-  const cancelOpen = useLastCallback(() => {
-    clearTimeout(openTimeoutRef.current);
-    openTimeoutRef.current = undefined;
-  });
+  const cancelOpen = () => {
+    clearTimeout(openTimeoutRef);
+    openTimeoutRef = undefined;
+  };
 
-  const cancelClose = useLastCallback(() => {
-    clearTimeout(closeTimeoutRef.current);
-    closeTimeoutRef.current = undefined;
-  });
+  const cancelClose = () => {
+    clearTimeout(closeTimeoutRef);
+    closeTimeoutRef = undefined;
+  };
 
-  const scheduleOpen = useLastCallback(() => {
+  const scheduleOpen = () => {
     cancelClose();
     cancelOpen();
-    openTimeoutRef.current = window.setTimeout(() => {
-      openTimeoutRef.current = undefined;
+    openTimeoutRef = window.setTimeout(() => {
+      openTimeoutRef = undefined;
       // Don't open if the parent menu is closing
-      const parentBubble = itemRef.current?.closest('.bubble');
+      const parentBubble = itemRef?.closest('.bubble');
       if (parentBubble?.classList.contains('closing')) return;
       openSubmenu();
     }, OPEN_TIMEOUT);
-  });
+  };
 
-  const scheduleClose = useLastCallback(() => {
+  const scheduleClose = () => {
     cancelOpen();
     cancelClose();
-    closeTimeoutRef.current = window.setTimeout(() => {
+    closeTimeoutRef = window.setTimeout(() => {
       closeSubmenu();
-      closeTimeoutRef.current = undefined;
+      closeTimeoutRef = undefined;
     }, CLOSE_TIMEOUT);
-  });
+  };
 
-  const handleMouseEnter = useLastCallback(() => {
-    if (disabled) return;
+  const handleMouseEnter = () => {
+    if (props.disabled) return;
     scheduleOpen();
-  });
+  };
 
-  const handleSubmenuMouseEnter = useLastCallback(() => {
+  const handleSubmenuMouseEnter = () => {
     cancelOpen();
     cancelClose();
-  });
+  };
 
-  const handleSubmenuMouseLeave = useLastCallback(() => {
+  const handleSubmenuMouseLeave = () => {
     scheduleClose();
-  });
+  };
 
-  const closeParentMenu = useLastCallback(() => {
-    const parentMenu = itemRef.current?.closest('.Menu');
+  const closeParentMenu = () => {
+    const parentMenu = itemRef?.closest('.Menu');
     if (parentMenu) {
       const backdrop = parentMenu.querySelector('.backdrop') as HTMLElement;
       if (backdrop) {
@@ -148,11 +137,11 @@ const NestedMenuItem = ({
         backdrop.dispatchEvent(event);
       }
     }
-  });
+  };
 
-  const handleSubmenuClose = useLastCallback(() => {
-    if (isClosingRef.current) return;
-    isClosingRef.current = true;
+  const handleSubmenuClose = () => {
+    if (isClosingRef) return;
+    isClosingRef = true;
 
     cancelOpen();
     cancelClose();
@@ -162,43 +151,41 @@ const NestedMenuItem = ({
 
     // Reset after a short delay
     setTimeout(() => {
-      isClosingRef.current = false;
+      isClosingRef = false;
     }, 100);
-  });
+  };
 
-  const getTriggerElement = useLastCallback(() => itemRef.current);
-  const getRootElement = useLastCallback(() => document.body);
-  const getMenuElement = useLastCallback(
-    () => document.getElementById(submenuId)?.querySelector('.bubble') as HTMLElement | undefined,
-  );
-  const getLayout = useLastCallback(() => ({ withPortal: true }));
+  const getTriggerElement = () => itemRef;
+  const getRootElement = () => document.body;
+  const getMenuElement = () => document.getElementById(submenuId)?.querySelector('.bubble') as HTMLElement | undefined;
+  const getLayout = () => ({ withPortal: true });
 
-  const handleClick = useLastCallback((e: React.SyntheticEvent<HTMLDivElement | HTMLAnchorElement>) => {
+  const handleClick = (e: React.SyntheticEvent<HTMLDivElement | HTMLAnchorElement>) => {
     e.stopPropagation();
-    if (disabled || isSubmenuOpen) return;
+    if (props.disabled || isSubmenuOpen()) return;
     openSubmenu();
-  });
+  };
 
   return (
     <div onMouseEnter={handleMouseEnter} onMouseLeave={scheduleClose} ref={itemRef}>
       <MenuItem
-        icon={icon}
-        customIcon={customIcon}
-        className={buildClassName(className, 'submenu')}
-        disabled={disabled}
-        destructive={destructive}
-        ariaLabel={ariaLabel}
-        hasIconPremiumBadge={hasIconPremiumBadge}
+        icon={props.icon}
+        customIcon={props.customIcon}
+        className={buildClassName(props.className, 'submenu')}
+        disabled={props.disabled}
+        destructive={props.destructive}
+        ariaLabel={props.ariaLabel}
+        hasIconPremiumBadge={props.hasIconPremiumBadge}
         onClick={handleClick}
       >
-        {children}
-        <Icon name={submenuIcon || (lang.isRtl ? 'previous' : 'next')} className="submenu-icon" />
-        {submenuAnchor && (
+        {props.children}
+        <Icon name={props.submenuIcon || (lang.isRtl ? 'previous' : 'next')} className="submenu-icon" />
+        {submenuAnchor() && (
           <Menu
             id={submenuId}
-            isOpen={isSubmenuOpen}
-            className={buildClassName('submenu', submenuClassName)}
-            anchor={submenuAnchor}
+            isOpen={isSubmenuOpen()}
+            className={buildClassName('submenu', props.submenuClassName)}
+            anchor={submenuAnchor()}
             positionX={lang.isRtl ? 'left' : 'right'}
             getTriggerElement={getTriggerElement}
             getRootElement={getRootElement}
@@ -207,12 +194,12 @@ const NestedMenuItem = ({
             autoClose
             nested
             withPortal
-            footer={footer}
+            footer={props.footer}
             onClose={handleSubmenuClose}
             onMouseEnter={handleSubmenuMouseEnter}
             onMouseLeave={handleSubmenuMouseLeave}
           >
-            {submenu}
+            {props.submenu}
           </Menu>
         )}
       </MenuItem>

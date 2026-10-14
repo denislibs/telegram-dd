@@ -1,21 +1,24 @@
-import { useRef } from '../../../../lib/teact/teact';
+import { previous } from 'frameact';
 
 import useForceUpdate from '../../../../hooks/useForceUpdate';
-import usePreviousDeprecated from '../../../../hooks/usePreviousDeprecated';
 
+// TODO(codemod): useLeftHeaderButtonRtlForumTransition: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useLeftHeaderButtonRtlForumTransition(shouldHideSearch?: boolean) {
+  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
   const forceUpdate = useForceUpdate();
-  const shouldDisableDropdownMenuTransitionRef = useRef(shouldHideSearch);
-  const prevShouldHideSearch = usePreviousDeprecated(shouldHideSearch);
+  let shouldDisableDropdownMenuTransitionRef = shouldHideSearch;
+  const prevShouldHideSearch = previous(() => shouldHideSearch);
 
   function handleDropdownMenuTransitionEnd() {
-    shouldDisableDropdownMenuTransitionRef.current = Boolean(shouldHideSearch);
+    shouldDisableDropdownMenuTransitionRef = Boolean(shouldHideSearch);
     forceUpdate();
   }
 
-  if (shouldHideSearch === false && prevShouldHideSearch !== shouldHideSearch) {
-    shouldDisableDropdownMenuTransitionRef.current = false;
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (shouldHideSearch === false && prevShouldHideSearch() !== shouldHideSearch) {
+    shouldDisableDropdownMenuTransitionRef = false;
   }
 
+  // TODO(codemod): "shouldDisableDropdownMenuTransitionRef" was a ref object passed as a value: pass an accessor (() => shouldDisableDropdownMenuTransitionRef) or a callback ref
   return { shouldDisableDropdownMenuTransitionRef, handleDropdownMenuTransitionEnd };
 }

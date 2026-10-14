@@ -1,10 +1,6 @@
-import { memo } from '../../../lib/teact/teact';
-
 import type { TabWithProperties } from '../../ui/TabList';
 
 import buildClassName from '../../../util/buildClassName';
-
-import useLastCallback from '../../../hooks/useLastCallback';
 
 import TabList from '../../ui/TabList';
 
@@ -18,27 +14,25 @@ type OwnProps = {
   onFileHoverOpen: (index: number) => void;
 };
 
-const ChatFolderTabList = ({ tabs, activeTab, className, onSwitchTab, onFileHoverOpen }: OwnProps) => {
-  const renderExtra = useLastCallback((tab: TabWithProperties) => {
+const ChatFolderTabList = (props: OwnProps) => {
+  const renderExtra = (tab: TabWithProperties) => {
     if (!tab.badgeCount) return undefined;
-    return (
-      <span className={buildClassName(styles.badge, tab.isBadgeActive && styles.badgeActive)}>{tab.badgeCount}</span>
-    );
-  });
+    return <span class={buildClassName(styles.badge, tab.isBadgeActive && styles.badgeActive)}>{tab.badgeCount}</span>;
+  };
 
   return (
-    <div className={buildClassName(styles.root)}>
+    <div class={buildClassName(styles.root)}>
       <TabList
-        tabs={tabs}
-        activeTab={activeTab}
+        tabs={props.tabs}
+        activeTab={props.activeTab}
         withFadeMask
         renderExtra={renderExtra}
-        className={buildClassName(styles.tabList, className)}
-        onSwitchTab={onSwitchTab}
-        onFileHoverOpen={onFileHoverOpen}
+        className={buildClassName(styles.tabList, props.className)}
+        onSwitchTab={props.onSwitchTab}
+        onFileHoverOpen={props.onFileHoverOpen}
       />
     </div>
   );
 };
 
-export default memo(ChatFolderTabList);
+export default ChatFolderTabList;

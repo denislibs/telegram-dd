@@ -1,5 +1,3 @@
-import { useRef } from '../lib/teact/teact';
-
 import type { IThemeSettings, ThemeKey } from '../types';
 import type { WallpaperStorageSource } from '../util/wallpaperStorage';
 
@@ -22,6 +20,7 @@ type ChatBackgroundParams = {
 // Shared chat-background rendering: resolves the active wallpaper (custom image, color, gradient or
 // pattern — falling back to the built-in default) into the class names, CSS variables and gradient
 // canvas that `Main` and the preview modals all render identically.
+// TODO(codemod): useChatBackground: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useChatBackground({ theme, wallpaper, isStatic, source }: ChatBackgroundParams) {
   const selectedModel = buildWallpaperRenderModel(theme, wallpaper);
   const customBackgroundValue = useCustomBackground(
@@ -35,9 +34,9 @@ export default function useChatBackground({ theme, wallpaper, isStatic, source }
       ? buildWallpaperRenderModel(theme, {})
       : selectedModel;
   const hasGradient = !model.isImage && model.colors.length >= 2;
-  const wasMaskedPatternRef = useRef(model.isMaskedPattern);
-  const shouldSnapGradient = model.isMaskedPattern && !wasMaskedPatternRef.current;
-  wasMaskedPatternRef.current = model.isMaskedPattern;
+  let wasMaskedPatternRef = model.isMaskedPattern;
+  const shouldSnapGradient = model.isMaskedPattern && !wasMaskedPatternRef;
+  wasMaskedPatternRef = model.isMaskedPattern;
 
   // Entering masked mode snaps away bright transition frames; masked wallpapers still morph between each other
   const gradientCanvasRef = useGradientBackground(

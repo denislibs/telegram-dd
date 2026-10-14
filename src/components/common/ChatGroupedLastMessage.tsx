@@ -1,7 +1,7 @@
-import type { TeactNode } from '../../lib/teact/teact';
-import { memo, useEffect, useRef, useState } from '../../lib/teact/teact';
+import { createMeasureEffect, createMemo, createSignal, requestMeasure, requestMutation } from 'frameact';
+import type { JSX } from 'frameact/jsx-runtime';
+import { depsOf } from '../../util/effectDeps';
 
-import { requestMeasure, requestMutation } from '../../lib/fasterdom/fasterdom';
 import buildClassName from '../../util/buildClassName';
 import { REM } from './helpers/mediaDimensions';
 import renderText from './helpers/renderText';
@@ -15,14 +15,14 @@ export type GroupedLastMessageItem = {
   key: string | number;
   title: string;
   isUnread?: boolean;
-  icon?: TeactNode;
+  icon?: JSX.Element;
 };
 
 type OwnProps = {
   // `undefined` while the items are still loading
   items?: GroupedLastMessageItem[];
   hasTags?: boolean;
-  renderLastMessage: () => TeactNode | undefined;
+  renderLastMessage: () => JSX.Element | undefined;
   // Returns `true` when the click is handled, so it does not open the chat itself
   onMainItemClick?: () => boolean;
 };
@@ -33,110 +33,116 @@ const ICON_CLASS_NAME = buildClassName(styles.icon, 'in-text-icon');
 // A chat list subtitle that groups a chat's parts (forum topics, community chats)
 // on one row and previews the freshest one's last message below, connecting
 // both with a bubble when that part is unread
-const ChatGroupedLastMessage = ({ items, hasTags, renderLastMessage, onMainItemClick }: OwnProps) => {
-  const lastMessageRef = useRef<HTMLDivElement>();
-  const mainColumnRef = useRef<HTMLDivElement>();
+const ChatGroupedLastMessage = (props: OwnProps) => {
+  let lastMessageRef!: HTMLDivElement;
+  let mainColumnRef!: HTMLDivElement;
 
-  const [mainItem, ...otherItems] = items || [];
+  // TODO(codemod): array destructuring of a reactive value: read the items through accessors
+  const [mainItem, ...otherItems] = props.items || [];
 
   const lang = useLang();
 
-  const [isReversedCorner, setIsReversedCorner] = useState(false);
-  const [overwrittenWidth, setOverwrittenWidth] = useState<number | undefined>(undefined);
+  const [isReversedCorner, setIsReversedCorner] = createSignal(false);
+  const [overwrittenWidth, setOverwrittenWidth] = createSignal<number | undefined>(undefined);
 
-  const { handleClick: handleMainItemClick, handleMouseDown: handleMainItemMouseDown } = useFastClick(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!onMainItemClick?.()) return;
+  const fastClickResult = createMemo(() =>
+    useFastClick((e: React.MouseEvent<HTMLDivElement>) => {
+      if (!props.onMainItemClick?.()) return;
 
       e.stopPropagation();
       e.preventDefault();
+    }),
+  );
+  const handleMainItemClick = () => fastClickResult().handleClick;
+  const handleMainItemMouseDown = () => fastClickResult().handleMouseDown;
+
+  createMeasureEffect(
+    depsOf(() => [mainItem, props.renderLastMessage, props.hasTags] as const),
+    ([mainItem2, renderLastMessage2, hasTags2]) => {
+      if (hasTags2) return undefined;
+
+      let isCancelled = false;
+
+      requestMeasure(() => {
+        const lastMessageElement = lastMessageRef;
+        const mainColumnElement = mainColumnRef;
+        if (isCancelled || !lastMessageElement || !mainColumnElement) return;
+
+        const lastMessageWidth = lastMessageElement.offsetWidth;
+        const mainColumnWidth = mainColumnElement.offsetWidth;
+
+        requestMutation(() => {
+          if (isCancelled) return;
+
+          setOverwrittenWidth(
+            Math.abs(lastMessageWidth - mainColumnWidth) < NO_CORNER_THRESHOLD
+              ? Math.max(lastMessageWidth, mainColumnWidth)
+              : undefined,
+          );
+          setIsReversedCorner(lastMessageWidth > mainColumnWidth);
+        });
+      });
+
+      return () => {
+        isCancelled = true;
+      };
     },
   );
 
-  useEffect(() => {
-    if (hasTags) return undefined;
-
-    let isCancelled = false;
-
-    requestMeasure(() => {
-      const lastMessageElement = lastMessageRef.current;
-      const mainColumnElement = mainColumnRef.current;
-      if (isCancelled || !lastMessageElement || !mainColumnElement) return;
-
-      const lastMessageWidth = lastMessageElement.offsetWidth;
-      const mainColumnWidth = mainColumnElement.offsetWidth;
-
-      requestMutation(() => {
-        if (isCancelled) return;
-
-        setOverwrittenWidth(
-          Math.abs(lastMessageWidth - mainColumnWidth) < NO_CORNER_THRESHOLD
-            ? Math.max(lastMessageWidth, mainColumnWidth)
-            : undefined,
-        );
-        setIsReversedCorner(lastMessageWidth > mainColumnWidth);
-      });
-    });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [mainItem, renderLastMessage, hasTags]);
-
   return (
     <div
-      className={buildClassName(
+      class={buildClassName(
         styles.root,
-        isReversedCorner && styles.reverseCorner,
-        overwrittenWidth && styles.overwrittenWidth,
+        isReversedCorner() && styles.reverseCorner,
+        overwrittenWidth() && styles.overwrittenWidth,
       )}
       dir={lang.isRtl ? 'rtl' : undefined}
-      style={overwrittenWidth ? `--overwritten-width: ${overwrittenWidth}px` : undefined}
+      style={overwrittenWidth() ? `--overwritten-width: ${overwrittenWidth()}px` : undefined}
     >
-      {!hasTags && (
+      {!props.hasTags && (
         <>
           {mainItem && (
-            <div className={styles.titleRow}>
+            <div class={styles.titleRow}>
               <div
-                className={buildClassName(styles.mainColumn, mainItem.isUnread && styles.unread)}
+                class={buildClassName(styles.mainColumn, mainItem.isUnread && styles.unread)}
                 ref={mainColumnRef}
-                onClick={handleMainItemClick}
-                onMouseDown={handleMainItemMouseDown}
+                onClick={handleMainItemClick()}
+                onMouseDown={handleMainItemMouseDown()}
               >
-                {Boolean(mainItem.icon) && <span className={ICON_CLASS_NAME}>{mainItem.icon}</span>}
-                <div className={styles.title}>{renderText(mainItem.title)}</div>
-                {!overwrittenWidth && isReversedCorner && (
-                  <div className={styles.afterWrapper}>
-                    <div className={styles.after} />
+                {Boolean(mainItem.icon) && <span class={ICON_CLASS_NAME}>{mainItem.icon}</span>}
+                <div class={styles.title}>{renderText(mainItem.title)}</div>
+                {!overwrittenWidth() && isReversedCorner() && (
+                  <div class={styles.afterWrapper}>
+                    <div class={styles.after} />
                   </div>
                 )}
               </div>
 
-              <div className={styles.otherColumns}>
+              <div class={styles.otherColumns}>
                 {otherItems.map((item) => (
-                  <div className={buildClassName(styles.otherColumn, item.isUnread && styles.unread)} key={item.key}>
-                    {Boolean(item.icon) && <span className={ICON_CLASS_NAME}>{item.icon}</span>}
-                    <span className={styles.otherColumnTitle}>{renderText(item.title)}</span>
+                  <div class={buildClassName(styles.otherColumn, item.isUnread && styles.unread)}>
+                    {Boolean(item.icon) && <span class={ICON_CLASS_NAME}>{item.icon}</span>}
+                    <span class={styles.otherColumnTitle}>{renderText(item.title)}</span>
                   </div>
                 ))}
               </div>
 
-              <div className={styles.ellipsis} />
+              <div class={styles.ellipsis} />
             </div>
           )}
-          {!items && <div className={buildClassName(styles.titleRow, styles.loading)}>{lang('Loading')}</div>}
+          {!props.items && <div class={buildClassName(styles.titleRow, styles.loading)}>{lang('Loading')}</div>}
         </>
       )}
       <div
-        className={buildClassName(styles.lastMessage, mainItem?.isUnread && !hasTags && styles.unread)}
+        class={buildClassName(styles.lastMessage, mainItem?.isUnread && !props.hasTags && styles.unread)}
         ref={lastMessageRef}
-        onClick={handleMainItemClick}
-        onMouseDown={handleMainItemMouseDown}
+        onClick={handleMainItemClick()}
+        onMouseDown={handleMainItemMouseDown()}
       >
-        {renderLastMessage()}
-        {!overwrittenWidth && !isReversedCorner && (
-          <div className={styles.afterWrapper}>
-            <div className={styles.after} />
+        {props.renderLastMessage()}
+        {!overwrittenWidth() && !isReversedCorner() && (
+          <div class={styles.afterWrapper}>
+            <div class={styles.after} />
           </div>
         )}
       </div>
@@ -144,4 +150,4 @@ const ChatGroupedLastMessage = ({ items, hasTags, renderLastMessage, onMainItemC
   );
 };
 
-export default memo(ChatGroupedLastMessage);
+export default ChatGroupedLastMessage;

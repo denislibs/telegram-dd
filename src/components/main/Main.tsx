@@ -2,21 +2,22 @@ import '../../global/actions/all';
 
 import {
   beginHeavyAnimation,
-  memo,
+  createEffect,
+  createMemo,
+  createSignal,
   onFullyIdle,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from '../../lib/teact/teact';
-import { addExtraClass, setExtraStyles } from '../../lib/teact/teact-dom';
+  onMount,
+  requestNextMutation,
+} from 'frameact';
+import { addExtraClass, setExtraStyles } from 'frameact/dom';
 import { getActions, getGlobal, withGlobal } from '../../global';
+import { depsOf } from '../../util/effectDeps';
+import { createShowTransition } from '../../lib/kit';
 
 import type { ApiChatFolder, ApiLimitTypeWithModal, ApiStarGiftAuctionState, ApiUser } from '../../api/types';
-import type { TabState } from '../../global/types';
+import type { GlobalState, TabState } from '../../global/types';
 
 import { BASE_EMOJI_KEYWORD_LANG, DEBUG, FOLDERS_POSITION_LEFT, INACTIVE_MARKER } from '../../config';
-import { requestNextMutation } from '../../lib/fasterdom/fasterdom';
 import {
   selectAreFoldersPresent,
   selectCanAnimateInterface,
@@ -53,10 +54,7 @@ import useTauriEvent from '../../hooks/tauri/useTauriEvent';
 import useAppLayout from '../../hooks/useAppLayout';
 import useForceUpdate from '../../hooks/useForceUpdate';
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
 import usePreventPinchZoomGesture from '../../hooks/usePreventPinchZoomGesture';
-import useShowTransition from '../../hooks/useShowTransition';
-import useSyncEffect from '../../hooks/useSyncEffect';
 import useBackgroundMode from '../../hooks/window/useBackgroundMode';
 import useBeforeUnload from '../../hooks/window/useBeforeUnload';
 import { useFullscreenStatus } from '../../hooks/window/useFullscreen';
@@ -163,55 +161,8 @@ const EDITOR_BUNDLE_LOADING_DELAY_MS = 10000; // 10 sec
 
 let DEBUG_isLogged = false;
 
-const Main = ({
-  isMobile,
-  isLeftColumnOpen,
-  isMiddleColumnOpen,
-  isRightColumnOpen,
-  isMediaViewerOpen,
-  isStoryViewerOpen,
-  isForwardModalOpen,
-  activeGroupCallId,
-  isHistoryCalendarOpen,
-  shouldSkipHistoryAnimations,
-  limitReached,
-  openedStickerSetShortName,
-  openedCustomEmojiSetIds,
-  withInterfaceAnimations,
-  wasTimeFormatSetManually,
-  addedSetIds,
-  addedCustomEmojiIds,
-  isPhoneCallActive,
-  newContactUserId,
-  newContactByPhoneNumber,
-  openedGame,
-  gameTitle,
-  isRatePhoneCallModalOpen,
-  botTrustRequest,
-  botTrustRequestBot,
-  requestedAttachBotInChat,
-  requestedBotStartGroup,
-  requestedDraft,
-  isPremiumModalOpen,
-  isGiveawayModalOpen,
-  isDeleteMessageModalOpen,
-  isStarsGiftingPickerModal,
-  isPaymentModalOpen,
-  isReceiptModalOpen,
-  isReactionPickerOpen,
-  isCurrentUserPremium,
-  deleteFolderDialog,
-  isMasterTab,
-  noRightColumnAnimation,
-  isSynced,
-  currentUserId,
-  hasCurrentUser,
-  isAccountFrozen,
-  isAppConfigLoaded,
-  isFoldersSidebarShown,
-  diceEmojies,
-  selectedGiftAuction,
-}: OwnProps & StateProps) => {
+const Main = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const {
     initMain,
     loadAnimatedEmojis,
@@ -296,169 +247,234 @@ const Main = ({
         void loadBundle(Bundles.Editor);
       });
     },
-    isSynced ? EDITOR_BUNDLE_LOADING_DELAY_MS : undefined,
+    () => (props.isSynced ? EDITOR_BUNDLE_LOADING_DELAY_MS : undefined),
   );
 
-  const containerRef = useRef<HTMLDivElement>();
-  const leftColumnRef = useRef<HTMLDivElement>();
+  let containerRef!: HTMLDivElement;
+  let leftColumnRef!: HTMLDivElement;
 
   const { isDesktop } = useAppLayout();
-  useEffect(() => {
-    if (!isLeftColumnOpen && !isMiddleColumnOpen && !isDesktop) {
-      // Always display at least one column
-      toggleLeftColumn();
-    } else if (isLeftColumnOpen && isMiddleColumnOpen && isMobile) {
-      // Can't have two active columns at the same time
-      toggleLeftColumn();
-    }
-  }, [isDesktop, isLeftColumnOpen, isMiddleColumnOpen, isMobile, toggleLeftColumn]);
-
-  useEffect(() => {
-    if (IS_TAURI && IS_MAC_OS) {
-      window.tauri?.markTitleBarOverlay(true, isMobile);
-    }
-  }, [isMobile]);
-
-  useInterval(checkAppVersion, isMasterTab ? APP_OUTDATED_TIMEOUT_MS : undefined, true);
-
-  // Initial API calls
-  useEffect(() => {
-    if (isMasterTab && isSynced) {
-      updateIsOnline({ isOnline: true });
-      loadConfig();
-      loadAppConfig();
-      loadPeerColors();
-      initMain();
-      loadContactList();
-      checkAppVersion();
-      loadAuthorizations();
-      loadPasswordInfo();
-    }
-  }, [isMasterTab, isSynced]);
-
-  // Initial API calls
-  useEffect(() => {
-    if (isMasterTab && isSynced && isAppConfigLoaded && !isAccountFrozen) {
-      loadAllStories();
-      loadAllHiddenStories();
-      loadPromoData();
-      loadContentSettings();
-      loadRecentReactions();
-      loadDefaultTagReactions();
-      loadAttachBots();
-
-      // `wallet.getState` creates the wallet on first call, so it is only made where the wallet is rolled out
-      if (getGlobal().appConfig.isWalletAvailable) {
-        loadWalletState();
+  createEffect(
+    depsOf(
+      () => [isDesktop, props.isLeftColumnOpen, props.isMiddleColumnOpen, props.isMobile, toggleLeftColumn] as const,
+    ),
+    ([, isLeftColumnOpen2, isMiddleColumnOpen2, isMobile2]) => {
+      if (!isLeftColumnOpen2 && !isMiddleColumnOpen2 && !isDesktop) {
+        // Always display at least one column
+        toggleLeftColumn();
+      } else if (isLeftColumnOpen2 && isMiddleColumnOpen2 && isMobile2) {
+        // Can't have two active columns at the same time
+        toggleLeftColumn();
       }
+    },
+  );
 
-      loadNotificationSettings();
-      loadNotificationExceptions();
-      loadTopPeers({ category: 'botsInline' });
-      loadTopReactions();
-      loadStarStatus();
-      loadEmojiKeywords({ language: BASE_EMOJI_KEYWORD_LANG });
-      loadFeaturedEmojiStickers();
-      loadSavedReactionTags();
-      loadTopPeers({ category: 'botsApp' });
-      loadTopPeers({ category: 'botsGuestChat' });
-      loadPaidReactionPrivacy();
-      loadDefaultTopicIcons();
-      loadAnimatedEmojis();
-      loadAvailableReactions();
-      loadUserCollectibleStatuses();
-      loadGenericEmojiEffects();
-      loadPremiumGifts();
-      loadTonGifts();
-      loadStarGifts();
-      loadMyUniqueGifts();
-      loadAvailableEffects();
-      loadBirthdayNumbersStickers();
-      loadRestrictedEmojiStickers();
-      loadQuickReplies();
-      loadTimezones();
-      loadAiComposeTones();
-      loadActiveGiftAuctions();
-    }
-  }, [isMasterTab, isSynced, isAppConfigLoaded, isAccountFrozen]);
+  createEffect(
+    () => props.isMobile,
+    (isMobile2) => {
+      if (IS_TAURI && IS_MAC_OS) {
+        window.tauri?.markTitleBarOverlay(true, isMobile2);
+      }
+    },
+  );
+
+  useInterval(checkAppVersion, () => (props.isMasterTab ? APP_OUTDATED_TIMEOUT_MS : undefined), true);
+
+  // Initial API calls
+  createEffect(
+    depsOf(() => [props.isMasterTab, props.isSynced] as const),
+    ([isMasterTab2, isSynced2]) => {
+      if (isMasterTab2 && isSynced2) {
+        updateIsOnline({ isOnline: true });
+        loadConfig();
+        loadAppConfig();
+        loadPeerColors();
+        initMain();
+        loadContactList();
+        checkAppVersion();
+        loadAuthorizations();
+        loadPasswordInfo();
+      }
+    },
+  );
+
+  // Initial API calls
+  createEffect(
+    depsOf(() => [props.isMasterTab, props.isSynced, props.isAppConfigLoaded, props.isAccountFrozen] as const),
+    ([isMasterTab2, isSynced2, isAppConfigLoaded2, isAccountFrozen2]) => {
+      if (isMasterTab2 && isSynced2 && isAppConfigLoaded2 && !isAccountFrozen2) {
+        loadAllStories();
+        loadAllHiddenStories();
+        loadPromoData();
+        loadContentSettings();
+        loadRecentReactions();
+        loadDefaultTagReactions();
+        loadAttachBots();
+
+        // `wallet.getState` creates the wallet on first call, so it is only made where the wallet is rolled out
+        if (getGlobal().appConfig.isWalletAvailable) {
+          loadWalletState();
+        }
+
+        loadNotificationSettings();
+        loadNotificationExceptions();
+        loadTopPeers({ category: 'botsInline' });
+        loadTopReactions();
+        loadStarStatus();
+        loadEmojiKeywords({ language: BASE_EMOJI_KEYWORD_LANG });
+        loadFeaturedEmojiStickers();
+        loadSavedReactionTags();
+        loadTopPeers({ category: 'botsApp' });
+        loadTopPeers({ category: 'botsGuestChat' });
+        loadPaidReactionPrivacy();
+        loadDefaultTopicIcons();
+        loadAnimatedEmojis();
+        loadAvailableReactions();
+        loadUserCollectibleStatuses();
+        loadGenericEmojiEffects();
+        loadPremiumGifts();
+        loadTonGifts();
+        loadStarGifts();
+        loadMyUniqueGifts();
+        loadAvailableEffects();
+        loadBirthdayNumbersStickers();
+        loadRestrictedEmojiStickers();
+        loadQuickReplies();
+        loadTimezones();
+        loadAiComposeTones();
+        loadActiveGiftAuctions();
+      }
+    },
+  );
 
   // The saved list is keyed on the current user, who may land in the global after the first sync
-  useEffect(() => {
-    if (isMasterTab && isSynced && isAppConfigLoaded && !isAccountFrozen && hasCurrentUser) {
-      loadAllChats({ listType: 'saved' });
-    }
-  }, [isMasterTab, isSynced, isAppConfigLoaded, isAccountFrozen, hasCurrentUser]);
+  createEffect(
+    depsOf(
+      () =>
+        [
+          props.isMasterTab,
+          props.isSynced,
+          props.isAppConfigLoaded,
+          props.isAccountFrozen,
+          props.hasCurrentUser,
+        ] as const,
+    ),
+    ([isMasterTab2, isSynced2, isAppConfigLoaded2, isAccountFrozen2, hasCurrentUser2]) => {
+      if (isMasterTab2 && isSynced2 && isAppConfigLoaded2 && !isAccountFrozen2 && hasCurrentUser2) {
+        loadAllChats({ listType: 'saved' });
+      }
+    },
+  );
 
   // Initial Premium API calls
-  useEffect(() => {
-    if (isMasterTab && isCurrentUserPremium && isAppConfigLoaded && !isAccountFrozen) {
-      loadDefaultStatusIcons();
-      loadRecentEmojiStatuses();
-    }
-  }, [isCurrentUserPremium, isMasterTab, isAppConfigLoaded, isAccountFrozen]);
+  createEffect(
+    depsOf(
+      () => [props.isCurrentUserPremium, props.isMasterTab, props.isAppConfigLoaded, props.isAccountFrozen] as const,
+    ),
+    ([isCurrentUserPremium2, isMasterTab2, isAppConfigLoaded2, isAccountFrozen2]) => {
+      if (isMasterTab2 && isCurrentUserPremium2 && isAppConfigLoaded2 && !isAccountFrozen2) {
+        loadDefaultStatusIcons();
+        loadRecentEmojiStatuses();
+      }
+    },
+  );
 
   // Language-based API calls
-  useEffect(() => {
-    if (isMasterTab) {
-      if (lang.code !== BASE_EMOJI_KEYWORD_LANG) {
-        loadEmojiKeywords({ language: lang.code });
-      }
+  createEffect(
+    depsOf(() => [lang.code, props.isMasterTab] as const),
+    ([, isMasterTab2]) => {
+      if (isMasterTab2) {
+        if (lang.code !== BASE_EMOJI_KEYWORD_LANG) {
+          loadEmojiKeywords({ language: lang.code });
+        }
 
-      loadCountryList({ langCode: lang.code });
-    }
-  }, [lang.code, isMasterTab]);
+        loadCountryList({ langCode: lang.code });
+      }
+    },
+  );
 
   // Re-fetch cached saved emoji for `localDb`
-  useEffect(() => {
-    if (isMasterTab) {
-      loadCustomEmojis({
-        ids: Object.keys(getGlobal().customEmojis.byId),
-        ignoreCache: true,
-      });
-    }
-  }, [isMasterTab]);
+  createEffect(
+    () => props.isMasterTab,
+    (isMasterTab2) => {
+      if (isMasterTab2) {
+        loadCustomEmojis({
+          ids: Object.keys(getGlobal().customEmojis.byId),
+          ignoreCache: true,
+        });
+      }
+    },
+  );
 
   // Sticker sets
-  useEffect(() => {
-    if (isMasterTab && isSynced && isAppConfigLoaded && !isAccountFrozen) {
-      if (!addedSetIds || !addedCustomEmojiIds) {
-        loadStickerSets();
-        loadFavoriteStickers();
+  createEffect(
+    depsOf(
+      () =>
+        [
+          props.addedSetIds,
+          props.addedCustomEmojiIds,
+          props.isMasterTab,
+          props.isSynced,
+          props.isAppConfigLoaded,
+          props.isAccountFrozen,
+        ] as const,
+    ),
+    ([addedSetIds2, addedCustomEmojiIds2, isMasterTab2, isSynced2, isAppConfigLoaded2, isAccountFrozen2]) => {
+      if (isMasterTab2 && isSynced2 && isAppConfigLoaded2 && !isAccountFrozen2) {
+        if (!addedSetIds2 || !addedCustomEmojiIds2) {
+          loadStickerSets();
+          loadFavoriteStickers();
+        }
+
+        if (addedSetIds2 && addedCustomEmojiIds2) {
+          loadAddedStickers();
+        }
       }
+    },
+  );
 
-      if (addedSetIds && addedCustomEmojiIds) {
-        loadAddedStickers();
+  createEffect(
+    depsOf(
+      () =>
+        [props.isMasterTab, props.isSynced, props.isAppConfigLoaded, props.isAccountFrozen, props.diceEmojies] as const,
+    ),
+    ([isMasterTab2, isSynced2, isAppConfigLoaded2, isAccountFrozen2, diceEmojies2]) => {
+      if (isMasterTab2 && isSynced2 && isAppConfigLoaded2 && !isAccountFrozen2 && diceEmojies2) {
+        loadDiceStickers();
       }
-    }
-  }, [addedSetIds, addedCustomEmojiIds, isMasterTab, isSynced, isAppConfigLoaded, isAccountFrozen]);
+    },
+  );
 
-  useEffect(() => {
-    if (isMasterTab && isSynced && isAppConfigLoaded && !isAccountFrozen && diceEmojies) {
-      loadDiceStickers();
-    }
-  }, [isMasterTab, isSynced, isAppConfigLoaded, isAccountFrozen, diceEmojies]);
-
-  useEffect(() => {
-    loadBotFreezeAppeal();
-  }, [isAppConfigLoaded]);
+  createEffect(
+    () => props.isAppConfigLoaded,
+    (isAppConfigLoaded2) => {
+      loadBotFreezeAppeal();
+    },
+  );
 
   // Ensure time format
-  useEffect(() => {
-    if (!wasTimeFormatSetManually) {
-      ensureTimeFormat();
-    }
-  }, [wasTimeFormatSetManually]);
+  createEffect(
+    () => props.wasTimeFormatSetManually,
+    (wasTimeFormatSetManually2) => {
+      if (!wasTimeFormatSetManually2) {
+        ensureTimeFormat();
+      }
+    },
+  );
 
   // Parse deep link
-  useEffect(() => {
-    if (!isSynced) return;
-    updatePageTitle();
+  createEffect(
+    () => props.isSynced,
+    (isSynced2) => {
+      if (!isSynced2) return;
+      updatePageTitle();
 
-    const parsedInitialLocationHash = parseInitialLocationHash();
-    if (parsedInitialLocationHash?.tgaddr) {
-      processDeepLink(parsedInitialLocationHash.tgaddr, { type: 'inner' });
-    }
-  }, [isSynced]);
+      const parsedInitialLocationHash = parseInitialLocationHash();
+      if (parsedInitialLocationHash?.tgaddr) {
+        processDeepLink(parsedInitialLocationHash.tgaddr, { type: 'inner' });
+      }
+    },
+  );
 
   useTauriEvent<string>('deeplink', (event) => {
     try {
@@ -473,58 +489,72 @@ const Main = ({
     }
   });
 
-  useEffect(() => {
-    const parsedLocationHash = parseLocationHash(currentUserId);
-    if (!parsedLocationHash) return;
+  createEffect(
+    () => props.currentUserId,
+    (currentUserId2) => {
+      const parsedLocationHash = parseLocationHash(currentUserId2);
+      if (!parsedLocationHash) return;
 
-    openThread({
-      chatId: parsedLocationHash.chatId,
-      threadId: parsedLocationHash.threadId,
-      type: parsedLocationHash.type,
-    });
-  }, [currentUserId]);
+      openThread({
+        chatId: parsedLocationHash.chatId,
+        threadId: parsedLocationHash.threadId,
+        type: parsedLocationHash.type,
+      });
+    },
+  );
 
   // Refresh gift auction subscription
-  const auctionTimeout = selectedGiftAuction?.state.type === 'active' ? selectedGiftAuction?.timeout : undefined;
-  const auctionGiftId = selectedGiftAuction?.gift.id;
+  const auctionTimeout = createMemo(() =>
+    props.selectedGiftAuction?.state.type === 'active' ? props.selectedGiftAuction?.timeout : undefined,
+  );
+  const auctionGiftId = createMemo(() => props.selectedGiftAuction?.gift.id);
   useInterval(
     () => {
-      if (auctionGiftId) {
-        loadGiftAuction({ giftId: auctionGiftId });
+      if (auctionGiftId()) {
+        loadGiftAuction({ giftId: auctionGiftId() });
       }
     },
-    auctionTimeout ? auctionTimeout * 1000 : undefined,
+    () => (auctionTimeout() ? auctionTimeout() * 1000 : undefined),
   );
 
   // Restore Transition slide class after async rendering
-  useLayoutEffect(() => {
-    const container = containerRef.current!;
+  onMount(() => {
+    const container = containerRef!;
     if (container.parentNode!.childElementCount === 1) {
       addExtraClass(container, 'Transition_slide-active');
     }
-  }, []);
+  });
 
-  useShowTransition({
-    ref: containerRef,
-    isOpen: isLeftColumnOpen,
-    noCloseTransition: shouldSkipHistoryAnimations,
+  createShowTransition({
+    // TODO(codemod): ref option: hand the result `ref` to the element (ref={t.ref}) instead
+    ref: () => containerRef,
+    isOpen: () => props.isLeftColumnOpen,
+    noCloseTransition: () => props.shouldSkipHistoryAnimations,
     prefix: 'left-column-',
   });
-  const willAnimateLeftColumnRef = useRef(false);
+  let willAnimateLeftColumnRef = false;
+  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
   const forceUpdate = useForceUpdate();
 
   // Handle opening middle column
-  useSyncEffect(
-    ([prevIsLeftColumnOpen]) => {
-      if (prevIsLeftColumnOpen === undefined || isLeftColumnOpen === prevIsLeftColumnOpen || !withInterfaceAnimations) {
+  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
+  createEffect(
+    depsOf(() => [props.isLeftColumnOpen, props.withInterfaceAnimations, forceUpdate]),
+    (_deps, prev) => {
+      const [prevIsLeftColumnOpen] = prev ?? [];
+      if (
+        prevIsLeftColumnOpen === undefined ||
+        props.isLeftColumnOpen === prevIsLeftColumnOpen ||
+        !props.withInterfaceAnimations
+      ) {
         return;
       }
 
-      willAnimateLeftColumnRef.current = true;
+      willAnimateLeftColumnRef = true;
 
       if (IS_ANDROID) {
         requestNextMutation(() => {
-          document.body.classList.toggle('android-left-blackout-open', !isLeftColumnOpen);
+          document.body.classList.toggle('android-left-blackout-open', !props.isLeftColumnOpen);
         });
       }
 
@@ -532,67 +562,73 @@ const Main = ({
 
       waitForTransitionEnd(document.getElementById('MiddleColumn')!, () => {
         endHeavyAnimation();
-        willAnimateLeftColumnRef.current = false;
+        willAnimateLeftColumnRef = false;
         forceUpdate();
       });
     },
-    [isLeftColumnOpen, withInterfaceAnimations, forceUpdate],
   );
 
-  useShowTransition({
-    ref: containerRef,
-    isOpen: isRightColumnOpen,
+  createShowTransition({
+    // TODO(codemod): ref option: hand the result `ref` to the element (ref={t.ref}) instead
+    ref: () => containerRef,
+    isOpen: () => props.isRightColumnOpen,
     noMountTransition: true,
-    noCloseTransition: shouldSkipHistoryAnimations,
+    noCloseTransition: () => props.shouldSkipHistoryAnimations,
     prefix: 'right-column-',
   });
-  const willAnimateRightColumnRef = useRef(false);
-  const [isNarrowMessageList, setIsNarrowMessageList] = useState(isRightColumnOpen);
+  let willAnimateRightColumnRef = false;
+  const [isNarrowMessageList, setIsNarrowMessageList] = createSignal(props.isRightColumnOpen);
 
   const isFullscreen = useFullscreenStatus();
 
   // Handle opening right column
-  useSyncEffect(
-    ([prevIsMiddleColumnOpen, prevIsRightColumnOpen]) => {
-      if (prevIsRightColumnOpen === undefined || isRightColumnOpen === prevIsRightColumnOpen) {
+  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
+  createEffect(
+    depsOf(() => [props.isMiddleColumnOpen, props.isRightColumnOpen, props.noRightColumnAnimation, forceUpdate]),
+    (_deps, prev) => {
+      const [prevIsMiddleColumnOpen, prevIsRightColumnOpen] = prev ?? [];
+      if (prevIsRightColumnOpen === undefined || props.isRightColumnOpen === prevIsRightColumnOpen) {
         return;
       }
 
-      if (!prevIsMiddleColumnOpen || noRightColumnAnimation) {
-        setIsNarrowMessageList(isRightColumnOpen);
+      if (!prevIsMiddleColumnOpen || props.noRightColumnAnimation) {
+        setIsNarrowMessageList(props.isRightColumnOpen);
         return;
       }
 
-      willAnimateRightColumnRef.current = true;
+      willAnimateRightColumnRef = true;
 
       const endHeavyAnimation = beginHeavyAnimation();
 
       waitForTransitionEnd(document.getElementById('RightColumn')!, () => {
         endHeavyAnimation();
-        willAnimateRightColumnRef.current = false;
+        willAnimateRightColumnRef = false;
         forceUpdate();
-        setIsNarrowMessageList(isRightColumnOpen);
+        setIsNarrowMessageList(props.isRightColumnOpen);
       });
     },
-    [isMiddleColumnOpen, isRightColumnOpen, noRightColumnAnimation, forceUpdate],
   );
 
-  const bgClassName = buildClassName(!noRightColumnAnimation && backgroundStyles.withTransition);
-
-  const className = buildClassName(
-    willAnimateLeftColumnRef.current && 'left-column-animating',
-    willAnimateRightColumnRef.current && 'right-column-animating',
-    isNarrowMessageList && 'narrow-message-list',
-    shouldSkipHistoryAnimations && 'history-animation-disabled',
-    isFullscreen && 'is-fullscreen',
-    isFoldersSidebarShown && 'folders-sidebar-visible',
+  const bgClassName = createMemo(() =>
+    buildClassName(!props.noRightColumnAnimation && backgroundStyles.withTransition),
   );
 
-  const handleBlur = useLastCallback(() => {
+  const className = createMemo(() =>
+    buildClassName(
+      willAnimateLeftColumnRef && 'left-column-animating',
+      willAnimateRightColumnRef && 'right-column-animating',
+      isNarrowMessageList() && 'narrow-message-list',
+      props.shouldSkipHistoryAnimations && 'history-animation-disabled',
+      isFullscreen && 'is-fullscreen',
+      props.isFoldersSidebarShown && 'folders-sidebar-visible',
+    ),
+  );
+
+  const handleBlur = () => {
     onTabFocusChange({ isBlurred: true });
-  });
+  };
 
-  const handleFocus = useLastCallback(() => {
+  const handleFocus = () => {
     onTabFocusChange({ isBlurred: false });
 
     if (!document.title.includes(INACTIVE_MARKER)) {
@@ -600,17 +636,17 @@ const Main = ({
     }
 
     updateIcon(false);
-  });
+  };
 
-  const playerReserveRef = useRef(0);
-  const handlePlayerPaneStateChange = useLastCallback(({ height }: PaneState) => {
-    const main = containerRef.current;
+  let playerReserveRef = 0;
+  const handlePlayerPaneStateChange = ({ height }: PaneState) => {
+    const main = containerRef;
     const middleColumn = document.getElementById('MiddleColumn');
     if (!main || !middleColumn) return;
     const occupiedHeight = height ? height + PANE_GAP_REM * REM : 0;
-    const heightDelta = occupiedHeight - playerReserveRef.current;
+    const heightDelta = occupiedHeight - playerReserveRef;
     if (!heightDelta) return;
-    playerReserveRef.current = occupiedHeight;
+    playerReserveRef = occupiedHeight;
     const parkedShift = occupiedHeight ? '0px' : 'var(--middle-panel-inline-padding)';
     updateTopReserveWithScrollCompensation(
       middleColumn,
@@ -627,171 +663,183 @@ const Main = ({
       },
       [main],
     );
-  });
+  };
 
-  const handleStickerSetModalClose = useLastCallback(() => {
+  const handleStickerSetModalClose = () => {
     closeStickerSetModal();
-  });
+  };
 
-  const handleCustomEmojiSetsModalClose = useLastCallback(() => {
+  const handleCustomEmojiSetsModalClose = () => {
     closeCustomEmojiSets();
-  });
+  };
 
   // Online status and browser tab indicators
   useBackgroundMode(handleBlur, handleFocus, IS_TAURI);
   useBeforeUnload(handleBlur);
-  usePreventPinchZoomGesture(isMediaViewerOpen || isStoryViewerOpen);
+  usePreventPinchZoomGesture(() => props.isMediaViewerOpen || props.isStoryViewerOpen);
 
   return (
-    <Wallpaper containerRef={containerRef} id="Main" className={className} bgClassName={bgClassName}>
-      {IS_TAURI && IS_MAC_OS && <div className="tauri-drag-region" data-tauri-drag-region />}
-      <FoldersSidebar isMobile={isMobile} isActive={isFoldersSidebarShown} />
-      <LeftColumn ref={leftColumnRef} isFoldersSidebarShown={isFoldersSidebarShown} />
+    <Wallpaper
+      containerRef={(el) => {
+        containerRef = el;
+      }}
+      id="Main"
+      className={className()}
+      bgClassName={bgClassName()}
+    >
+      {IS_TAURI && IS_MAC_OS && <div class="tauri-drag-region" data-tauri-drag-region />}
+      <FoldersSidebar isMobile={props.isMobile} isActive={props.isFoldersSidebarShown} />
+      <LeftColumn ref={leftColumnRef} isFoldersSidebarShown={props.isFoldersSidebarShown} />
       <MiddleColumn
-        leftColumnRef={leftColumnRef}
-        isMobile={isMobile}
+        leftColumnRef={(el) => {
+          leftColumnRef = el;
+        }}
+        isMobile={props.isMobile}
         onPlayerPaneStateChange={handlePlayerPaneStateChange}
       />
-      <RightColumn isMobile={isMobile} />
-      <MediaViewer isOpen={isMediaViewerOpen} />
-      <StoryViewer isOpen={isStoryViewerOpen} />
-      <ForwardRecipientPicker isOpen={isForwardModalOpen} />
-      <DraftRecipientPicker requestedDraft={requestedDraft} />
+      <RightColumn isMobile={props.isMobile} />
+      <MediaViewer isOpen={props.isMediaViewerOpen} />
+      <StoryViewer isOpen={props.isStoryViewerOpen} />
+      <ForwardRecipientPicker isOpen={props.isForwardModalOpen} />
+      <DraftRecipientPicker requestedDraft={props.requestedDraft} />
       <Dialogs />
       <AudioPlayer noUi />
       <ModalContainer />
-      <HistoryCalendar isOpen={isHistoryCalendarOpen} />
+      <HistoryCalendar isOpen={props.isHistoryCalendarOpen} />
       <StickerSetModal
-        isOpen={Boolean(openedStickerSetShortName)}
+        isOpen={Boolean(props.openedStickerSetShortName)}
         onClose={handleStickerSetModalClose}
-        stickerSetShortName={openedStickerSetShortName}
+        stickerSetShortName={props.openedStickerSetShortName}
       />
-      <CustomEmojiSetsModal customEmojiSetIds={openedCustomEmojiSetIds} onClose={handleCustomEmojiSetsModalClose} />
-      {activeGroupCallId && <GroupCall groupCallId={activeGroupCallId} />}
-      <ActiveCallHeader isActive={Boolean(activeGroupCallId || isPhoneCallActive)} />
+      <CustomEmojiSetsModal
+        customEmojiSetIds={props.openedCustomEmojiSetIds}
+        onClose={handleCustomEmojiSetsModalClose}
+      />
+      {props.activeGroupCallId && <GroupCall groupCallId={props.activeGroupCallId} />}
+      <ActiveCallHeader isActive={Boolean(props.activeGroupCallId || props.isPhoneCallActive)} />
       <NewContactModal
-        isOpen={Boolean(newContactUserId || newContactByPhoneNumber)}
-        userId={newContactUserId}
-        isByPhoneNumber={newContactByPhoneNumber}
+        isOpen={Boolean(props.newContactUserId || props.newContactByPhoneNumber)}
+        userId={props.newContactUserId}
+        isByPhoneNumber={props.newContactByPhoneNumber}
       />
-      <GameModal openedGame={openedGame} gameTitle={gameTitle} />
+      <GameModal openedGame={props.openedGame} gameTitle={props.gameTitle} />
       <DownloadManager />
       <ConfettiContainer />
       {IS_WAVE_TRANSFORM_SUPPORTED && <WaveContainer />}
       <SnapEffectContainer />
-      <PhoneCall isActive={isPhoneCallActive} />
+      <PhoneCall isActive={props.isPhoneCallActive} />
       <UnreadCount isForAppBadge />
-      <RatePhoneCallModal isOpen={isRatePhoneCallModalOpen} />
+      <RatePhoneCallModal isOpen={props.isRatePhoneCallModalOpen} />
       <BotTrustModal
-        bot={botTrustRequestBot}
-        type={botTrustRequest?.type}
-        shouldRequestWriteAccess={botTrustRequest?.shouldRequestWriteAccess}
+        bot={props.botTrustRequestBot}
+        type={props.botTrustRequest?.type}
+        shouldRequestWriteAccess={props.botTrustRequest?.shouldRequestWriteAccess}
       />
       <AttachBotRecipientPicker
-        requestedAttachBotInChat={requestedAttachBotInChat}
-        requestedBotStartGroup={requestedBotStartGroup}
+        requestedAttachBotInChat={props.requestedAttachBotInChat}
+        requestedBotStartGroup={props.requestedBotStartGroup}
       />
       <MessageListHistoryHandler />
-      <PremiumMainModal isOpen={isPremiumModalOpen} />
-      <GiveawayModal isOpen={isGiveawayModalOpen} />
-      <StarsGiftingPickerModal isOpen={isStarsGiftingPickerModal} />
-      <PremiumLimitReachedModal limit={limitReached} />
-      <PaymentModal isOpen={isPaymentModalOpen} onClose={closePaymentModal} />
-      <ReceiptModal isOpen={isReceiptModalOpen} onClose={clearReceipt} />
-      <DeleteFolderDialog folder={deleteFolderDialog} />
-      <ReactionPicker isOpen={isReactionPickerOpen} />
-      <DeleteMessageModal isOpen={isDeleteMessageModalOpen} />
+      <PremiumMainModal isOpen={props.isPremiumModalOpen} />
+      <GiveawayModal isOpen={props.isGiveawayModalOpen} />
+      <StarsGiftingPickerModal isOpen={props.isStarsGiftingPickerModal} />
+      <PremiumLimitReachedModal limit={props.limitReached} />
+      <PaymentModal isOpen={props.isPaymentModalOpen} onClose={closePaymentModal} />
+      <ReceiptModal isOpen={props.isReceiptModalOpen} onClose={clearReceipt} />
+      <DeleteFolderDialog folder={props.deleteFolderDialog} />
+      <ReactionPicker isOpen={props.isReactionPickerOpen} />
+      <DeleteMessageModal isOpen={props.isDeleteMessageModalOpen} />
     </Wallpaper>
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global, { isMobile }): Complete<StateProps> => {
-    const { currentUserId } = global;
+const mapStateToProps = (global: GlobalState, { isMobile }: OwnProps): Complete<StateProps> => {
+  const { currentUserId } = global;
 
-    const {
-      botTrustRequest,
-      requestedAttachBotInChat,
-      requestedBotStartGroup,
-      requestedDraft,
-      openedStickerSetShortName,
-      openedCustomEmojiSetIds,
-      shouldSkipHistoryAnimations,
-      openedGame,
-      isLeftColumnShown,
-      historyCalendarSelectedAt,
-      newContact,
-      ratingPhoneCall,
-      premiumModal,
-      giveawayModal,
-      deleteMessageModal,
-      starsGiftingPickerModal,
-      isMasterTab,
-      payment,
-      limitReachedModal,
-      deleteFolderDialogModal,
-    } = selectTabState(global);
+  const {
+    botTrustRequest,
+    requestedAttachBotInChat,
+    requestedBotStartGroup,
+    requestedDraft,
+    openedStickerSetShortName,
+    openedCustomEmojiSetIds,
+    shouldSkipHistoryAnimations,
+    openedGame,
+    isLeftColumnShown,
+    historyCalendarSelectedAt,
+    newContact,
+    ratingPhoneCall,
+    premiumModal,
+    giveawayModal,
+    deleteMessageModal,
+    starsGiftingPickerModal,
+    isMasterTab,
+    payment,
+    limitReachedModal,
+    deleteFolderDialogModal,
+  } = selectTabState(global);
 
-    const selectedGiftAuction = selectTabSelectedGiftAuction(global);
+  const selectedGiftAuction = selectTabSelectedGiftAuction(global);
 
-    const { wasTimeFormatSetManually, foldersPosition } = selectSharedSettings(global);
+  const { wasTimeFormatSetManually, foldersPosition } = selectSharedSettings(global);
 
-    const gameMessage = openedGame && selectChatMessage(global, openedGame.chatId, openedGame.messageId);
-    const gameTitle = gameMessage?.content.game?.title;
-    const { chatId } = selectCurrentMessageList(global) || {};
-    const noRightColumnAnimation =
-      !selectPerformanceSettingsValue(global, 'rightColumnAnimations') || !selectCanAnimateInterface(global);
+  const gameMessage = openedGame && selectChatMessage(global, openedGame.chatId, openedGame.messageId);
+  const gameTitle = gameMessage?.content.game?.title;
+  const { chatId } = selectCurrentMessageList(global) || {};
+  const noRightColumnAnimation =
+    !selectPerformanceSettingsValue(global, 'rightColumnAnimations') || !selectCanAnimateInterface(global);
 
-    const deleteFolderDialog = deleteFolderDialogModal ? selectChatFolder(global, deleteFolderDialogModal) : undefined;
-    const isAccountFrozen = selectIsCurrentUserFrozen(global);
+  const deleteFolderDialog = deleteFolderDialogModal ? selectChatFolder(global, deleteFolderDialogModal) : undefined;
+  const isAccountFrozen = selectIsCurrentUserFrozen(global);
 
-    return {
-      currentUserId,
-      hasCurrentUser: Boolean(selectUser(global, currentUserId!)),
-      isLeftColumnOpen: isLeftColumnShown,
-      isMiddleColumnOpen: Boolean(chatId),
-      isRightColumnOpen: selectIsRightColumnShown(global, isMobile),
-      isMediaViewerOpen: selectIsMediaViewerOpen(global),
-      isStoryViewerOpen: selectIsStoryViewerOpen(global),
-      isForwardModalOpen: selectIsForwardModalOpen(global),
-      isReactionPickerOpen: selectIsReactionPickerOpen(global),
-      isHistoryCalendarOpen: Boolean(historyCalendarSelectedAt),
-      shouldSkipHistoryAnimations,
-      openedStickerSetShortName,
-      openedCustomEmojiSetIds,
-      activeGroupCallId: isMasterTab ? global.groupCalls.activeGroupCallId : undefined,
-      withInterfaceAnimations: selectCanAnimateInterface(global),
-      wasTimeFormatSetManually,
-      isPhoneCallActive: isMasterTab ? Boolean(global.phoneCall) : undefined,
-      addedSetIds: global.stickers.added.setIds,
-      addedCustomEmojiIds: global.customEmojis.added.setIds,
-      newContactUserId: newContact?.userId,
-      newContactByPhoneNumber: newContact?.isByPhoneNumber,
-      openedGame,
-      gameTitle,
-      isRatePhoneCallModalOpen: Boolean(ratingPhoneCall),
-      botTrustRequest,
-      botTrustRequestBot: botTrustRequest && selectUser(global, botTrustRequest.botId),
-      requestedAttachBotInChat,
-      requestedBotStartGroup,
-      isCurrentUserPremium: selectIsCurrentUserPremium(global),
-      isPremiumModalOpen: premiumModal?.isOpen,
-      isGiveawayModalOpen: giveawayModal?.isOpen,
-      isDeleteMessageModalOpen: Boolean(deleteMessageModal),
-      isStarsGiftingPickerModal: starsGiftingPickerModal?.isOpen,
-      limitReached: limitReachedModal?.limit,
-      isPaymentModalOpen: payment.isPaymentModalOpen,
-      isReceiptModalOpen: Boolean(payment.receipt),
-      deleteFolderDialog,
-      isMasterTab,
-      requestedDraft,
-      noRightColumnAnimation,
-      isSynced: global.isSynced,
-      isAccountFrozen,
-      isAppConfigLoaded: global.isAppConfigLoaded,
-      isFoldersSidebarShown: foldersPosition === FOLDERS_POSITION_LEFT && !isMobile && selectAreFoldersPresent(global),
-      diceEmojies: global.appConfig?.diceEmojies,
-      selectedGiftAuction,
-    };
-  })(Main),
-);
+  return {
+    currentUserId,
+    hasCurrentUser: Boolean(selectUser(global, currentUserId!)),
+    isLeftColumnOpen: isLeftColumnShown,
+    isMiddleColumnOpen: Boolean(chatId),
+    isRightColumnOpen: selectIsRightColumnShown(global, isMobile),
+    isMediaViewerOpen: selectIsMediaViewerOpen(global),
+    isStoryViewerOpen: selectIsStoryViewerOpen(global),
+    isForwardModalOpen: selectIsForwardModalOpen(global),
+    isReactionPickerOpen: selectIsReactionPickerOpen(global),
+    isHistoryCalendarOpen: Boolean(historyCalendarSelectedAt),
+    shouldSkipHistoryAnimations,
+    openedStickerSetShortName,
+    openedCustomEmojiSetIds,
+    activeGroupCallId: isMasterTab ? global.groupCalls.activeGroupCallId : undefined,
+    withInterfaceAnimations: selectCanAnimateInterface(global),
+    wasTimeFormatSetManually,
+    isPhoneCallActive: isMasterTab ? Boolean(global.phoneCall) : undefined,
+    addedSetIds: global.stickers.added.setIds,
+    addedCustomEmojiIds: global.customEmojis.added.setIds,
+    newContactUserId: newContact?.userId,
+    newContactByPhoneNumber: newContact?.isByPhoneNumber,
+    openedGame,
+    gameTitle,
+    isRatePhoneCallModalOpen: Boolean(ratingPhoneCall),
+    botTrustRequest,
+    botTrustRequestBot: botTrustRequest && selectUser(global, botTrustRequest.botId),
+    requestedAttachBotInChat,
+    requestedBotStartGroup,
+    isCurrentUserPremium: selectIsCurrentUserPremium(global),
+    isPremiumModalOpen: premiumModal?.isOpen,
+    isGiveawayModalOpen: giveawayModal?.isOpen,
+    isDeleteMessageModalOpen: Boolean(deleteMessageModal),
+    isStarsGiftingPickerModal: starsGiftingPickerModal?.isOpen,
+    limitReached: limitReachedModal?.limit,
+    isPaymentModalOpen: payment.isPaymentModalOpen,
+    isReceiptModalOpen: Boolean(payment.receipt),
+    deleteFolderDialog,
+    isMasterTab,
+    requestedDraft,
+    noRightColumnAnimation,
+    isSynced: global.isSynced,
+    isAccountFrozen,
+    isAppConfigLoaded: global.isAppConfigLoaded,
+    isFoldersSidebarShown: foldersPosition === FOLDERS_POSITION_LEFT && !isMobile && selectAreFoldersPresent(global),
+    diceEmojies: global.appConfig?.diceEmojies,
+    selectedGiftAuction,
+  };
+};
+
+export default Main;

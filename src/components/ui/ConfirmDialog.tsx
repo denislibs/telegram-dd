@@ -1,5 +1,5 @@
-import type { FC, TeactNode } from '../../lib/teact/teact';
-import { memo, useCallback, useRef } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import type { TextPart } from '../../types';
 
@@ -15,10 +15,10 @@ type OwnProps = {
   isOpen: boolean;
   title?: string;
   noDefaultTitle?: boolean;
-  header?: TeactNode;
+  header?: JSX.Element;
   textParts?: TextPart;
   text?: string;
-  confirmLabel?: TeactNode;
+  confirmLabel?: JSX.Element;
   confirmIsDestructive?: boolean;
   isConfirmDisabled?: boolean;
   isConfirmLoading?: boolean;
@@ -31,56 +31,40 @@ type OwnProps = {
   onCloseAnimationEnd?: NoneToVoidFunction;
 };
 
-const ConfirmDialog: FC<OwnProps> = ({
-  isOpen,
-  title,
-  noDefaultTitle,
-  header,
-  text,
-  textParts,
-  confirmLabel,
-  confirmIsDestructive,
-  isConfirmDisabled,
-  isConfirmLoading,
-  isOnlyConfirm,
-  areButtonsInColumn,
-  className,
-  children,
-  confirmHandler,
-  onClose,
-  onCloseAnimationEnd,
-}) => {
+const ConfirmDialog = (props: OwnProps) => {
   const lang = useLang();
 
-  const containerRef = useRef<HTMLDivElement>();
+  let containerRef!: HTMLDivElement;
 
-  const isConfirmBlocked = isConfirmDisabled || isConfirmLoading;
+  const isConfirmBlocked = createMemo(() => props.isConfirmDisabled || props.isConfirmLoading);
 
   // Enter confirms past the button, so it has to honour the block as well
-  const handleSelectWithEnter = useCallback(
-    (index: number) => {
-      if (index === -1 && !isConfirmBlocked) confirmHandler();
-    },
-    [confirmHandler, isConfirmBlocked],
-  );
+  const handleSelectWithEnter = (index: number) => {
+    if (index === -1 && !isConfirmBlocked()) props.confirmHandler();
+  };
 
-  const handleKeyDown = useKeyboardListNavigation(containerRef, isOpen, handleSelectWithEnter, '.Button');
+  const handleKeyDown = useKeyboardListNavigation(
+    () => containerRef,
+    () => props.isOpen,
+    handleSelectWithEnter,
+    '.Button',
+  );
 
   return (
     <Modal
-      className={buildClassName('confirm', className)}
-      title={title || (!noDefaultTitle ? lang('Telegram') : undefined)}
-      header={header}
-      isOpen={isOpen}
-      onClose={onClose}
+      className={buildClassName('confirm', props.className)}
+      title={props.title || (!props.noDefaultTitle ? lang('Telegram') : undefined)}
+      header={props.header}
+      isOpen={props.isOpen}
+      onClose={props.onClose}
       isNativeDialog
-      onCloseAnimationEnd={onCloseAnimationEnd}
+      onCloseAnimationEnd={props.onCloseAnimationEnd}
       noTitleAutoFocus
     >
-      {text && text.split('\\n').map((textPart) => <p>{textPart}</p>)}
-      {textParts || children}
+      {props.text && props.text.split('\\n').map((textPart) => <p>{textPart}</p>)}
+      {props.textParts || props.children}
       <div
-        className={areButtonsInColumn ? 'dialog-buttons-column' : 'dialog-buttons mt-2'}
+        class={props.areButtonsInColumn ? 'dialog-buttons-column' : 'dialog-buttons mt-2'}
         ref={containerRef}
         onKeyDown={handleKeyDown}
       >
@@ -88,16 +72,21 @@ const ConfirmDialog: FC<OwnProps> = ({
           className="confirm-dialog-button"
           isText
           inline
-          onClick={confirmHandler}
-          color={confirmIsDestructive ? 'danger' : 'primary'}
-          isLoading={isConfirmLoading}
-          disabled={isConfirmBlocked}
-          autoFocus={!confirmIsDestructive}
+          onClick={props.confirmHandler}
+          color={props.confirmIsDestructive ? 'danger' : 'primary'}
+          isLoading={props.isConfirmLoading}
+          disabled={isConfirmBlocked()}
+          autoFocus={!props.confirmIsDestructive}
         >
-          {confirmLabel || lang('GeneralConfirm')}
+          {props.confirmLabel || lang('GeneralConfirm')}
         </Button>
-        {!isOnlyConfirm && (
-          <Button className="confirm-dialog-button" isText onClick={onClose} autoFocus={confirmIsDestructive}>
+        {!props.isOnlyConfirm && (
+          <Button
+            className="confirm-dialog-button"
+            isText
+            onClick={props.onClose}
+            autoFocus={props.confirmIsDestructive}
+          >
             {lang('Cancel')}
           </Button>
         )}
@@ -106,4 +95,4 @@ const ConfirmDialog: FC<OwnProps> = ({
   );
 };
 
-export default memo(ConfirmDialog);
+export default ConfirmDialog;

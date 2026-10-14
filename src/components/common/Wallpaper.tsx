@@ -1,5 +1,7 @@
-import type { ElementRef, TeactNode } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import type { JSX } from 'frameact/jsx-runtime';
 import { withGlobal } from '../../global';
+import type { GlobalState } from '../../global/types';
 
 import type { IThemeSettings, ThemeKey } from '../../types';
 
@@ -12,8 +14,8 @@ import useChatBackground from '../../hooks/useChatBackground';
 import backgroundStyles from '../../styles/_patternBackground.module.scss';
 
 type OwnProps = {
-  children?: TeactNode;
-  containerRef?: ElementRef<HTMLDivElement>;
+  children?: JSX.Element;
+  containerRef?: (el: HTMLDivElement) => void;
   id?: string;
   className?: string;
   // Extra classes for the background layer itself (e.g. the chat's right-column transitions).
@@ -38,59 +40,50 @@ const EMPTY_THEME_SETTINGS: IThemeSettings = {};
 // Wraps the chat content and renders the wallpaper behind it: the animated gradient + doodle pattern
 // (or a custom image / solid color), plus the CSS variables message bubbles read. Pulls the active
 // active theme's wallpaper from global.
-const Wallpaper = ({
-  children,
-  containerRef,
-  id,
-  className,
-  bgClassName,
-  style,
-  inert,
-  isStatic,
-  backgroundMode,
-  onClick,
-  theme,
-  canAnimateGradient,
-  themeSettings,
-}: OwnProps & StateProps) => {
+const Wallpaper = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   // With the send animation disabled the gradient never moves, so the 2D render is identical
   // and no WebGL context is spent
-  const isStaticGradient = isStatic || !canAnimateGradient;
+  const isStaticGradient = createMemo(() => props.isStatic || !props.canAnimateGradient);
 
   const background = useChatBackground({
-    theme,
-    wallpaper: themeSettings || EMPTY_THEME_SETTINGS,
-    isStatic: isStaticGradient,
-    source: backgroundMode === 'lockScreen' ? 'lockScreen' : undefined,
+    theme: () => props.theme,
+    wallpaper: () => props.themeSettings || EMPTY_THEME_SETTINGS,
+    isStatic: () => isStaticGradient(),
+    source: () => (props.backgroundMode === 'lockScreen' ? 'lockScreen' : undefined),
   });
 
   return (
     <div
-      ref={containerRef}
-      id={id}
-      className={className}
-      style={buildStyle(background.rootStyle, style) || undefined}
-      inert={inert}
-      onClick={onClick}
+      ref={props.containerRef}
+      id={props.id}
+      class={props.className}
+      style={buildStyle(background.rootStyle, props.style) || undefined}
+      inert={props.inert}
+      onClick={(e) => props.onClick?.(e)}
     >
-      <div className={buildClassName(background.backgroundClassNames, bgClassName)} style={background.backgroundStyle}>
+      <div
+        class={buildClassName(background.backgroundClassNames, props.bgClassName)}
+        style={background.backgroundStyle}
+      >
         {background.hasGradient && (
+          // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show>
           <canvas
             // A canvas can hold only one context type, so switching between the animated (WebGL)
             // and static (2D) renderers must recreate the element
-            key={isStaticGradient ? 'static' : 'animated'}
+            key={isStaticGradient() ? 'static' : 'animated'}
             ref={background.gradientCanvasRef}
-            className={backgroundStyles.gradientCanvas}
+            class={backgroundStyles.gradientCanvas}
           />
         )}
       </div>
-      {children}
+      {props.children}
     </div>
   );
 };
 
 // No `memo`: `children` change on nearly every parent render, so memoization would never apply
-export default withGlobal<OwnProps>((global, { backgroundMode }): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState, { backgroundMode }: OwnProps): Complete<StateProps> => {
   const theme = selectTheme(global);
 
   return {
@@ -98,4 +91,6 @@ export default withGlobal<OwnProps>((global, { backgroundMode }): Complete<State
     canAnimateGradient: selectPerformanceSettingsValue(global, 'messageSendingAnimations'),
     themeSettings: backgroundMode === 'default' ? EMPTY_THEME_SETTINGS : selectThemeValues(global, theme),
   };
-})(Wallpaper);
+};
+
+export default Wallpaper;

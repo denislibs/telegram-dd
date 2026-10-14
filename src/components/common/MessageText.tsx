@@ -1,7 +1,8 @@
-import { memo, useMemo, useRef } from '../../lib/teact/teact';
+import { createEffect, createMemo } from 'frameact';
+import { Show } from 'frameact/dom';
+import { depsOf } from '../../util/effectDeps';
 
 import type { ApiFormattedText, ApiMessage, ApiMessageEntity, ApiStory } from '../../api/types';
-import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 import type { ThreadId } from '../../types';
 import { ApiMessageEntityTypes } from '../../api/types';
 
@@ -10,8 +11,6 @@ import trimText from '../../util/trimText';
 import { insertTextEntity, renderTextWithEntities } from './helpers/renderTextWithEntities';
 
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
-import useSyncEffect from '../../hooks/useSyncEffect';
 import useUniqueId from '../../hooks/useUniqueId';
 
 import TypingWrapper from './TypingWrapper';
@@ -45,135 +44,124 @@ interface OwnProps {
 
 const MIN_CUSTOM_EMOJIS_FOR_SHARED_CANVAS = 3;
 
-function MessageText({
-  messageOrStory,
-  forcedText,
-  isForAnimation,
-  emojiSize,
-  highlight,
-  asPreview,
-  truncateLength,
-  isProtected,
-  observeIntersectionForLoading,
-  observeIntersectionForPlaying,
-  withTranslucentThumbs,
-  shouldRenderAsHtml,
-  inChatList,
-  forcePlayback,
-  focusedQuote,
-  focusedQuoteOffset,
-  isInSelectMode,
-  canBeEmpty,
-  maxTimestamp,
-  threadId,
-  shouldAnimateTyping,
-  noInitialTypingAnimation,
-  canAnimateTextStreaming,
-  onTypingAnimationEnd,
-}: OwnProps) {
-  const sharedCanvasRef = useRef<HTMLCanvasElement>();
-  const sharedCanvasHqRef = useRef<HTMLCanvasElement>();
+function MessageText(props: OwnProps) {
+  let sharedCanvasRef!: HTMLCanvasElement;
+  let sharedCanvasHqRef!: HTMLCanvasElement;
 
-  const textCacheBusterRef = useRef(0);
+  let textCacheBusterRef = 0;
 
   const lang = useLang();
 
-  const formattedText = forcedText || extractMessageText(messageOrStory, inChatList);
-  const adaptedFormattedText = isForAnimation && formattedText ? stripCustomEmoji(formattedText) : formattedText;
-  const { text, entities } = adaptedFormattedText || {};
+  const formattedText = createMemo(
+    () => props.forcedText || extractMessageText(props.messageOrStory, props.inChatList),
+  );
+  const adaptedFormattedText = createMemo(() =>
+    props.isForAnimation && formattedText() ? stripCustomEmoji(formattedText()) : formattedText(),
+  );
+  const source = createMemo(() => adaptedFormattedText() || {});
+  const text = () => source().text;
+  const entities = () => source().entities;
 
-  const entitiesWithFocusedQuote = useMemo(() => {
-    if (!text || !focusedQuote) return entities;
+  const entitiesWithFocusedQuote = createMemo(() => {
+    if (!text() || !props.focusedQuote) return entities();
 
-    const offsetIndex = text.indexOf(focusedQuote, focusedQuoteOffset);
-    const index = offsetIndex >= 0 ? offsetIndex : text.indexOf(focusedQuote); // Fallback to first occurrence
-    const lendth = focusedQuote.length;
+    const offsetIndex = text().indexOf(props.focusedQuote, props.focusedQuoteOffset);
+    const index = offsetIndex >= 0 ? offsetIndex : text().indexOf(props.focusedQuote); // Fallback to first occurrence
+    const lendth = props.focusedQuote.length;
     if (index >= 0) {
-      return insertTextEntity(entities || [], {
+      return insertTextEntity(entities() || [], {
         offset: index,
         length: lendth,
         type: ApiMessageEntityTypes.QuoteFocus,
       });
     }
 
-    return entities;
-  }, [text, entities, focusedQuote, focusedQuoteOffset]);
+    return entities();
+  });
 
   const containerId = useUniqueId();
 
-  useSyncEffect(() => {
-    textCacheBusterRef.current += 1;
-  }, [text, entitiesWithFocusedQuote]);
+  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
+  createEffect(
+    depsOf(() => [text(), entitiesWithFocusedQuote()] as const),
+    ([text2, entitiesWithFocusedQuote2]) => {
+      textCacheBusterRef += 1;
+    },
+  );
 
-  const withSharedCanvas = useMemo(() => {
-    if (shouldAnimateTyping) {
+  const withSharedCanvas = createMemo(() => {
+    if (props.shouldAnimateTyping) {
       return false;
     }
 
-    const customEmojisCount = countCustomEmojis(entitiesWithFocusedQuote);
+    const customEmojisCount = countCustomEmojis(entitiesWithFocusedQuote());
     return (
-      customEmojisCount >= MIN_CUSTOM_EMOJIS_FOR_SHARED_CANVAS && !hasSpoileredCustomEmojis(entitiesWithFocusedQuote)
+      customEmojisCount >= MIN_CUSTOM_EMOJIS_FOR_SHARED_CANVAS && !hasSpoileredCustomEmojis(entitiesWithFocusedQuote())
     );
-  }, [entitiesWithFocusedQuote, shouldAnimateTyping]);
+  });
 
-  const renderText = useLastCallback((t: ApiFormattedText) => {
+  const renderText = (t: ApiFormattedText) => {
     return renderTextWithEntities({
       text: t.text,
       entities: t.entities,
-      highlight,
-      emojiSize,
-      shouldRenderAsHtml,
+      highlight: props.highlight,
+      emojiSize: props.emojiSize,
+      shouldRenderAsHtml: props.shouldRenderAsHtml,
       containerId,
-      asPreview,
-      isProtected,
-      observeIntersectionForLoading,
-      observeIntersectionForPlaying,
-      withTranslucentThumbs,
-      sharedCanvasRef: withSharedCanvas ? sharedCanvasRef : undefined,
-      sharedCanvasHqRef: withSharedCanvas ? sharedCanvasHqRef : undefined,
-      cacheBuster: textCacheBusterRef.current.toString(),
-      forcePlayback,
-      isInSelectMode,
-      maxTimestamp,
-      chatId: 'chatId' in messageOrStory ? messageOrStory.chatId : undefined,
-      messageId: messageOrStory.id,
-      threadId,
+      asPreview: props.asPreview,
+      isProtected: props.isProtected,
+      observeIntersectionForLoading: props.observeIntersectionForLoading,
+      observeIntersectionForPlaying: props.observeIntersectionForPlaying,
+      withTranslucentThumbs: props.withTranslucentThumbs,
+      // TODO(codemod): "sharedCanvasRef" was a ref object passed as a value: pass an accessor (() => sharedCanvasRef) or a callback ref
+      sharedCanvasRef: withSharedCanvas() ? sharedCanvasRef : undefined,
+      // TODO(codemod): "sharedCanvasHqRef" was a ref object passed as a value: pass an accessor (() => sharedCanvasHqRef) or a callback ref
+      sharedCanvasHqRef: withSharedCanvas() ? sharedCanvasHqRef : undefined,
+      cacheBuster: textCacheBusterRef.toString(),
+      forcePlayback: props.forcePlayback,
+      isInSelectMode: props.isInSelectMode,
+      maxTimestamp: props.maxTimestamp,
+      chatId: 'chatId' in props.messageOrStory ? props.messageOrStory.chatId : undefined,
+      messageId: props.messageOrStory.id,
+      threadId: props.threadId,
     });
-  });
-
-  if (!text && !canBeEmpty) {
-    return <span className="content-unsupported">{lang('MessageUnsupported')}</span>;
-  }
-
-  const textToRender: ApiFormattedText = {
-    text: trimText(text || '', truncateLength),
-    entities: entitiesWithFocusedQuote,
   };
-  const shouldRenderTypingPlaceholder = !('previousLocalId' in messageOrStory) || !messageOrStory.previousLocalId;
+
+  const textToRender = createMemo<ApiFormattedText>(() => ({
+    text: trimText(text() || '', props.truncateLength),
+    entities: entitiesWithFocusedQuote(),
+  }));
+  const shouldRenderTypingPlaceholder = createMemo(
+    () => !('previousLocalId' in props.messageOrStory) || !props.messageOrStory.previousLocalId,
+  );
 
   return (
-    <>
-      {[
-        withSharedCanvas && <canvas key="shared-canvas" ref={sharedCanvasRef} className="shared-canvas" />,
-        withSharedCanvas && <canvas key="shared-canvas-hq" ref={sharedCanvasHqRef} className="shared-canvas" />,
-        shouldAnimateTyping ? (
-          <TypingWrapper
-            key="typing-wrapper"
-            formattedText={textToRender}
-            renderText={renderText}
-            shouldAnimateMask={canAnimateTextStreaming}
-            noInitialAnimation={noInitialTypingAnimation}
-            shouldRenderPlaceholder={shouldRenderTypingPlaceholder}
-            onCompleted={onTypingAnimationEnd}
-            completionKey={messageOrStory.id}
-          />
-        ) : (
-          renderText(textToRender)
-        ),
-      ]
-        .flat()
-        .filter(Boolean)}
-    </>
+    <Show
+      when={!(!text() && !props.canBeEmpty)}
+      fallback={<span class="content-unsupported">{lang('MessageUnsupported')}</span>}
+    >
+      <>
+        {[
+          withSharedCanvas() && <canvas ref={sharedCanvasRef} class="shared-canvas" />,
+          withSharedCanvas() && <canvas ref={sharedCanvasHqRef} class="shared-canvas" />,
+          props.shouldAnimateTyping ? (
+            <TypingWrapper
+              formattedText={textToRender()}
+              renderText={renderText}
+              shouldAnimateMask={props.canAnimateTextStreaming}
+              noInitialAnimation={props.noInitialTypingAnimation}
+              shouldRenderPlaceholder={shouldRenderTypingPlaceholder()}
+              onCompleted={props.onTypingAnimationEnd}
+              completionKey={props.messageOrStory.id}
+            />
+          ) : (
+            renderText(textToRender())
+          ),
+        ]
+          .flat()
+          .filter(Boolean)}
+      </>
+    </Show>
   );
 }
 
@@ -200,4 +188,4 @@ function hasSpoileredCustomEmojis(entities?: ApiMessageEntity[]) {
   );
 }
 
-export default memo(MessageText);
+export default MessageText;

@@ -1,18 +1,16 @@
-import { useEffect, useMemo, useRef } from '../../../../lib/teact/teact';
+import { createEffect, createMemo, onMount, previous, requestNextMutation } from 'frameact';
+import { depsOf } from '../../../../util/effectDeps';
 
-import { requestNextMutation } from '../../../../lib/fasterdom/fasterdom';
 import { mapValues } from '../../../../util/iteratees';
 import { useChatAnimationType } from './useChatAnimationType';
 
 import useForceUpdate from '../../../../hooks/useForceUpdate';
-import useLastCallback from '../../../../hooks/useLastCallback';
-import usePreviousDeprecated from '../../../../hooks/usePreviousDeprecated';
-import useSyncEffect from '../../../../hooks/useSyncEffect';
 
 const EMPTY_ORDER_DIFF = {};
 
+// TODO(codemod): useOrderDiff: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useOrderDiff(orderedIds: (string | number)[] | undefined, topOffset: number, key?: string) {
-  const orderById = useMemo(() => {
+  const orderById = createMemo(() => {
     if (!orderedIds) {
       return undefined;
     }
@@ -24,54 +22,55 @@ export default function useOrderDiff(orderedIds: (string | number)[] | undefined
       },
       {} as Record<string, number>,
     );
-  }, [orderedIds]);
-
-  const prevOrderById = usePreviousDeprecated(orderById);
-  const prevChatId = usePreviousDeprecated(key);
-  const prevTopOffset = usePreviousDeprecated(topOffset);
-  const isInitialRenderRef = useRef(true);
-
-  useEffect(() => {
-    requestNextMutation(() => {
-      isInitialRenderRef.current = false;
-    });
-  }, []);
-
-  const orderDiffByIdRef = useRef<Record<string | number, number>>(EMPTY_ORDER_DIFF);
-  const forceUpdate = useForceUpdate();
-
-  const onReorderAnimationEnd = useLastCallback(() => {
-    if (orderDiffByIdRef.current === EMPTY_ORDER_DIFF) return;
-
-    orderDiffByIdRef.current = EMPTY_ORDER_DIFF;
-    forceUpdate();
   });
 
-  const shiftDiff = prevTopOffset !== undefined ? topOffset - prevTopOffset : 0;
+  const prevOrderById = previous(() => orderById());
+  const prevChatId = previous(() => key);
+  const prevTopOffset = previous(() => topOffset);
+  let isInitialRenderRef = true;
 
-  useSyncEffect(() => {
-    if (!orderById || !prevOrderById || key !== prevChatId || prevOrderById === orderById) {
-      orderDiffByIdRef.current = EMPTY_ORDER_DIFF;
-      return;
-    }
-
-    const diff = mapValues(orderById, (order, id) => {
-      return prevOrderById[id] !== undefined ? order - prevOrderById[id] : -Infinity;
+  onMount(() => {
+    requestNextMutation(() => {
+      isInitialRenderRef = false;
     });
+  });
 
-    const hasChanges = Object.values(diff).some((value) => value !== 0);
-    orderDiffByIdRef.current = hasChanges ? diff : EMPTY_ORDER_DIFF;
-  }, [key, orderById, prevChatId, prevOrderById, topOffset]);
+  let orderDiffByIdRef: Record<string | number, number> = EMPTY_ORDER_DIFF;
+  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
+  const forceUpdate = useForceUpdate();
 
-  const getAnimationType = useChatAnimationType(
-    orderDiffByIdRef.current,
-    isInitialRenderRef.current,
-    Boolean(shiftDiff),
+  const onReorderAnimationEnd = () => {
+    if (orderDiffByIdRef === EMPTY_ORDER_DIFF) return;
+
+    orderDiffByIdRef = EMPTY_ORDER_DIFF;
+    forceUpdate();
+  };
+
+  const shiftDiff = createMemo(() => (prevTopOffset() !== undefined ? topOffset - prevTopOffset() : 0));
+
+  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
+  createEffect(
+    depsOf(() => [key, orderById(), prevChatId(), prevOrderById(), topOffset] as const),
+    ([, orderById2, prevChatId2, prevOrderById2]) => {
+      if (!orderById2 || !prevOrderById2 || key !== prevChatId2 || prevOrderById2 === orderById2) {
+        orderDiffByIdRef = EMPTY_ORDER_DIFF;
+        return;
+      }
+
+      const diff = mapValues(orderById2, (order, id) => {
+        return prevOrderById2[id] !== undefined ? order - prevOrderById2[id] : -Infinity;
+      });
+
+      const hasChanges = Object.values(diff).some((value) => value !== 0);
+      orderDiffByIdRef = hasChanges ? diff : EMPTY_ORDER_DIFF;
+    },
   );
 
+  const getAnimationType = useChatAnimationType(orderDiffByIdRef, isInitialRenderRef, Boolean(shiftDiff()));
+
   return {
-    orderDiffById: orderDiffByIdRef.current,
-    shiftDiff,
+    orderDiffById: orderDiffByIdRef,
+    shiftDiff: shiftDiff(),
     getAnimationType,
     onReorderAnimationEnd,
   };

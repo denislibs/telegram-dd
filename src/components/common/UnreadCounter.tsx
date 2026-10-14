@@ -1,4 +1,6 @@
-import { memo, useEffect } from '../../lib/teact/teact';
+import { createEffect } from 'frameact';
+import { Show } from 'frameact/dom';
+import { depsOf } from '../../util/effectDeps';
 
 import { ALL_FOLDER_ID } from '../../config';
 import { updateAppBadge } from '../../util/appBadge';
@@ -11,23 +13,26 @@ interface OwnProps {
   isForAppBadge?: boolean;
 }
 
-const UnreadCounter = ({ isForAppBadge }: OwnProps) => {
+const UnreadCounter = (props: OwnProps) => {
   const unreadCounters = useFolderManagerForUnreadCounters();
   const unreadNotificationsCount = unreadCounters[ALL_FOLDER_ID]?.notificationsCount || 0;
 
   const lang = useLang();
 
-  useEffect(() => {
-    if (isForAppBadge) {
-      updateAppBadge(unreadNotificationsCount);
-    }
-  }, [isForAppBadge, unreadNotificationsCount]);
+  createEffect(
+    depsOf(() => [props.isForAppBadge, unreadNotificationsCount] as const),
+    ([isForAppBadge2]) => {
+      if (isForAppBadge2) {
+        updateAppBadge(unreadNotificationsCount);
+      }
+    },
+  );
 
-  if (isForAppBadge || !unreadNotificationsCount) {
-    return undefined;
-  }
-
-  return <div className="unread-count active">{formatIntegerCompact(lang, unreadNotificationsCount)}</div>;
+  return (
+    <Show when={!(props.isForAppBadge || !unreadNotificationsCount)}>
+      <div class="unread-count active">{formatIntegerCompact(lang, unreadNotificationsCount)}</div>
+    </Show>
+  );
 };
 
-export default memo(UnreadCounter);
+export default UnreadCounter;

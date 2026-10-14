@@ -1,5 +1,5 @@
-import type { FC } from '../../lib/teact/teact';
-import { memo } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import { Show } from 'frameact/dom';
 
 import type { ThreadId } from '../../types';
 
@@ -22,22 +22,28 @@ type OwnProps = {
   onClick?: NoneToVoidFunction;
 };
 
-const TopicDefaultIcon: FC<OwnProps> = ({ className, letterClassName, topicId, iconColor, title, onClick }) => {
-  const iconSrc = getTopicDefaultIcon(iconColor);
+const TopicDefaultIcon = (props: OwnProps) => {
+  const iconSrc = createMemo(() => getTopicDefaultIcon(props.iconColor));
 
-  if (topicId === GENERAL_TOPIC_ID) {
-    return (
-      <Icon name="hashtag" className={buildClassName(styles.root, className, 'general-forum-icon')} onClick={onClick} />
-    );
-  }
   return (
-    <div className={buildClassName(styles.root, className)} onClick={onClick}>
-      <img className={styles.icon} src={iconSrc} alt="" draggable={false} />
-      <div className={buildClassName(styles.title, letterClassName, 'topic-icon-letter')}>
-        {renderText(getFirstLetters(title, 1))}
+    <Show
+      when={!(props.topicId === GENERAL_TOPIC_ID)}
+      fallback={
+        <Icon
+          name="hashtag"
+          className={buildClassName(styles.root, props.className, 'general-forum-icon')}
+          onClick={props.onClick}
+        />
+      }
+    >
+      <div class={buildClassName(styles.root, props.className)} onClick={(e) => props.onClick?.(e)}>
+        <img class={styles.icon} src={iconSrc()} alt="" draggable={false} />
+        <div class={buildClassName(styles.title, props.letterClassName, 'topic-icon-letter')}>
+          {renderText(getFirstLetters(props.title, 1))}
+        </div>
       </div>
-    </div>
+    </Show>
   );
 };
 
-export default memo(TopicDefaultIcon);
+export default TopicDefaultIcon;

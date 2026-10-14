@@ -1,4 +1,4 @@
-import type { FC } from '../../lib/teact/teact';
+import { mergeProps } from 'frameact/dom';
 
 import buildClassName from '../../util/buildClassName';
 
@@ -9,8 +9,9 @@ type OwnProps = {
   size?: 'thin' | 'thick';
 };
 
-const MenuSeparator: FC<OwnProps> = ({ className, size = 'thin' }) => {
-  return <div className={buildClassName(styles.root, styles[size], className)} />;
+const MenuSeparator = (rawProps: OwnProps) => {
+  const props = mergeProps({ size: 'thin' }, rawProps) as OwnProps & Required<Pick<OwnProps, 'size'>>;
+  return <div class={buildClassName(styles.root, styles[props.size], props.className)} />;
 };
 
 export default MenuSeparator;

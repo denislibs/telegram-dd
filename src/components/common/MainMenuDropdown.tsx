@@ -1,4 +1,4 @@
-import { type FC, memo, useRef } from '@teact';
+import { createMemo } from 'frameact';
 import { APP_REVISION } from 'virtual:git-info';
 import { getActions, getGlobal } from '../../global';
 
@@ -12,7 +12,6 @@ import buildClassName from '../../util/buildClassName';
 
 import useFlag from '../../hooks/useFlag';
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
 import useLeftHeaderButtonRtlForumTransition from '../left/main/hooks/useLeftHeaderButtonRtlForumTransition';
 
 import LeftSideMenuItems from '../left/main/LeftSideMenuItems';
@@ -24,11 +23,11 @@ type OwnProps = {
   className?: string;
 };
 
-const LeftSideMenuDropdown = ({ trigger, shouldHideSearch, className }: OwnProps) => {
+const LeftSideMenuDropdown = (props: OwnProps) => {
   const { openLeftColumnContent, closeForumPanel, closeCommunityPanel, openSettingsScreen, setIsUiReady } =
     getActions();
-  const pendingAccountSwitchRef = useRef<VoidFunction>();
-  const isSwitchingAccountRef = useRef(false);
+  let pendingAccountSwitchRef: VoidFunction | undefined;
+  let isSwitchingAccountRef = false;
   const [isBotMenuOpen, markBotMenuOpen, unmarkBotMenuOpen] = useFlag();
   const [isSwitchingAccount, markSwitchingAccount, unmarkSwitchingAccount] = useFlag();
   const lang = useLang();
@@ -36,25 +35,30 @@ const LeftSideMenuDropdown = ({ trigger, shouldHideSearch, className }: OwnProps
   const versionString = IS_BETA ? `${APP_VERSION} Beta (${APP_REVISION})` : DEBUG ? APP_REVISION : APP_VERSION;
 
   // Disable dropdown menu RTL animation for resize
-  const { shouldDisableDropdownMenuTransitionRef, handleDropdownMenuTransitionEnd } =
-    useLeftHeaderButtonRtlForumTransition(shouldHideSearch);
+  const leftHeaderButtonRtlForumTransitionResult = createMemo(() =>
+    useLeftHeaderButtonRtlForumTransition(() => props.shouldHideSearch),
+  );
+  const shouldDisableDropdownMenuTransitionRef = () =>
+    leftHeaderButtonRtlForumTransitionResult().shouldDisableDropdownMenuTransitionRef;
+  const handleDropdownMenuTransitionEnd = () =>
+    leftHeaderButtonRtlForumTransitionResult().handleDropdownMenuTransitionEnd;
 
-  const handleSelectSettings = useLastCallback(() => {
+  const handleSelectSettings = () => {
     openSettingsScreen({ screen: SettingsScreens.Main });
-  });
+  };
 
-  const handleSelectContacts = useLastCallback(() => {
+  const handleSelectContacts = () => {
     openLeftColumnContent({ contentKey: LeftColumnContent.Contacts });
-  });
+  };
 
-  const handleSelectArchived = useLastCallback(() => {
+  const handleSelectArchived = () => {
     openLeftColumnContent({ contentKey: LeftColumnContent.Archived });
     closeForumPanel();
     closeCommunityPanel();
-  });
+  };
 
-  const handleSwitchAccount = useLastCallback((url: string) => {
-    if (isSwitchingAccountRef.current) return;
+  const handleSwitchAccount = (url: string) => {
+    if (isSwitchingAccountRef) return;
 
     // Only mask the UI when canceled navigation can restore it
     if (!window.navigation) {
@@ -64,24 +68,24 @@ const LeftSideMenuDropdown = ({ trigger, shouldHideSearch, className }: OwnProps
 
     const { uiReadyState } = selectTabState(getGlobal());
     // Lock before rendering so rapid selections cannot capture the masked UI state
-    isSwitchingAccountRef.current = true;
+    isSwitchingAccountRef = true;
     setIsUiReady({ uiReadyState: 0 });
     if (IS_VIEW_TRANSITION_SUPPORTED && 'onpagereveal' in window) {
       // The view transition captures the open menu and owns its closing animation
       markSwitchingAccount();
       navigateToAccount(url, uiReadyState);
     } else {
-      pendingAccountSwitchRef.current = () => navigateToAccount(url, uiReadyState);
+      pendingAccountSwitchRef = () => navigateToAccount(url, uiReadyState);
     }
-  });
+  };
 
-  const handleMenuHide = useLastCallback(() => {
-    const pendingAccountSwitch = pendingAccountSwitchRef.current;
+  const handleMenuHide = () => {
+    const pendingAccountSwitch = pendingAccountSwitchRef;
     if (!pendingAccountSwitch) return;
 
-    pendingAccountSwitchRef.current = undefined;
+    pendingAccountSwitchRef = undefined;
     pendingAccountSwitch();
-  });
+  };
 
   function navigateToAccount(url: string, uiReadyState: TabState['uiReadyState']) {
     window.addEventListener('pageshow', handlePageShow);
@@ -105,28 +109,28 @@ const LeftSideMenuDropdown = ({ trigger, shouldHideSearch, className }: OwnProps
     function restoreUi() {
       window.removeEventListener('pageshow', handlePageShow);
       setIsUiReady({ uiReadyState });
-      isSwitchingAccountRef.current = false;
+      isSwitchingAccountRef = false;
       unmarkSwitchingAccount();
     }
   }
 
   return (
     <DropdownMenu
-      trigger={trigger}
+      trigger={props.trigger}
       className={buildClassName(
         'main-menu',
         lang.isRtl && 'rtl',
-        shouldHideSearch && lang.isRtl && 'right-aligned',
-        shouldDisableDropdownMenuTransitionRef.current && lang.isRtl && 'disable-transition',
-        className,
+        props.shouldHideSearch && lang.isRtl && 'right-aligned',
+        shouldDisableDropdownMenuTransitionRef().current && lang.isRtl && 'disable-transition',
+        props.className,
       )}
-      forceOpen={isBotMenuOpen || isSwitchingAccount}
-      positionX={shouldHideSearch && lang.isRtl ? 'right' : 'left'}
+      forceOpen={isBotMenuOpen() || isSwitchingAccount()}
+      positionX={props.shouldHideSearch && lang.isRtl ? 'right' : 'left'}
       transformOriginX={90}
       transformOriginY={100}
       withPortal
       onHide={handleMenuHide}
-      onTransitionEnd={lang.isRtl ? handleDropdownMenuTransitionEnd : undefined}
+      onTransitionEnd={lang.isRtl ? handleDropdownMenuTransitionEnd() : undefined}
     >
       <LeftSideMenuItems
         onSelectArchived={handleSelectArchived}
@@ -141,4 +145,4 @@ const LeftSideMenuDropdown = ({ trigger, shouldHideSearch, className }: OwnProps
   );
 };
 
-export default memo(LeftSideMenuDropdown);
+export default LeftSideMenuDropdown;

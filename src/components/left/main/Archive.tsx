@@ -1,5 +1,6 @@
-import { memo, useMemo, useRef } from '../../../lib/teact/teact';
+import { createEffect, createMemo } from 'frameact';
 import { getActions, getGlobal } from '../../../global';
+import { depsOf } from '../../../util/effectDeps';
 
 import type { GlobalState } from '../../../global/types';
 import type { CustomPeer } from '../../../types';
@@ -21,7 +22,6 @@ import { ChatAnimationTypes } from './hooks';
 import useSelector from '../../../hooks/data/useSelector';
 import { useFolderManagerForOrderedIds, useFolderManagerForUnreadCounters } from '../../../hooks/useFolderManager';
 import useLang from '../../../hooks/useLang';
-import useSyncEffect from '../../../hooks/useSyncEffect';
 
 import Avatar from '../../common/Avatar';
 import Icon from '../../common/icons/Icon';
@@ -48,52 +48,57 @@ const ARCHIVE_CUSTOM_PEER: CustomPeer = {
 
 const ANIMATION_RESET_DELAY = 200;
 
-const Archive = ({ archiveSettings, isFoldersSidebarShown, offsetTop, animationType, onClick }: OwnProps) => {
+const Archive = (props: OwnProps) => {
   const { updateArchiveSettings } = getActions();
 
-  const ref = useRef<HTMLDivElement>();
+  let ref!: HTMLDivElement;
 
   const animationLevel = useSelector(selectAnimationLevel);
-  const shouldAnimateRef = useRef(animationLevel !== ANIMATION_LEVEL_MIN);
+  let shouldAnimateRef = animationLevel() !== ANIMATION_LEVEL_MIN;
   const lang = useLang();
 
-  useSyncEffect(() => {
-    if (animationLevel === ANIMATION_LEVEL_MIN) {
-      shouldAnimateRef.current = false;
-      return undefined;
-    }
+  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
+  createEffect(
+    depsOf(() => [props.animationType, animationLevel()] as const),
+    ([animationType2, animationLevel2]) => {
+      if (animationLevel2 === ANIMATION_LEVEL_MIN) {
+        shouldAnimateRef = false;
+        return undefined;
+      }
 
-    if (animationType !== ChatAnimationTypes.None) {
-      shouldAnimateRef.current = true;
-      return undefined;
-    }
+      if (animationType2 !== ChatAnimationTypes.None) {
+        shouldAnimateRef = true;
+        return undefined;
+      }
 
-    // Keep animation alive slightly longer to avoid jumps
-    const timeout = setTimeout(() => {
-      shouldAnimateRef.current = false;
-    }, ANIMATION_RESET_DELAY);
+      // Keep animation alive slightly longer to avoid jumps
+      const timeout = setTimeout(() => {
+        shouldAnimateRef = false;
+      }, ANIMATION_RESET_DELAY);
 
-    const element = ref.current;
-    if (element) {
-      waitForTransitionEnd(
-        element,
-        () => {
-          shouldAnimateRef.current = false;
-        },
-        'transform',
-      );
-    }
+      const element = ref;
+      if (element) {
+        waitForTransitionEnd(
+          element,
+          () => {
+            shouldAnimateRef = false;
+          },
+          'transform',
+        );
+      }
 
-    return () => clearTimeout(timeout);
-  }, [animationType, animationLevel]);
+      return () => clearTimeout(timeout);
+    },
+  );
 
   const orderedChatIds = useFolderManagerForOrderedIds(ARCHIVED_FOLDER_ID);
   const unreadCounters = useFolderManagerForUnreadCounters();
   const archiveUnreadCount = unreadCounters[ARCHIVED_FOLDER_ID]?.chatsCount;
 
-  const previewItems = useMemo(() => {
+  const previewItems = createMemo(() => {
     if (!orderedChatIds?.length) return lang('Loading');
 
+    // TODO(codemod): getGlobal() in a memo / JSX is a one-time read: use useGlobal() (store contract §12.4)
     const global = getGlobal();
 
     return orderedChatIds.slice(0, PREVIEW_SLICE).map((chatId, i, arr) => {
@@ -108,18 +113,18 @@ const Archive = ({ archiveSettings, isFoldersSidebarShown, offsetTop, animationT
 
       return (
         <>
-          <span className={buildClassName(styles.chat, archiveUnreadCount && readState?.unreadCount && styles.unread)}>
+          <span class={buildClassName(styles.chat, archiveUnreadCount && readState?.unreadCount && styles.unread)}>
             {renderText(title)}
           </span>
           {isLast ? '' : ', '}
         </>
       );
     });
-  }, [orderedChatIds, lang, archiveUnreadCount]);
+  });
 
-  const contextActions = useMemo(() => {
+  const contextActions = createMemo(() => {
     const actionMinimize =
-      !archiveSettings.isMinimized &&
+      !props.archiveSettings.isMinimized &&
       ({
         title: lang('ContextArchiveCollapse'),
         icon: 'collapse',
@@ -129,7 +134,7 @@ const Archive = ({ archiveSettings, isFoldersSidebarShown, offsetTop, animationT
       } satisfies MenuItemContextAction);
 
     const actionExpand =
-      archiveSettings.isMinimized &&
+      props.archiveSettings.isMinimized &&
       ({
         title: lang('ContextArchiveExpand'),
         icon: 'expand',
@@ -147,14 +152,14 @@ const Archive = ({ archiveSettings, isFoldersSidebarShown, offsetTop, animationT
     } satisfies MenuItemContextAction;
 
     return compact([actionMinimize, actionExpand, actionHide]);
-  }, [archiveSettings.isMinimized, lang, updateArchiveSettings]);
+  });
 
   function renderCollapsed() {
     return (
-      <div className={buildClassName(styles.info, 'info')}>
-        <div className="info-row">
-          <div className={buildClassName('title', styles.title)}>
-            <h3 dir="auto" className={buildClassName(styles.name, 'fullName')}>
+      <div class={buildClassName(styles.info, 'info')}>
+        <div class="info-row">
+          <div class={buildClassName('title', styles.title)}>
+            <h3 dir="auto" class={buildClassName(styles.name, 'fullName')}>
               <Icon name="archive-filled" className={styles.icon} />
               {lang('ArchivedChats')}
             </h3>
@@ -171,19 +176,19 @@ const Archive = ({ archiveSettings, isFoldersSidebarShown, offsetTop, animationT
   function renderRegular() {
     return (
       <>
-        <div className={buildClassName('status', styles.avatarWrapper)}>
+        <div class={buildClassName('status', styles.avatarWrapper)}>
           <Avatar peer={ARCHIVE_CUSTOM_PEER} />
         </div>
-        <div className={buildClassName(styles.info, 'info')}>
-          <div className="info-row">
-            <div className={buildClassName('title', styles.title)}>
-              <h3 dir="auto" className={buildClassName(styles.name, 'fullName')}>
+        <div class={buildClassName(styles.info, 'info')}>
+          <div class="info-row">
+            <div class={buildClassName('title', styles.title)}>
+              <h3 dir="auto" class={buildClassName(styles.name, 'fullName')}>
                 {lang('ArchivedChats')}
               </h3>
             </div>
           </div>
-          <div className="subtitle">
-            <div className={buildClassName('status', styles.chatsPreview)}>{previewItems}</div>
+          <div class="subtitle">
+            <div class={buildClassName('status', styles.chatsPreview)}>{previewItems()}</div>
             <Badge
               className={styles.unreadCount}
               text={archiveUnreadCount ? formatIntegerCompact(lang, archiveUnreadCount) : undefined}
@@ -197,25 +202,25 @@ const Archive = ({ archiveSettings, isFoldersSidebarShown, offsetTop, animationT
   return (
     <ListItem
       ref={ref}
-      onClick={onClick}
-      onFileHoverOpen={onClick}
+      onClick={props.onClick}
+      onFileHoverOpen={props.onClick}
       className={buildClassName(
         styles.root,
-        archiveSettings.isMinimized && styles.minimized,
-        isFoldersSidebarShown && archiveSettings.isMinimized && styles.noMarginTop,
-        !shouldAnimateRef.current && styles.noAnimation,
-        offsetTop && styles.noMarginTop,
+        props.archiveSettings.isMinimized && styles.minimized,
+        props.isFoldersSidebarShown && props.archiveSettings.isMinimized && styles.noMarginTop,
+        !shouldAnimateRef && styles.noAnimation,
+        props.offsetTop && styles.noMarginTop,
         'chat-item-clickable',
         'chat-item-archive',
       )}
-      style={buildStyle(Boolean(offsetTop) && `transform: translateY(${offsetTop}px)`)}
+      style={buildStyle(Boolean(props.offsetTop) && `transform: translateY(${props.offsetTop}px)`)}
       buttonClassName={styles.button}
-      contextActions={contextActions}
+      contextActions={contextActions()}
       withPortalForMenu
     >
-      {archiveSettings.isMinimized ? renderCollapsed() : renderRegular()}
+      {props.archiveSettings.isMinimized ? renderCollapsed() : renderRegular()}
     </ListItem>
   );
 };
 
-export default memo(Archive);
+export default Archive;

@@ -1,5 +1,4 @@
-import type { FC } from '../../../lib/teact/teact';
-import { memo, useMemo } from '../../../lib/teact/teact';
+import { createMemo } from 'frameact';
 
 import type { ApiDocument } from '../../../api/types';
 import type { ThemeKey } from '../../../types';
@@ -25,13 +24,13 @@ const DARK_THEME_COLOR = 'rgb(255, 255, 255)';
 const LIGHT_THEME_COLOR = 'rgb(0, 0, 0)';
 const COLOR_REPLACE_PATTERN = /#fff/gi;
 
-const AttachBotIcon: FC<OwnProps> = ({ icon, theme }) => {
+const AttachBotIcon = (props: OwnProps) => {
   const { isTouchScreen } = useAppLayout();
-  const mediaData = useMedia(getDocumentMediaHash(icon, 'full'), false, ApiMediaFormat.Text);
+  const mediaData = useMedia(() => getDocumentMediaHash(props.icon, 'full'), false, ApiMediaFormat.Text);
 
-  const iconSvg = useMemo(() => {
+  const iconSvg = createMemo(() => {
     if (!mediaData) return '';
-    const color = theme === 'dark' ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
+    const color = props.theme === 'dark' ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
 
     const mediaDataWithReplacedColors = mediaData.replace(COLOR_REPLACE_PATTERN, color);
     const doc = new DOMParser().parseFromString(mediaDataWithReplacedColors, 'image/svg+xml');
@@ -41,18 +40,18 @@ const AttachBotIcon: FC<OwnProps> = ({ icon, theme }) => {
     });
 
     return `data:image/svg+xml;utf8,${doc.documentElement.outerHTML}`;
-  }, [mediaData, theme]);
+  });
 
   return (
-    <i className={buildClassName(styles.root, 'icon', !isTouchScreen && styles.compact)}>
+    <i class={buildClassName(styles.root, 'icon', !isTouchScreen && styles.compact)}>
       <img
-        src={iconSvg}
+        src={iconSvg()}
         alt=""
-        className={buildClassName(styles.image, !isTouchScreen && styles.compact)}
+        class={buildClassName(styles.image, !isTouchScreen && styles.compact)}
         draggable={false}
       />
     </i>
   );
 };
 
-export default memo(AttachBotIcon);
+export default AttachBotIcon;

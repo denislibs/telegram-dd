@@ -1,5 +1,3 @@
-import { memo } from '../../lib/teact/teact';
-
 import type { ApiMessageOutgoingStatus } from '../../api/types';
 
 import Transition from '../ui/Transition';
@@ -18,20 +16,21 @@ enum Keys {
   read,
 }
 
-const MessageOutgoingStatus = ({ status }: OwnProps) => {
+const MessageOutgoingStatus = (props: OwnProps) => {
   return (
-    <div className="MessageOutgoingStatus">
-      <Transition name="reveal" activeKey={Keys[status]}>
-        {status === 'failed' ? (
-          <div className="MessageOutgoingStatus--failed">
+    <div class="MessageOutgoingStatus">
+      {/* TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6) */}
+      <Transition name="reveal" activeKey={Keys[props.status]}>
+        {props.status === 'failed' ? (
+          <div class="MessageOutgoingStatus--failed">
             <Icon name="message-failed" />
           </div>
         ) : (
-          <Icon name={status === 'succeeded' ? 'check' : `message-${status}`} />
+          <Icon name={props.status === 'succeeded' ? 'check' : `message-${props.status}`} />
         )}
       </Transition>
     </div>
   );
 };
 
-export default memo(MessageOutgoingStatus);
+export default MessageOutgoingStatus;

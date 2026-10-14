@@ -1,4 +1,5 @@
-import { memo } from '@teact';
+import { createMemo } from 'frameact';
+import { For, Show } from 'frameact/dom';
 
 import { type ApiChatFolder, ApiMessageEntityTypes } from '../../../api/types';
 
@@ -20,19 +21,15 @@ type OwnProps = {
   itemClassName?: string;
 };
 
-const ChatTags = ({ orderedFolderIds, chatFoldersById, isFoldersSidebarShown, itemClassName }: OwnProps) => {
-  if (!orderedFolderIds) {
-    return undefined;
-  }
-
-  const visibleFolderIds = orderedFolderIds.slice(0, MAX_VISIBLE_TAGS);
-  const remainingCount = orderedFolderIds.length - visibleFolderIds.length;
+const ChatTags = (props: OwnProps) => {
+  const visibleFolderIds = createMemo(() => props.orderedFolderIds.slice(0, MAX_VISIBLE_TAGS));
+  const remainingCount = createMemo(() => props.orderedFolderIds.length - visibleFolderIds().length);
 
   function getFolderTitle(folder: ApiChatFolder) {
     let text = folder.title.text;
     let entities = folder.title.entities;
 
-    if (isFoldersSidebarShown) {
+    if (props.isFoldersSidebarShown) {
       const currentCustomEmoji = folder.title.entities?.find(
         (entity) => entity.type === ApiMessageEntityTypes.CustomEmoji && entity.offset === 0,
       );
@@ -57,29 +54,32 @@ const ChatTags = ({ orderedFolderIds, chatFoldersById, isFoldersSidebarShown, it
   }
 
   return (
-    <div className={styles.wrapper}>
-      {visibleFolderIds.map((folderId) => {
-        const folder = chatFoldersById?.[folderId];
-        return (
-          folder && (
-            <div
-              key={folder.id}
-              className={buildClassName(
-                styles.tag,
-                folder.color !== undefined && folder.color !== -1 && getPeerColorClass(folder.color),
-                itemClassName,
-              )}
-            >
-              {getFolderTitle(folder)}
-            </div>
-          )
-        );
-      })}
-      {remainingCount > 0 && (
-        <div className={buildClassName(styles.tag, styles.tagColorMore, itemClassName)}>+{remainingCount}</div>
-      )}
-    </div>
+    <Show when={props.orderedFolderIds}>
+      <div class={styles.wrapper}>
+        <For each={visibleFolderIds()}>
+          {(folderId) => {
+            const folder = props.chatFoldersById?.[folderId];
+            return (
+              folder && (
+                <div
+                  class={buildClassName(
+                    styles.tag,
+                    folder.color !== undefined && folder.color !== -1 && getPeerColorClass(folder.color),
+                    props.itemClassName,
+                  )}
+                >
+                  {getFolderTitle(folder)}
+                </div>
+              )
+            );
+          }}
+        </For>
+        {remainingCount() > 0 && (
+          <div class={buildClassName(styles.tag, styles.tagColorMore, props.itemClassName)}>+{remainingCount()}</div>
+        )}
+      </div>
+    </Show>
   );
 };
 
-export default memo(ChatTags);
+export default ChatTags;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from '../../lib/teact/teact';
+import { createEffect, createMemo } from 'frameact';
 import { getActions, getGlobal } from '../../global';
 
 import type { ApiChat, ApiUser } from '../../api/types';
@@ -33,15 +33,18 @@ const loadFromQueue = throttle(() => {
   }
 }, REQUEST_THROTTLE);
 
+// TODO(codemod): usePeerStoriesPolling: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function usePeerStoriesPolling(ids?: string[]) {
-  const peers = useMemo(() => {
+  const peers = createMemo(() => {
+    // TODO(codemod): getGlobal() in a memo / JSX is a one-time read: use useGlobal() (store contract §12.4)
     const global = getGlobal();
     return ids?.map((id) => selectPeer(global, id)).filter(Boolean);
-  }, [ids]);
+  });
 
-  const pollablePeerIds = useMemo(() => {
+  const pollablePeerIds = createMemo(() => {
+    // TODO(codemod): getGlobal() in a memo / JSX is a one-time read: use useGlobal() (store contract §12.4)
     const global = getGlobal();
-    return peers
+    return peers()
       ?.filter((peer) => {
         const lastPollingTime = PEER_LAST_POLLING_TIME.get(peer.id) || 0;
         if (Date.now() - lastPollingTime < POLLING_INTERVAL) {
@@ -60,12 +63,15 @@ export default function usePeerStoriesPolling(ids?: string[]) {
         }
       })
       .map((user) => user.id);
-  }, [peers]);
+  });
 
-  useEffect(() => {
-    if (pollablePeerIds?.length) {
-      pollablePeerIds.forEach((id) => PEER_ID_QUEUE.add(id));
-      loadFromQueue();
-    }
-  }, [pollablePeerIds]);
+  createEffect(
+    () => pollablePeerIds(),
+    (pollablePeerIds2) => {
+      if (pollablePeerIds2?.length) {
+        pollablePeerIds2.forEach((id) => PEER_ID_QUEUE.add(id));
+        loadFromQueue();
+      }
+    },
+  );
 }

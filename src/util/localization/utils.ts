@@ -1,4 +1,3 @@
-import type { TeactNode } from '../../lib/teact/teact';
 
 import type { LangFn } from './types';
 

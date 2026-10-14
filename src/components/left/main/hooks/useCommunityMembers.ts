@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from '../../../../lib/teact/teact';
+import { createMemo } from 'frameact';
 
 import type { ApiChat, ApiCommunityLinkedPeer, ApiMessage } from '../../../../api/types';
 import type { GlobalState } from '../../../../global/types';
@@ -16,33 +16,27 @@ export type CommunityMember = {
 };
 
 // The previewed chat comes first in the subtitle; the badge counts all unread joined chats
+// TODO(codemod): useCommunityMembers: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useCommunityMembers(linkedPeers?: ApiCommunityLinkedPeer[]) {
-  const peersSelector = useCallback(
-    (global: GlobalState) => linkedPeers?.map(({ peerId }) => selectChat(global, peerId)),
-    [linkedPeers],
-  );
+  const peersSelector = (global: GlobalState) => linkedPeers?.map(({ peerId }) => selectChat(global, peerId));
   const peers = useShallowSelector(peersSelector);
 
-  const lastMessagesSelector = useCallback(
-    (global: GlobalState) => linkedPeers?.map(({ peerId }) => selectChatLastMessage(global, peerId)),
-    [linkedPeers],
-  );
+  const lastMessagesSelector = (global: GlobalState) =>
+    linkedPeers?.map(({ peerId }) => selectChatLastMessage(global, peerId));
   const lastMessages = useShallowSelector(lastMessagesSelector);
 
-  const unreadFlagsSelector = useCallback(
-    (global: GlobalState) => linkedPeers?.map(({ peerId }) => selectIsChatUnread(global, peerId)),
-    [linkedPeers],
-  );
+  const unreadFlagsSelector = (global: GlobalState) =>
+    linkedPeers?.map(({ peerId }) => selectIsChatUnread(global, peerId));
   const unreadFlags = useShallowSelector(unreadFlagsSelector);
 
-  return useMemo(() => {
+  return createMemo(() => {
     if (!linkedPeers) return undefined;
 
     let latestMessage: ApiMessage | undefined;
     const datedMembers: (CommunityMember & { date: number })[] = [];
     linkedPeers.forEach(({ peerId }, i) => {
-      const peer = peers?.[i];
-      const lastMessage = lastMessages?.[i];
+      const peer = peers()?.[i];
+      const lastMessage = lastMessages()?.[i];
       if (!peer || !getIsCommunityPeerJoined(peer, lastMessage)) return;
 
       if (lastMessage && (!latestMessage || lastMessage.date > latestMessage.date)) {
@@ -53,7 +47,7 @@ export default function useCommunityMembers(linkedPeers?: ApiCommunityLinkedPeer
         id: peerId,
         title: peer.title,
         peer,
-        isUnread: unreadFlags?.[i],
+        isUnread: unreadFlags()?.[i],
         date: getCommunityPeerDate(peer, lastMessage),
       });
     });
@@ -73,5 +67,5 @@ export default function useCommunityMembers(linkedPeers?: ApiCommunityLinkedPeer
       lastMessageChatId: lastMessageChatId ?? members[0]?.id,
       unreadCount: members.filter(({ isUnread }) => isUnread).length,
     };
-  }, [linkedPeers, peers, lastMessages, unreadFlags]);
+  });
 }

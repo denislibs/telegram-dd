@@ -1,5 +1,4 @@
-import type { FC } from '../../lib/teact/teact';
-import { useCallback, useEffect, useMemo, useState } from '../../lib/teact/teact';
+import { createEffect, createMemo, createSignal } from 'frameact';
 import { getActions } from '../../global';
 
 import buildClassName from '../../util/buildClassName';
@@ -21,72 +20,74 @@ type OwnProps = {
   isAccountFrozen?: boolean;
 };
 
-const NewChatButton: FC<OwnProps> = ({ isShown, onNewPrivateChat, onNewChannel, onNewGroup, isAccountFrozen }) => {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+const NewChatButton = (props: OwnProps) => {
+  const [isMenuOpen, setIsMenuOpen] = createSignal(false);
   const { openFrozenAccountModal } = getActions();
 
-  const shouldRender = isShown || isMenuOpen;
+  const shouldRender = createMemo(() => props.isShown || isMenuOpen());
 
-  useEffect(() => {
-    if (!shouldRender) {
-      setIsMenuOpen(false);
-    }
-  }, [shouldRender]);
+  createEffect(
+    () => shouldRender(),
+    (shouldRender2) => {
+      if (!shouldRender2) {
+        setIsMenuOpen(false);
+      }
+    },
+  );
 
   const lang = useOldLang();
 
-  const fabClassName = buildClassName('NewChatButton', shouldRender && 'revealed', isMenuOpen && 'menu-is-open');
+  const fabClassName = createMemo(() =>
+    buildClassName('NewChatButton', shouldRender() && 'revealed', isMenuOpen() && 'menu-is-open'),
+  );
 
-  const toggleIsMenuOpen = useCallback(() => {
-    if (isAccountFrozen) {
+  const toggleIsMenuOpen = () => {
+    if (props.isAccountFrozen) {
       openFrozenAccountModal();
       return;
     }
-    setIsMenuOpen(!isMenuOpen);
-  }, [isMenuOpen, isAccountFrozen]);
+    setIsMenuOpen(!isMenuOpen());
+  };
 
-  const handleClose = useCallback(() => {
+  const handleClose = () => {
     setIsMenuOpen(false);
-  }, []);
+  };
 
-  const menuItems = useMemo(
-    () => (
-      <>
-        <MenuItem icon="channel" onClick={onNewChannel}>
-          {lang('NewChannel')}
-        </MenuItem>
-        <MenuItem icon="group" onClick={onNewGroup}>
-          {lang('NewGroup')}
-        </MenuItem>
-        <MenuItem icon="user" onClick={onNewPrivateChat}>
-          {lang('NewMessageTitle')}
-        </MenuItem>
-      </>
-    ),
-    [lang, onNewChannel, onNewGroup, onNewPrivateChat],
-  );
+  const menuItems = createMemo(() => (
+    <>
+      <MenuItem icon="channel" onClick={props.onNewChannel}>
+        {lang('NewChannel')}
+      </MenuItem>
+      <MenuItem icon="group" onClick={props.onNewGroup}>
+        {lang('NewGroup')}
+      </MenuItem>
+      <MenuItem icon="user" onClick={props.onNewPrivateChat}>
+        {lang('NewMessageTitle')}
+      </MenuItem>
+    </>
+  ));
 
   return (
-    <div className={fabClassName} dir={lang.isRtl ? 'rtl' : undefined}>
+    <div class={fabClassName()} dir={lang.isRtl ? 'rtl' : undefined}>
       <Button
         round
         color="primary"
-        className={isMenuOpen ? 'active' : ''}
+        className={isMenuOpen() ? 'active' : ''}
         onClick={toggleIsMenuOpen}
-        ariaLabel={lang(isMenuOpen ? 'Close' : 'NewMessageTitle')}
+        ariaLabel={lang(isMenuOpen() ? 'Close' : 'NewMessageTitle')}
         tabIndex={-1}
       >
         <Icon name="new-chat-filled" />
         <Icon name="close" />
       </Button>
       <Menu
-        isOpen={isMenuOpen}
+        isOpen={isMenuOpen()}
         positionX={lang.isRtl ? 'left' : 'right'}
         positionY="bottom"
         autoClose
         onClose={handleClose}
       >
-        {menuItems}
+        {menuItems()}
       </Menu>
     </div>
   );

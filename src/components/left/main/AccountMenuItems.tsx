@@ -1,4 +1,4 @@
-import { memo, useMemo } from '../../../lib/teact/teact';
+import { createMemo } from 'frameact';
 import { getActions } from '../../../global';
 
 import type { ApiUser } from '../../../api/types';
@@ -11,7 +11,6 @@ import { getAccountSlotUrl } from '../../../util/multiaccount';
 import { REM } from '../../common/helpers/mediaDimensions';
 
 import useLang from '../../../hooks/useLang';
-import useLastCallback from '../../../hooks/useLastCallback';
 import useMultiaccountInfo from '../../../hooks/useMultiaccountInfo';
 
 import Avatar from '../../common/Avatar';
@@ -28,41 +27,41 @@ type OwnProps = {
 
 const NOTIFICATION_DURATION = 7000;
 
-const AccountMenuItems = ({ currentUser, totalLimit, onSelectCurrent, onSwitchAccount }: OwnProps) => {
+const AccountMenuItems = (props: OwnProps) => {
   const { showNotification } = getActions();
   const lang = useLang();
-  const accounts = useMultiaccountInfo(currentUser);
+  const accounts = useMultiaccountInfo(() => props.currentUser);
 
   const currentCount = getCurrentProdAccountCount();
   const maxCount = getCurrentMaxAccountCount();
 
-  const currentAccountInfo = useMemo(() => {
-    return Object.values(accounts).find((account) => account.userId === currentUser.id);
-  }, [accounts, currentUser.id]);
+  const currentAccountInfo = createMemo(() => {
+    return Object.values(accounts).find((account) => account.userId === props.currentUser.id);
+  });
 
   const shouldShowLimit = currentCount >= maxCount;
 
-  const handleAccountClick = useLastCallback((account: AccountInfo, e: React.SyntheticEvent<HTMLElement>) => {
-    if (account.userId === currentUser.id) {
-      onSelectCurrent?.();
+  const handleAccountClick = (account: AccountInfo, e: React.SyntheticEvent<HTMLElement>) => {
+    if (account.userId === props.currentUser.id) {
+      props.onSelectCurrent?.();
       return;
     }
 
     handleAccountNavigation(e);
-  });
+  };
 
-  const handleNewAccountClick = useLastCallback((e: React.SyntheticEvent<HTMLElement>) => {
+  const handleNewAccountClick = (e: React.SyntheticEvent<HTMLElement>) => {
     if (shouldShowLimit) {
       showNotification({
         title: lang('PremiumLimitAccountsTitle'),
-        message: currentUser.isPremium ? lang('PremiumLimitAccounts') : lang('PremiumLimitAccountsNoPremium'),
+        message: props.currentUser.isPremium ? lang('PremiumLimitAccounts') : lang('PremiumLimitAccountsNoPremium'),
         duration: NOTIFICATION_DURATION,
       });
       return;
     }
 
     handleAccountNavigation(e);
-  });
+  };
 
   function handleAccountNavigation(e: React.SyntheticEvent<HTMLElement>) {
     if (
@@ -80,15 +79,15 @@ const AccountMenuItems = ({ currentUser, totalLimit, onSelectCurrent, onSwitchAc
     e.preventDefault();
     // IDB locks up if we write large payload on navigation
     if (IS_SAFARI) temporarilySuspendCacheUpdate();
-    onSwitchAccount(e.currentTarget.href);
+    props.onSwitchAccount(e.currentTarget.href);
   }
 
-  const newAccountUrl = useMemo(() => {
+  const newAccountUrl = createMemo(() => {
     if (!Object.values(accounts).length) {
       return undefined;
     }
 
-    if (currentCount === totalLimit) {
+    if (currentCount === props.totalLimit) {
       return undefined;
     }
 
@@ -98,14 +97,14 @@ const AccountMenuItems = ({ currentUser, totalLimit, onSelectCurrent, onSwitchAc
     }
 
     return getAccountSlotUrl(freeIndex, true);
-  }, [accounts, currentCount, totalLimit]);
+  });
 
   return (
     <>
       {Object.entries(accounts || {})
-        .sort(([, account]) => (account.userId === currentUser.id ? -1 : 1))
+        .sort(([, account]) => (account.userId === props.currentUser.id ? -1 : 1))
         .map(([slot, account], index, arr) => {
-          const isSameServer = account.isTest === currentAccountInfo?.isTest;
+          const isSameServer = account.isTest === currentAccountInfo()?.isTest;
           const mockUser: CustomPeer = {
             title: [account.firstName, account.lastName].filter(Boolean).join(' '),
             isCustomPeer: true,
@@ -114,7 +113,7 @@ const AccountMenuItems = ({ currentUser, totalLimit, onSelectCurrent, onSwitchAc
             isPremium: account.isPremium,
           };
 
-          const hasSeparator = account.userId === currentUser.id && (newAccountUrl || arr.length > 1);
+          const hasSeparator = account.userId === props.currentUser.id && (newAccountUrl() || arr.length > 1);
 
           return (
             <>
@@ -124,20 +123,20 @@ const AccountMenuItems = ({ currentUser, totalLimit, onSelectCurrent, onSwitchAc
                   <Avatar size="mini" className="account-avatar" peer={mockUser} previewUrl={account.avatarUri} />
                 }
                 onClick={(e) => handleAccountClick(account, e)}
-                href={account.userId !== currentUser.id ? getAccountSlotUrl(Number(slot)) : undefined}
+                href={account.userId !== props.currentUser.id ? getAccountSlotUrl(Number(slot)) : undefined}
               >
-                {account.isTest && <span className="account-menu-item-test">T</span>}
+                {account.isTest && <span class="account-menu-item-test">T</span>}
                 <FullNameTitle peer={mockUser} withEmojiStatus emojiStatusSize={REM} />
               </MenuItem>
               {hasSeparator && <MenuSeparator />}
             </>
           );
         })}
-      {newAccountUrl && (
+      {newAccountUrl() && (
         <MenuItem
           icon="add"
           rel="noopener" // Allow referrer to be passed
-          href={!shouldShowLimit ? newAccountUrl : undefined}
+          href={!shouldShowLimit ? newAccountUrl() : undefined}
           onClick={handleNewAccountClick}
         >
           {lang('MenuAddAccount')}
@@ -147,4 +146,4 @@ const AccountMenuItems = ({ currentUser, totalLimit, onSelectCurrent, onSwitchAc
   );
 };
 
-export default memo(AccountMenuItems);
+export default AccountMenuItems;

@@ -1,8 +1,8 @@
-import { memo } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
 import { withGlobal } from '../../global';
+import type { GlobalState } from '../../global/types';
 
 import type { ApiFormattedText, ApiMessage, ApiMessagePoll, ApiTypeStory, ApiWebPage } from '../../api/types';
-import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 
 import { extractMessageText, getMessagePollId, groupStatefulContent, isActionMessage } from '../../global/helpers';
 import {
@@ -39,88 +39,90 @@ type StateProps = {
   webPage?: ApiWebPage;
 };
 
-function MessageSummary({
-  message,
-  forcedText,
-  noEmoji,
-  highlight,
-  truncateLength = TRUNCATED_SUMMARY_LENGTH,
-  withTranslucentThumbs,
-  inChatList,
-  emojiSize,
-  poll,
-  story,
-  webPage,
-  observeIntersectionForLoading,
-  observeIntersectionForPlaying,
-}: OwnProps & StateProps) {
+function MessageSummary(ownProps: OwnProps) {
+  const props = withGlobal(ownProps, mapStateToProps);
   const lang = useLang();
-  const extractedText = extractMessageText(message, inChatList);
-  const hasPoll = Boolean(getMessagePollId(message));
-  const isAction = isActionMessage(message);
+  const extractedText = createMemo(() => extractMessageText(props.message, props.inChatList));
+  const hasPoll = createMemo(() => Boolean(getMessagePollId(props.message)));
+  const isAction = createMemo(() => isActionMessage(props.message));
 
-  const statefulContent = groupStatefulContent({ poll, story, webPage });
-  const emoji = !noEmoji && getMessageSummaryEmoji(message);
+  const statefulContent = createMemo(() =>
+    groupStatefulContent({ poll: props.poll, story: props.story, webPage: props.webPage }),
+  );
+  const emoji = createMemo(() => !props.noEmoji && getMessageSummaryEmoji(props.message));
 
-  if (!extractedText && !hasPoll && !isAction) {
-    if (forcedText?.text) {
-      const trimmedText = trimText(forcedText.text, truncateLength);
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (!extractedText() && !hasPoll() && !isAction()) {
+    if (props.forcedText?.text) {
+      const trimmedText = trimText(
+        props.forcedText.text,
+        props.truncateLength === undefined ? TRUNCATED_SUMMARY_LENGTH : props.truncateLength,
+      );
 
       return (
         <span>
-          {highlight ? renderText(trimmedText, ['emoji', 'highlight'], { highlight }) : renderText(trimmedText)}
+          {props.highlight
+            ? renderText(trimmedText, ['emoji', 'highlight'], { highlight: props.highlight })
+            : renderText(trimmedText)}
         </span>
       );
     }
 
-    const description = getMessageSummaryDescription(lang, message, statefulContent);
+    const description = getMessageSummaryDescription(lang, props.message, statefulContent());
 
     if (typeof description !== 'string') {
-      const { todo } = message.content;
+      const { todo } = props.message.content;
       const formattedSummaryText = todo?.todo.title;
       const renderedDescription = formattedSummaryText
         ? renderFormattedSummaryText({
             formattedText: formattedSummaryText,
-            highlight,
-            truncateLength,
-            emojiSize,
-            observeIntersectionForLoading,
-            observeIntersectionForPlaying,
-            withTranslucentThumbs,
+            highlight: props.highlight,
+            truncateLength: props.truncateLength === undefined ? TRUNCATED_SUMMARY_LENGTH : props.truncateLength,
+            emojiSize: props.emojiSize,
+            observeIntersectionForLoading: props.observeIntersectionForLoading,
+            observeIntersectionForPlaying: props.observeIntersectionForPlaying,
+            withTranslucentThumbs: props.withTranslucentThumbs,
           })
         : description;
 
-      return <span>{[emoji ? renderText(`${emoji} `) : undefined, renderedDescription].flat().filter(Boolean)}</span>;
+      return (
+        <span>{[emoji() ? renderText(`${emoji()} `) : undefined, renderedDescription].flat().filter(Boolean)}</span>
+      );
     }
 
-    const emojiWithSpace = emoji ? `${emoji} ` : '';
+    const emojiWithSpace = emoji() ? `${emoji()} ` : '';
     const summaryText = `${emojiWithSpace}${description}`;
-    const trimmedText = trimText(summaryText, truncateLength);
+    const trimmedText = trimText(
+      summaryText,
+      props.truncateLength === undefined ? TRUNCATED_SUMMARY_LENGTH : props.truncateLength,
+    );
 
     return (
       <span>
-        {highlight ? renderText(trimmedText, ['emoji', 'highlight'], { highlight }) : renderText(trimmedText)}
+        {props.highlight
+          ? renderText(trimmedText, ['emoji', 'highlight'], { highlight: props.highlight })
+          : renderText(trimmedText)}
       </span>
     );
   }
 
   function renderMessageText() {
-    if (isAction) {
-      return <ActionMessageText message={message} asPreview />;
+    if (isAction()) {
+      return <ActionMessageText message={props.message} asPreview />;
     }
 
     return (
       <MessageText
-        messageOrStory={message}
-        forcedText={forcedText}
-        highlight={highlight}
+        messageOrStory={props.message}
+        forcedText={props.forcedText}
+        highlight={props.highlight}
         asPreview
-        observeIntersectionForLoading={observeIntersectionForLoading}
-        observeIntersectionForPlaying={observeIntersectionForPlaying}
-        withTranslucentThumbs={withTranslucentThumbs}
-        truncateLength={truncateLength}
-        inChatList={inChatList}
-        emojiSize={emojiSize}
+        observeIntersectionForLoading={props.observeIntersectionForLoading}
+        observeIntersectionForPlaying={props.observeIntersectionForPlaying}
+        withTranslucentThumbs={props.withTranslucentThumbs}
+        truncateLength={props.truncateLength === undefined ? TRUNCATED_SUMMARY_LENGTH : props.truncateLength}
+        inChatList={props.inChatList}
+        emojiSize={props.emojiSize}
       />
     );
   }
@@ -128,8 +130,8 @@ function MessageSummary({
   return (
     <>
       {[
-        emoji ? renderText(`${emoji} `) : undefined,
-        getMessageSummaryDescription(lang, message, statefulContent, renderMessageText()),
+        emoji() ? renderText(`${emoji()} `) : undefined,
+        getMessageSummaryDescription(lang, props.message, statefulContent(), renderMessageText()),
       ]
         .flat()
         .filter(Boolean)}
@@ -137,20 +139,20 @@ function MessageSummary({
   );
 }
 
-export default memo(
-  withGlobal<OwnProps>((global, { message }): Complete<StateProps> => {
-    const poll = selectPollFromMessage(global, message);
-    const webPage = selectWebPageFromMessage(global, message);
-    const storyData = message.content.storyData;
-    const story = storyData && selectPeerStory(global, storyData.peerId, storyData.id);
+const mapStateToProps = (global: GlobalState, { message }: OwnProps): Complete<StateProps> => {
+  const poll = selectPollFromMessage(global, message);
+  const webPage = selectWebPageFromMessage(global, message);
+  const storyData = message.content.storyData;
+  const story = storyData && selectPeerStory(global, storyData.peerId, storyData.id);
 
-    return {
-      poll,
-      story,
-      webPage,
-    };
-  })(MessageSummary),
-);
+  return {
+    poll,
+    story,
+    webPage,
+  };
+};
+
+export default MessageSummary;
 
 function renderFormattedSummaryText({
   formattedText,

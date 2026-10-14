@@ -1,10 +1,11 @@
-import { useEffect } from '../../lib/teact/teact';
+import { onMount } from 'frameact';
 
 import { onBeforeUnload } from '../../util/schedulers';
 import useLastCallback from '../useLastCallback';
 
+// TODO(codemod): useBeforeUnload: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useBeforeUnload(callback: AnyToVoidFunction) {
-  const lastCallback = useLastCallback(callback);
+  const lastCallback = callback;
 
-  useEffect(() => onBeforeUnload(lastCallback), [lastCallback]);
+  onMount(() => onBeforeUnload(lastCallback));
 }

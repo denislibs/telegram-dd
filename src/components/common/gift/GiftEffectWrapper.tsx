@@ -1,4 +1,4 @@
-import { type ElementRef, memo, type TeactNode, useRef } from '@teact';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import buildClassName from '../../../util/buildClassName';
 import buildStyle from '../../../util/buildStyle';
@@ -8,8 +8,8 @@ import Sparkles from '../Sparkles';
 import styles from './GiftEffectWrapper.module.scss';
 
 type OwnProps = {
-  children: TeactNode;
-  ref?: ElementRef<HTMLDivElement>;
+  children: JSX.Element;
+  ref?: (el: HTMLDivElement) => void;
   className?: string;
   style?: string;
   withSparkles?: boolean;
@@ -19,39 +19,31 @@ type OwnProps = {
   onClick?: NoneToVoidFunction;
 };
 
-const GiftEffectWrapper = ({
-  children,
-  ref,
-  className,
-  style,
-  withSparkles,
-  sparklesClassName,
-  sparklesColor,
-  glowColor,
-  onClick,
-}: OwnProps) => {
-  let containerRef = useRef<HTMLDivElement>();
-  if (ref) {
-    containerRef = ref;
+const GiftEffectWrapper = (props: OwnProps) => {
+  let containerRef!: HTMLDivElement;
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (props.ref) {
+    // TODO(codemod): "containerRef" was a ref object and is reassigned here (a forwarded ref?): use a callback ref
+    containerRef = props.ref;
   }
 
   return (
     <div
       ref={containerRef}
-      className={buildClassName(styles.root, className)}
-      style={buildStyle(glowColor && `--glow-color: ${glowColor}`, style)}
-      onClick={onClick}
+      class={buildClassName(styles.root, props.className)}
+      style={buildStyle(props.glowColor && `--glow-color: ${props.glowColor}`, props.style)}
+      onClick={(e) => props.onClick?.(e)}
     >
-      {withSparkles && (
+      {props.withSparkles && (
         <Sparkles
           preset="button"
-          className={buildClassName(styles.sparkles, sparklesClassName)}
-          style={buildStyle(sparklesColor && `color: ${sparklesColor}`)}
+          className={buildClassName(styles.sparkles, props.sparklesClassName)}
+          style={buildStyle(props.sparklesColor && `color: ${props.sparklesColor}`)}
         />
       )}
-      {children}
+      {props.children}
     </div>
   );
 };
 
-export default memo(GiftEffectWrapper);
+export default GiftEffectWrapper;

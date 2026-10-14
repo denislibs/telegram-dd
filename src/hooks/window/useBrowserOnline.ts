@@ -1,9 +1,9 @@
-import { useEffect, useState } from '../../lib/teact/teact';
+import { createSignal, onMount } from 'frameact';
 
 export default function useBrowserOnline() {
-  const [isOnline, setIsOnline] = useState(window.navigator.onLine);
+  const [isOnline, setIsOnline] = createSignal(window.navigator.onLine);
 
-  useEffect(() => {
+  onMount(() => {
     function handleChange() {
       setIsOnline(window.navigator.onLine);
     }
@@ -15,7 +15,7 @@ export default function useBrowserOnline() {
       window.removeEventListener('offline', handleChange);
       window.removeEventListener('online', handleChange);
     };
-  }, []);
+  });
 
   return isOnline;
 }

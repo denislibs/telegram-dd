@@ -1,30 +1,35 @@
 import type { Event } from '@tauri-apps/api/event';
-import { useEffect } from '../../lib/teact/teact';
+import { createEffect } from 'frameact';
+import { depsOf } from '../../util/effectDeps';
 
 import { IS_TAURI } from '../../util/browser/globalEnvironment';
 
+// TODO(codemod): useTauriEvent: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useTauriEvent<T>(name: string, callback: (event: Event<T>) => void) {
-  return useEffect(() => {
-    if (!IS_TAURI) {
-      return undefined;
-    }
+  return createEffect(
+    depsOf(() => [name, callback]),
+    () => {
+      if (!IS_TAURI) {
+        return undefined;
+      }
 
-    let removeListener: VoidFunction | undefined;
+      let removeListener: VoidFunction | undefined;
 
-    const setUpListener = async () => {
-      const { listen } = await import('@tauri-apps/api/event');
-      removeListener = await listen<T>(name, (event) => {
-        callback(event);
+      const setUpListener = async () => {
+        const { listen } = await import('@tauri-apps/api/event');
+        removeListener = await listen<T>(name, (event) => {
+          callback(event);
+        });
+      };
+
+      setUpListener().catch((error) => {
+        // eslint-disable-next-line no-console
+        console.error(`Could not set up window event listener. ${error}`);
       });
-    };
 
-    setUpListener().catch((error) => {
-      // eslint-disable-next-line no-console
-      console.error(`Could not set up window event listener. ${error}`);
-    });
-
-    return () => {
-      removeListener?.();
-    };
-  }, [name, callback]);
+      return () => {
+        removeListener?.();
+      };
+    },
+  );
 }

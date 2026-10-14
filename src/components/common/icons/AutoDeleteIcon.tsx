@@ -1,4 +1,4 @@
-import { memo } from '../../../lib/teact/teact';
+import { createMemo } from 'frameact';
 
 import type { ApiPeer } from '../../../api/types';
 
@@ -19,20 +19,20 @@ type OwnProps = {
 
 const AVATAR_FALLBACK_COLOR = '#0003';
 
-function AutoDeleteIcon({ period, peer, className, ariaLabel }: OwnProps) {
-  const averageColor = useAverageColor(peer, AVATAR_FALLBACK_COLOR);
-  const hasAvatarPhoto = Boolean(peer.avatarPhotoId);
+function AutoDeleteIcon(props: OwnProps) {
+  const averageColor = useAverageColor(() => props.peer, AVATAR_FALLBACK_COLOR);
+  const hasAvatarPhoto = createMemo(() => Boolean(props.peer.avatarPhotoId));
 
   return (
     <span
-      className={buildClassName(styles.root, className)}
-      style={hasAvatarPhoto ? `background-color: ${averageColor}` : undefined}
+      class={buildClassName(styles.root, props.className)}
+      style={hasAvatarPhoto() ? `background-color: ${averageColor}` : undefined}
       role="img"
-      aria-label={ariaLabel}
+      aria-label={props.ariaLabel}
     >
-      <AutoDeleteOutlinedIcon period={period} className={styles.glyph} />
+      <AutoDeleteOutlinedIcon period={props.period} className={styles.glyph} />
     </span>
   );
 }
 
-export default memo(AutoDeleteIcon);
+export default AutoDeleteIcon;

@@ -1,9 +1,10 @@
-import type { TeactNode } from '../../lib/teact/teact';
-import { useEffect, useLayoutEffect, useRef } from '../../lib/teact/teact';
+import { createMeasureEffect, createMemo, createMutationEffect, requestForcedReflow, requestMutation } from 'frameact';
+import { For } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
+import { depsOf } from '../../util/effectDeps';
 
 import type { MenuItemContextAction } from './ListItem';
 
-import { requestForcedReflow, requestMutation } from '../../lib/fasterdom/fasterdom';
 import { MouseButton } from '../../util/browser/windowEnvironment';
 import buildClassName from '../../util/buildClassName';
 import forceReflow from '../../util/forceReflow';
@@ -11,7 +12,6 @@ import renderText from '../common/helpers/renderText';
 
 import useContextMenuHandlers from '../../hooks/useContextMenuHandlers';
 import { useFastClick } from '../../hooks/useFastClick';
-import useLastCallback from '../../hooks/useLastCallback';
 
 import Icon from '../common/icons/Icon';
 import Menu from './Menu';
@@ -22,7 +22,7 @@ import './Tab.scss';
 
 type OwnProps = {
   className?: string;
-  title: TeactNode;
+  title: JSX.Element;
   isActive?: boolean;
   isBlocked?: boolean;
   badgeCount?: number;
@@ -32,7 +32,7 @@ type OwnProps = {
   clickArg?: number;
   contextActions?: MenuItemContextAction[];
   contextRootElementSelector?: string;
-  icon?: TeactNode;
+  icon?: JSX.Element;
 };
 
 const classNames = {
@@ -40,149 +40,148 @@ const classNames = {
   badgeActive: 'Tab__badge--active',
 };
 
-const Tab = ({
-  className,
-  title,
-  isActive,
-  isBlocked,
-  badgeCount,
-  isBadgeActive,
-  previousActiveTab,
-  contextActions,
-  contextRootElementSelector,
-  icon,
-  clickArg,
-  onClick,
-}: OwnProps) => {
-  const tabRef = useRef<HTMLDivElement>();
+const Tab = (props: OwnProps) => {
+  let tabRef!: HTMLDivElement;
 
-  useLayoutEffect(() => {
-    // Set initial active state
-    if (isActive && previousActiveTab === undefined && tabRef.current) {
-      tabRef.current.classList.add(classNames.active);
-    }
-  }, [isActive, previousActiveTab]);
-
-  useEffect(() => {
-    if (!isActive || previousActiveTab === undefined) {
-      return;
-    }
-
-    const tabEl = tabRef.current!;
-    const prevTabEl = tabEl.parentElement!.children[previousActiveTab];
-    if (!prevTabEl) {
-      // The number of tabs in the parent component has decreased. It is necessary to add the active tab class name.
-      if (isActive && !tabEl.classList.contains(classNames.active)) {
-        requestMutation(() => {
-          tabEl.classList.add(classNames.active);
-        });
+  createMutationEffect(
+    depsOf(() => [props.isActive, props.previousActiveTab] as const),
+    ([isActive2, previousActiveTab2]) => {
+      // Set initial active state
+      if (isActive2 && previousActiveTab2 === undefined && tabRef) {
+        tabRef.classList.add(classNames.active);
       }
-      return;
-    }
+    },
+  );
 
-    const platformEl = tabEl.querySelector<HTMLElement>('.platform')!;
-    const prevPlatformEl = prevTabEl.querySelector<HTMLElement>('.platform')!;
+  createMeasureEffect(
+    depsOf(() => [props.isActive, props.previousActiveTab] as const),
+    ([isActive2, previousActiveTab2]) => {
+      if (!isActive2 || previousActiveTab2 === undefined) {
+        return;
+      }
 
-    // We move and resize the platform, so it repeats the position and size of the previous one
-    const shiftLeft = prevPlatformEl.parentElement!.offsetLeft - platformEl.parentElement!.offsetLeft;
-    const scaleFactor = prevPlatformEl.clientWidth / platformEl.clientWidth;
+      const tabEl = tabRef!;
+      const prevTabEl = tabEl.parentElement!.children[previousActiveTab2];
+      if (!prevTabEl) {
+        // The number of tabs in the parent component has decreased. It is necessary to add the active tab class name.
+        if (isActive2 && !tabEl.classList.contains(classNames.active)) {
+          requestMutation(() => {
+            tabEl.classList.add(classNames.active);
+          });
+        }
+        return;
+      }
 
-    requestMutation(() => {
-      prevPlatformEl.classList.remove('animate');
-      platformEl.classList.remove('animate');
-      platformEl.style.transform = `translate3d(${shiftLeft}px, 0, 0) scale3d(${scaleFactor}, 1, 1)`;
+      const platformEl = tabEl.querySelector<HTMLElement>('.platform')!;
+      const prevPlatformEl = prevTabEl.querySelector<HTMLElement>('.platform')!;
 
-      requestForcedReflow(() => {
-        forceReflow(platformEl);
+      // We move and resize the platform, so it repeats the position and size of the previous one
+      const shiftLeft = prevPlatformEl.parentElement!.offsetLeft - platformEl.parentElement!.offsetLeft;
+      const scaleFactor = prevPlatformEl.clientWidth / platformEl.clientWidth;
 
-        return () => {
-          platformEl.classList.add('animate');
-          platformEl.style.transform = 'none';
+      requestMutation(() => {
+        prevPlatformEl.classList.remove('animate');
+        platformEl.classList.remove('animate');
+        platformEl.style.transform = `translate3d(${shiftLeft}px, 0, 0) scale3d(${scaleFactor}, 1, 1)`;
 
-          prevTabEl.classList.remove(classNames.active);
-          tabEl.classList.add(classNames.active);
-        };
+        requestForcedReflow(() => {
+          forceReflow(platformEl);
+
+          return () => {
+            platformEl.classList.add('animate');
+            platformEl.style.transform = 'none';
+
+            prevTabEl.classList.remove(classNames.active);
+            tabEl.classList.add(classNames.active);
+          };
+        });
       });
-    });
-  }, [isActive, previousActiveTab]);
-
-  const {
-    contextMenuAnchor,
-    handleContextMenu,
-    handleBeforeContextMenu,
-    handleContextMenuClose,
-    handleContextMenuHide,
-    isContextMenuOpen,
-  } = useContextMenuHandlers(tabRef, !contextActions);
-
-  const { handleClick, handleMouseDown } = useFastClick((e: React.MouseEvent<HTMLDivElement>) => {
-    if (contextActions && (e.button === MouseButton.Secondary || !onClick)) {
-      handleBeforeContextMenu(e);
-    }
-
-    if (e.type === 'mousedown' && e.button !== MouseButton.Main) {
-      return;
-    }
-
-    onClick?.(clickArg!);
-  });
-
-  const getTriggerElement = useLastCallback(() => tabRef.current);
-  const getRootElement = useLastCallback(() =>
-    contextRootElementSelector ? tabRef.current!.closest(contextRootElementSelector) : document.body,
+    },
   );
-  const getMenuElement = useLastCallback(() =>
-    document.querySelector('#portals')!.querySelector('.Tab-context-menu .bubble'),
+
+  const contextMenuHandlersResult = createMemo(() =>
+    useContextMenuHandlers(
+      () => tabRef,
+      () => !props.contextActions,
+    ),
   );
-  const getLayout = useLastCallback(() => ({ withPortal: true }));
+  const contextMenuAnchor = () => contextMenuHandlersResult().contextMenuAnchor;
+  const handleContextMenu = () => contextMenuHandlersResult().handleContextMenu;
+  const handleBeforeContextMenu = () => contextMenuHandlersResult().handleBeforeContextMenu;
+  const handleContextMenuClose = () => contextMenuHandlersResult().handleContextMenuClose;
+  const handleContextMenuHide = () => contextMenuHandlersResult().handleContextMenuHide;
+  const isContextMenuOpen = () => contextMenuHandlersResult().isContextMenuOpen;
+
+  const fastClickResult = createMemo(() =>
+    useFastClick((e: React.MouseEvent<HTMLDivElement>) => {
+      if (props.contextActions && (e.button === MouseButton.Secondary || !props.onClick)) {
+        handleBeforeContextMenu()(e);
+      }
+
+      if (e.type === 'mousedown' && e.button !== MouseButton.Main) {
+        return;
+      }
+
+      props.onClick?.(props.clickArg!);
+    }),
+  );
+  const handleClick = () => fastClickResult().handleClick;
+  const handleMouseDown = () => fastClickResult().handleMouseDown;
+
+  const getTriggerElement = () => tabRef;
+  const getRootElement = () =>
+    props.contextRootElementSelector ? tabRef!.closest(props.contextRootElementSelector) : document.body;
+  const getMenuElement = () => document.querySelector('#portals')!.querySelector('.Tab-context-menu .bubble');
+  const getLayout = () => ({ withPortal: true });
 
   return (
     <div
-      className={buildClassName('Tab', onClick && 'Tab--interactive', className)}
-      onClick={handleClick}
-      onMouseDown={handleMouseDown}
-      onContextMenu={handleContextMenu}
+      class={buildClassName('Tab', props.onClick && 'Tab--interactive', props.className)}
+      onClick={handleClick()}
+      onMouseDown={handleMouseDown()}
+      onContextMenu={handleContextMenu()}
       ref={tabRef}
     >
-      {icon}
-      <span className="Tab_inner">
-        {typeof title === 'string' ? renderText(title) : title}
-        {Boolean(badgeCount) && (
-          <span className={buildClassName('badge', isBadgeActive && classNames.badgeActive)}>{badgeCount}</span>
+      {props.icon}
+      <span class="Tab_inner">
+        {typeof props.title === 'string' ? renderText(props.title) : props.title}
+        {Boolean(props.badgeCount) && (
+          <span class={buildClassName('badge', props.isBadgeActive && classNames.badgeActive)}>{props.badgeCount}</span>
         )}
-        {isBlocked && <Icon name="lock-filled" className="blocked" />}
-        <i className="platform" />
+        {props.isBlocked && <Icon name="lock-filled" className="blocked" />}
+        <i class="platform" />
       </span>
 
-      {contextActions && contextMenuAnchor !== undefined && (
+      {props.contextActions && contextMenuAnchor() !== undefined && (
         <Menu
-          isOpen={isContextMenuOpen}
-          anchor={contextMenuAnchor}
+          isOpen={isContextMenuOpen()}
+          anchor={contextMenuAnchor()}
           getTriggerElement={getTriggerElement}
           getRootElement={getRootElement}
           getMenuElement={getMenuElement}
           getLayout={getLayout}
           className="Tab-context-menu"
           autoClose
-          onClose={handleContextMenuClose}
-          onCloseAnimationEnd={handleContextMenuHide}
+          onClose={handleContextMenuClose()}
+          onCloseAnimationEnd={handleContextMenuHide()}
           withPortal
         >
-          {contextActions.map((action) =>
-            'isSeparator' in action ? (
-              <MenuSeparator key={action.key || 'separator'} />
-            ) : (
-              <MenuItem
-                key={action.title}
-                icon={action.icon}
-                destructive={action.destructive}
-                disabled={!action.handler}
-                onClick={action.handler}
-              >
-                {action.title}
-              </MenuItem>
-            ),
-          )}
+          <For each={props.contextActions}>
+            {(action) =>
+              'isSeparator' in action ? (
+                <MenuSeparator />
+              ) : (
+                <MenuItem
+                  icon={action.icon}
+                  destructive={action.destructive}
+                  disabled={!action.handler}
+                  onClick={action.handler}
+                >
+                  {action.title}
+                </MenuItem>
+              )
+            }
+          </For>
         </Menu>
       )}
     </div>

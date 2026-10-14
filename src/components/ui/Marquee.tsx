@@ -1,12 +1,12 @@
-import { memo, useEffect, useRef, useState } from '../../lib/teact/teact';
+import { createEffect, createMemo, createSignal, onMount, requestMeasure } from 'frameact';
+import { mergeProps } from 'frameact/dom';
 import { getGlobal } from '../../global';
+import { depsOf } from '../../util/effectDeps';
 
-import { requestMeasure } from '../../lib/fasterdom/fasterdom';
 import { selectCanAnimateInterface } from '../../global/selectors';
 import buildClassName from '../../util/buildClassName';
 import buildStyle from '../../util/buildStyle';
 
-import useLastCallback from '../../hooks/useLastCallback';
 import useResizeObserver from '../../hooks/useResizeObserver';
 
 import styles from './Marquee.module.scss';
@@ -47,69 +47,74 @@ const INITIAL_MARQUEE_SIZE: MarqueeSize = {
   distance: 0,
 };
 
-const Marquee = ({ children, className, contentClassName, paused, style, speed = DEFAULT_SPEED }: OwnProps) => {
-  const rootRef = useRef<HTMLSpanElement>();
-  const contentRef = useRef<HTMLSpanElement>();
-  const copyRef = useRef<HTMLSpanElement>();
-  const [marqueeSize, setMarqueeSize] = useState(INITIAL_MARQUEE_SIZE);
-  const [animationState, setAnimationState] = useState(INITIAL_ANIMATION_STATE);
-  const restartAnimationFrameRef = useRef<number>();
-  const hasAutoStartedRef = useRef(false);
+const Marquee = (rawProps: OwnProps) => {
+  const props = mergeProps({ speed: DEFAULT_SPEED }, rawProps) as OwnProps & Required<Pick<OwnProps, 'speed'>>;
+  let rootRef!: HTMLSpanElement;
+  let contentRef!: HTMLSpanElement;
+  let copyRef!: HTMLSpanElement;
+  const [marqueeSize, setMarqueeSize] = createSignal(INITIAL_MARQUEE_SIZE);
+  const [animationState, setAnimationState] = createSignal(INITIAL_ANIMATION_STATE);
+  let restartAnimationFrameRef: number | undefined;
+  let hasAutoStartedRef = false;
 
-  const { isOverflowing, distance } = marqueeSize;
-  const { isAnimating, hasAnimationDelay } = animationState;
-  const isPaused = Boolean(paused);
-  const duration = distance ? (distance / speed) * 1000 : 0;
+  const marqueeSizeResult = createMemo(() => marqueeSize());
+  const isOverflowing = () => marqueeSizeResult().isOverflowing;
+  const distance = () => marqueeSizeResult().distance;
+  const animationStateResult = createMemo(() => animationState());
+  const isAnimating = () => animationStateResult().isAnimating;
+  const hasAnimationDelay = () => animationStateResult().hasAnimationDelay;
+  const isPaused = createMemo(() => Boolean(props.paused));
+  const duration = createMemo(() => (distance() ? (distance() / props.speed) * 1000 : 0));
 
-  const startAnimation = useLastCallback((options?: StartAnimationOptions) => {
+  const startAnimation = (options?: StartAnimationOptions) => {
     const shouldForce = Boolean(options?.shouldForce);
     const shouldDelay = Boolean(options?.shouldDelay);
 
-    if ((!shouldForce && (!isOverflowing || isAnimating)) || !selectCanAnimateInterface(getGlobal())) {
+    if ((!shouldForce && (!isOverflowing() || isAnimating())) || !selectCanAnimateInterface(getGlobal())) {
       return;
     }
 
-    if (restartAnimationFrameRef.current) {
-      cancelAnimationFrame(restartAnimationFrameRef.current);
+    if (restartAnimationFrameRef) {
+      cancelAnimationFrame(restartAnimationFrameRef);
     }
 
     setAnimationState({
       isAnimating: false,
       hasAnimationDelay: shouldDelay,
     });
-    restartAnimationFrameRef.current = requestAnimationFrame(() => {
-      restartAnimationFrameRef.current = undefined;
+    restartAnimationFrameRef = requestAnimationFrame(() => {
+      restartAnimationFrameRef = undefined;
       setAnimationState((current) => ({
         isAnimating: true,
         hasAnimationDelay: current.hasAnimationDelay,
       }));
     });
-  });
+  };
 
-  const startAutoAnimation = useLastCallback(() => {
-    if (hasAutoStartedRef.current) {
+  const startAutoAnimation = () => {
+    if (hasAutoStartedRef) {
       return;
     }
 
-    hasAutoStartedRef.current = true;
+    hasAutoStartedRef = true;
     startAnimation({ shouldForce: true, shouldDelay: true });
-  });
+  };
 
-  const measureOverflow = useLastCallback(() => {
+  const measureOverflow = () => {
     requestMeasure(() => {
-      if (!rootRef.current || !contentRef.current) return;
+      if (!rootRef || !contentRef) return;
 
-      const rootElement = rootRef.current;
-      const contentElement = contentRef.current;
-      const copyElement = copyRef.current;
+      const rootElement = rootRef;
+      const contentElement = contentRef;
+      const copyElement = copyRef;
       const nextContainerWidth = rootElement.clientWidth;
       const nextContentWidth = contentElement.scrollWidth;
       const nextOverflowDistance = Math.ceil(nextContentWidth - nextContainerWidth);
 
       if (nextOverflowDistance <= 0) {
-        if (restartAnimationFrameRef.current) {
-          cancelAnimationFrame(restartAnimationFrameRef.current);
-          restartAnimationFrameRef.current = undefined;
+        if (restartAnimationFrameRef) {
+          cancelAnimationFrame(restartAnimationFrameRef);
+          restartAnimationFrameRef = undefined;
         }
         setMarqueeSize(INITIAL_MARQUEE_SIZE);
         setAnimationState(INITIAL_ANIMATION_STATE);
@@ -126,89 +131,94 @@ const Marquee = ({ children, className, contentClassName, paused, style, speed =
       setMarqueeSize({ isOverflowing: true, distance: nextDistance });
       startAutoAnimation();
     });
-  });
+  };
 
-  useEffect(() => {
-    if (restartAnimationFrameRef.current) {
-      cancelAnimationFrame(restartAnimationFrameRef.current);
-      restartAnimationFrameRef.current = undefined;
-    }
+  createEffect(
+    depsOf(() => [props.children, measureOverflow] as const),
+    ([children2]) => {
+      if (restartAnimationFrameRef) {
+        cancelAnimationFrame(restartAnimationFrameRef);
+        restartAnimationFrameRef = undefined;
+      }
 
-    hasAutoStartedRef.current = false;
-    setMarqueeSize(INITIAL_MARQUEE_SIZE);
-    setAnimationState(INITIAL_ANIMATION_STATE);
-    measureOverflow();
-  }, [children, measureOverflow]);
+      hasAutoStartedRef = false;
+      setMarqueeSize(INITIAL_MARQUEE_SIZE);
+      setAnimationState(INITIAL_ANIMATION_STATE);
+      measureOverflow();
+    },
+  );
 
-  useEffect(() => {
-    if (!isOverflowing || distance) {
+  onMount(() => {
+    if (!isOverflowing() || distance()) {
       return;
     }
 
     measureOverflow();
-  }, [distance, isOverflowing, measureOverflow]);
+  });
 
-  useEffect(() => {
+  onMount(() => {
     return () => {
-      if (restartAnimationFrameRef.current) {
-        cancelAnimationFrame(restartAnimationFrameRef.current);
+      if (restartAnimationFrameRef) {
+        cancelAnimationFrame(restartAnimationFrameRef);
       }
     };
-  }, []);
+  });
 
-  useResizeObserver(rootRef, measureOverflow);
-  useResizeObserver(contentRef, measureOverflow);
+  useResizeObserver(() => rootRef, measureOverflow);
+  useResizeObserver(() => contentRef, measureOverflow);
 
-  const handleAnimationEnd = useLastCallback((e: React.AnimationEvent<HTMLElement>) => {
+  const handleAnimationEnd = (e: React.AnimationEvent<HTMLElement>) => {
     if (e.animationName === styles.marqueeScroll) {
       setAnimationState(INITIAL_ANIMATION_STATE);
     }
-  });
+  };
 
-  const handleMouseEnter = useLastCallback(() => {
+  const handleMouseEnter = () => {
     startAnimation();
-  });
+  };
 
-  const handlePointerDown = useLastCallback((e: React.PointerEvent<HTMLElement>) => {
+  const handlePointerDown = (e: React.PointerEvent<HTMLElement>) => {
     if (e.pointerType === 'mouse') return;
     startAnimation();
-  });
+  };
 
-  const rootStyle = buildStyle(
-    isOverflowing && `--_marquee-distance: ${distance}px`,
-    isOverflowing && `--_marquee-duration: ${duration}ms`,
-    style,
+  const rootStyle = createMemo(() =>
+    buildStyle(
+      isOverflowing() && `--_marquee-distance: ${distance()}px`,
+      isOverflowing() && `--_marquee-duration: ${duration()}ms`,
+      props.style,
+    ),
   );
 
   return (
     <span
       ref={rootRef}
-      className={buildClassName(
+      class={buildClassName(
         styles.root,
-        isOverflowing && styles.overflowing,
-        isAnimating && styles.animating,
-        hasAnimationDelay && styles.delayed,
-        isPaused && styles.paused,
-        className,
+        isOverflowing() && styles.overflowing,
+        isAnimating() && styles.animating,
+        hasAnimationDelay() && styles.delayed,
+        isPaused() && styles.paused,
+        props.className,
       )}
-      style={rootStyle}
+      style={rootStyle()}
       onMouseEnter={handleMouseEnter}
       onPointerDown={handlePointerDown}
     >
       <span
         ref={contentRef}
-        className={buildClassName(styles.content, contentClassName)}
+        class={buildClassName(styles.content, props.contentClassName)}
         onAnimationEnd={handleAnimationEnd}
       >
-        {children}
+        {props.children}
       </span>
-      {isOverflowing && (
-        <span ref={copyRef} className={buildClassName(styles.content, styles.copy, contentClassName)} aria-hidden>
-          {children}
+      {isOverflowing() && (
+        <span ref={copyRef} class={buildClassName(styles.content, styles.copy, props.contentClassName)} aria-hidden>
+          {props.children}
         </span>
       )}
     </span>
   );
 };
 
-export default memo(Marquee);
+export default Marquee;
