@@ -1431,3 +1431,65 @@ it('swipe (tt behaviour, documented): a move event that brings no progress (same
   stop();
 });
 
+
+it('swipe (review m3): the animations are looked up once per gesture, not on every move', async () => {
+  nowMs = 0;
+  const { t, s1, stop } = await swipeSetup();
+  const original = HTMLElement.prototype.getAnimations;
+  let lookups = 0;
+  (HTMLElement.prototype as unknown as { getAnimations: unknown }).getAnimations = function (this: HTMLElement) {
+    lookups++;
+    return original.call(this);
+  };
+  try {
+    await startSwipe(t, s1);
+    lookups = 0;
+    for (const x of [152, 192, 232, 272, 312]) touch('touchmove', s1, x);
+    expect(lookups).toBe(0);
+    expect(animationOf(slidesOf(t)[1]).currentTime).toBeGreaterThan(0);
+    touch('touchend', s1);
+    await advance(0);
+    await advance(400);
+    await advance(16);
+    expect(lookups).toBe(0); // nor during the release inertia
+    fireAnimationEnd(...slidesOf(t));
+    await frame();
+  } finally {
+    (HTMLElement.prototype as unknown as { getAnimations: unknown }).getAnimations = original;
+  }
+  stop();
+});
+
+it('swipe (review m3): the scroll lock (selectorToPreventScroll, iOS) is applied once per gesture, not on every move', async () => {
+  nowMs = 0;
+  vi.spyOn(Date, 'now').mockImplementation(() => nowMs);
+  const base = setup({ name: 'slideLayers', withSwipeControl: true }, 1);
+  const t = base.root.firstElementChild as HTMLElement;
+  const scrollable = document.createElement('div');
+  scrollable.className = 'scroll-lock-me';
+  base.root.appendChild(scrollable);
+  const stop = captureControlledSwipe(t, {
+    selectorToPreventScroll: '.scroll-lock-me',
+    onSwipeRightStart: () => base.setKey(0),
+    onCancel: () => base.setKey(1),
+  });
+  await frame();
+  const [s1] = slidesOf(t);
+  const queries = vi.spyOn(document, 'querySelectorAll');
+  touch('touchstart', s1, 100);
+  for (const x of [112, 150, 190, 230, 270]) {
+    touch('touchmove', s1, x);
+    await frame();
+  }
+  expect(scrollable.style.overflow).toBe('hidden');
+  expect(queries.mock.calls.filter((c) => c[0] === '.scroll-lock-me').length).toBe(1);
+  touch('touchend', s1);
+  await frame();
+  expect(scrollable.style.overflow).toBe('');
+  await advance(500);
+  await advance(16);
+  fireAnimationEnd(...slidesOf(t));
+  await frame();
+  queries.mockRestore();
+  stop();
+});

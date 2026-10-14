@@ -128,6 +128,8 @@ export function captureEvents(element: HTMLElement, options: CaptureOptions) {
   const maxZoom = options.maxZoom ?? 4;
 
   let isNearEdge = false;
+  // Deviation: the scroll lock is written once per gesture, not on every move event (tt queried and wrote it each time).
+  let isScrollLocked = false;
 
   function onCapture(e: MouseEvent | RealTouchEvent) {
     const target = e.target as HTMLElement;
@@ -250,6 +252,7 @@ export function captureEvents(element: HTMLElement, options: CaptureOptions) {
 
     hasMoved = false;
     hasSwiped = false;
+    isScrollLocked = false;
     isZooming = false;
     initialDistance = 0;
     wheelZoom = clamp(wheelZoom, minZoom, maxZoom);
@@ -323,7 +326,8 @@ export function captureEvents(element: HTMLElement, options: CaptureOptions) {
         shouldPreventScroll = hasSwiped;
       }
 
-      if (IS_IOS && shouldPreventScroll && options.selectorToPreventScroll) {
+      if (IS_IOS && shouldPreventScroll && options.selectorToPreventScroll && !isScrollLocked) {
+        isScrollLocked = true;
         const selector = options.selectorToPreventScroll;
         requestMutation(() => {
           Array.from(document.querySelectorAll<HTMLElement>(selector))

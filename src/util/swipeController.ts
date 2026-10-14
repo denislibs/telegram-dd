@@ -144,8 +144,9 @@ export function allowSwipeControlForTransition(
   const targetPosition = extractAnimationEndPosition(currentSlide);
   if (!targetPosition) return undefined;
 
-  currentSlide.getAnimations().forEach((a) => a.pause());
-  nextSlide.getAnimations().forEach((a) => a.pause());
+  // Deviation: looked up once per gesture (every `getAnimations()` flushes style, and tt did it twice per move).
+  const animations = [...currentSlide.getAnimations(), ...nextSlide.getAnimations()];
+  animations.forEach((a) => a.pause());
 
   const owner = {};
   currentSlide.style.animationTimingFunction = 'linear';
@@ -170,8 +171,7 @@ export function allowSwipeControlForTransition(
   }
 
   function cleanup() {
-    currentSlide.getAnimations().forEach((a) => a.cancel());
-    nextSlide.getAnimations().forEach((a) => a.cancel());
+    animations.forEach((a) => a.cancel());
 
     resetTimingFunctions();
   }
@@ -181,8 +181,7 @@ export function allowSwipeControlForTransition(
 
     if (!isSwipeActive) {
       // Deviation: the finger was lifted before this measure ran, so nothing would ever resume the paused animations.
-      currentSlide.getAnimations().forEach((a) => a.play());
-      nextSlide.getAnimations().forEach((a) => a.play());
+      animations.forEach((a) => a.play());
       resetTimingFunctions(); // they run with the stylesheet's easing, not the swipe's `linear`
       waitForAnimationEnd(currentSlide, cleanup);
       options?.onRelease?.();
@@ -212,7 +211,7 @@ export function allowSwipeControlForTransition(
       currentDirection = newProgress > progress ? 1 : -1;
       progress = newProgress;
 
-      updateAnimationProgress([currentSlide, nextSlide], progress);
+      updateAnimationProgress(animations, progress);
     };
     onDrag = ownOnDrag;
 
@@ -232,7 +231,7 @@ export function allowSwipeControlForTransition(
         duration: INERTIA_DURATION,
         timing: INERTIA_EASING,
         onUpdate(releaseProgress) {
-          updateAnimationProgress([currentSlide, nextSlide], releaseProgress);
+          updateAnimationProgress(animations, releaseProgress);
         },
         onEnd(isCanceled = false) {
           if (isDisposed) return;
@@ -270,8 +269,8 @@ export function allowSwipeControlForTransition(
   };
 }
 
-function updateAnimationProgress(elements: HTMLElement[], progress: number) {
-  elements.map((e) => e.getAnimations()).flat().forEach((animation) => {
+function updateAnimationProgress(animations: Animation[], progress: number) {
+  animations.forEach((animation) => {
     animation.currentTime = (animation.effect!.getTiming().duration as number) * progress;
   });
 }
