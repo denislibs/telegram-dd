@@ -21,10 +21,11 @@ export function getTopicColors() {
 }
 
 export function getTopicDefaultIcon(iconColor?: number) {
-  return (iconColor && TOPIC_MAPPING[iconColor][0]) || grey;
+  // Deviation: `?.` — an `icon_color` that the server sends outside the six known values threw while a row was created
+  return (iconColor && TOPIC_MAPPING[iconColor]?.[0]) || grey;
 }
 
 export function getTopicColorCssVariable(iconColor?: number) {
-  const color = (iconColor && TOPIC_MAPPING[iconColor][1]) || 'grey';
+  const color = (iconColor && TOPIC_MAPPING[iconColor]?.[1]) || 'grey';
   return `--color-topic-${color}`;
 }
