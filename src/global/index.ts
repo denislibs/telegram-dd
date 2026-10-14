@@ -286,9 +286,12 @@ const EMPTY_PROPS = {} as AnyLiteral;
  * nothing downstream re-runs while the mapped record stays shallow-equal. As tt's container: a throwing mapper is
  * reported through `handleError` and the previous props stay; an inactive container (`activationFn`) is not mapped,
  * on the first run included; own props win over state props, a key present in the own props with `undefined` too
- * (`{ ...mapped, ...own }`). The second type argument has a default, so tt's `withGlobal<OwnProps>(…)` compiles.
+ * (`{ ...mapped, ...own }`). Call it without type arguments so both are inferred (the codemod drops tt's
+ * `<OwnProps>`); with an explicit `<OwnProps>` the state props default to `{}`, so a state prop read is a compile
+ * error rather than `any` (N4).
  */
-export function withGlobal<OwnProps extends AnyLiteral, StateProps extends AnyLiteral = AnyLiteral>(
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- the default must be the empty record, not `any`
+export function withGlobal<OwnProps extends AnyLiteral, StateProps extends AnyLiteral = {}>(
   ownProps: OwnProps,
   mapStateToProps: MapStateToProps<OwnProps, StateProps>,
   activationFn?: ActivationFn<OwnProps>,

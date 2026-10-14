@@ -12,7 +12,6 @@ import { DEBUG } from '../config';
 import { MAIN_IDB_STORE } from '../util/browser/idb';
 import { getCurrentTabId } from '../util/establishMultitabRole';
 import { cloneDeep, pick } from '../util/iteratees';
-import useSelector from '../hooks/data/useSelector';
 import { updateTabState } from './reducers/tabs';
 import { selectTabState } from './selectors/tabs';
 import {
@@ -28,6 +27,8 @@ import {
   withGlobal,
 } from './index';
 import { INITIAL_GLOBAL_STATE, INITIAL_TAB_STATE } from './initialState';
+
+import useSelector from '../hooks/data/useSelector';
 
 const tabId = getCurrentTabId();
 const actions = getActions() as unknown as Record<string, (payload?: unknown, options?: AnyLiteral) => void>;
