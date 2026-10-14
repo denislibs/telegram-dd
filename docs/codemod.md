@@ -14,6 +14,8 @@ pnpm codemod:sweep                                   # every tt component and ho
 pnpm codemod:typecheck [tt paths…]                   # does a sample typecheck against frameact once its imports resolve?
 ```
 
+`--report` only adds the summary: without `--dry` the files are still written, and running the codemod twice over the same file doubles the rewrite (`x()()`, doubled TODOs), so preview with `--dry --report` and run it once.
+
 A path that exists in the repository is rewritten in place; one that only exists in `reference/telegram-tt` (found like
 the gates find it: `$TT_REFERENCE`, `reference/telegram-tt`, the main worktree) is read from there and written to the
 same path under `src/`. Copy the stylesheet and commit the unchanged import first (checklist step 1): the codemod's
