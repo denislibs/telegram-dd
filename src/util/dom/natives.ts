@@ -1,4 +1,4 @@
-// Original tg-frameact code (GPL-3.0-or-later). Prototype natives for app code that creates, walks or listens on
+// Original telegram-dd code (GPL-3.0-or-later). Prototype natives for app code that creates, walks or listens on
 // nodes built from untrusted content (message text, usernames, link previews).
 //
 // A `<form>` (or `document`) with a child whose `id` / `name` equals a built-in (`<input name="insertBefore">`,
