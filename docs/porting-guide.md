@@ -240,7 +240,7 @@ re-derive them. The short version:
 - `useMemo` → `createMemo`. `useCallback`, `useLastCallback` and `memo` become plain functions.
 - `useRef` → a `let` variable ([§4.3](#43-props-refs-and-events)).
 - `teactFastList` / `teactOrderKey` → `<ManualFor orderKey>`.
-- `teactExperimentControlled` → `use:value` / `use:checked`.
+- `value=` / `checked=` on a native `<input>` / `<textarea>` / `<select>` (with or without `teactExperimentControlled`) → `use:value={() => …}` / `use:checked={() => …}`; a component's `value` prop stays. The handler must still update the source, or the input is rolled back. `installControlledInputListeners()` (`src/lib/kit/controlledInputs.ts`) must have run, and tests call it after `delegateEvents`.
 - `className=` → `class=`.
 
 ### 4.2 App-specific mapping

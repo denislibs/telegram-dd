@@ -68,6 +68,18 @@ test.describe('phone number screen', () => {
     await expect(phone).toHaveValue(/^\+99912345678|^\+999/);
   });
 
+  test('the field is controlled: a keystroke the formatter drops is rolled back in a real browser', async ({
+    page,
+  }) => {
+    const phone = page.locator('#sign-in-phone-number');
+    await phone.fill('79001234567');
+    await expect(phone).toHaveValue('+7 900 123 45 67');
+    await phone.press('x'); // a letter reaches the DOM, the handler's number does not change: the field must go back
+    await expect(phone).toHaveValue('+7 900 123 45 67');
+    await phone.press('8');
+    await expect(phone).toHaveValue('+7 900 123 45 678');
+  });
+
   test('choosing a country from the menu resets the number and moves the focus to it', async ({ page }) => {
     const phone = page.locator('#sign-in-phone-number');
     await phone.fill('79001234567');

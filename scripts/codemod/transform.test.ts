@@ -507,6 +507,77 @@ describe('jsx', () => {
   });
 });
 
+describe('controlled native inputs', () => {
+  it('value= / checked= on a native input, textarea and select become use:value / use:checked (the RangeSlider case)', () => {
+    const { code, report } = run(
+      `const X = (props: { value: number; text?: string; on: boolean; mode: string }) => (
+  <div>
+    <input min={0} value={props.value} step={1} type="range" onChange={noop} />
+    <textarea value={props.text || ''} />
+    <select value={props.mode}><option value="a">a</option></select>
+    <input type="checkbox" checked={props.on} />
+    <input type={props.on ? 'text' : 'password'} value={props.on ? props.text : ''} />
+  </div>
+);`,
+      ['jsx'],
+    );
+    expectIncludes(code, '<input min={0} use:value={() => props.value} step={1} type="range" onChange={noop} />');
+    expectIncludes(code, "<textarea use:value={() => props.text || ''} />");
+    expectIncludes(code, '<select use:value={() => props.mode}>');
+    expectIncludes(code, '<input type="checkbox" use:checked={() => props.on} />');
+    expectIncludes(
+      code,
+      "<input type={props.on ? 'text' : 'password'} use:value={() => props.on ? props.text : ''} />",
+    );
+    expect(report.hits.controlled).toBe(5);
+  });
+
+  it('teactExperimentControlled on a native input is dropped, on a component only the flag goes (the component controls its own input)', () => {
+    const { code } = run(
+      `const X = (props: { v: string }) => (
+  <>
+    <input value={props.v} teactExperimentControlled onInput={noop} />
+    <InputText value={props.v} teactExperimentControlled onChange={noop} />
+  </>
+);`,
+      ['jsx'],
+    );
+    expectIncludes(code, '<input use:value={() => props.v} onInput={noop} />');
+    expectIncludes(code, '<InputText value={props.v} onChange={noop} />');
+    expect(code).not.toContain('teactExperimentControlled');
+  });
+
+  it('leaves attributes alone: a checkbox / radio / file / button value, static values, spreads, components, option', () => {
+    const src = `const X = (props: { id: string; rest: object }) => (
+  <div>
+    <input type="checkbox" value={props.id} />
+    <input type="radio" value={props.id} checked />
+    <input type="file" value={props.id} />
+    <input type="submit" value={props.id} />
+    <input value="x" checked={true} />
+    <input value={undefined} />
+    <input {...props.rest} />
+    <Checkbox value={props.id} checked={props.id === 'a'} />
+    <option value={props.id}>a</option>
+  </div>
+);`;
+    const { code, report } = run(src, ['jsx']);
+    expect(squash(code)).toBe(squash(src));
+    expect(report.hits.controlled).toBeUndefined();
+  });
+
+  it('a reactive read from an earlier rule (signal / memo) is thunked as is; an accessor stays', () => {
+    const { code } = run(
+      `const X = () => {
+  const [text, setText] = useState('');
+  return <input value={text} onChange={(e) => setText(e.currentTarget.value)} />;
+};`,
+    );
+    expectIncludes(code, 'use:value={() => text()}');
+    expectIncludes(code, 'onInput={(e) => setText(e.currentTarget.value)}');
+  });
+});
+
 describe('store contract: trackGlobal and identity deps', () => {
   it('wraps getGlobal()-reading helpers in trackGlobal inside memos, effects, JSX and hook bodies, not in handlers or mappers', () => {
     const { code, report } = run(

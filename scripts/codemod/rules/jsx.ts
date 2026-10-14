@@ -1,6 +1,8 @@
 // JSX: `className` → `class` on elements (a DEV error in frameact), reactive `.map()` children → `<For>` (keyed when the
-// row had `key=`), `teactFastList` + `teactOrderKey` → `<ManualFor orderKey>`, `teactExperimentControlled` →
-// `use:value` / `use:checked`, a reactive `key=` on a single element and non-function `<Transition>` children → TODO.
+// row had `key=`), `teactFastList` + `teactOrderKey` → `<ManualFor orderKey>`, a native `<input>` / `<textarea>` /
+// `<select>` `value=` / `checked=` → `use:value` / `use:checked` (controlled in teact with or without
+// `teactExperimentControlled`; a flag on a component is only dropped), a reactive `key=` on a single element and
+// non-function `<Transition>` children → TODO.
 // `{cond && <X/>}` and ternaries are left alone: the compiler evaluates JSX expressions reactively.
 import type { Binding, NodePath } from '@babel/traverse';
 import type * as t from '@babel/types';
@@ -29,6 +31,48 @@ function findAttr(element: t.JSXElement, name: string): t.JSXAttribute | undefin
 function isIntrinsic(element: t.JSXElement): boolean {
   const name = element.openingElement.name;
   return name.type === 'JSXIdentifier' && /^[a-z]/.test(name.name);
+}
+
+const CONTROLLABLE_TAGS = new Set(['input', 'textarea', 'select']);
+// `<input type=…>` kinds whose `value` is a plain attribute (the submitted value / the button label), not their state.
+const VALUE_IS_ATTRIBUTE_TYPES = new Set(['checkbox', 'radio', 'file', 'button', 'submit', 'reset', 'image', 'hidden']);
+
+function isStaticLiteral(expr: t.Expression): boolean {
+  return (
+    expr.type === 'StringLiteral' ||
+    expr.type === 'NumericLiteral' ||
+    expr.type === 'BooleanLiteral' ||
+    expr.type === 'NullLiteral' ||
+    (expr.type === 'TemplateLiteral' && expr.expressions.length === 0) ||
+    (expr.type === 'Identifier' && expr.name === 'undefined')
+  );
+}
+
+/** The string a static `type="…"` / `type={'…'}` carries, else undefined (absent or computed). */
+function staticType(element: t.JSXElement): string | undefined {
+  const attr = findAttr(element, 'type');
+  const expr = attr && attrValueExpr(attr);
+  if (expr?.type === 'StringLiteral') return expr.value;
+  if (expr?.type === 'TemplateLiteral' && expr.expressions.length === 0) {
+    return expr.quasis[0].value.cooked ?? undefined;
+  }
+  return undefined;
+}
+
+/**
+ * A native `value=` / `checked=` that frameact must control with `use:value` / `use:checked`. teact's `value=` on a
+ * native input is a property written on every render (controlled outright with `teactExperimentControlled`); frameact's
+ * compiler writes the property once and a reactive `value=` is not controlled (the Vite plugin warns), so the form that
+ * follows the source and rolls rejected input back is the directive. Components keep their `value` prop (they pass it
+ * to their own native input). A checkbox's / radio's `value` stays an attribute.
+ */
+function isControllable(element: t.JSXElement, name: 'value' | 'checked'): boolean {
+  const tag = element.openingElement.name;
+  if (tag.type !== 'JSXIdentifier' || !CONTROLLABLE_TAGS.has(tag.name)) return false;
+  if (name === 'checked') return tag.name === 'input';
+  if (tag.name !== 'input') return true;
+  const type = staticType(element);
+  return type === undefined || !VALUE_IS_ATTRIBUTE_TYPES.has(type);
 }
 
 function tagName(element: t.JSXElement): string {
@@ -155,7 +199,7 @@ function rewriteList(ctx: Ctx, map: MapCall, parent: t.JSXElement | undefined, k
 export const jsxRule: Rule = {
   name: 'jsx',
   description:
-    'className → class, .map → <For>, teactFastList → <For>/<ManualFor>, teactExperimentControlled → use:value, key= / <Transition> TODOs',
+    'className → class, .map → <For>, teactFastList → <For>/<ManualFor>, native input value= / checked= → use:value / use:checked, key= / <Transition> TODOs',
   run(ctx: Ctx) {
     const propKinds = collectPropKinds(ctx);
     const bodies = findBodies(ctx);
@@ -183,11 +227,11 @@ export const jsxRule: Rule = {
           if (name === 'className' && intrinsic) {
             ctx.overwrite([attr.start!, attr.start! + 'className'.length], 'class');
             ctx.hit('class');
-          } else if ((name === 'value' || name === 'checked') && controlled) {
+          } else if ((name === 'value' || name === 'checked') && isControllable(element, name)) {
             const expr = attrValueExpr(attr as t.JSXAttribute);
-            if (expr) {
+            if (expr && !isStaticLiteral(expr)) {
               ctx.overwrite((attr as t.JSXAttribute).name, `use:${name}`);
-              ctx.overwrite(expr, `() => ${ctx.textWithParens(expr)}`);
+              ctx.overwrite(expr, ctx.thunk(expr));
               ctx.hit('controlled');
             }
           }

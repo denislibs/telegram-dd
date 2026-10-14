@@ -107,7 +107,7 @@ const RangeSlider = (rawProps: OwnProps) => {
         <input
           min={props.min}
           max={props.max}
-          value={props.value}
+          use:value={() => props.value}
           step={props.step}
           type="range"
           class="RangeSlider__input"
