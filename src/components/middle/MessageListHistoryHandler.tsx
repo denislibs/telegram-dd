@@ -1,4 +1,4 @@
-import { memo } from '../../lib/teact/teact';
+import { For } from 'frameact/dom';
 import { getActions, withGlobal } from '../../global';
 
 import type { MessageList as GlobalMessageList } from '../../types';
@@ -14,7 +14,13 @@ type StateProps = {
 
 // Actual `MessageList` components are unmounted when deep in the history,
 // so we need a separate component just for handling history
-const MessageListHistoryHandler = ({ messageLists }: StateProps) => {
+// Deviation: rows are keyed by the message-list entry (a stable store object) instead of tt's `${chatId}_${threadId}_${type}_${i}`.
+const MessageListHistoryHandler = (ownProps: AnyLiteral) => {
+  const props = withGlobal(ownProps, (global): Complete<StateProps> => {
+    return {
+      messageLists: selectTabState(global).messageLists,
+    };
+  });
   const { openChat } = getActions();
 
   const closeChat = () => {
@@ -23,36 +29,28 @@ const MessageListHistoryHandler = ({ messageLists }: StateProps) => {
 
   return (
     <div>
-      {messageLists?.map((messageList, i) => (
-        <MessageHistoryRecord
-          key={`${messageList.chatId}_${messageList.threadId}_${messageList.type}_${i}`}
-          {...messageList}
-          onBack={closeChat}
-        />
-      ))}
+      <For each={props.messageLists ?? []}>
+        {(messageList) => (
+          <MessageHistoryRecord
+            chatId={messageList.chatId}
+            type={messageList.type}
+            threadId={messageList.threadId}
+            onBack={closeChat}
+          />
+        )}
+      </For>
     </div>
   );
 };
 
-const MessageHistoryRecord = ({
-  chatId,
-  type,
-  threadId,
-  onBack,
-}: GlobalMessageList & { onBack: NoneToVoidFunction }) => {
+const MessageHistoryRecord = (props: GlobalMessageList & { onBack: NoneToVoidFunction }) => {
   useHistoryBack({
     isActive: true,
-    hash: createLocationHash(chatId, type, threadId),
-    onBack,
+    hash: () => createLocationHash(props.chatId, props.type, props.threadId),
+    onBack: () => props.onBack(),
   });
 
   return undefined;
 };
 
-export default memo(
-  withGlobal((global): Complete<StateProps> => {
-    return {
-      messageLists: selectTabState(global).messageLists,
-    };
-  })(MessageListHistoryHandler),
-);
+export default MessageListHistoryHandler;

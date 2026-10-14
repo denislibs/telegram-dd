@@ -1,12 +1,11 @@
-import { useCallback, useRef } from '../lib/teact/teact';
+import { type Accessor, createEffect, onDestroy, onMount, requestMeasure } from 'frameact';
 import { getActions } from '../global';
 
 import { IS_TEST } from '../config';
-import { requestMeasure } from '../lib/fasterdom/fasterdom';
 import { IS_IOS } from '../util/browser/windowEnvironment';
-import useEffectOnce from './useEffectOnce';
-import useLastCallback from './useLastCallback';
-import useSyncEffect from './useSyncEffect';
+
+type MaybeAccessor<T> = T | Accessor<T>;
+const read = <T>(value: MaybeAccessor<T>): T => (typeof value === 'function' ? (value as Accessor<T>)() : value);
 
 const PATH_BASE = `${window.location.pathname}${window.location.search}`;
 // Carefully selected by swiping and observing visual changes
@@ -249,89 +248,90 @@ export default function useHistoryBack({
   hash,
   onBack,
 }: {
-  isActive?: boolean;
-  shouldBeReplaced?: boolean;
-  hash?: string;
-  shouldResetUrlHash?: boolean;
+  isActive?: MaybeAccessor<boolean | undefined>;
+  shouldBeReplaced?: MaybeAccessor<boolean | undefined>;
+  hash?: MaybeAccessor<string | undefined>;
+  shouldResetUrlHash?: MaybeAccessor<boolean | undefined>;
   onBack: VoidFunction;
 }) {
   ensureHistoryInitialized();
 
-  const lastOnBack = useLastCallback(onBack);
+  const lastOnBack = () => onBack();
 
   // Active index of the record
-  const indexRef = useRef<number>();
-  const wasReplacedRef = useRef(false);
+  let index: number | undefined;
+  let wasReplaced = false;
 
-  const isFirstRenderRef = useRef(true);
+  let isFirstRender = true;
 
-  const pushState = useCallback(
-    (forceReplace = false) => {
-      // Check if the old state should be replaced
-      const shouldReplace = forceReplace || historyState[historyCursor].shouldBeReplaced;
-      indexRef.current = shouldReplace ? historyCursor : ++historyCursor;
+  const pushState = (forceReplace = false) => {
+    // Check if the old state should be replaced
+    const shouldReplace = forceReplace || historyState[historyCursor].shouldBeReplaced;
+    index = shouldReplace ? historyCursor : ++historyCursor;
 
-      historyCursor = indexRef.current;
+    historyCursor = index;
 
-      // Mark the previous record as replaced so effectBack doesn't perform back operation on the new record
-      const previousRecord = historyState[indexRef.current];
-      if (previousRecord && !previousRecord.isClosed) {
-        previousRecord.markReplaced?.();
-      }
+    // Mark the previous record as replaced so effectBack doesn't perform back operation on the new record
+    const previousRecord = historyState[index];
+    if (previousRecord && !previousRecord.isClosed) {
+      previousRecord.markReplaced?.();
+    }
 
-      historyState[indexRef.current] = {
-        index: indexRef.current,
-        onBack: lastOnBack,
-        shouldBeReplaced,
-        markReplaced: () => {
-          wasReplacedRef.current = true;
-        },
-      };
+    historyState[index] = {
+      index,
+      onBack: lastOnBack,
+      shouldBeReplaced: read(shouldBeReplaced),
+      markReplaced: () => {
+        wasReplaced = true;
+      },
+    };
 
-      deferHistoryOperation({
-        type: shouldReplace ? 'replaceState' : 'pushState',
-        data: {
-          index: indexRef.current,
-          historyUniqueSessionId,
-        },
-        // Space is a hack to make the browser completely remove the hash
-        hash: hash ? `#${hash}` : shouldResetUrlHash ? ' ' : undefined,
-      });
-    },
-    [hash, shouldBeReplaced, shouldResetUrlHash],
-  );
+    const currentHash = read(hash);
+    deferHistoryOperation({
+      type: shouldReplace ? 'replaceState' : 'pushState',
+      data: {
+        index,
+        historyUniqueSessionId,
+      },
+      // Space is a hack to make the browser completely remove the hash
+      hash: currentHash ? `#${currentHash}` : read(shouldResetUrlHash) ? ' ' : undefined,
+    });
+  };
 
-  const processBack = useCallback(() => {
+  const processBack = () => {
     // Only process back on open records
-    if (indexRef.current && historyState[indexRef.current] && !wasReplacedRef.current) {
-      historyState[indexRef.current].isClosed = true;
-      wasReplacedRef.current = true;
-      if (indexRef.current === historyCursor && !shouldBeReplaced) {
+    if (index && historyState[index] && !wasReplaced) {
+      historyState[index].isClosed = true;
+      wasReplaced = true;
+      if (index === historyCursor && !read(shouldBeReplaced)) {
         historyCursor -= cleanupClosed();
       }
     }
-  }, [shouldBeReplaced]);
+  };
 
   // Process back navigation when element is unmounted
-  useEffectOnce(() => {
-    isFirstRenderRef.current = false;
-    return () => {
-      if (!isActive || wasReplacedRef.current) return;
-      processBack();
-    };
+  onMount(() => {
+    isFirstRender = false;
+  });
+  onDestroy(() => {
+    if (!read(isActive) || wasReplaced) return;
+    processBack();
   });
 
-  useSyncEffect(
-    ([prevIsActive]) => {
-      if (prevIsActive === isActive) return;
-      if (isFirstRenderRef.current && !isActive) return;
+  // tt's `useSyncEffect` on `[isActive]`: the first run is synchronous (before mount), later runs follow `isActive`
+  createEffect(
+    () => read(isActive),
+    (value, prevIsActive) => {
+      if (prevIsActive === value) return;
+      if (isFirstRender && !value) return;
 
-      if (isActive) {
+      if (value) {
         pushState();
       } else {
         processBack();
       }
     },
-    [isActive, processBack, pushState],
+    undefined,
+    { immediateApply: true },
   );
 }

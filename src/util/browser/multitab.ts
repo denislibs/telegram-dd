@@ -1,6 +1,5 @@
-import { onFullyIdle } from '../../lib/teact/teact';
-import { addCallback } from '../../lib/teact/teactn';
-import { getActions, getGlobal, setGlobal } from '../../global';
+import { onFullyIdle } from 'frameact';
+import { addCallback, getActions, getGlobal, setGlobal } from '../../global';
 
 import type { LocalDb } from '../../api/gramjs/localDb';
 import type { MethodArgs, Methods } from '../../api/gramjs/methods/types';
@@ -17,7 +16,6 @@ import {
   updateFullLocalDb,
   updateLocalDb,
 } from '../../api/gramjs';
-import { deepDiff } from '../deepDiff';
 import { deepMerge } from '../deepMerge';
 import { getCurrentTabId, subscribeToTokenDied } from '../establishMultitabRole';
 import { omit } from '../iteratees';
@@ -117,7 +115,10 @@ let isDisabled = false;
 const channel = new BroadcastChannel(DATA_BROADCAST_CHANNEL_NAME) as TypedBroadcastChannel;
 
 let isBroadcastDiffScheduled = false;
-let lastBroadcastDiffGlobal: GlobalState | undefined;
+// The store is written in place, so there is no previous global to `deepDiff` against: the store callbacks hand over
+// the diff of every write since their last run (tt's diff format). Diffs are posted one per run, in order; a diff
+// cannot be composed with the next one (a value after a deletion would merge into the receiver's old object).
+const pendingBroadcastDiffs: AnyLiteral[] = [];
 let broadcastDiffFallbackTimeout: number | undefined;
 
 function flushBroadcastDiff() {
@@ -128,24 +129,22 @@ function flushBroadcastDiff() {
     broadcastDiffFallbackTimeout = undefined;
   }
 
-  const diff = deepDiff(lastBroadcastDiffGlobal, currentGlobal);
+  const diffs = pendingBroadcastDiffs.splice(0);
 
-  if (typeof diff !== 'symbol') {
+  diffs.forEach((diff) => {
     channel.postMessage({
       type: 'globalDiffUpdate',
       diff,
     });
-  }
+  });
 
   isBroadcastDiffScheduled = false;
-  lastBroadcastDiffGlobal = undefined;
 }
 
 function broadcastDiffOnIdle() {
   if (isBroadcastDiffScheduled) return;
 
   isBroadcastDiffScheduled = true;
-  lastBroadcastDiffGlobal = currentGlobal;
 
   onFullyIdle(flushBroadcastDiff);
   broadcastDiffFallbackTimeout = window.setTimeout(flushBroadcastDiff, BROADCAST_DIFF_FALLBACK_TIMEOUT);
@@ -176,13 +175,9 @@ export function subscribeToMultitabBroadcastChannel() {
     setGlobal(global);
   });
 
-  addCallback((global: GlobalState) => {
+  addCallback((global: GlobalState, diff?: AnyLiteral) => {
     if (!isFirstGlobalResolved || isDisabled) {
       currentGlobal = global;
-      return;
-    }
-
-    if (currentGlobal === global) {
       return;
     }
 
@@ -195,6 +190,11 @@ export function subscribeToMultitabBroadcastChannel() {
       return;
     }
 
+    if (!diff) {
+      return;
+    }
+
+    pendingBroadcastDiffs.push(diff);
     broadcastDiffOnIdle();
 
     currentGlobal = global;
@@ -228,7 +228,7 @@ export function handleMessage({ data }: { data: BroadcastChannelMessage }) {
       global.DEBUG_randomId = oldGlobal.DEBUG_randomId;
 
       currentGlobal = global;
-      setGlobal(global);
+      setGlobal(global, { fromRemote: true });
       break;
     }
 
@@ -239,7 +239,7 @@ export function handleMessage({ data }: { data: BroadcastChannelMessage }) {
       data.global.DEBUG_randomId = oldGlobal.DEBUG_randomId;
       currentGlobal = data.global;
       // eslint-disable-next-line tt-multitab/set-global-only-variable
-      setGlobal(data.global);
+      setGlobal(data.global, { fromRemote: true });
       if (resolveGlobalPromise) {
         resolveGlobalPromise();
         resolveGlobalPromise = undefined;
