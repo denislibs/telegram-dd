@@ -28,6 +28,8 @@ Toolchain: Vite 8, TypeScript 7 (native `tsc`), oxlint, prettier, pnpm 10, Node 
 
 ## Porting rules
 
+- **App-level guide**: [`docs/porting-guide.md`](docs/porting-guide.md) (directory mapping, global state → store,
+  app-specific hooks, styles, workers, port order, per-file checklist, upstream tracking).
 - **Port, don't rewrite.** Take components, styles (SCSS), animations, the custom GramJS (`src/lib/gramjs`), the API
   layer, utilities and dependencies from `reference/telegram-tt` and keep their structure and file names where it makes
   sense, so a diff against the reference stays readable. Change only what teact → frameact requires.
@@ -42,13 +44,24 @@ Toolchain: Vite 8, TypeScript 7 (native `tsc`), oxlint, prettier, pnpm 10, Node 
 
 ## Licensing
 
-This app is **GPL-3.0-or-later** (it is derived from telegram-tt). Two consequences:
+This app is **GPL-3.0-or-later** (it is derived from telegram-tt). Attribution, the modification notice and the
+third-party inventory are in [`NOTICE.md`](NOTICE.md); the app-level porting guide is
+[`docs/porting-guide.md`](docs/porting-guide.md).
 
-- Code copied or adapted from telegram-tt keeps its copyright notices; distributing the app means distributing its
-  source under the GPL.
-- **Never move telegram-tt code into `src/vendor/frameact`.** The framework is MIT. If porting shows the framework is
-  missing something, write it in the frameact repo clean-room (from behaviour and tests, without tt's source) and send
-  it there as a PR, then bump the submodule. Do not edit files under `src/vendor/frameact` in this repo.
+- **File headers**: a ported file keeps every existing notice verbatim and gets no added header while it keeps its
+  telegram-tt path; a file that cannot keep its path gets `// Ported from telegram-tt <path> (GPL-3.0-or-later)` as its
+  first line; new original files need no header. Distributing the app means offering its source under the GPL.
+- **Never move telegram-tt code into `src/vendor/frameact`.** The framework is MIT. Do not edit files under
+  `src/vendor/frameact` in this repo.
+- **frameact gets only engine-level things**: reactivity, rendering and the DOM runtime, the scheduler and frame phases,
+  the store, stricterdom, and generic primitives tied to phases and animation gating (what `frameact/kit` already has:
+  `Transition`, `ShowTransition`, `InfiniteScroll`, scroll anchoring). Every app/UI component stays in `src/` and is
+  never upstreamed, even if it looks reusable (Button, Modal, Menu, Avatar, Loading, ListItem, Icon, the chat list, the
+  message list, the composer).
+- When porting shows the framework seems to be missing something, ask: is it an engine concern (phases, reactivity,
+  scheduling, DOM runtime, gating)? If yes, write it in the frameact repo clean-room (from behaviour and tests, without
+  tt's source; teact-derived engine code comes from the MIT [Ajaxy/teact](https://github.com/Ajaxy/teact), never from
+  tt's `src/lib/teact`), send it there as a PR, then bump the submodule. If no, it belongs in the client.
 
 ## Conventions
 
