@@ -1,9 +1,9 @@
 import { createMemo, createRoot } from 'frameact';
 import { $TRACK, createStore, unwrap } from 'frameact/store';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { omit } from '../../util/iteratees';
-import { applyGlobal, copyContainer, isContainer, type UntypedSetState } from './apply';
+import { applyGlobal, copyContainer, isContainer, setDevChecks, type UntypedSetState } from './apply';
 
 type Message = { id: number; chatId: string; text: string; content?: { text: { text: string } } };
 type Chat = { id: string; title: string; unread: number; photo?: { small: string } };
@@ -185,6 +185,42 @@ describe('applyGlobal: the store mirrors the committed tt global', () => {
     expect(next.byTabId[1].giftCraftModal.gift1).toBe(unwrap(proxyA));
     expect(mirror.byTabId[1].giftCraftModal!.gift1).toBe(g.chats.byId.a);
     expect(() => structuredClone(getGlobal())).not.toThrow();
+  });
+
+  it('DEV scan (N5): a proxy nested deep inside an entity or an array is reported once; container levels are not rescanned', () => {
+    const { state, setGlobal, getGlobal } = setup();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    setDevChecks(true);
+    try {
+      const proxyB = state.chats.byId.b as unknown as Chat;
+      let g = getGlobal();
+      // deep inside an entity field: entity.photo.deep.proxy
+      setGlobal({
+        ...g,
+        chats: {
+          ...g.chats,
+          byId: { ...g.chats.byId, a: { ...g.chats.byId.a, photo: { small: 's', deep: { p: proxyB } } as never } },
+        },
+      });
+      expect(error).toHaveBeenCalledTimes(1);
+      // deep inside an array: [{ wrap: { p: proxy } }]
+      g = getGlobal();
+      setGlobal({
+        ...g,
+        byTabId: {
+          ...g.byTabId,
+          1: { ...g.byTabId[1], giftCraftModal: { gifts: [{ wrap: { p: proxyB } } as never] } },
+        },
+      });
+      expect(error).toHaveBeenCalledTimes(2);
+      // a container-only change with no proxies: nothing reported
+      g = getGlobal();
+      setGlobal({ ...g, byTabId: { ...g.byTabId, 1: { ...g.byTabId[1], isLeftColumnShown: true } } });
+      expect(error).toHaveBeenCalledTimes(2);
+    } finally {
+      setDevChecks(false);
+      error.mockRestore();
+    }
   });
 
   it('never mirrors the DEV stamp', () => {
