@@ -1,9 +1,23 @@
-import { createHeavyAnimationScope, createMeasureEffect, createMutationEffect, createRoot, createSignal, type HeavyAnimationScope,onCleanup } from 'frameact';
+import { createHeavyAnimationScope, createMeasureEffect, createMutationEffect, createRoot, createSignal, type HeavyAnimationScope,onCleanup, requestMeasure } from 'frameact';
 import { createComponent, insert } from 'frameact/dom';
-import { afterEach, expect, it, vi } from 'vitest';
+import { disableStrict, enableStrict, setHandler } from 'frameact/stricterdom';
+import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 
+import { captureControlledSwipe } from '../../util/swipeController';
 import { container, useDomHarness } from './testing/dom';
 import { Transition, type TransitionSlide } from './transition';
+
+// The swipe tests need iOS (tt only starts a controlled swipe there); windowSize reads visualViewport on iOS at import.
+vi.hoisted(() => {
+  Object.defineProperty(window, 'visualViewport', {
+    value: { height: 800, pageTop: 0, addEventListener: () => {} },
+    configurable: true,
+  });
+});
+vi.mock('../../util/browser/windowEnvironment', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../util/browser/windowEnvironment')>()),
+  IS_IOS: true,
+}));
 
 const { frame } = useDomHarness();
 
@@ -675,12 +689,11 @@ it('slideOptimized: the active slide rests at translate3d(0, 0, 0) with no trans
 
 it('slideOptimized: the starting position of the `to` slide is +100% forwards and -100% backwards, the `from` slide leaves to the opposite side', async () => {
   const starts: string[] = [];
-  let t!: HTMLElement;
   const { root, setKey } = setup({
     name: 'slideOptimized',
-    onStart: () => starts.push(slidesOf(t).map(transformOf).join(' | ')),
+    onStart: () => starts.push(slidesOf(root.firstElementChild!).map(transformOf).join(' | ')),
   }, 1);
-  t = root.firstElementChild as HTMLElement;
+  const t = root.firstElementChild as HTMLElement;
   setKey(2);
   await frame();
   expect(starts).toEqual(['translate3d(0, 0, 0) | translate3d(100%, 0, 0)']);
@@ -698,12 +711,11 @@ it('slideOptimized: the starting position of the `to` slide is +100% forwards an
 
 it('slideOptimizedRtl mirrors the direction (container class and positions)', async () => {
   const starts: string[] = [];
-  let t!: HTMLElement;
   const { root, setKey } = setup({
     name: 'slideOptimizedRtl',
-    onStart: () => starts.push(slidesOf(t).map(transformOf).join(' | ')),
+    onStart: () => starts.push(slidesOf(root.firstElementChild!).map(transformOf).join(' | ')),
   });
-  t = root.firstElementChild as HTMLElement;
+  const t = root.firstElementChild as HTMLElement;
   setKey(1);
   await frame();
   expect(classes(t)).toBe('Transition Transition-slideOptimizedRtlBackwards'); // forwards by key = backwards in RTL
@@ -835,4 +847,365 @@ it('slideOptimized: disposal mid-step releases the heavy animation and does noth
   await frame();
   expect(log).toEqual(['start']);
   expect(transformOf(s0)).toBe('translate3d(-100%, 0, 0)'); // untouched
+});
+
+// ---- withSwipeControl: the swipe-to-go-back gesture drives the step (tt `allowSwipeControlForTransition`) ----------
+
+// jsdom has no Web Animations: every slide with a `-from` / `-to` class gets one fake CSS animation (250 ms) that ends at
+// translateX(100%) (`from`) or translateX(0) (`to`). `cancel()` removes it until the slide's state class changes.
+interface FakeAnimation {
+  effect: { getKeyframes: () => { offset: number; transform: string }[]; getTiming: () => { duration: number } };
+  currentTime: number;
+  state: 'running' | 'paused' | 'canceled';
+  pause: () => void;
+  play: () => void;
+  cancel: () => void;
+}
+class FakeKeyframeEffect {
+  constructor(private end: string) {}
+  getKeyframes() {
+    return [
+      { offset: 0, transform: 'translateX(0)' },
+      { offset: 1, transform: this.end },
+    ];
+  }
+  getTiming() {
+    return { duration: 250 };
+  }
+}
+const animations = new WeakMap<Element, { cls: string; animation: FakeAnimation }>();
+function fakeGetAnimations(this: HTMLElement): FakeAnimation[] {
+  const cls = this.classList.contains('Transition_slide-from')
+    ? 'from'
+    : this.classList.contains('Transition_slide-to')
+      ? 'to'
+      : '';
+  if (!cls) return [];
+  let entry = animations.get(this);
+  if (entry?.cls !== cls) {
+    const animation: FakeAnimation = {
+      effect: new FakeKeyframeEffect(cls === 'from' ? 'translateX(100%)' : 'translateX(0)'),
+      currentTime: 0,
+      state: 'running',
+      pause: () => { animation.state = 'paused'; },
+      play: () => { animation.state = 'running'; },
+      cancel: () => { animation.state = 'canceled'; },
+    };
+    entry = { cls, animation };
+    animations.set(this, entry);
+  }
+  return entry.animation.state === 'canceled' ? [] : [entry.animation];
+}
+const animationOf = (el: Element) => animations.get(el)!.animation;
+
+let originalOffsetWidth: PropertyDescriptor | undefined;
+beforeAll(() => {
+  vi.stubGlobal('KeyframeEffect', FakeKeyframeEffect);
+  (HTMLElement.prototype as unknown as { getAnimations: unknown }).getAnimations = fakeGetAnimations;
+  originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth');
+  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { get: () => 400, configurable: true });
+});
+afterAll(() => {
+  vi.unstubAllGlobals();
+  delete (HTMLElement.prototype as unknown as { getAnimations?: unknown }).getAnimations;
+  if (originalOffsetWidth) Object.defineProperty(HTMLElement.prototype, 'offsetWidth', originalOffsetWidth);
+});
+
+function touch(type: 'touchstart' | 'touchmove' | 'touchend', target: Element, x = 0, y = 100) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : [{ pageX: x, pageY: y }] });
+  target.dispatchEvent(event);
+}
+
+let nowMs = 0;
+const advance = async (ms: number) => {
+  nowMs += ms;
+  await frame();
+};
+
+/** A transition on keys 1 → 0 (going back) with the swipe wired like tt's LeftColumn: swiping right goes to key 0, a cancel returns to key 1. */
+async function swipeSetup(extra: Record<string, unknown> = {}) {
+  vi.spyOn(Date, 'now').mockImplementation(() => nowMs);
+  const props = Object.defineProperties({}, Object.getOwnPropertyDescriptors({ name: 'slideLayers', withSwipeControl: true }));
+  Object.defineProperties(props, Object.getOwnPropertyDescriptors(extra)); // keeps getters reactive
+  const base = setup(props, 1);
+  const t = base.root.firstElementChild as HTMLElement;
+  const swipeCalls: string[] = [];
+  const stop = captureControlledSwipe(t, {
+    onSwipeRightStart: () => {
+      swipeCalls.push('right');
+      base.setKey(0);
+    },
+    onCancel: () => {
+      swipeCalls.push('cancel');
+      base.setKey(1);
+    },
+  });
+  await frame();
+  const [s1] = slidesOf(t);
+  return { ...base, t, s1, swipeCalls, stop };
+}
+
+/** Touch down on the slide, then move far enough to start the swipe (the offsets of the swipe start are 12 px). */
+async function startSwipe(t: HTMLElement, target: Element) {
+  touch('touchstart', target, 100);
+  touch('touchmove', target, 112);
+  await frame(); // the step applies: the animations are paused
+  await frame(); // the first measure: the drag/release hooks are registered
+}
+
+it('swipe: a swipe in progress takes the step over: animations paused and linear, no 1 s fallback, the drag moves currentTime by the finger offset', async () => {
+  const { t, s1, scope, log, swipeCalls, stop } = await swipeSetup({ isBlockingAnimation: true });
+  await startSwipe(t, s1);
+  const [s0, s1b] = slidesOf(t); // keys 0, 1
+  expect(swipeCalls).toEqual(['right']);
+  expect(classes(t)).toBe('Transition Transition-slideLayersBackwards');
+  expect(classes(s0)).toBe('Transition_slide Transition_slide-to');
+  expect(classes(s1b)).toBe('Transition_slide Transition_slide-from');
+  expect(animationOf(s1b).state).toBe('paused');
+  expect(animationOf(s0).state).toBe('paused');
+  expect(s1b.style.animationTimingFunction).toBe('linear');
+  expect(s0.style.animationTimingFunction).toBe('linear');
+  expect(log).toEqual(['start']);
+  // The finger holds the animation: a blocking animation must not park the app meanwhile, and nothing settles on its own.
+  expect(scope.isAnimating.peek()).toBe(true);
+  expect(scope.isBlockingAnimating.peek()).toBe(false);
+  vi.advanceTimersByTime(5000);
+  await frame();
+  expect(scope.isAnimating.peek()).toBe(true);
+  expect(log).toEqual(['start']);
+
+  touch('touchmove', s1b, 212); // 100 px since the swipe started, the layer is 400 px wide
+  expect(animationOf(s1b).currentTime).toBeCloseTo(250 * 0.25);
+  expect(animationOf(s0).currentTime).toBeCloseTo(250 * 0.25);
+  touch('touchmove', s1b, 312);
+  expect(animationOf(s1b).currentTime).toBeCloseTo(250 * 0.5);
+  touch('touchmove', s1b, 2000); // clamped to 1
+  expect(animationOf(s1b).currentTime).toBeCloseTo(250);
+  touch('touchmove', s1b, 312);
+  touch('touchend', s1b);
+  await advance(1000);
+  stop();
+});
+
+it('swipe: releasing while moving forward commits: inertia to the end, then the animation ends normally and the step settles', async () => {
+  nowMs = 0;
+  const { t, s1, scope, log, swipeCalls, stop } = await swipeSetup({ isBlockingAnimation: true });
+  await startSwipe(t, s1);
+  const [s0, s1b] = slidesOf(t);
+  touch('touchmove', s1b, 312);
+  touch('touchend', s1b);
+  expect(scope.isBlockingAnimating.peek()).toBe(true); // released: the animation is a normal blocking one again
+  await advance(0);
+  await advance(150); // the inertia (300 ms, ease out) is half-way
+  expect(animationOf(s1b).currentTime).toBeGreaterThan(250 * 0.5);
+  expect(animationOf(s1b).currentTime).toBeLessThan(250);
+  await advance(200);
+  await advance(16);
+  expect(animationOf(s1b).currentTime).toBeCloseTo(250);
+  // the browser fires animationend on the `to` slide (and the `from` one) at the end
+  s1b.dispatchEvent(new Event('animationend', { bubbles: true }));
+  s0.dispatchEvent(new Event('animationend', { bubbles: true }));
+  vi.advanceTimersByTime(50);
+  await frame();
+  expect(classes(s0)).toBe('Transition_slide Transition_slide-active');
+  expect(classes(s1b)).toBe('Transition_slide Transition_slide-inactive');
+  expect(classes(t)).toBe('Transition');
+  expect(animationOf(s1b).state).toBe('canceled'); // the swipe's own cleanup
+  await frame();
+  expect(s1b.style.animationTimingFunction).toBe('');
+  expect(scope.isAnimating.peek()).toBe(false);
+  expect(log).toEqual(['start', 'stop']);
+  expect(swipeCalls).toEqual(['right']); // no cancel
+  stop();
+});
+
+it('swipe: releasing while moving back cancels: inertia to the start, the step stops (onStop, heavy animation released), the client cancel changes the key back and that switch is not animated', async () => {
+  nowMs = 0;
+  const { t, s1, scope, log, swipeCalls, stop } = await swipeSetup({ isBlockingAnimation: true });
+  await startSwipe(t, s1);
+  const [s0, s1b] = slidesOf(t);
+  touch('touchmove', s1b, 312);
+  touch('touchmove', s1b, 262); // the finger turns back: the last direction decides
+  touch('touchend', s1b);
+  await advance(0);
+  await advance(200);
+  expect(swipeCalls).toEqual(['right']);
+  await advance(150);
+  await advance(16); // the inertia ended at 0: the transition is cancelled, then the client's
+  expect(swipeCalls).toEqual(['right', 'cancel']);
+  expect(log).toEqual(['start', 'stop']);
+  expect(scope.isAnimating.peek()).toBe(false);
+  expect(animationOf(s1b).state).toBe('canceled');
+  await frame(); // the key change back
+  expect(classes(t)).toBe('Transition'); // applied without an animation
+  expect(classes(s1b)).toBe('Transition_slide Transition_slide-active');
+  expect(classes(s0)).toBe('Transition_slide Transition_slide-inactive');
+  expect(log).toEqual(['start', 'stop']); // no second start
+  expect(scope.isAnimating.peek()).toBe(false);
+  vi.advanceTimersByTime(5000);
+  await frame();
+  expect(log).toEqual(['start', 'stop']); // the abandoned step's end never arrives
+  // the switch after that is a normal animated one again
+  touch('touchstart', s1b, 100);
+  touch('touchend', s1b);
+  stop();
+});
+
+it('swipe: without a swipe in progress withSwipeControl changes nothing: a normal step with the 1 s fallback, animations untouched', async () => {
+  nowMs = 0;
+  const { t, setKey, scope, log, stop } = await swipeSetup();
+  setKey(0);
+  await frame();
+  await frame();
+  const [s0, s1] = slidesOf(t);
+  s1.getAnimations(); // the fake animation is created on first look
+  expect(animationOf(s1).state).toBe('running');
+  expect(s1.style.animationTimingFunction).toBe('');
+  expect(scope.isAnimating.peek()).toBe(true);
+  vi.advanceTimersByTime(1000);
+  await frame();
+  expect(scope.isAnimating.peek()).toBe(false);
+  expect(classes(s0)).toBe('Transition_slide Transition_slide-active');
+  expect(log).toEqual(['start', 'stop']);
+  stop();
+});
+
+it('swipe: the finger lifted before the first measure resumes the paused animations (nothing would release them) and ends with the normal fallback-free end', async () => {
+  nowMs = 0;
+  const { t, s1, scope, log, stop } = await swipeSetup({ isBlockingAnimation: true });
+  touch('touchstart', s1, 100);
+  touch('touchmove', s1, 112);
+  touch('touchmove', s1, 130); // far enough to count as a drag, so the release is reported
+  await frame(); // the step applies: paused
+  const [s0, s1b] = slidesOf(t);
+  expect(animationOf(s1b).state).toBe('paused');
+  touch('touchend', s1b); // before the registering measure
+  await frame();
+  expect(animationOf(s1b).state).toBe('running');
+  expect(animationOf(s0).state).toBe('running');
+  expect(scope.isBlockingAnimating.peek()).toBe(true);
+  s0.dispatchEvent(new Event('animationend', { bubbles: true }));
+  s1b.dispatchEvent(new Event('animationend', { bubbles: true }));
+  vi.advanceTimersByTime(50);
+  await frame();
+  await frame();
+  expect(scope.isAnimating.peek()).toBe(false);
+  expect(classes(s0)).toBe('Transition_slide Transition_slide-active');
+  expect(s1b.style.animationTimingFunction).toBe('');
+  expect(log).toEqual(['start', 'stop']);
+  stop();
+});
+
+it('swipe: disposal mid-drag releases the heavy animation, drops the hooks (later touches change nothing) and does not call the client cancel', async () => {
+  nowMs = 0;
+  const { t, s1, scope, log, swipeCalls, dispose, stop } = await swipeSetup({ isBlockingAnimation: true });
+  await startSwipe(t, s1);
+  const [, s1b] = slidesOf(t);
+  touch('touchmove', s1b, 212);
+  const time = animationOf(s1b).currentTime;
+  dispose();
+  expect(scope.isAnimating.peek()).toBe(false);
+  touch('touchmove', s1b, 312);
+  touch('touchend', s1b);
+  await advance(500);
+  await advance(16);
+  expect(animationOf(s1b).currentTime).toBe(time); // no longer driven
+  expect(swipeCalls).toEqual(['right']);
+  expect(log).toEqual(['start']);
+  stop();
+});
+
+it('swipe: disposal during the release inertia stops it silently (no cancel callbacks, no more progress)', async () => {
+  nowMs = 0;
+  const { t, s1, scope, log, swipeCalls, dispose, stop } = await swipeSetup({ isBlockingAnimation: true });
+  await startSwipe(t, s1);
+  const [, s1b] = slidesOf(t);
+  touch('touchmove', s1b, 312);
+  touch('touchmove', s1b, 262);
+  touch('touchend', s1b); // a revert inertia starts
+  await advance(0);
+  await advance(100);
+  const time = animationOf(s1b).currentTime;
+  dispose();
+  expect(scope.isAnimating.peek()).toBe(false);
+  await advance(400);
+  await advance(16);
+  expect(animationOf(s1b).currentTime).toBe(time);
+  expect(swipeCalls).toEqual(['right']); // the client's onCancel was not called for a transition that is gone
+  expect(log).toEqual(['start']);
+  stop();
+});
+
+it('swipe: a keyframe step that is superseded by an instant switch lets the swipe go', async () => {
+  nowMs = 0;
+  const [off, setOff] = createSignal(false);
+  const { t, s1, setKey, scope, log, swipeCalls, stop } = await swipeSetup({
+    get disableAnimation() {
+      return off();
+    },
+  });
+  await startSwipe(t, s1);
+  const [, s1b] = slidesOf(t);
+  touch('touchmove', s1b, 212);
+  setOff(true);
+  setKey(1);
+  await frame();
+  expect(scope.isAnimating.peek()).toBe(false);
+  expect(log).toEqual(['start', 'stop']);
+  touch('touchmove', s1b, 312);
+  touch('touchend', s1b);
+  await advance(500);
+  expect(swipeCalls).toEqual(['right']);
+  stop();
+});
+
+it('swipe: the whole gesture (take over, drag, release, inertia, end; and a revert) is stricterdom clean: reads in measure, writes in mutate', async () => {
+  nowMs = 0;
+  const violations: string[] = [];
+  const { t, s1, setKey, stop } = await swipeSetup({ isBlockingAnimation: true });
+  enableStrict();
+  setHandler((error) => { violations.push(error.message); });
+  try {
+    requestMeasure(() => { t.style.opacity = '0.5'; }); // a canary: a write in the measure phase is reported, so the monitor is live
+    await frame();
+    expect(violations.length).toBeGreaterThan(0);
+    violations.length = 0;
+    await startSwipe(t, s1);
+    const [s0, s1b] = slidesOf(t);
+    touch('touchmove', s1b, 212);
+    touch('touchmove', s1b, 312);
+    touch('touchend', s1b);
+    await advance(0);
+    await advance(150);
+    await advance(200);
+    await advance(16);
+    s1b.dispatchEvent(new Event('animationend', { bubbles: true }));
+    s0.dispatchEvent(new Event('animationend', { bubbles: true }));
+    vi.advanceTimersByTime(50);
+    await frame();
+    await frame();
+    // a second swipe, reverted
+    setKey(1);
+    await frame();
+    await frame();
+    const target = slidesOf(t)[0];
+    touch('touchstart', target, 100);
+    touch('touchmove', target, 112);
+    await frame();
+    await frame();
+    touch('touchmove', target, 300);
+    touch('touchmove', target, 250);
+    touch('touchend', target);
+    await advance(0);
+    await advance(200);
+    await advance(150);
+    await advance(16);
+    await frame();
+  } finally {
+    setHandler(undefined);
+    disableStrict();
+  }
+  expect(violations).toEqual([]);
+  stop();
 });

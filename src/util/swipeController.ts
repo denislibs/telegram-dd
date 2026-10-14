@@ -1,10 +1,11 @@
+import { requestMeasure, requestMutation } from 'frameact';
+
 import type { MoveOffsets } from './captureEvents';
 
-import { requestMeasure, requestMutation } from '../lib/fasterdom/fasterdom';
+import { waitForAnimationEnd } from '../lib/kit/animationEnd';
 import { IS_IOS } from './browser/windowEnvironment';
 import { animateNumber, timingFunctions } from './animation';
 import { captureEvents, SwipeDirection } from './captureEvents';
-import { waitForAnimationEnd } from './cssAnimationEndListeners';
 import { clamp } from './math';
 
 const INERTIA_DURATION = 300;
@@ -66,17 +67,39 @@ export function captureControlledSwipe(
   });
 }
 
+// Deviation: tt returns nothing. The kit's <Transition> needs to know whether the swipe took the animation over (an
+// animation held by a finger must not get the 1 s end fallback, and its heavy animation is not blocking while dragged),
+// to be told when the finger is released, and to let go of everything when it is disposed mid-swipe.
+export interface SwipeControl {
+  /** Let go of the swipe without any callback (the transition is gone): drop the drag/release hooks, stop the inertia. */
+  dispose: NoneToVoidFunction;
+}
+
+export interface SwipeControlOptions {
+  /** The finger was lifted (before the inertia animation starts). */
+  onRelease?: NoneToVoidFunction;
+}
+
+/**
+ * Hand the CSS animations of a transition that was just started to the finger of a swipe in progress (see
+ * `captureControlledSwipe`): they are paused and driven by the drag offset, and on release they either run out or are
+ * reverted (`onCancelForTransition`, then the swipe's own `onCancel`). Returns `undefined` when no swipe is active or the
+ * slide's animation has no `translate` end position.
+ *
+ * Call it right after the animation classes are written (the mutate phase): it writes `animation-timing-function`.
+ */
 export function allowSwipeControlForTransition(
   currentSlide: HTMLElement,
   nextSlide: HTMLElement,
   onCancelForTransition: NoneToVoidFunction,
-) {
+  options?: SwipeControlOptions,
+): SwipeControl | undefined {
   cancelCurrentReleaseAnimation?.();
 
-  if (!isSwipeActive) return;
+  if (!isSwipeActive) return undefined;
 
   const targetPosition = extractAnimationEndPosition(currentSlide);
-  if (!targetPosition) return;
+  if (!targetPosition) return undefined;
 
   currentSlide.getAnimations().forEach((a) => a.pause());
   nextSlide.getAnimations().forEach((a) => a.pause());
@@ -85,8 +108,33 @@ export function allowSwipeControlForTransition(
   nextSlide.style.animationTimingFunction = 'linear';
 
   let currentDirection: 1 | -1 | undefined;
+  let isDisposed = false;
+  let ownOnDrag: typeof onDrag;
+  let ownOnRelease: typeof onRelease;
+  let ownCancelReleaseAnimation: NoneToVoidFunction | undefined;
+
+  function cleanup() {
+    currentSlide.getAnimations().forEach((a) => a.cancel());
+    nextSlide.getAnimations().forEach((a) => a.cancel());
+
+    requestMutation(() => {
+      currentSlide.style.animationTimingFunction = '';
+      nextSlide.style.animationTimingFunction = '';
+    });
+  }
 
   requestMeasure(() => {
+    if (isDisposed) return;
+
+    if (!isSwipeActive) {
+      // Deviation: the finger was lifted before this measure ran, so nothing would ever resume the paused animations.
+      currentSlide.getAnimations().forEach((a) => a.play());
+      nextSlide.getAnimations().forEach((a) => a.play());
+      waitForAnimationEnd(currentSlide, cleanup);
+      options?.onRelease?.();
+      return;
+    }
+
     const computedStyle = getComputedStyle(currentSlide);
     const initialPositionPx = extractPositionFromMatrix(computedStyle.transform, targetPosition.axis);
     const targetPositionPx = targetPosition.units === 'px'
@@ -98,7 +146,7 @@ export function allowSwipeControlForTransition(
 
     let progress = 0;
 
-    onDrag = ({ dragOffsetX, dragOffsetY }) => {
+    ownOnDrag = ({ dragOffsetX, dragOffsetY }) => {
       const dragOffset = targetPosition.axis === 'X'
         ? dragOffsetX - swipeOffsets!.dragOffsetX
         : dragOffsetY - swipeOffsets!.dragOffsetY;
@@ -109,26 +157,19 @@ export function allowSwipeControlForTransition(
 
       updateAnimationProgress([currentSlide, nextSlide], progress);
     };
+    onDrag = ownOnDrag;
 
-    onRelease = (onCancelForClient: NoneToVoidFunction) => {
+    ownOnRelease = (onCancelForClient: NoneToVoidFunction) => {
       const isRevertSwipe = currentDirection === -1;
 
-      function cleanup() {
-        currentSlide.getAnimations().forEach((a) => a.cancel());
-        nextSlide.getAnimations().forEach((a) => a.cancel());
-
-        requestMutation(() => {
-          currentSlide.style.animationTimingFunction = '';
-          nextSlide.style.animationTimingFunction = '';
-        });
-      }
+      options?.onRelease?.();
 
       if (!isRevertSwipe) {
         // For some reason animations are not cleared when CSS class is removed
         waitForAnimationEnd(currentSlide, cleanup);
       }
 
-      cancelCurrentReleaseAnimation = animateNumber({
+      ownCancelReleaseAnimation = cancelCurrentReleaseAnimation = animateNumber({
         from: progress,
         to: isRevertSwipe ? 0 : 1,
         duration: INERTIA_DURATION,
@@ -137,6 +178,8 @@ export function allowSwipeControlForTransition(
           updateAnimationProgress([currentSlide, nextSlide], releaseProgress);
         },
         onEnd(isCanceled = false) {
+          if (isDisposed) return;
+
           cancelCurrentReleaseAnimation = undefined;
 
           if (isCanceled || isRevertSwipe) {
@@ -147,7 +190,22 @@ export function allowSwipeControlForTransition(
         },
       });
     };
+    onRelease = ownOnRelease;
   });
+
+  return {
+    dispose() {
+      if (isDisposed) return;
+      isDisposed = true;
+
+      if (onDrag === ownOnDrag) onDrag = undefined;
+      if (onRelease === ownOnRelease) onRelease = undefined;
+      if (ownCancelReleaseAnimation && cancelCurrentReleaseAnimation === ownCancelReleaseAnimation) {
+        cancelCurrentReleaseAnimation = undefined;
+        ownCancelReleaseAnimation();
+      }
+    },
+  };
 }
 
 function updateAnimationProgress(elements: HTMLElement[], progress: number) {
@@ -185,6 +243,10 @@ function extractPositionFromTransform(transformRule: string) {
 }
 
 function extractPositionFromMatrix(transform: string, axis: 'X' | 'Y') {
-  const matrix = transform.slice(7, -1).split(',').map(Number);
-  return matrix[axis === 'X' ? 4 : 5];
+  // Deviation: `none` (no transform yet) is position 0, and `matrix3d(` is read too (tt slices a fixed 7 characters).
+  const match = transform.match(/^matrix(3d)?\((.*)\)$/);
+  if (!match) return 0;
+
+  const values = match[2].split(',').map(Number);
+  return match[1] ? values[axis === 'X' ? 12 : 13] : values[axis === 'X' ? 4 : 5];
 }

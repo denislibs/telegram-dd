@@ -137,7 +137,7 @@
       "maxRatio": 0.58
     },
     "src/components/ui/Transition.tsx": {
-      "reason": "Adapter over src/lib/kit Transition (porting guide section 2): tt implements the transition itself; here only the prop mapping, the animations-off switch and the Deviation/TODO(port) list (nextKey, swipe control, slideOptimized) remain.",
+      "reason": "Adapter over src/lib/kit Transition (porting guide section 2): tt implements the transition itself; here only the prop mapping, the animations-off switch and the Deviation list (shouldWrap is ignored) remain.",
       "maxRatio": 0.92
     },
     "src/hooks/element/useStyleObserver.ts": {

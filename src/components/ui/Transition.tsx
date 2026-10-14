@@ -9,8 +9,9 @@
 // Children: a render function `(slide) => node` called once per slide; render by `slide.key` (framework guide section 6).
 // tt's `(isActive, isFrom, currentKey, activeKey)` arguments are `slide.isActive()`, `slide.isFrom()`, `slide.key`,
 // `slide.activeKey()`.
-// Not available (TODO(port) below): withSwipeControl, shouldWrap / wrapExceptionKey (accepted and ignored: the kit
-// always wraps each slide).
+// withSwipeControl is the kit's (iOS swipe-to-go-back; the gesture itself is captureControlledSwipe in
+// util/swipeController, started by the owner of the transition, as in tt).
+// Not available: shouldWrap / wrapExceptionKey (accepted and ignored: the kit always wraps each slide).
 import { createMemo } from 'frameact';
 import { splitProps } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
@@ -58,7 +59,6 @@ export type TransitionProps = {
   id?: string;
   className?: string;
   slideClassName?: string;
-  // TODO(port): swipe control (util/swipeController) is not supported by the kit.
   withSwipeControl?: boolean;
   isBlockingAnimation?: boolean;
   children: JSX.Element | ChildrenFn;
@@ -92,7 +92,6 @@ const Transition = (props: TransitionProps) => {
     'name',
     'className',
     'slideClassName',
-    'withSwipeControl',
     'shouldWrap',
     'wrapExceptionKey',
     'children',

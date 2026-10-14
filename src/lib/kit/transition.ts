@@ -37,6 +37,12 @@
 //     cancels it (waiter, heavy animation, `onStop`) so nothing stays stuck. Disposal cancels every
 //     in-flight end, releases every heavy animation and disposes the slides; nothing touches the DOM
 //     or calls `onStop` after it.
+//   - `withSwipeControl` (tt, iOS swipe-to-go-back): when a swipe (`captureControlledSwipe`, util/swipeController) is in
+//     progress as the step starts, its CSS animations are paused and driven by the finger. Then the step has no 1 s end
+//     fallback (a held animation must not settle), its blocking heavy animation is non-blocking while the finger is
+//     down and blocking again from the release; a swipe that is reverted stops the step (`onStop`, heavy animation
+//     released) and the NEXT key change is applied without animation (tt `isSwipeJustCancelled`). Disposal mid-swipe
+//     lets the swipe go without calling its cancel callbacks.
 //   - Scopes: the slides' effects are gated by `props.scope` (default: a fresh child of the enclosing
 //     scope); the component's own effects live under a child owner that re-provides the ENCLOSING
 //     scope, so a step is never parked by this transition's own blocking animation.
@@ -48,6 +54,7 @@ type Accessor,
 import { insert, setExtraStyles, spread } from 'frameact/dom';
 
 import { getNatives } from '../../util/dom/natives';
+import { allowSwipeControlForTransition, type SwipeControl } from '../../util/swipeController';
 import { waitForAnimationEnd, waitForTransitionEnd } from './animationEnd';
 
 export type TransitionDirection = 'auto' | 'inverse' | 1 | -1;
@@ -96,6 +103,11 @@ export interface TransitionProps {
   /** `shouldRestoreHeight`: measure this descendant of the active slide instead of the slide. */
   contentSelector?: string;
   isBlockingAnimation?: boolean;
+  /**
+   * Let a swipe in progress (`captureControlledSwipe`, iOS) drive the step's animation (tt `withSwipeControl`).
+   * Read when a step starts. Keyframe animations only (not `slideOptimized`, as in tt).
+   */
+  withSwipeControl?: boolean;
   /**
    * The heavy-animation scope the animation runs on and that the slides' effects are gated by
    * (default: a fresh child of the scope this component is under, so a blocking animation parks only
@@ -156,12 +168,14 @@ interface Step {
   endHeavyAnimation: () => void;
   /** `onStop` ran for this step (supersede, interrupt, drop or its own end): exactly once per `onStart`. */
   stopped: boolean;
+  /** A swipe took the animation over (`withSwipeControl`). */
+  swipe?: SwipeControl;
 }
 
 /** The props the component consumes itself; everything else (`id`, `class`, `ref`, `data-*`, `on*`) is spread onto the container. */
 const OWN_PROPS = new Set([
   'activeKey', 'nextKey', 'name', 'direction', 'renderCount', 'shouldCleanup', 'cleanupExceptionKey', 'cleanupOnlyKey', 'shouldRestoreHeight',
-  'restoreHeightKey', 'contentSelector', 'isBlockingAnimation', 'scope', 'disableAnimation', 'slideClass', 'onStart', 'onStop', 'children',
+  'restoreHeightKey', 'contentSelector', 'isBlockingAnimation', 'withSwipeControl', 'scope', 'disableAnimation', 'slideClass', 'onStart', 'onStop', 'children',
 ]);
 const isOwnProp = (key: string) => OWN_PROPS.has(key);
 
@@ -214,6 +228,8 @@ export function Transition(props: TransitionProps): unknown {
   let warnedRenderCount = false;
   /** The DOM is in the `slideOptimized` style (see the model). */
   let isOptimizedMode = untrack(() => isOptimizedName(props.name));
+  /** A swipe was reverted: the next step is applied without animation (tt `isSwipeJustCancelledRef`). */
+  let isSwipeJustCancelled = false;
 
   // The slides' scope: every effect their content creates snapshots it.
   provideHeavyAnimationScope(scope);
@@ -399,9 +415,17 @@ export function Transition(props: TransitionProps): unknown {
   /** A non-animated switch during `step`: stop it now so no class or scope stays stuck. */
   function interrupt(step: Step): void {
     step.cancelWait();
+    step.swipe?.dispose();
     step.endHeavyAnimation();
     forget(step);
     stopStep(step);
+  }
+
+  /** The step's heavy animation, swapped for one with `blocking` (the new one begins first: the scope never flickers idle). */
+  function reBeginHeavyAnimation(step: Step, blocking: boolean): void {
+    const end = scope.begin(Infinity, blocking);
+    step.endHeavyAnimation();
+    step.endHeavyAnimation = end;
   }
 
   /** A step is the running one: not superseded, cancelled or disposed. */
@@ -454,7 +478,8 @@ export function Transition(props: TransitionProps): unknown {
       applyOptimizedStep(next, prev, name, !isForwards(props.direction, prevKey, key));
       return;
     }
-    if (name === 'none' || props.disableAnimation) {
+    if (name === 'none' || props.disableAnimation || isSwipeJustCancelled) {
+      isSwipeJustCancelled = false;
       if (running !== undefined) interrupt(running);
       settleSlides(next);
       syncChildren();
@@ -463,7 +488,10 @@ export function Transition(props: TransitionProps): unknown {
     }
     // A step still running is superseded: it is over for `onStop` now (so every `onStart` has one `onStop`);
     // its own end only releases its heavy animation.
-    if (running !== undefined) stopStep(running);
+    if (running !== undefined) {
+      running.swipe?.dispose();
+      stopStep(running);
+    }
     const step: Step = { seq: ++stepSeq, to: next, cancelWait: () => {}, endHeavyAnimation: () => {}, stopped: false };
     running = step;
     inFlight.push(step);
@@ -474,14 +502,42 @@ export function Transition(props: TransitionProps): unknown {
     setContainerAnimation(`${CONTAINER_CLASS_NAME}-${name}${isBackwards ? 'Backwards' : ''}`);
     syncChildren();
     setFromKey(prevKey);
-    step.endHeavyAnimation = scope.begin(Infinity, Boolean(props.isBlockingAnimation));
+    const isBlocking = Boolean(props.isBlockingAnimation);
+    step.endHeavyAnimation = scope.begin(Infinity, isBlocking);
     // The slide the stylesheet animates: `to`, except the two names whose backwards variant animates `from` only
     // (tt `watchedNode`). Without that slide nothing animates and the step ends at once.
     const watched = isBackwards && animatesFromWhenBackwards(name) ? prev : next;
+    const end = () => requestMutation(() => finish(step, prev));
     if (watched === undefined) {
-      requestMutation(() => finish(step, prev));
+      end();
     } else {
-      step.cancelWait = waitForAnimationEnd(watched.el, () => requestMutation(() => finish(step, prev)), { fallbackMs: ANIMATION_END_FALLBACK_MS });
+      step.cancelWait = waitForAnimationEnd(watched.el, end, { fallbackMs: ANIMATION_END_FALLBACK_MS });
+      if (props.withSwipeControl && prev !== undefined) {
+        const swipe = allowSwipeControlForTransition(
+          prev.el,
+          next.el,
+          () => {
+            // The swipe was reverted: this step is over, the client's own cancel changes the key back next.
+            step.cancelWait();
+            isSwipeJustCancelled = true;
+            stopStep(step);
+            step.endHeavyAnimation();
+            forget(step);
+          },
+          {
+            onRelease: () => {
+              if (isBlocking && isLive(step)) reBeginHeavyAnimation(step, true);
+            },
+          },
+        );
+        if (swipe !== undefined) {
+          step.swipe = swipe;
+          // A held animation must not settle on the fallback timer; and a finger on the screen does not park the app.
+          step.cancelWait();
+          step.cancelWait = waitForAnimationEnd(watched.el, end);
+          if (isBlocking) reBeginHeavyAnimation(step, false);
+        }
+      }
     }
     callback(props.onStart, 'onStart');
   }
@@ -509,7 +565,10 @@ export function Transition(props: TransitionProps): unknown {
     }
     // The Rtl variant mirrors the direction.
     const isBackwards = name === 'slideOptimizedRtl' ? !isBackwardsByKeys : isBackwardsByKeys;
-    if (running !== undefined) stopStep(running);
+    if (running !== undefined) {
+      running.swipe?.dispose();
+      stopStep(running);
+    }
     const step: Step = { seq: ++stepSeq, to: next, cancelWait: () => {}, endHeavyAnimation: () => {}, stopped: false };
     running = step;
     inFlight.push(step);
@@ -602,6 +661,7 @@ export function Transition(props: TransitionProps): unknown {
     disposeOwn();
     for (const step of inFlight.splice(0)) {
       step.cancelWait();
+      step.swipe?.dispose();
       step.endHeavyAnimation();
     }
     running = undefined;

@@ -1,3 +1,5 @@
+import { requestMutation } from 'frameact';
+
 import { IS_IOS, IS_WINDOWS } from './browser/windowEnvironment';
 import { Lethargy } from './lethargy';
 import { clamp, round } from './math';
@@ -192,7 +194,10 @@ export function captureEvents(element: HTMLElement, options: CaptureOptions) {
     }
 
     if (withCursor) {
-      document.body.classList.add('cursor-grabbing');
+      // Deviation: a live-DOM write goes through the mutate phase (stricterdom).
+      requestMutation(() => {
+        document.body.classList.add('cursor-grabbing');
+      });
     }
 
     options.onCapture?.(e);
@@ -201,7 +206,9 @@ export function captureEvents(element: HTMLElement, options: CaptureOptions) {
   function onRelease(e?: MouseEvent | TouchEvent) {
     if (captureEvent) {
       if (options.withCursor) {
-        document.body.classList.remove('cursor-grabbing');
+        requestMutation(() => {
+          document.body.classList.remove('cursor-grabbing');
+        });
       }
 
       document.removeEventListener('mouseup', onRelease);
@@ -211,10 +218,13 @@ export function captureEvents(element: HTMLElement, options: CaptureOptions) {
       (captureEvent.target as HTMLElement).removeEventListener('touchmove', onMove);
 
       if (IS_IOS && options.selectorToPreventScroll) {
-        Array.from(document.querySelectorAll<HTMLElement>(options.selectorToPreventScroll))
-          .forEach((scrollable) => {
-            scrollable.style.overflow = '';
-          });
+        const selector = options.selectorToPreventScroll;
+        requestMutation(() => {
+          Array.from(document.querySelectorAll<HTMLElement>(selector))
+            .forEach((scrollable) => {
+              scrollable.style.overflow = '';
+            });
+        });
       }
 
       if (e) {
@@ -312,10 +322,13 @@ export function captureEvents(element: HTMLElement, options: CaptureOptions) {
       }
 
       if (IS_IOS && shouldPreventScroll && options.selectorToPreventScroll) {
-        Array.from(document.querySelectorAll<HTMLElement>(options.selectorToPreventScroll))
-          .forEach((scrollable) => {
-            scrollable.style.overflow = 'hidden';
-          });
+        const selector = options.selectorToPreventScroll;
+        requestMutation(() => {
+          Array.from(document.querySelectorAll<HTMLElement>(selector))
+            .forEach((scrollable) => {
+              scrollable.style.overflow = 'hidden';
+            });
+        });
       }
     }
   }
