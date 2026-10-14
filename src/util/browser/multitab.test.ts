@@ -1,10 +1,10 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { getGlobal, setGlobal } from '../../global';
 
 import type { GlobalState, TabState } from '../../global/types';
 
-import { INITIAL_GLOBAL_STATE, INITIAL_TAB_STATE } from '../../global/initialState';
 import { updateTabState } from '../../global/reducers/tabs';
+import { getGlobal, setGlobal } from '../../global';
+import { INITIAL_GLOBAL_STATE, INITIAL_TAB_STATE } from '../../global/initialState';
 import { deepMerge } from '../deepMerge';
 import { getCurrentTabId } from '../establishMultitabRole';
 import { cloneDeep } from '../iteratees';
@@ -42,8 +42,14 @@ class FakeBroadcastChannel {
 vi.stubGlobal('BroadcastChannel', FakeBroadcastChannel);
 
 const tabId = getCurrentTabId();
+// the store callbacks run at tick end; tt's `broadcastDiffOnIdle` flushes on `onFullyIdle`, which is tick end under jsdom
 const tick = async () => {
-  for (let i = 0; i < 6; i++) await Promise.resolve();
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+};
+/** tt's DEBUG stamp travels in the diff as in tt (the receiver overwrites it); the assertions ignore it. */
+const withoutStamp = (diff: AnyLiteral) => {
+  const { DEBUG_randomId: _stamp, ...rest } = diff;
+  return rest;
 };
 
 function resetGlobal() {
@@ -52,8 +58,10 @@ function resetGlobal() {
 }
 
 const chat = (id: string, title = id) => ({ id, title, type: 'chatTypePrivate', unreadCount: 0 }) as any;
+const setChat = (c: AnyLiteral) =>
+  setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, byId: { ...getGlobal().chats.byId, [c.id]: c } } });
 
-describe('multitab: the master tab broadcasts the store diffs, a tab applies them with deepMerge', () => {
+describe('multitab (tt code unchanged): the master broadcasts deepDiff(previous, current), a tab applies deepMerge', () => {
   let multitab: typeof import('./multitab');
   let peer: FakeBroadcastChannel;
   const received: AnyLiteral[] = [];
@@ -74,7 +82,7 @@ describe('multitab: the master tab broadcasts the store diffs, a tab applies the
     received.length = 0;
   });
 
-  it('sends the full global once, then one tt-format diff per callback run; a peer reconstructs the state', async () => {
+  it('sends the full global once, then the diff of each idle flush; a peer reconstructs the state', async () => {
     setGlobal({ ...getGlobal(), isSyncing: true });
     await tick();
     expect(received.map((m) => m.type)).toEqual(['globalUpdate']);
@@ -85,33 +93,33 @@ describe('multitab: the master tab broadcasts the store diffs, a tab applies the
 
     // a cascade of tt-style writes in one tick
     setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, byId: { a: chat('a'), b: chat('b') } } });
-    setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, byId: { ...getGlobal().chats.byId, a: { ...chat('a'), title: 'A2' } } } });
+    setChat({ ...chat('a'), title: 'A2' });
     setGlobal(updateTabState(getGlobal(), { isLeftColumnShown: false }, tabId));
     await tick();
 
     expect(received.map((m) => m.type)).toEqual(['globalDiffUpdate']);
-    const diff = received[0].diff;
-    expect(diff).toEqual({
+    expect(withoutStamp(received[0].diff)).toEqual({
       chats: { byId: { a: { ...chat('a'), title: 'A2' }, b: chat('b') } },
       byTabId: { [tabId]: { isLeftColumnShown: false } },
     });
-    peerGlobal = deepMerge(peerGlobal, diff);
+    peerGlobal = deepMerge(peerGlobal, received[0].diff);
     expect(peerGlobal.chats.byId).toEqual(getGlobal().chats.byId);
     expect(peerGlobal.byTabId[tabId].isLeftColumnShown).toBe(false);
 
-    // a second tick: a deletion and an entity replacement travel as their own diff
-    setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, byId: { a: { ...chat('a', 'A3'), lastMessage: { id: 1 } } } } });
+    // another tick: a deletion and an entity replacement
+    setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, byId: { a: { ...chat('a', 'A3'), lastMessageId: 1 } } } });
     await tick();
     expect(received).toHaveLength(2);
+    expect(withoutStamp(received[1].diff)).toEqual({ chats: { byId: { a: { title: 'A3', lastMessageId: 1 }, b: { __delete: true } } } });
     peerGlobal = deepMerge(peerGlobal, received[1].diff);
     expect(peerGlobal.chats.byId).toEqual(getGlobal().chats.byId);
   });
 
-  it('applies an incoming globalDiffUpdate into the store (the non-master path)', async () => {
-    setGlobal({ ...getGlobal(), chats: { ...getGlobal().chats, byId: { a: chat('a') } } });
+  it('applies an incoming globalDiffUpdate into the store and never echoes it (currentGlobal === global)', async () => {
+    setChat(chat('a'));
     await tick();
     received.length = 0;
-    const before = structuredClone(getGlobal().chats.byId);
+    const before = getGlobal().chats.byId;
 
     multitab.handleMessage({
       data: {
@@ -123,16 +131,33 @@ describe('multitab: the master tab broadcasts the store diffs, a tab applies the
     expect(getGlobal().chats.byId.a.title).toBe('from master');
     expect(getGlobal().chats.byId.c).toEqual(chat('c'));
     expect(getGlobal().isSynced).toBe(true);
-    expect(before.a.title).toBe('a');
-    // a received diff is never echoed back (tt: `currentGlobal === global`; here: `fromRemote` writes are journaled apart)
+    expect(before.a.title).toBe('a'); // the previous global is an untouched snapshot
     await tick();
     expect(received).toEqual([]);
 
-    // but a local write in the same tick still goes out, on its own
-    multitab.handleMessage({ data: { type: 'globalDiffUpdate', diff: { isSyncing: true } } });
+    // a local write afterwards goes out on its own
     setGlobal({ ...getGlobal(), isFetchingDifference: true });
     await tick();
-    expect(received.map((m) => m.diff)).toEqual([{ isFetchingDifference: true }]);
+    expect(received.map((m) => withoutStamp(m.diff))).toEqual([{ isFetchingDifference: true }]);
+  });
+
+  it("I1: a local write followed by a newer value from the master before the flush sends the master's value", async () => {
+    setChat({ ...chat('a'), unreadCount: 3 });
+    await tick();
+    received.length = 0;
+
+    // local optimistic write (slave side), then the master's newer value arrives before the idle flush
+    setChat({ ...getGlobal().chats.byId.a, unreadCount: 0 });
+    multitab.handleMessage({ data: { type: 'globalDiffUpdate', diff: { chats: { byId: { a: { unreadCount: 7 } } } } } });
+    await tick();
+
+    // tt diffs final states (and skips the callback run whose global it just applied): the stale local `0` never
+    // reaches the other tabs; either nothing or the master's own value goes out, and the tabs agree on 7
+    const sent = received.map((m) => withoutStamp(m.diff));
+    expect(sent.length).toBeLessThanOrEqual(1);
+    expect(JSON.stringify(sent)).not.toContain('"unreadCount":0');
+    if (sent.length) expect(sent[0]).toEqual({ chats: { byId: { a: { unreadCount: 7 } } } });
+    expect(getGlobal().chats.byId.a.unreadCount).toBe(7);
   });
 
   it('a requestGlobal from another tab is answered by the master with the full global', () => {

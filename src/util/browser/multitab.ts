@@ -16,6 +16,7 @@ import {
   updateFullLocalDb,
   updateLocalDb,
 } from '../../api/gramjs';
+import { deepDiff } from '../deepDiff';
 import { deepMerge } from '../deepMerge';
 import { getCurrentTabId, subscribeToTokenDied } from '../establishMultitabRole';
 import { omit } from '../iteratees';
@@ -115,10 +116,7 @@ let isDisabled = false;
 const channel = new BroadcastChannel(DATA_BROADCAST_CHANNEL_NAME) as TypedBroadcastChannel;
 
 let isBroadcastDiffScheduled = false;
-// The store is written in place, so there is no previous global to `deepDiff` against: the store callbacks hand over
-// the diff of every write since their last run (tt's diff format). Diffs are posted one per run, in order; a diff
-// cannot be composed with the next one (a value after a deletion would merge into the receiver's old object).
-const pendingBroadcastDiffs: AnyLiteral[] = [];
+let lastBroadcastDiffGlobal: GlobalState | undefined;
 let broadcastDiffFallbackTimeout: number | undefined;
 
 function flushBroadcastDiff() {
@@ -129,22 +127,24 @@ function flushBroadcastDiff() {
     broadcastDiffFallbackTimeout = undefined;
   }
 
-  const diffs = pendingBroadcastDiffs.splice(0);
+  const diff = deepDiff(lastBroadcastDiffGlobal, currentGlobal);
 
-  diffs.forEach((diff) => {
+  if (typeof diff !== 'symbol') {
     channel.postMessage({
       type: 'globalDiffUpdate',
       diff,
     });
-  });
+  }
 
   isBroadcastDiffScheduled = false;
+  lastBroadcastDiffGlobal = undefined;
 }
 
 function broadcastDiffOnIdle() {
   if (isBroadcastDiffScheduled) return;
 
   isBroadcastDiffScheduled = true;
+  lastBroadcastDiffGlobal = currentGlobal;
 
   onFullyIdle(flushBroadcastDiff);
   broadcastDiffFallbackTimeout = window.setTimeout(flushBroadcastDiff, BROADCAST_DIFF_FALLBACK_TIMEOUT);
@@ -175,9 +175,13 @@ export function subscribeToMultitabBroadcastChannel() {
     setGlobal(global);
   });
 
-  addCallback((global: GlobalState, diff?: AnyLiteral) => {
+  addCallback((global: GlobalState) => {
     if (!isFirstGlobalResolved || isDisabled) {
       currentGlobal = global;
+      return;
+    }
+
+    if (currentGlobal === global) {
       return;
     }
 
@@ -190,11 +194,6 @@ export function subscribeToMultitabBroadcastChannel() {
       return;
     }
 
-    if (!diff) {
-      return;
-    }
-
-    pendingBroadcastDiffs.push(diff);
     broadcastDiffOnIdle();
 
     currentGlobal = global;
@@ -228,7 +227,7 @@ export function handleMessage({ data }: { data: BroadcastChannelMessage }) {
       global.DEBUG_randomId = oldGlobal.DEBUG_randomId;
 
       currentGlobal = global;
-      setGlobal(global, { fromRemote: true });
+      setGlobal(global);
       break;
     }
 
@@ -239,7 +238,7 @@ export function handleMessage({ data }: { data: BroadcastChannelMessage }) {
       data.global.DEBUG_randomId = oldGlobal.DEBUG_randomId;
       currentGlobal = data.global;
       // eslint-disable-next-line tt-multitab/set-global-only-variable
-      setGlobal(data.global, { fromRemote: true });
+      setGlobal(data.global);
       if (resolveGlobalPromise) {
         resolveGlobalPromise();
         resolveGlobalPromise = undefined;
