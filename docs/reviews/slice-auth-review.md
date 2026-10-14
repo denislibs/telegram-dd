@@ -295,3 +295,132 @@ cleanup. Это ровно `useHeavyAnimation(…, isDisabled)` у tt. Guard в 
   `NEXT_ARROW_REPLACEMENT` как геттер нужен.
 - `InputText`: `use:value` переносит каретку сам, а `setSelectionRange` из `AuthPhoneNumber` идёт после него в том же
   mutate, это порядок tt (value в commit, затем layout-эффект).
+
+## Re-review: fix round
+
+Диапазон `9249b68..HEAD` без merge (`79210b0` … `d03134f`, плюс `be047ac` с портами), HEAD `a2e75d3`. Каждое
+исправление проверял мутацией: откатывал фикс локально, гонял его тест, восстанавливал (`git checkout`). Временный
+repro-тест и временный e2e лежали в `src/__repro__/` и `tests/e2e/`, в коммит не попали.
+
+### Вердикт: READY TO MERGE (Critical нет, Important нет)
+
+Все четыре Important закрыты, тесты на них настоящие: без фикса они краснеют. Новые находки только Minor (ниже). Одна
+поправка к моему первому ревью. Я писал, что обновление QR по новому токену «повторяет tt». Это было неверно. Новый e2e
+нашёл баг, и он старше `depsOf`: без `depsOf`, с исходным `authQrCode()` в compute, QR-тест тоже красный. Store
+вливает новый токен в тот же proxy, и compute не перезапускается.
+
+### Что запускал
+
+| Команда / проверка | Результат                                                                                                                                                      |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm check`       | зелёный (oxlint, prettier, tsc, gates diff/tests/licenses, build, size)                                                                                        |
+| `pnpm test`        | 34 файла, 319 passed, 2 skipped                                                                                                                                |
+| `pnpm gates`       | diff, upstream, tests, licenses, size: PASS                                                                                                                    |
+| `pnpm test:e2e`    | 29 passed. В логе есть `Failed to fetch … actions/all.ts`, stricterdom на `#Main` и `uncaught!`, но это намеренные сценарии `boot.spec` и `strictMonitor.spec` |
+| `pnpm test:a11y`   | 11 passed                                                                                                                                                      |
+
+### Мутации (фикс откачен, должен краснеть его тест)
+
+| Фикс                      | Откат                                                                                           | Результат                                                                          |
+| ------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| I1 `AuthPhoneNumber`      | `Object.values/entries(accountsInfo)`                                                           | `authMultiaccount.spec`: 2 красных (кнопка назад, переход в слот)                  |
+| I1 `AuthQrCode`           | то же                                                                                           | `authMultiaccount.spec`: «QR … back button» красный                                |
+| I2 `DropdownMenu`         | `if (isOpen())` после записи                                                                    | `uiPorted.test`: красный                                                           |
+| I2-класс `AuthCode`       | `code()` после `setCode`                                                                        | `AuthCode.test`: красный. `readAfterSet.ts` на откате `DropdownMenu` находит `:55` |
+| I3 цепочка подписок       | подписка только на свой scope                                                                   | 4 красных (`AnimatedSticker.test` ×2, `heavyAnimationScope.test` ×2)               |
+| QR по токену              | `authQrCode()` вместо `?.token`                                                                 | `authBehavior` QR красный; без `depsOf` тоже красный                               |
+| Appsec Low 1              | убран `shouldCleanup`                                                                           | `auth.spec`: красный (`#sign-in-password` остаётся)                                |
+| Appsec Low 2              | `replaceAll(str, str)`                                                                          | `localization.test`: красный                                                       |
+| `depsOf`                  | всегда `return next`                                                                            | `effectDeps.test` и `RoundTimer` красные                                           |
+| `useHistoryBack`          | `!read(isActive)` в `onDestroy`                                                                 | `useHistoryBack.test`: красный                                                     |
+| `PasswordForm`            | `onSubmit` связан один раз / задержка прочитана один раз                                        | оба теста `PasswordForm.test` красные                                              |
+| `forwardedHandlers`       | `Loading`                                                                                       | красный                                                                            |
+| `forwardedHandlers`       | `Button.onContextMenu`, `MenuItem.onContextMenu`, `GramIcon`, `StarIcon`, `InputText.onKeyDown` | **зелёные** (см. m-r1)                                                             |
+| `isHeavyAnimatingInChain` | смотрит только свой scope                                                                       | **зелёные** (см. m-r2)                                                             |
+| счётчик `busy`            | `onEnd` на каждом конце                                                                         | **зелёные** (см. m-r2)                                                             |
+
+### Проверено и в порядке
+
+- **I1.** `hasActiveAccount()` и `Object.entries(accountsInfo())` в memo. e2e кладёт `account2` в localStorage и
+  открывает вкладку слота 3. Проверены кнопка «назад» на телефоне и QR, номер чужого слота ведёт на его URL, новый
+  номер начинает вход. Тест осмысленный.
+- **I2.** `wasOpen` до записи. Сканер `readAfterSet.ts` нашёл ещё `AuthCode`: направление трекинга монки никогда не
+  шло назад. Исправлено, тест на реальном `InputText`.
+- **I3.** `heavyAnimationChain.ts` семантически корректен как временная замена. `isHeavyAnimatingInChain` повторяет
+  гейтинг движка (scope → parent → root). `watchHeavyAnimationInChain` считает активные scope цепочки: вложенные
+  root- и scope-анимации дают один start и один end, а `onStart` сразу вызывается, если цепочка уже занята. Так ведёт
+  себя tt для всего, что выше стикера. Отличие от глобального хука tt осталось одно: анимация **соседнего** scope
+  (другой `Transition`) стикер не паузит. Это осознанная модель frameact, но комментарий в файле обещает «pause for
+  every animation», а это не так (m-r3). Вендор `src/vendor/frameact` стоит на `3e8787c`, до frameact#21 (merged). Так
+  что хелпер пока нужен. После обновления сабмодуля он останется корректным (счётчик не даст двойного start), но станет
+  избыточным.
+- **I4.** В `authBehavior.spec.ts` **12** тестов, а не 13, как пишет отчёт. Почти все проверяют поведение: ошибку на
+  поле и текст label, сброс ошибки вводом, форматирование и определение страны, сброс номера при выборе страны и фокус
+  на нём, фокус на каждом экране, отбор цифр, обрезку до 5 и автоотправку, «Keep me signed in» в store, «изменить
+  номер» и browser Back, перерисовку QR без второго `append`. Тест сразу нашёл настоящий баг QR. Слабые места мелкие:
+  проверка неизвестного префикса тривиальна (`/^\+999/`). Тест «edit number» смотрит только на `errorKey`, а не на
+  экран. В тесте выбора страны есть тавтология `'+1 '.trimEnd() === '+1' ? … : ''`. Визуальные состояния
+  `auth-code-error` и `auth-phone-filled` по-прежнему не сделаны, это честно отмечено.
+- **Appsec Low 1/2.** `shouldCleanup` у `Transition` в `Auth` и replacer-функция в `processTranslation`. Оба помечены
+  `// Deviation:`. Отчёт пишет, что из-за cleanup «назад больше не показывает введённый номер». Временным e2e проверил:
+  это **неверно**. После «изменить номер» поле снова `+1 650 555 1234`, потому что `parseFullNumber(authPhoneNumber)`
+  восстанавливает его из store (m-r4).
+- **`depsOf` и правило `effectDeps`.** Семантика совпадает с teact: `teact.ts:748` сравнивает поэлементно через `!==`,
+  `depsOf` через `Object.is`. Разница только в `NaN` и ±0, и `depsOf` тут даже точнее. Длина массива сравнивается.
+  Первый прогон apply выполняется, `prev` у apply сохраняется (возвращается прошлый массив). Правило идемпотентно
+  (обёрнутый compute уже не arrow), стоит после `effects`, импорт добавляется через `imports`. Выборочно прочитал
+  `AuthPhoneNumber` (4), `AuthQrCode`, `useAsync`, `useMedia`, `useVirtualBackdrop` (там `onClose?.()` это accessor
+  колбэка, не вызов обработчика), `AvatarStoryCircle`, `Modal`/`Menu` (`props.onClose` по ссылке, как deps tt),
+  `AnimatedSticker`, `useInterval`, `RoundTimer`. Store-контейнер по идентичности сравнивается только в исправленном
+  QR. Остальные элементы примитивы, accessor'ы, колбэки или массивы пропов.
+- **`useHistoryBack`.** У tt cleanup читал `isActive` первого рендера. Здесь проверка снята, а `processBack` сам
+  трогает только открытую запись (`index` задан и `!wasReplaced`). Повторного back после `isActive → false` нет:
+  `processBack` выставляет `wasReplaced`. Компонент, который так и не стал активным, ничего не делает. Отличие от tt в
+  лучшую сторону: «смонтирован неактивным, потом открыт и размонтирован открытым» у tt оставлял запись висеть.
+  Помечено `Deviation`.
+- **`PasswordForm`.** Задержка фокуса стала accessor'ом и следует за раскладкой. `onSubmit` вызывается через проп.
+- **`forwardedHandlers` и перф.** Цена: одно замыкание на обработчик на экземпляр при создании. Для делегируемых
+  событий (`click`, `contextmenu`, `mouseup`, `keydown`) лишнего listener'а нет. Для неделегируемых (`transitionend`,
+  `animationend`, `mouseenter/leave`, `load`, `blur`, `paste`, `on:filehoveropen`) listener теперь висит всегда, даже
+  без пропа, и на каждое событие вызывает no-op. Это редкие события, на горячем пути не дорого. Риск будущий, см.
+  m-r5.
+- **a11y-baseline.** Новые записи только `color-contrast`: label'ы телефона и регистрации, label'ы в
+  `.DropdownMenu`, кнопка на QR. Визуальный дифф с tt на этих пяти экранах 0 px, то есть цвета те же, что у tt.
+  Значит, это контраст стилей tt, а не регрессия порта, и реальных проблем baseline не прячет. Других правил не
+  добавилось, проверка «stale» не даёт baseline расти незаметно.
+- **`AnimatedSticker` 0.67 → 0.72.** Фактически 67.9 %, запас 4.1 п. У остальных записей allowlist запас 3–6 п.
+  (`AnimatedIcon` 3.0, `useMedia` 3.7, `useLangString` 5.0), так что повышение обосновано: рост дали многострочные
+  `depsOf` и цепочка scope.
+- **Порты (`tests/config.ts`).** Смещение от хеша `cwd` (шаг 5, 200 корзин), в CI 0, env-переменные важнее. Все три
+  конфига и `tt-run` (через `env.TT_PORT`) берут порты из одного места. Здесь получился DEV-порт 1725.
+
+### Minor (не блокирует)
+
+- **m-r1. Тест «handlers added later» слабее заявленного.** Откат `Button`/`MenuItem.onContextMenu` его не валит:
+  `<button>` и `MenuItem` лежат внутри `<Show>`, и чтение `props.onContextMenu` при создании элемента отслеживается
+  memo у `Show`. Поддерево пересоздаётся на смене обработчика, и новый обработчик «случайно» оказывается на месте.
+  `GramIcon`, `StarIcon`, `DropdownMenu.onTransitionEnd` и `InputText` тестом не покрыты вовсе. Фиксы верны (это видно
+  из кода и из repro, где `addEvent(_el$, "contextmenu", props.onContextMenu, true)` связывается один раз). Но в тест
+  стоит добавить проверку, что DOM-узел не пересоздан (`expect(el.querySelector('button')).toBe(before)`), и покрыть
+  оставшиеся компоненты. Попутно видна ловушка: run-once чтение пропа внутри дочернего `<Show>` молча пересоздаёт всё
+  поддерево. Это стоит строки в porting-guide.
+- **m-r2. Нет тестов на счётчик `busy` и на `isHeavyAnimatingInChain` в `init`/`isFrozen`.** Оба отката зелёные. Нужны
+  тесты: одновременные root- и scope-анимации (конец одной не должен снимать паузу) и стикер с `play`, созданный под
+  `Transition` во время root-анимации (не должен играть до её конца).
+- **m-r3. `heavyAnimationChain.ts`.** Поправить комментарий: соседние scope не слышны. TODO сейчас
+  `frameact#engine-gaps`; указать `frameact#21` (merged) и шаг «обновить сабмодуль, сделать re-export».
+- **m-r4. Отчёт.** «13 tests» → 12. Убрать утверждение, что с `shouldCleanup` «назад» теряет номер. У QR-записи в
+  `baseline.json` причина скопирована про «floating labels», а нарушает кнопка. Цель `button` слишком общая: любую
+  будущую кнопку с плохим контрастом на этом экране baseline примет молча. Лучше `.auth-form button` или id.
+- **m-r5. Правило `forwardedHandlers`.** Для `onWheel`/`onTouch*` вне делегирования, если такие появятся, правило
+  повесит непассивный listener навсегда, а это блокирует композиторную прокрутку. Таким событиям нужен TODO вместо
+  переписывания. В тесте правила `effectDeps` идемпотентность проверяется той же строкой, что и первая замена. Стоит
+  добавить `expect(code).not.toContain('depsOf(depsOf')`.
+- **m-r6. Тестовая инфраструктура.** `serverSays` раз в 100 мс переотправляет состояние, если `auth.state`
+  разошёлся. Это лечит гонку мок-синка (`sync.ts` совпадает с tt), но заодно скроет клиентскую регрессию, при которой
+  приложение само сбросит `auth.state`. Лучше ограничить повтор окном синка или логировать каждое срабатывание.
+  `quality-gates.md` обещает, что worktree «never» переиспользуют чужой сервер. При 200 корзинах это вероятностно
+  (5 worktree дают около 5 % коллизий). Надёжнее сверять маркер checkout'а у найденного сервера. Перф-тест набора
+  теперь ждёт 1.5 с после смены экрана. Сама смена (около 70 мс при 4x) осталась без гейта, её стоит сравнить с tt
+  отдельным замером.
+- Остались открыты из первого ревью: m2, m3, m4, m5/m6, m8 и `websync.ts`. Они перечислены в отчёте как «Not changed».
