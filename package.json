@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "cross-env APP_ENV=development vite --mode development",
+    "dev:test": "cross-env APP_ENV=development vite --mode development --open \"/?test\"",
     "dev:mocked": "cross-env APP_ENV=test APP_MOCKED_CLIENT=1 vite --mode development --port 1235",
     "build": "vite build",
     "build:dev": "vite build --mode development",
