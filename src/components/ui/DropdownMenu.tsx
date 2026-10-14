@@ -48,9 +48,11 @@ const DropdownMenu = (rawProps: OwnProps) => {
       setMenuAnchor({ x: rect.left, y: rect.bottom });
     }
 
-    setIsOpen(!isOpen());
+    // Deviation: a signal write is visible at once, so the value before the toggle is kept (tt's closure value).
+    const wasOpen = isOpen();
+    setIsOpen(!wasOpen);
 
-    if (isOpen()) {
+    if (wasOpen) {
       props.onClose?.();
     } else {
       props.onOpen?.();

@@ -310,6 +310,38 @@ it('DropdownMenu: the default trigger opens the menu; a custom trigger is a comp
   dispose();
 });
 
+it('DropdownMenu: onOpen fires when the trigger opens the menu, onClose when it closes it (tt reads the value before the toggle)', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const el = host();
+  const calls: string[] = [];
+  const dispose = render(
+    () => (
+      <DropdownMenu
+        onOpen={() => calls.push('open')}
+        onClose={() => calls.push('close')}
+        trigger={(props) => (
+          <button type="button" class="custom-trigger" onClick={props.onTrigger}>
+            t
+          </button>
+        )}
+      >
+        <MenuItem>One</MenuItem>
+      </DropdownMenu>
+    ),
+    el,
+  );
+  await flushMicrotasks();
+  await frame();
+  const trigger = el.querySelector('.custom-trigger') as HTMLButtonElement;
+  trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  flushSync();
+  expect(calls).toEqual(['open']);
+  trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  flushSync();
+  expect(calls).toEqual(['open', 'close']);
+  dispose();
+});
+
 it('DropdownMenu withPortal: the dynamic position options reach the menu (anchor + element getters)', async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   const portals = portalsHost();
