@@ -7,6 +7,8 @@ import { createStrictMonitor } from './strictMonitor';
 
 type AppWindow = Window & {
   getGlobal: () => any;
+  // DEV: the store mirror that components read (src/global/index.ts), not the committed global
+  getMirror: () => any;
   setGlobal: (global: any) => void;
   __sent: { type: string; text: string }[];
 };
@@ -92,6 +94,28 @@ test('a chat written in tab A reaches tab B, and tab B does not echo it back', a
       pageB.evaluate((id) => (window as unknown as AppWindow).getGlobal().byTabId[id].isLeftColumnShown, tabA),
     )
     .toBe(leftColumnInA);
+  // ... and the store mirror of B, which is what components read, matches the committed global there
+  await expect
+    .poll(() => pageB.evaluate(() => (window as unknown as AppWindow).getMirror().chats.byId['777001']?.title))
+    .toBe('From tab A');
+  await expect
+    .poll(() =>
+      pageB.evaluate((id) => (window as unknown as AppWindow).getMirror().byTabId[id].isLeftColumnShown, tabA),
+    )
+    .toBe(leftColumnInA);
+  expect(
+    await pageB.evaluate(() => {
+      const w = window as unknown as AppWindow;
+      const { DEBUG_randomId: _stamp, ...committed } = w.getGlobal();
+      const sorted = (value: unknown) =>
+        JSON.stringify(value, (_key, v) =>
+          v && typeof v === 'object' && !Array.isArray(v)
+            ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1)))
+            : v,
+        );
+      return sorted(w.getMirror()) === sorted(committed);
+    }),
+  ).toBe(true);
   // B's own tab state was not touched by A's write
   expect(await tabsOf(pageB)).toEqual(tabsB);
 
@@ -117,6 +141,9 @@ test('a chat written in tab A reaches tab B, and tab B does not echo it back', a
   });
   await expect
     .poll(() => pageA.evaluate(() => (window as unknown as AppWindow).getGlobal().chats.byId['777002']?.title))
+    .toBe('From tab B');
+  await expect
+    .poll(() => pageA.evaluate(() => (window as unknown as AppWindow).getMirror().chats.byId['777002']?.title))
     .toBe('From tab B');
   const sentByBAfter = await pageB.evaluate(() => (window as unknown as AppWindow).__sent);
   expect(sentByBAfter.some((m) => m.type === 'globalDiffUpdate' && m.text.includes('777002'))).toBe(true);

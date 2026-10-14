@@ -11,7 +11,7 @@
 //  - `useGlobal()` is the tracked view (the store proxy) for component bodies, JSX, memos and effects. `withGlobal`
 //    and `useSelector` read through it.
 import { createMemo, flushSync, getIsHeavyAnimating, rootScope } from 'frameact';
-import { afterActions, createStore, defineActions, ungated } from 'frameact/store';
+import { afterActions, createStore, defineActions, ungated, unwrap } from 'frameact/store';
 
 import type { ActionPayloads, GlobalState, RequiredActionPayloads, RequiredGlobalState } from './types';
 
@@ -370,4 +370,6 @@ if (DEBUG) {
   (window as any).getGlobal = getGlobal;
   (window as any).setGlobal = setGlobal;
   (window as any).getActions = getActions;
+  // Not in tt: the store mirror that components read (raw object), for the e2e checks of docs/quality-gates.md
+  (window as any).getMirror = () => unwrap(trackedGlobal);
 }
