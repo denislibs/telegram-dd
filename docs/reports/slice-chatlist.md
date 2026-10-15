@@ -405,6 +405,17 @@ per-row cost of `Chat`), tracked above.
 
 The existing no-gap e2e tests (wheel steps, a jump by `scrollTop`) pass with the progressive mount.
 
+## Fix round 4: the perf gates run at the same device speed everywhere
+
+After round 3 the scroll gate still failed on the GitHub runner (tasks of 147 / 139 ms, 143 ms on the retry) while the same code
+measures 78 ms here: a fixed `setCPUThrottlingRate(4)` slows the machine it runs on, so "4x" is a slower device on a slower
+runner. The caps were calibrated against telegram-tt on this machine and are not raised. Instead the throttling rate is
+calibrated: a deterministic CPU benchmark runs in the browser before the throttling is set, and
+`rate = 4 * referenceMs / measuredMs` (clamped to [1, 8]) makes every machine emulate the same target device, "4x on the reference
+machine". A machine too slow even for rate 1 fails the gate with a message. `tests/perf/**` and `pnpm perf:compare` (one rate per
+invocation, the same for both apps; `--cpu 4` forces a fixed rate) use it; the rate and the benchmark time are printed and attached
+to every test. How it works and how to re-measure the reference: `docs/quality-gates.md`, "Calibrated throttling".
+
 ## Remaining stubs
 
 15 new FOUNDATION STUBs (render nothing, tt's props kept; `pnpm gates:diff` lists them): `left/ArchivedChats.async`,

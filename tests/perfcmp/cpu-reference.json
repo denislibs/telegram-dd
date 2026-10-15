@@ -1,0 +1,6 @@
+{
+  "targetRate": 4,
+  "referenceMs": 42.5,
+  "benchmark": 1,
+  "measuredOn": "Apple M1 Pro, darwin 25.5.0, Chromium 156.0.8078.4, 2026-10-15, 6.66 7.98 12.22"
+}
