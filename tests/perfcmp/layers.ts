@@ -10,7 +10,13 @@ const { values: args } = parseArgs({ options: { dir: { type: 'string' }, label: 
 const server = await serveDir(args.dir!);
 const browser = await chromium.launch();
 try {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC', serviceWorkers: 'block' });
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    deviceScaleFactor: 1,
+    locale: 'en-US',
+    timezoneId: 'UTC',
+    serviceWorkers: 'block',
+  });
   const page = await context.newPage();
   await page.addInitScript({ path: join(import.meta.dirname, 'probe.js') });
   await page.addInitScript({ path: join(import.meta.dirname, 'keycount-page.js') });
@@ -37,7 +43,10 @@ try {
       if (style.display === 'none') hidden++;
       if (style.animationName !== 'none' && style.animationPlayState === 'running') {
         animated++;
-        const k = `${el.tagName.toLowerCase()}.${String((el as HTMLElement).className).split(' ').slice(0, 2).join('.')} ${style.animationName} ${style.animationIterationCount}`;
+        const k = `${el.tagName.toLowerCase()}.${String((el as HTMLElement).className)
+          .split(' ')
+          .slice(0, 2)
+          .join('.')} ${style.animationName} ${style.animationIterationCount}`;
         anims.set(k, (anims.get(k) ?? 0) + 1);
       }
     }
@@ -62,33 +71,65 @@ try {
       if (st.maskImage && st.maskImage !== 'none') hits.push('mask');
       for (const h of hits) props.set(h, (props.get(h) ?? 0) + 1);
       if (hits.length) {
-        const k = `${el.tagName.toLowerCase()}.${String((el as HTMLElement).className?.baseVal ?? (el as HTMLElement).className).split(' ').filter((c) => c && !/^[A-Za-z0-9_-]{8}$/.test(c)).slice(0, 2).join('.')} [${hits.join(',')}]`;
+        const k = `${el.tagName.toLowerCase()}.${String(
+          (el as HTMLElement).className?.baseVal ?? (el as HTMLElement).className,
+        )
+          .split(' ')
+          .filter((c) => c && !/^[A-Za-z0-9_-]{8}$/.test(c))
+          .slice(0, 2)
+          .join('.')} [${hits.join(',')}]`;
         where.set(k, (where.get(k) ?? 0) + 1);
       }
     }
-    return { props: [...props.entries()], where: [...where.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30), elements: all.length, hidden, animated, anims: [...anims.entries()], animations: document.getAnimations().map((a) => `${(a as CSSAnimation).animationName ?? a.constructor.name} ${(a.effect as KeyframeEffect)?.target?.className ?? ''}`.slice(0, 120)) };
+    return {
+      props: [...props.entries()],
+      where: [...where.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30),
+      elements: all.length,
+      hidden,
+      animated,
+      anims: [...anims.entries()],
+      animations: document
+        .getAnimations()
+        .map((a) =>
+          `${(a as CSSAnimation).animationName ?? a.constructor.name} ${(a.effect as KeyframeEffect)?.target?.className ?? ''}`.slice(
+            0,
+            120,
+          ),
+        ),
+    };
   });
   const cdp = await context.newCDPSession(page);
   await cdp.send('DOM.enable');
   await cdp.send('LayerTree.enable');
-  const layers = await new Promise<{ layerId: string; backendNodeId?: number; width: number; height: number; drawsContent: boolean }[]>((resolve) => {
+  const layers = await new Promise<
+    { layerId: string; backendNodeId?: number; width: number; height: number; drawsContent: boolean }[]
+  >((resolve) => {
     cdp.on('LayerTree.layerTreeDidChange', (event: { layers?: any[] }) => event.layers && resolve(event.layers));
     void page.evaluate(() => document.body.style.setProperty('--kc', String(Math.random())));
   });
   const withReasons = [];
   for (const layer of layers) {
     if (!layer.drawsContent) continue;
-    const { compositingReasons } = await cdp.send('LayerTree.compositingReasons', { layerId: layer.layerId }).catch(() => ({ compositingReasons: [] as string[] }));
+    const { compositingReasons } = await cdp
+      .send('LayerTree.compositingReasons', { layerId: layer.layerId })
+      .catch(() => ({ compositingReasons: [] as string[] }));
     let node = '';
     if (layer.backendNodeId) {
-      const described = await cdp.send('DOM.describeNode', { backendNodeId: layer.backendNodeId }).catch(() => undefined);
+      const described = await cdp
+        .send('DOM.describeNode', { backendNodeId: layer.backendNodeId })
+        .catch(() => undefined);
       const n = described?.node;
-      if (n) node = `${n.localName}${(n.attributes ?? []).reduce((acc: string, v: string, i: number, arr: string[]) => (i % 2 === 0 && v === 'class' ? `${acc}.${arr[i + 1].split(' ').slice(0, 2).join('.')}` : acc), '')}`;
+      if (n)
+        node = `${n.localName}${(n.attributes ?? []).reduce((acc: string, v: string, i: number, arr: string[]) => (i % 2 === 0 && v === 'class' ? `${acc}.${arr[i + 1].split(' ').slice(0, 2).join('.')}` : acc), '')}`;
     }
     withReasons.push(`${layer.width}x${layer.height} ${node} [${compositingReasons.join(',')}]`);
   }
-  process.stdout.write(`${args.label} paint-property elements: ${JSON.stringify(dom.props)}\n  ${dom.where.map(([k, v]) => `${v} ${k}`).join('\n  ')}\n`);
-  process.stdout.write(`${args.label}: elements ${dom.elements}, display:none ${dom.hidden}, running CSS animations ${dom.animated}\n  ${dom.anims.map(([k, v]) => `${v} ${k}`).join('\n  ')}\n  getAnimations: ${dom.animations.join(' | ')}\n  layers drawing content: ${withReasons.length} (all ${layers.length})\n   ${withReasons.join('\n   ')}\n`);
+  process.stdout.write(
+    `${args.label} paint-property elements: ${JSON.stringify(dom.props)}\n  ${dom.where.map(([k, v]) => `${v} ${k}`).join('\n  ')}\n`,
+  );
+  process.stdout.write(
+    `${args.label}: elements ${dom.elements}, display:none ${dom.hidden}, running CSS animations ${dom.animated}\n  ${dom.anims.map(([k, v]) => `${v} ${k}`).join('\n  ')}\n  getAnimations: ${dom.animations.join(' | ')}\n  layers drawing content: ${withReasons.length} (all ${layers.length})\n   ${withReasons.join('\n   ')}\n`,
+  );
 } finally {
   await browser.close();
   await server.close();

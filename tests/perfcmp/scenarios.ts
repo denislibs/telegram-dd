@@ -189,7 +189,13 @@ export const SCENARIOS: Scenario[] = [
       const opened = await pc<boolean>(page, 'openFirstChat', 5);
       await pc<boolean>(page, 'waitForCount', '#editable-message-text[contenteditable="true"]', 1, 20000);
       await sleep(page, 1500);
-      const result = await pc<{ latencies: number[]; sent: number; typingStart: number }>(page, 'typeAndSend', 20, 10, 100);
+      const result = await pc<{ latencies: number[]; sent: number; typingStart: number }>(
+        page,
+        'typeAndSend',
+        20,
+        10,
+        100,
+      );
       await sleep(page, 500);
       const sorted = [...result.latencies].sort((a, b) => a - b);
       const at = (fraction: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))] ?? 0;

@@ -20,7 +20,11 @@ const { SourceMapConsumer } = (await import(
 )) as { SourceMapConsumer: new (raw: unknown) => SourceMapLike };
 
 interface SourceMapLike {
-  originalPositionFor(pos: { line: number; column: number }): { source: string | null; line: number | null; name: string | null };
+  originalPositionFor(pos: { line: number; column: number }): {
+    source: string | null;
+    line: number | null;
+    name: string | null;
+  };
 }
 
 const { values: args } = parseArgs({
@@ -97,15 +101,35 @@ async function countsOf(
 function traceCounts(events: TraceEvent[], from: string, to: string) {
   const thread = findMainThread(events)!;
   const mark = (name: string) =>
-    events.find((event) => event.name === name && event.pid === thread.pid && (event.ph === 'R' || event.ph === 'I' || event.ph === 'n' || event.ph === 'b'))?.ts;
+    events.find(
+      (event) =>
+        event.name === name &&
+        event.pid === thread.pid &&
+        (event.ph === 'R' || event.ph === 'I' || event.ph === 'n' || event.ph === 'b'),
+    )?.ts;
   const start = mark(from);
   const end = mark(to);
   if (start === undefined || end === undefined) return undefined;
   const mine = events
-    .filter((event) => event.pid === thread.pid && event.tid === thread.tid && event.ph === 'X' && event.ts >= start && event.ts < end)
+    .filter(
+      (event) =>
+        event.pid === thread.pid && event.tid === thread.tid && event.ph === 'X' && event.ts >= start && event.ts < end,
+    )
     .sort((a, b) => a.ts - b.ts || (b.dur ?? 0) - (a.dur ?? 0));
   const reasons: Record<string, number> = {};
-  const out = { styles: 0, styleMs: 0, layouts: 0, layoutMs: 0, forcedLayouts: 0, forcedStyles: 0, paints: 0, paintMs: 0, scriptMs: 0, styleElements: 0, layoutObjects: 0 };
+  const out = {
+    styles: 0,
+    styleMs: 0,
+    layouts: 0,
+    layoutMs: 0,
+    forcedLayouts: 0,
+    forcedStyles: 0,
+    paints: 0,
+    paintMs: 0,
+    scriptMs: 0,
+    styleElements: 0,
+    layoutObjects: 0,
+  };
   const stack: TraceEvent[] = [];
   for (const event of mine) {
     while (stack.length && stack[stack.length - 1].ts + stack[stack.length - 1].dur! <= event.ts) stack.pop();
@@ -116,8 +140,19 @@ function traceCounts(events: TraceEvent[], from: string, to: string) {
       out.styleMs += event.dur! / 1000;
       if (inScript) {
         out.forcedStyles++;
-        const stack = (event.args?.beginData as { stackTrace?: { functionName: string; url: string; lineNumber: number; columnNumber: number }[] } | undefined)?.stackTrace;
-        const k = 'S ' + (stack ? stack.slice(0, 3).map((f) => frameKey(f)).join(' < ') : '?');
+        const stack = (
+          event.args?.beginData as
+            | { stackTrace?: { functionName: string; url: string; lineNumber: number; columnNumber: number }[] }
+            | undefined
+        )?.stackTrace;
+        const k =
+          'S ' +
+          (stack
+            ? stack
+                .slice(0, 3)
+                .map((f) => frameKey(f))
+                .join(' < ')
+            : '?');
         reasons[k] = (reasons[k] ?? 0) + 1;
       }
       const count = (event.args?.elementCount as number | undefined) ?? 0;
@@ -127,8 +162,19 @@ function traceCounts(events: TraceEvent[], from: string, to: string) {
       out.layoutMs += event.dur! / 1000;
       if (inScript) {
         out.forcedLayouts++;
-        const stack = (event.args?.beginData as { stackTrace?: { functionName: string; url: string; lineNumber: number; columnNumber: number }[] } | undefined)?.stackTrace;
-        const k = 'L ' + (stack ? stack.slice(0, 3).map((f) => frameKey(f)).join(' < ') : '?');
+        const stack = (
+          event.args?.beginData as
+            | { stackTrace?: { functionName: string; url: string; lineNumber: number; columnNumber: number }[] }
+            | undefined
+        )?.stackTrace;
+        const k =
+          'L ' +
+          (stack
+            ? stack
+                .slice(0, 3)
+                .map((f) => frameKey(f))
+                .join(' < ')
+            : '?');
         reasons[k] = (reasons[k] ?? 0) + 1;
       }
       const begin = event.args?.beginData as { dirtyObjects?: number } | undefined;
@@ -156,7 +202,8 @@ function frameKey(f: { functionName: string; url: string; lineNumber: number; co
   }
   if (map) {
     const o = map.originalPositionFor({ line: f.lineNumber + 1, column: f.columnNumber });
-    if (o.source) return `${f.functionName || '(anon)'} ${o.source.replace(/^.*?(src\/|node_modules\/)/, '$1').replace(/^node_modules\/.pnpm\/[^/]+\/node_modules\//, '')}:${o.line}`;
+    if (o.source)
+      return `${f.functionName || '(anon)'} ${o.source.replace(/^.*?(src\/|node_modules\/)/, '$1').replace(/^node_modules\/.pnpm\/[^/]+\/node_modules\//, '')}:${o.line}`;
   }
   return `${f.functionName || '(anon)'} ${file}:${f.lineNumber + 1}`;
 }
@@ -166,7 +213,11 @@ async function measure(app: string, dir: string) {
   mapCache.clear();
   const server = await serveDir(dir);
   const browser = await chromium.launch({
-    args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'],
+    args: [
+      '--disable-background-timer-throttling',
+      '--disable-renderer-backgrounding',
+      '--disable-backgrounding-occluded-windows',
+    ],
   });
   try {
     const context = await browser.newContext({
@@ -208,7 +259,11 @@ async function measure(app: string, dir: string) {
     // Warm-up: one message typed and sent (lazy chunks, tooltips, first-send paths).
     if (args.warmup !== '0') {
       await page.evaluate(async () => {
-        const kc = (window as unknown as { __kc: { type(n: number, t?: string): Promise<void>; send(ms: number, t?: string): Promise<void> } }).__kc;
+        const kc = (
+          window as unknown as {
+            __kc: { type(n: number, t?: string): Promise<void>; send(ms: number, t?: string): Promise<void> };
+          }
+        ).__kc;
         await kc.type(20, 'w');
         await kc.send(1500, 'w');
       });
@@ -216,7 +271,16 @@ async function measure(app: string, dir: string) {
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: Number(args.cpu) });
     await pc(page, 'sleep', 500);
     const chars = Number(args.chars);
-    await browser.startTracing(page, { categories: ['devtools.timeline', 'toplevel', 'blink.user_timing', 'v8.execute', 'disabled-by-default-devtools.timeline', 'disabled-by-default-devtools.timeline.stack'] });
+    await browser.startTracing(page, {
+      categories: [
+        'devtools.timeline',
+        'toplevel',
+        'blink.user_timing',
+        'v8.execute',
+        'disabled-by-default-devtools.timeline',
+        'disabled-by-default-devtools.timeline.stack',
+      ],
+    });
     const messages = Number(args.messages);
     if (messages > 0) {
       if (withCoverage) await countsOf(cdp, scripts);
@@ -231,15 +295,35 @@ async function measure(app: string, dir: string) {
       let sendMut = 0;
       for (let m = 0; m < messages; m++) {
         await page.evaluate(() => (window as unknown as { __kc: { reset(): void } }).__kc.reset());
-        await page.evaluate(([n, tag]) => (window as unknown as { __kc: { type(n: number, t: string): Promise<void> } }).__kc.type(n, tag), [chars, `m${m}_`] as const);
-        const taken = await page.evaluate(() => (window as unknown as { __kc: { take(): { kinds: { records: number }; byTarget: [string, number][]; scrolls: [string, number][] } } }).__kc.take());
+        await page.evaluate(
+          ([n, tag]) =>
+            (window as unknown as { __kc: { type(n: number, t: string): Promise<void> } }).__kc.type(n, tag),
+          [chars, `m${m}_`] as const,
+        );
+        const taken = await page.evaluate(() =>
+          (
+            window as unknown as {
+              __kc: {
+                take(): { kinds: { records: number }; byTarget: [string, number][]; scrolls: [string, number][] };
+              };
+            }
+          ).__kc.take(),
+        );
         keyMut += taken.kinds.records;
         for (const [k, v] of taken.scrolls) keyScrolls.set(k, (keyScrolls.get(k) ?? 0) + v);
         for (const [k, v] of taken.byTarget) keyTargets.set(k, (keyTargets.get(k) ?? 0) + v);
         if (withCoverage) add(keyCounts, (await countsOf(cdp, scripts)).counts);
         await page.evaluate(() => (window as unknown as { __kc: { reset(): void } }).__kc.reset());
-        await page.evaluate(([ms, tag]) => (window as unknown as { __kc: { send(ms: number, t: string): Promise<void> } }).__kc.send(ms, tag), [Number(args.rest), `m${m}`] as const);
-        sendMut += (await page.evaluate(() => (window as unknown as { __kc: { take(): { kinds: { records: number } } } }).__kc.take())).kinds.records;
+        await page.evaluate(
+          ([ms, tag]) =>
+            (window as unknown as { __kc: { send(ms: number, t: string): Promise<void> } }).__kc.send(ms, tag),
+          [Number(args.rest), `m${m}`] as const,
+        );
+        sendMut += (
+          await page.evaluate(() =>
+            (window as unknown as { __kc: { take(): { kinds: { records: number } } } }).__kc.take(),
+          )
+        ).kinds.records;
         if (withCoverage) add(sendCounts, (await countsOf(cdp, scripts)).counts);
       }
       const events = parseTrace(await browser.stopTracing());
@@ -247,8 +331,14 @@ async function measure(app: string, dir: string) {
         const thread = findMainThread(events)!;
         const a = events.find((e) => e.name === 'kc:keym3_0')?.ts ?? 0;
         const b = events.find((e) => e.name === 'kc:typedm3_')?.ts ?? 0;
-        writeFileSync(join(args.out, `${app}-trace-m3.json`), JSON.stringify(events.filter((e) => e.pid === thread.pid && e.ts >= a && e.ts <= b)));
-        writeFileSync(join(args.out, `${app}-trace-main.json`), JSON.stringify(events.filter((e) => e.pid === thread.pid && e.tid === thread.tid && e.ph !== 'M')));
+        writeFileSync(
+          join(args.out, `${app}-trace-m3.json`),
+          JSON.stringify(events.filter((e) => e.pid === thread.pid && e.ts >= a && e.ts <= b)),
+        );
+        writeFileSync(
+          join(args.out, `${app}-trace-main.json`),
+          JSON.stringify(events.filter((e) => e.pid === thread.pid && e.tid === thread.tid && e.ph !== 'M')),
+        );
       }
       const sum = (pairs: [string, string][]) => {
         const out: Record<string, number> = {};
@@ -257,7 +347,8 @@ async function measure(app: string, dir: string) {
           if (!part) continue;
           for (const [k, v] of Object.entries(part)) {
             if (k === 'reasons') {
-              for (const [r, c] of Object.entries(v as Record<string, number>)) out[`reason ${r}`] = (out[`reason ${r}`] ?? 0) + c;
+              for (const [r, c] of Object.entries(v as Record<string, number>))
+                out[`reason ${r}`] = (out[`reason ${r}`] ?? 0) + c;
             } else out[k] = (out[k] ?? 0) + (v as number);
           }
         }
@@ -275,13 +366,29 @@ async function measure(app: string, dir: string) {
       }
       const total = (map: Map<string, number>) => [...map.values()].reduce((a, b) => a + b, 0);
       const top = Number(args.top);
-      const sorted = (map: Map<string, number>, div: number) => [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, top).map(([k, v]) => [Math.round((v / div) * 100) / 100, k] as const);
+      const sorted = (map: Map<string, number>, div: number) =>
+        [...map.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, top)
+          .map(([k, v]) => [Math.round((v / div) * 100) / 100, k] as const);
       return {
         app,
         chars,
         messages,
-        keys: { callsPerKey: total(keyCounts) / (chars * messages), mutationsPerKey: keyMut / (chars * messages), trace: sum(keyWin), top: sorted(keyCounts, chars * messages), all: [...keyCounts.entries()] },
-        sends: { callsPerSend: total(sendCounts) / messages, mutationsPerSend: sendMut / messages, trace: sum(sendWin), top: sorted(sendCounts, messages), all: [...sendCounts.entries()] },
+        keys: {
+          callsPerKey: total(keyCounts) / (chars * messages),
+          mutationsPerKey: keyMut / (chars * messages),
+          trace: sum(keyWin),
+          top: sorted(keyCounts, chars * messages),
+          all: [...keyCounts.entries()],
+        },
+        sends: {
+          callsPerSend: total(sendCounts) / messages,
+          mutationsPerSend: sendMut / messages,
+          trace: sum(sendWin),
+          top: sorted(sendCounts, messages),
+          all: [...sendCounts.entries()],
+        },
         perMessage,
         keyScrolls: [...keyScrolls.entries()],
         keyTargets: [...keyTargets.entries()].sort((a, b) => b[1] - a[1]),
@@ -301,13 +408,32 @@ async function measure(app: string, dir: string) {
     const sendTrace = traceCounts(events, 'kc:send', 'kc:sent');
     const top = Number(args.top);
     const perKey = (map: Map<string, number>) =>
-      [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, top).map(([k, v]) => [Math.round((v / chars) * 100) / 100, k] as const);
-    const sorted = (map: Map<string, number>) => [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, top).map(([k, v]) => [v, k] as const);
+      [...map.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, top)
+        .map(([k, v]) => [Math.round((v / chars) * 100) / 100, k] as const);
+    const sorted = (map: Map<string, number>) =>
+      [...map.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, top)
+        .map(([k, v]) => [v, k] as const);
     return {
       app,
       chars,
-      typing: { callsPerKey: typing.total / chars, mutations: typingMutations, trace: typingTrace, top: perKey(typing.counts), all: [...typing.counts.entries()] },
-      send: { calls: send.total, mutations: sendMutations, trace: sendTrace, top: sorted(send.counts), all: [...send.counts.entries()] },
+      typing: {
+        callsPerKey: typing.total / chars,
+        mutations: typingMutations,
+        trace: typingTrace,
+        top: perKey(typing.counts),
+        all: [...typing.counts.entries()],
+      },
+      send: {
+        calls: send.total,
+        mutations: sendMutations,
+        trace: sendTrace,
+        top: sorted(send.counts),
+        all: [...send.counts.entries()],
+      },
     };
   } finally {
     await browser.close();
@@ -323,10 +449,20 @@ for (const app of args.app.split(',')) {
   const result = (await measure(app, dir)) as any;
   writeFileSync(join(args.out, `${app}.json`), JSON.stringify(result, undefined, 1));
   if (result.messages) {
-    const r = (o: Record<string, number>) => JSON.stringify(Object.fromEntries(Object.entries(o).map(([k, v]) => [k, Math.round(v * 10) / 10])));
-    const plain = (o: Record<string, number>) => Object.fromEntries(Object.entries(o).filter(([k]) => !k.startsWith('reason ')));
-    const reasons = (o: Record<string, number>) => Object.entries(o).filter(([k]) => k.startsWith('reason ')).sort((a, b) => b[1] - a[1]).slice(0, 14).map(([k, v]) => `    ${String(v).padStart(5)} ${k.slice(7)}`).join('\n');
-    process.stdout.write(`\n== ${app}: ${result.messages} messages x ${result.chars} keys\n keys: ${result.keys.callsPerKey.toFixed(0)} calls/key, ${result.keys.mutationsPerKey.toFixed(2)} mutation records/key, trace ${r(plain(result.keys.trace))}\n  forced, by JS stack:\n${reasons(result.keys.trace)}\n sends: ${result.sends.callsPerSend.toFixed(0)} calls/send, ${result.sends.mutationsPerSend.toFixed(1)} records/send, trace ${r(plain(result.sends.trace))}\n  forced, by JS stack:\n${reasons(result.sends.trace)}\n`);
+    const r = (o: Record<string, number>) =>
+      JSON.stringify(Object.fromEntries(Object.entries(o).map(([k, v]) => [k, Math.round(v * 10) / 10])));
+    const plain = (o: Record<string, number>) =>
+      Object.fromEntries(Object.entries(o).filter(([k]) => !k.startsWith('reason ')));
+    const reasons = (o: Record<string, number>) =>
+      Object.entries(o)
+        .filter(([k]) => k.startsWith('reason '))
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 14)
+        .map(([k, v]) => `    ${String(v).padStart(5)} ${k.slice(7)}`)
+        .join('\n');
+    process.stdout.write(
+      `\n== ${app}: ${result.messages} messages x ${result.chars} keys\n keys: ${result.keys.callsPerKey.toFixed(0)} calls/key, ${result.keys.mutationsPerKey.toFixed(2)} mutation records/key, trace ${r(plain(result.keys.trace))}\n  forced, by JS stack:\n${reasons(result.keys.trace)}\n sends: ${result.sends.callsPerSend.toFixed(0)} calls/send, ${result.sends.mutationsPerSend.toFixed(1)} records/send, trace ${r(plain(result.sends.trace))}\n  forced, by JS stack:\n${reasons(result.sends.trace)}\n`,
+    );
     continue;
   }
   const t = result.typing;

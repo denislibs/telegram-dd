@@ -27,11 +27,15 @@
     }).observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
   };
   const scrolls = new Map();
-  document.addEventListener('scroll', (e) => {
-    if (!on) return;
-    const t = e.target === document ? 'document' : describe(e.target);
-    scrolls.set(t, (scrolls.get(t) || 0) + 1);
-  }, true);
+  document.addEventListener(
+    'scroll',
+    (e) => {
+      if (!on) return;
+      const t = e.target === document ? 'document' : describe(e.target);
+      scrolls.set(t, (scrolls.get(t) || 0) + 1);
+    },
+    true,
+  );
   if (document.documentElement) start();
   else document.addEventListener('readystatechange', start, { once: true });
   const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
@@ -44,7 +48,11 @@
     },
     take() {
       on = false;
-      return { kinds: { ...kinds }, byTarget: [...byTarget.entries()].sort((a, b) => b[1] - a[1]), scrolls: [...scrolls.entries()] };
+      return {
+        kinds: { ...kinds },
+        byTarget: [...byTarget.entries()].sort((a, b) => b[1] - a[1]),
+        scrolls: [...scrolls.entries()],
+      };
     },
     async type(count, tag = '') {
       const input = document.querySelector('#editable-message-text');
