@@ -188,7 +188,7 @@ const ReactionAnimatedEmoji = (ownProps: OwnProps) => {
       <Show when={shouldRenderCenter() && !isCustom()}>
         {/* tt: key={`${centerIconId}-${size}`} */}
         <Show when={`${centerIconId()}-${size()}`} keyed>
-          {() => (
+          {(_key) => (
             <AnimatedSticker
               ref={centerRef}
               className={styles.animatedIcon}
@@ -207,7 +207,7 @@ const ReactionAnimatedEmoji = (ownProps: OwnProps) => {
         <>
           {/* tt: key={`${effectId}-${effectSize}`} */}
           <Show when={`${effectId()}-${effectSize()}`} keyed>
-            {() => (
+            {(_key) => (
               <AnimatedSticker
                 ref={effectRef}
                 className={styles.effect}

@@ -87,5 +87,59 @@
       "target": ".submenu",
       "reason": "telegram-tt's markup: the main menu is a `Menu` without `ariaLabel`/`ariaLabelledBy`, so its bubble has no `role=menu` while the items are `role=menuitem` (ui/Menu.tsx and MenuItem.tsx are ported verbatim); the fix is an aria label on the bubble and belongs to the accessibility pass"
     }
+  ],
+  "middle column: an open chat with entities": [
+    {
+      "rule": "aria-input-field-name",
+      "target": "code",
+      "reason": "telegram-tt's markup: an inline code entity is `<code role=\"textbox\" tabindex=\"0\">` (click copies it) without an accessible name (renderTextWithEntities, ported verbatim); the fix is `aria-label` / a role without the textbox semantics and belongs to the accessibility pass"
+    },
+    {
+      "rule": "color-contrast",
+      "target": "a[href$=\"label\"]",
+      "reason": "telegram-tt's markup and theme: a message link is the theme's `--color-links` (#168acd) on the bubble background, below 4.5:1 (renderTextWithEntities and the stylesheets are ported verbatim); the fix is a theme colour and belongs to the accessibility pass"
+    },
+    {
+      "rule": "color-contrast",
+      "target": ".word-break-all",
+      "reason": "telegram-tt's markup and theme: a message link is the theme's `--color-links` (#168acd) on the bubble background, below 4.5:1 (renderTextWithEntities and the stylesheets are ported verbatim); the fix is a theme colour and belongs to the accessibility pass"
+    },
+    {
+      "rule": "color-contrast",
+      "target": "a[data-entity-type=\"MessageEntityHashtag\"]",
+      "reason": "telegram-tt's markup and theme: a message link is the theme's `--color-links` (#168acd) on the bubble background, below 4.5:1 (renderTextWithEntities and the stylesheets are ported verbatim); the fix is a theme colour and belongs to the accessibility pass"
+    },
+    {
+      "rule": "color-contrast",
+      "target": "a[data-entity-type=\"MessageEntityCashtag\"]",
+      "reason": "telegram-tt's markup and theme: a message link is the theme's `--color-links` (#168acd) on the bubble background, below 4.5:1 (renderTextWithEntities and the stylesheets are ported verbatim); the fix is a theme colour and belongs to the accessibility pass"
+    },
+    {
+      "rule": "color-contrast",
+      "target": "a[data-entity-type=\"MessageEntityBotCommand\"]",
+      "reason": "telegram-tt's markup and theme: a message link is the theme's `--color-links` (#168acd) on the bubble background, below 4.5:1 (renderTextWithEntities and the stylesheets are ported verbatim); the fix is a theme colour and belongs to the accessibility pass"
+    },
+    {
+      "rule": "color-contrast",
+      "target": "a[href$=\"mailto:user@example.com\"]",
+      "reason": "telegram-tt's markup and theme: a message link is the theme's `--color-links` (#168acd) on the bubble background, below 4.5:1 (renderTextWithEntities and the stylesheets are ported verbatim); the fix is a theme colour and belongs to the accessibility pass"
+    },
+    {
+      "rule": "color-contrast",
+      "target": "a[href=\"tel:+1 555 0100\"]",
+      "reason": "telegram-tt's markup and theme: a message link is the theme's `--color-links` (#168acd) on the bubble background, below 4.5:1 (renderTextWithEntities and the stylesheets are ported verbatim); the fix is a theme colour and belongs to the accessibility pass"
+    }
+  ],
+  "middle column: a long chat opened at its first unread message": [
+    {
+      "rule": "color-contrast",
+      "target": ".ScrollDownButton-module__unread-count",
+      "reason": "telegram-tt's stylesheet: the white counter on the accent colour of the scroll-down button (ScrollDownButton.module.scss, verbatim) is below 4.5:1; theme colour fix for the accessibility pass"
+    },
+    {
+      "rule": "scrollable-region-focusable",
+      "target": ".MessageList",
+      "reason": "telegram-tt's markup: the message list is a scroll container that is not focusable (MessageList.tsx / MessageList.scss ported as in tt); keyboard scrolling of the list belongs to the accessibility pass"
+    }
   ]
 }

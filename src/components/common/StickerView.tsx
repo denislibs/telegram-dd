@@ -193,7 +193,7 @@ const StickerView = (rawProps: OwnProps) => {
       {shouldRenderFullMedia() &&
         (isLottie() ? (
           <Show when={renderId()} keyed>
-            {() => (
+            {(_key) => (
               <AnimatedSticker
                 ref={fullMediaRef}
                 renderId={renderId()}

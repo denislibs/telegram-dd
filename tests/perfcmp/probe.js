@@ -235,6 +235,42 @@
       return { frames: frameCount, scrollHeight: list.scrollHeight, scrollTop: list.scrollTop };
     },
 
+    /**
+     * Scenario 7. Opens the chat at the top of the list (the one with the long history) through the app's own action and
+     * resolves when its first message is rendered; false when the app shows no message list.
+     */
+    async openFirstChat() {
+      actions().openChat({ id: listedChatIds()[0] });
+      return pc.waitForCount('#MiddleColumn .MessageList .message-list-item', 1, 20000);
+    },
+
+    /**
+     * Scenario 7. Scrolls the open message list up, `stepPx` per frame, until it reached the first message of the
+     * history or `maxMs` passed (the history pages in as it goes).
+     */
+    async scrollHistoryUp(stepPx, maxMs) {
+      const list = document.querySelector('#MiddleColumn .MessageList');
+      if (!list) return { frames: 0, messages: 0, firstId: 0 };
+      const start = performance.now();
+      let frameCount = 0;
+      let lastCount = 0;
+      let stableSince = performance.now();
+      const ids = () => [...list.querySelectorAll('.message-list-item')].map((el) => Number(el.dataset.messageId));
+      while (performance.now() - start < maxMs) {
+        list.scrollTop -= stepPx;
+        frameCount++;
+        await nextFrame();
+        const count = list.querySelectorAll('.message-list-item').length;
+        if (count !== lastCount) {
+          lastCount = count;
+          stableSince = performance.now();
+        }
+        if (list.scrollTop <= 1 && Math.min(...ids()) <= 1 && performance.now() - stableSince > 600) break;
+      }
+      const all = ids();
+      return { frames: frameCount, messages: all.length, firstId: Math.min(...all) };
+    },
+
     folderTabs: () => document.querySelectorAll('.ChatFolders .TabList > [data-file-hover-open]'),
 
     /** Scenario 5. Clicks the folder tabs in `order`, waiting for each slide animation to end (plus a short rest). */

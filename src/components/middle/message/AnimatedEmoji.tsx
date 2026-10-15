@@ -54,7 +54,7 @@ const AnimatedEmoji = (ownProps: OwnProps) => {
   return (
     // Deviation: tt's `key={`${sticker?.id}_${fitzModifier}`}` -> a keyed Show
     <Show when={`${props.sticker?.id}_${fitzModifier()}`} keyed>
-      {() => (
+      {(_key) => (
         <AnimatedIconFromSticker
           sticker={props.sticker}
           fitzModifier={fitzModifier()}

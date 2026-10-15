@@ -221,7 +221,7 @@ const Sticker = (ownProps: OwnProps) => {
         <Portal>
           {/* Deviation: tt's `key={mediaHashEffect}` -> a keyed Show */}
           <Show when={mediaHashEffect()} keyed>
-            {() => (
+            {(_key) => (
               <AnimatedSticker
                 ref={(el) => {
                   effectRef = el;

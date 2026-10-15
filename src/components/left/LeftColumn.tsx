@@ -533,7 +533,7 @@ function LeftColumn(ownProps: OwnProps) {
         return (
           // `key={lastResetTime}` of tt: a new `when` object remounts the screen after every reset.
           <Show when={{ resetTime: lastResetTime() }} keyed>
-            {() => (
+            {(_key) => (
               <NewChat
                 isActive={isActive()}
                 isChannel
@@ -547,7 +547,7 @@ function LeftColumn(ownProps: OwnProps) {
       case ContentType.NewGroup:
         return (
           <Show when={{ resetTime: lastResetTime() }} keyed>
-            {() => (
+            {(_key) => (
               <NewChat
                 isActive={isActive()}
                 content={props.contentKey}

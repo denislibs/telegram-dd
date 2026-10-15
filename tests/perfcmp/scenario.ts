@@ -10,6 +10,8 @@
 
 export const LARGE_SCENARIO_NAME = 'perfcmp-large';
 export const DEFAULT_CHAT_COUNT = 1200;
+/** Messages in the history of the chat at the top of the list. */
+export const HISTORY_LENGTH = 400;
 
 /** First message date of the mock (tt's MOCK_STARTING_DATE): new messages must be newer than every listed chat. */
 export const BASE_DATE = 1_666_969_420;
@@ -67,6 +69,9 @@ const text = (value: string) => ({ text: value, entities: [] });
 export function buildLargeScenario(chatCount = DEFAULT_CHAT_COUNT, seed = 20261014): LargeScenario {
   const random = mulberry32(seed);
   const pick = <T>(list: T[]) => list[Math.floor(random() * list.length)];
+  // the history of the top chat has its own sequence: the other chats are the same as before it existed
+  const historyRandom = mulberry32(seed ^ 0x9e3779b9);
+  const pickHistory = <T>(list: T[]) => list[Math.floor(historyRandom() * list.length)];
 
   const users: Record<string, unknown>[] = [{ id: '1', self: true, firstName: 'Me', lastName: 'Myself' }];
   const chats: Record<string, unknown>[] = [];
@@ -102,9 +107,28 @@ export function buildLargeScenario(chatCount = DEFAULT_CHAT_COUNT, seed = 202610
       channels.push({ id: mockId, title: `${pick(TOPICS)} channel ${rank}`, broadcast: true, date });
     }
 
-    dialogs.push({ id: mockId, topMessage: messageId, unreadCount, readInboxMaxId: unreadCount ? 0 : messageId });
-    messages[mockId] = [{ id: messageId, date, message: `${pick(WORDS)} #${rank}`, entities: [] }];
-    infos.push({ rank, kind, mockId, topMessageId: messageId });
+    // The top chat has a long history (the "open a chat and scroll its history" scenario): every other chat has one message.
+    const history = rank === 0 ? HISTORY_LENGTH : 1;
+    const topMessageId = rank === 0 ? HISTORY_LENGTH : messageId;
+    dialogs.push({
+      id: mockId,
+      topMessage: topMessageId,
+      unreadCount: rank === 0 ? 0 : unreadCount,
+      readInboxMaxId: unreadCount && rank !== 0 ? 0 : topMessageId,
+    });
+    messages[mockId] = Array.from({ length: history }, (_, index) => {
+      const id = history === 1 ? messageId : index + 1;
+      // newest last, a message every 5 minutes; text lengths vary so that the bubbles have different heights
+      const body = `${pickHistory(WORDS)} #${rank}.${id}${id % 7 === 0 ? `; ${pickHistory(WORDS)}; ${pickHistory(WORDS)}` : ''}`;
+      return {
+        id,
+        date: history === 1 ? date : date - (history - id) * 300,
+        message: body,
+        out: id % 3 === 0,
+        entities: [],
+      };
+    });
+    infos.push({ rank, kind, mockId, topMessageId });
   }
 
   const json = {

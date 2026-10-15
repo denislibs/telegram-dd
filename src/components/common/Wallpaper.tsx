@@ -71,7 +71,7 @@ const Wallpaper = (ownProps: OwnProps) => {
           {/* A canvas can hold only one context type, so switching between the animated (WebGL)
               and static (2D) renderers must recreate the element (tt: `key`) */}
           <Show when={isStaticGradient() ? 'static' : 'animated'} keyed>
-            {() => <canvas ref={background.gradientCanvasRef} class={backgroundStyles.gradientCanvas} />}
+            {(_key) => <canvas ref={background.gradientCanvasRef} class={backgroundStyles.gradientCanvas} />}
           </Show>
         </Show>
       </div>
