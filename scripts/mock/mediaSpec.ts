@@ -66,7 +66,7 @@ export const PHOTOS: PhotoSpec[] = [
   { id: 124, w: 960, h: 540, album: '9002' },
 ];
 
-// Vic Videos
+// Vic Videos (two round videos: starting one pauses the other)
 export const VIDEOS: VideoSpec[] = [
   { id: 201, w: 640, h: 360, duration: 2, caption: 'A clip', hue: 210 },
   { id: 202, w: 480, h: 270, duration: 2, gif: true, noSound: true, hue: 150 },
@@ -74,6 +74,7 @@ export const VIDEOS: VideoSpec[] = [
   { id: 204, w: 640, h: 360, duration: 2, spoiler: true, hue: 330 },
   { id: 205, w: 640, h: 360, duration: 2, noSound: true, caption: 'Without sound', hue: 90 },
   { id: 206, w: 640, h: 360, duration: 3, big: true, caption: 'A big one', hue: 270 },
+  { id: 207, w: 400, h: 400, duration: 2, round: true, hue: 60 },
 ];
 
 /** The path of an asset below `src/lib/gramjs/client/__data__/` (also the `url` of its entry in `documents`). */

@@ -1,8 +1,8 @@
-import type { MouseEvent as ReactMouseEvent } from 'react';
-import { createMemo } from 'frameact';
-import { getActions } from '../../../../global';
-import type { GlobalState } from '../../../../global/types';
+import { splitProps } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
+import { getActions, withGlobal } from '../../../../global';
 
+import type { GlobalState } from '../../../../global/types';
 import type { OwnProps as PhotoProps } from '../Photo';
 import type { OwnProps as VideoProps } from '../Video';
 
@@ -21,48 +21,56 @@ type StateProps = {
   isSelected?: boolean;
 };
 
-export default function withSelectControl(WrappedComponent: FC) {
-  const ComponentWithSelectControl = <T,>(props: OwnProps<T> & StateProps) => {
-    const { isInSelectMode, isSelected, clickArg } = props;
+// Deviation: tt's HOC is a wrapper component here (docs/porting-guide.md §4.2). `withSelectControl(Photo)` keeps its call
+// shape; the wrapper passes the props of the wrapped component through as lazy getters (`splitProps`), with the selection
+// state and the click handler overridden by getters, since they change when the selection mode is toggled.
+export default function withSelectControl(WrappedComponent: (props: never) => JSX.Element) {
+  const ComponentWithSelectControl = <T,>(ownProps: OwnProps<T>) => {
+    const props = withGlobal(ownProps, mapStateToProps);
     const { toggleMessageSelection } = getActions();
+    const Wrapped = WrappedComponent as unknown as (props: PhotoProps<T> | VideoProps<T>) => JSX.Element;
 
-    const handleMessageSelect = (e: ReactMouseEvent<HTMLDivElement, MouseEvent>) => {
+    // The wrapped component gets everything but the select props; its `onClick` is set below (a spread `onClick` would
+    // win over a getter that returns `undefined`).
+    const [, rest] = splitProps(ownProps, ['onClick', 'noSelectControls']);
+
+    const handleMessageSelect = (e: MouseEvent) => {
       e.stopPropagation();
-      toggleMessageSelection({ messageId: clickArg, withShift: e?.shiftKey });
+      toggleMessageSelection({ messageId: props.clickArg, withShift: e?.shiftKey });
     };
-
-    const newProps = createMemo(() => {
-      const { onClick } = props;
-      return {
-        ...props,
-        isInSelectMode,
-        isSelected,
-        onClick: isInSelectMode ? undefined : onClick,
-      };
-    });
 
     return (
       <div
-        class={buildClassName('album-item-select-wrapper', isSelected && 'is-selected')}
-        onClick={isInSelectMode ? handleMessageSelect : undefined}
+        class={buildClassName('album-item-select-wrapper', props.isSelected && 'is-selected')}
+        onClick={(e) => {
+          if (props.isInSelectMode) handleMessageSelect(e);
+        }}
       >
-        {isInSelectMode && (
+        {props.isInSelectMode && (
           <div class="message-select-control">
-            {isSelected && <Icon name="check" className="message-select-control-icon" />}
+            {props.isSelected && <Icon name="check" className="message-select-control-icon" />}
           </div>
         )}
-        <WrappedComponent {...newProps} />
+        <Wrapped
+          {...(rest as PhotoProps<T> | VideoProps<T>)}
+          isInSelectMode={props.isInSelectMode}
+          isSelected={props.isSelected}
+          onClick={props.isInSelectMode ? undefined : ownProps.onClick}
+        />
       </div>
     );
   };
 
-  const mapStateToProps = (global: GlobalState, ownProps: OwnProps<unknown>) => {
-      const { clickArg, noSelectControls } = ownProps;
-      return {
-        isInSelectMode: !noSelectControls && selectIsInSelectMode(global),
-        isSelected: !noSelectControls && selectIsMessageSelected(global, clickArg),
-      };
-    };
-
-return ComponentWithSelectControl as typeof ComponentWithSelectControl;
+  return ComponentWithSelectControl;
 }
+
+const mapStateToProps = (
+  global: GlobalState,
+  ownProps: Pick<OwnProps<unknown>, 'clickArg' | 'noSelectControls'>,
+): StateProps => {
+  const { clickArg, noSelectControls } = ownProps;
+  return {
+    isInSelectMode: !noSelectControls && selectIsInSelectMode(global),
+    isSelected: !noSelectControls && selectIsMessageSelected(global, clickArg),
+  };
+};

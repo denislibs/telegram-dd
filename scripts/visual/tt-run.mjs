@@ -14,7 +14,7 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writ
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { mediaExtraFiles, mediaPatches } from './tt-media-files.mjs';
+import { mediaExtraFiles, mediaPatches, mediaTtPatches } from './tt-media-files.mjs';
 import { extraFiles, patches } from './tt-patches.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -47,6 +47,7 @@ function patchesHash() {
   return JSON.stringify([
     patches,
     mediaPatches,
+    mediaTtPatches,
     [...extraFiles, ...mediaExtraFiles].map((file) => readFileSync(join(ROOT, file)).toString('base64')),
   ]);
 }
@@ -71,7 +72,7 @@ function prepare() {
     filter: (source) => !SKIP.has(source.slice(REFERENCE.length + 1).split('/')[0]),
   });
 
-  for (const patch of [...patches, ...mediaPatches]) {
+  for (const patch of [...patches, ...mediaPatches, ...mediaTtPatches]) {
     const file = join(COPY, patch.file);
     const original = readFileSync(file, 'utf8');
     if (!original.includes(patch.find)) {

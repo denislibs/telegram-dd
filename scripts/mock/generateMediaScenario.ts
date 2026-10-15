@@ -4,7 +4,8 @@
 //
 //   user 21 "Mia Photos": 24 photos, oldest first: a 2-album, a 20000x10 "photo", a 10:1 and a 1:10 one (the aspect-ratio clamps),
 //                         a spoiler photo, singles of several ratios, three with a caption, two outgoing, and a 4-album at the bottom
-//   user 22 "Vic Videos": a clip, a GIF, a round video, a spoiler video, a video without sound and a 1.6 MB one (more than three
+//   user 1 "Saved Messages": three photos (the same photos as Mia's)
+//   user 22 "Vic Videos": a clip, a GIF, two round videos, a spoiler video, a video without sound and a 1.6 MB one (more than three
 //                         512 KB download parts), then a tail of 40 text messages so that the videos can be scrolled off screen
 //
 // A mock message is built from JSON, which cannot hold the Api classes: a message carries a plain `mediaSpec` and
@@ -88,6 +89,27 @@ for (let i = 1; i <= 40; i++) {
   });
 }
 
+// Saved Messages: three photos of Mia's chat (the same photo ids), for the e2e that opens a chat through the main menu
+// (a heavy animation) with media in it
+const SAVED = '1';
+const saved: unknown[] = [108, 110, 116].map((photoId, index) => {
+  const photo = PHOTOS.find((item) => item.id === photoId)!;
+  return {
+    id: 1 + index,
+    date: BASE_DATE - 7200 + 60 * index,
+    message: '',
+    out: true,
+    entities: [],
+    mediaSpec: {
+      kind: 'photo',
+      id: photo.id,
+      w: photo.w,
+      h: photo.h,
+      stripped: manifest.photos[photo.id].stripped,
+    },
+  };
+});
+
 const documents = [
   ...PHOTOS.map((photo) => ({ id: photo.id, url: photoAssetUrl(photo.id), mimeType: 'image/jpeg' })),
   ...VIDEOS.flatMap((video) => [
@@ -110,10 +132,11 @@ const json = {
     active: [
       { id: VIC, topMessage: lastId(vic), readInboxMaxId: lastId(vic), unreadCount: 0 },
       { id: MIA, topMessage: lastId(mia), readInboxMaxId: lastId(mia), unreadCount: 0 },
+      { id: SAVED, topMessage: lastId(saved), readInboxMaxId: lastId(saved), unreadCount: 0 },
     ],
     archived: [],
   },
-  messages: { [MIA]: mia, [VIC]: vic },
+  messages: { [MIA]: mia, [VIC]: vic, [SAVED]: saved },
   availableReactions: [],
   documents,
   dialogFilters: [],

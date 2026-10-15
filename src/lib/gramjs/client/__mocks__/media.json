@@ -32,11 +32,73 @@
         "topMessage": 25,
         "readInboxMaxId": 25,
         "unreadCount": 0
+      },
+      {
+        "id": "1",
+        "topMessage": 3,
+        "readInboxMaxId": 3,
+        "unreadCount": 0
       }
     ],
     "archived": []
   },
   "messages": {
+    "1": [
+      {
+        "id": 1,
+        "date": 1699992800,
+        "message": "",
+        "out": true,
+        "entities": [],
+        "mediaSpec": {
+          "kind": "photo",
+          "id": 108,
+          "w": 640,
+          "h": 640,
+          "stripped": {
+            "base64": "ASgo4sSy/wB4/pTuScnqaaBV0Cv2KyR6gAVdAoAq6BVAAFS4qcCpsUAcmBV0CgCroFAABVwCgCroFAABU2KnAqbFAHJgVcAqAVdFAE4FXQKgFXRQBOBU2KBUtAE=",
+            "w": 40,
+            "h": 40
+          }
+        }
+      },
+      {
+        "id": 2,
+        "date": 1699992860,
+        "message": "",
+        "out": true,
+        "entities": [],
+        "mediaSpec": {
+          "kind": "photo",
+          "id": 110,
+          "w": 960,
+          "h": 540,
+          "stripped": {
+            "base64": "ARco4sM/95vzNShashauhazP2QrBauBatBauhaBlULU22tELUu2gDnAtXQtQirooAmC1dC1CKuigCYLUu2nCpqAP",
+            "w": 40,
+            "h": 23
+          }
+        }
+      },
+      {
+        "id": 3,
+        "date": 1699992920,
+        "message": "",
+        "out": true,
+        "entities": [],
+        "mediaSpec": {
+          "kind": "photo",
+          "id": 116,
+          "w": 960,
+          "h": 540,
+          "stripped": {
+            "base64": "ARco4wNJ/eb8zVj5m6kn61KFq6Fr9YsfIFYLVwLVoLV0LTEVQtTba0QtS7aAOcC1dC1CKuigCYLV0LUIq6KAJgtS7acKmoA/",
+            "w": 40,
+            "h": 23
+          }
+        }
+      }
+    ],
     "21": [
       {
         "id": 1,
@@ -618,6 +680,28 @@
         }
       },
       {
+        "id": 7,
+        "date": 1700000420,
+        "message": "",
+        "out": false,
+        "entities": [],
+        "mediaSpec": {
+          "kind": "video",
+          "id": 207,
+          "w": 400,
+          "h": 400,
+          "duration": 2,
+          "round": true,
+          "posterW": 320,
+          "posterH": 320,
+          "stripped": {
+            "base64": "ASgo8+Aq6BQBV0Cv14+lACroFAFXAKAACpsVOBU2KAOTAq6BQBVwCgAAq6BQBV0CgAAqbFTgVNigDkgKugVAKuigCcCroFQCrooAnAqbFAqWgD8=",
+            "w": 40,
+            "h": 40
+          }
+        }
+      },
+      {
         "id": 101,
         "date": 1700003660,
         "message": "Vic message 1",
@@ -1079,6 +1163,16 @@
     {
       "id": 10206,
       "url": "media/poster-206.jpg",
+      "mimeType": "image/jpeg"
+    },
+    {
+      "id": 207,
+      "url": "media/video-207.webm",
+      "mimeType": "video/webm"
+    },
+    {
+      "id": 10207,
+      "url": "media/poster-207.jpg",
       "mimeType": "image/jpeg"
     }
   ],

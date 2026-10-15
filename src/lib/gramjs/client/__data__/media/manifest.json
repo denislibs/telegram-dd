@@ -247,6 +247,15 @@
         "w": 40,
         "h": 23
       }
+    },
+    "207": {
+      "bytes": 3973,
+      "posterBytes": 2444,
+      "stripped": {
+        "base64": "ASgo8+Aq6BQBV0Cv14+lACroFAFXAKAACpsVOBU2KAOTAq6BQBVwCgAAq6BQBV0CgAAqbFTgVNigDkgKugVAKuigCcCroFQCrooAnAqbFAqWgD8=",
+        "w": 40,
+        "h": 40
+      }
     }
   }
 }

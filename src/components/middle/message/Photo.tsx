@@ -1,13 +1,14 @@
-import { createEffect, createMemo, createMutationEffect, createSignal, previous, requestMutation } from 'frameact';
+import { createEffect, createMemo, createSignal, frameMutation, onDestroy, previous, requestMutation } from 'frameact';
+import { mergeProps } from 'frameact/dom';
 import { getActions, withGlobal } from '../../../global';
-import { createMediaTransition, createShowTransition } from '../../../lib/kit';
-import { depsOf } from '../../../util/effectDeps';
-import type { GlobalState } from '../../../global/types';
 
 import type { ApiMediaExtendedPreview, ApiPhoto } from '../../../api/types';
+import type { GlobalState } from '../../../global/types';
+import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 import type { ThemeKey } from '../../../types';
 
 import { CUSTOM_APPENDIX_ATTRIBUTE, MESSAGE_CONTENT_SELECTOR } from '../../../config';
+import { createMediaTransition, createShowTransition } from '../../../lib/kit';
 import {
   getMediaDimensions,
   getMediaFormat,
@@ -15,8 +16,11 @@ import {
   getMediaTransferState,
   getPhotoMediaHash,
 } from '../../../global/helpers';
+import { areRecordsShallowEqual } from '../../../util/areShallowEqual';
 import buildClassName from '../../../util/buildClassName';
 import buildStyle from '../../../util/buildStyle';
+import { depsOf } from '../../../util/effectDeps';
+import { clampMediaDimensions, clampNumber } from '../../common/helpers/placeholder';
 import getCustomAppendixBg from './helpers/getCustomAppendixBg';
 
 import useFlag from '../../../hooks/useFlag';
@@ -61,55 +65,84 @@ type StateProps = {
 };
 
 const Photo = <T,>(ownProps: OwnProps<T>) => {
-  const props = withGlobal(ownProps, mapStateToProps);
+  const props = withGlobal(
+    mergeProps({ size: 'inline', layout: 'intrinsic' }, ownProps) as OwnProps<T> &
+      Required<Pick<OwnProps<T>, 'size' | 'layout'>>,
+    mapStateToProps,
+  );
   let ref!: HTMLDivElement;
-  const isPaidPreview = createMemo(() => props.photo.mediaType === 'extendedMediaPreview');
-  const getMediaDimensionsResult = createMemo(() => getMediaDimensions(props.photo));
-  const width = () => getMediaDimensionsResult().width;
-  const height = () => getMediaDimensionsResult().height;
+  // `props.photo` is replaced when the views or the reactions of the message change: nothing is derived from its identity.
+  const photo = () => (props.photo.mediaType === 'photo' ? props.photo : undefined);
+  const isPaidPreview = () => props.photo.mediaType === 'extendedMediaPreview';
+  // Deviation (untrusted): the dimensions come from the server; `clampMediaDimensions` keeps them finite and bounded
+  // (a legitimate size is unchanged). The memo is compared shallowly, so a replaced `photo` of the same size wakes nobody.
+  const dimensions = createMemo(() => clampMediaDimensions(getMediaDimensions(props.photo)), {
+    equals: areRecordsShallowEqual,
+  });
+  const width = () => dimensions().width;
+  const height = () => dimensions().height;
 
-  const localBlobUrl = createMemo(() => !isPaidPreview() ? props.photo.blobUrl : undefined);
+  const localBlobUrl = () => photo()?.blobUrl;
 
-  const isIntersecting = useIsIntersecting(() => ref, () => props.observeIntersection);
+  const isIntersecting = useIsIntersecting(
+    () => ref,
+    () => props.observeIntersection,
+  );
 
+  // Deviation: `useState(canAutoLoad)` is an initial value, so `canAutoLoad` is read once, at creation, on purpose.
   const [isLoadAllowed, setIsLoadAllowed] = createSignal(props.canAutoLoad);
-  const shouldLoad = createMemo(() => isLoadAllowed() && isIntersecting && !isPaidPreview());
-  const mediaWithLoadProgressResult = createMemo(() => useMediaWithLoadProgress(
-    () => !isPaidPreview() ? getPhotoMediaHash(props.photo, (props.size === undefined ? 'inline' : props.size)) : undefined,
+  const shouldLoad = createMemo(() => Boolean(isLoadAllowed()) && isIntersecting() && !isPaidPreview());
+  const { mediaData, loadProgress } = useMediaWithLoadProgress(
+    () => {
+      const photo2 = photo();
+      return photo2 ? getPhotoMediaHash(photo2, props.size) : undefined;
+    },
     () => !shouldLoad(),
-  ));
-  const mediaData = () => mediaWithLoadProgressResult().mediaData;
-  const loadProgress = () => mediaWithLoadProgressResult().loadProgress;
-  const prevMediaData = previous(() => mediaData());
+  );
+  const prevMediaData = previous(mediaData);
   const fullMediaData = createMemo(() => localBlobUrl() || mediaData());
 
+  // Deviation: `useMediaTransition({ withShouldRender })` -> `createMediaTransition`: `shouldRender` gates the `<img>`
+  // and `fullMediaRef` is handed to it.
   const { ref: fullMediaRef, shouldRender: shouldRenderFullMedia } = createMediaTransition({
     hasMediaData: () => Boolean(fullMediaData()),
   });
 
-  const withBlurredBackground = createMemo(() => (props.layout === undefined ? 'intrinsic' : props.layout) !== 'fill' && (props.size === undefined ? 'inline' : props.size) === 'inline');
-  const [withThumb] = createSignal(!fullMediaData());
-  const noThumb = createMemo(() => Boolean(fullMediaData()));
-  const thumbRef = useBlurredMediaThumbRef(() => props.photo, () => noThumb());
-  // TODO(codemod): ref option: hand the result `ref` to the element (ref={t.ref}) instead
-  createMediaTransition({ ref: thumbRef, hasMediaData: () => !noThumb() });
-  const blurredBackgroundRef = useBlurredMediaThumbRef(() => props.photo, () => !withBlurredBackground());
-  const thumbDataUri = createMemo(() => getMediaThumbUri(props.photo));
+  const withBlurredBackground = () => props.layout !== 'fill' && props.size === 'inline';
+  // Deviation: `useState(!fullMediaData)` is an initial value: whether the thumb canvas exists is decided once, at creation.
+  const withThumb = !fullMediaData();
+  const noThumb = () => Boolean(fullMediaData());
+  const thumbRef = useBlurredMediaThumbRef(
+    () => props.photo,
+    () => noThumb(),
+  );
+  // Deviation: tt passed the canvas ref object to `useMediaTransition({ ref })`; here the transition's `ref` is applied to
+  // the canvas next to the blur hook's ref.
+  const { ref: thumbTransitionRef } = createMediaTransition({ hasMediaData: () => !noThumb() });
+  const blurredBackgroundRef = useBlurredMediaThumbRef(
+    () => props.photo,
+    () => !withBlurredBackground(),
+  );
 
   const { updateContentSettings, openAgeVerificationModal } = getActions();
   const [isNsfwModalOpen, openNsfwModal, closeNsfwModal] = useFlag();
   const [shouldAlwaysShowNsfw, setShouldAlwaysShowNsfw] = createSignal(false);
 
-  const shouldShowSpoiler = createMemo(() => isPaidPreview() || props.photo.isSpoiler || props.isMediaNsfw);
+  const shouldShowSpoiler = createMemo(() => Boolean(isPaidPreview() || photo()?.isSpoiler || props.isMediaNsfw));
+  // Deviation: `useFlag(shouldShowSpoiler)` is an initial value, read once at creation.
   const [isSpoilerShown, showSpoiler, hideSpoiler] = useFlag(shouldShowSpoiler());
 
-  createEffect(() => shouldShowSpoiler(), (shouldShowSpoiler2) => {
-    if (shouldShowSpoiler2) {
-      showSpoiler();
-    } else {
-      hideSpoiler();
-    }
-  });
+  // Runs when `shouldShowSpoiler` CHANGES, not when the message is updated: a revealed spoiler stays revealed.
+  createEffect(
+    () => shouldShowSpoiler(),
+    (shouldShowSpoiler2) => {
+      if (shouldShowSpoiler2) {
+        showSpoiler();
+      } else {
+        hideSpoiler();
+      }
+    },
+  );
 
   const handleNsfwConfirm = () => {
     closeNsfwModal();
@@ -120,26 +153,37 @@ const Photo = <T,>(ownProps: OwnProps<T>) => {
     }
   };
 
-  const mediaWithLoadProgressResult2 = createMemo(() => useMediaWithLoadProgress(
-    () => !isPaidPreview() ? getPhotoMediaHash(props.photo, 'download') : undefined,
+  const { loadProgress: downloadProgress } = useMediaWithLoadProgress(
+    () => {
+      const photo2 = photo();
+      return photo2 ? getPhotoMediaHash(photo2, 'download') : undefined;
+    },
     () => !props.isDownloading,
-    () => !isPaidPreview() ? getMediaFormat(props.photo, 'download') : undefined,
-  ));
-  const downloadProgress = () => mediaWithLoadProgressResult2().loadProgress;
+    () => {
+      const photo2 = photo();
+      return photo2 ? getMediaFormat(photo2, 'download') : undefined;
+    },
+  );
 
-  const getMediaTransferStateResult = createMemo(() => getMediaTransferState(
-    props.uploadProgress || (props.isDownloading ? downloadProgress() : loadProgress()),
-    shouldLoad() && !fullMediaData(),
-    props.uploadProgress !== undefined,
-  ));
-  const isUploading = () => getMediaTransferStateResult().isUploading;
-  const isTransferring = () => getMediaTransferStateResult().isTransferring;
-  const transferProgress = () => getMediaTransferStateResult().transferProgress;
-  const wasLoadDisabled = createMemo(() => previous(() => isLoadAllowed()) === false);
+  const transferState = createMemo(
+    () =>
+      getMediaTransferState(
+        props.uploadProgress || (props.isDownloading ? downloadProgress() : loadProgress()),
+        shouldLoad() && !fullMediaData(),
+        props.uploadProgress !== undefined,
+      ),
+    { equals: areRecordsShallowEqual },
+  );
+  const isUploading = () => transferState().isUploading;
+  const isTransferring = () => transferState().isTransferring;
+  // Deviation (untrusted): the progress is a number of the API; it is bounded to [0, 1] before it reaches the spinner and
+  // the percentage.
+  const transferProgress = () => clampNumber(transferState().transferProgress, 0, 1, 0);
+  // Deviation: tt's `usePreviousDeprecated(isLoadAllowed) === false` was read only at mount (`noMountTransition`), where the
+  // previous value is always `undefined`: it is always `false`, so the option is not set.
 
   const { ref: spinnerRef, shouldRender: shouldRenderSpinner } = createShowTransition({
     isOpen: () => isTransferring(),
-    noMountTransition: wasLoadDisabled(),
     className: 'slow',
   });
   const { ref: downloadButtonRef, shouldRender: shouldRenderDownloadButton } = createShowTransition({
@@ -147,7 +191,14 @@ const Photo = <T,>(ownProps: OwnProps<T>) => {
   });
   const { ref: transferProgressRef, shouldRender: shouldRenderTransferProgress } = createShowTransition({
     isOpen: () => isTransferring(),
-    noMountTransition: wasLoadDisabled(),
+  });
+
+  // Deviation: the spoiler overlay is created once a spoiler has been shown and then stays, so its hide animation plays;
+  // a photo that never has a spoiler creates no `MediaSpoiler` (its canvas, its transition and its effects).
+  let hadSpoiler = false;
+  const shouldRenderSpoiler = createMemo(() => {
+    hadSpoiler = hadSpoiler || isSpoilerShown();
+    return hadSpoiler;
   });
 
   const handleClick = (e: React.MouseEvent<HTMLElement>) => {
@@ -182,61 +233,121 @@ const Photo = <T,>(ownProps: OwnProps<T>) => {
     props.onClick?.(props.clickArg!, e);
   };
 
-  createMutationEffect(
-    depsOf(() => [props.shouldAffectAppendix, fullMediaData(), props.isOwn, props.isInSelectMode, props.isSelected, props.theme]), (_deps, prev) => {
-      const [prevShouldAffectAppendix] = prev ?? [];
-      if (!props.shouldAffectAppendix) {
+  // Deviation: a token of the latest run; the background of an older run (the deps changed while the worker computed it)
+  // is dropped, and so is the one of a destroyed photo.
+  let appendixRun = 0;
+  onDestroy(() => {
+    appendixRun++;
+  });
+  // Deviation: `useLayoutEffectWithPrevDeps` -> an effect on the mutate phase. It writes the DOM of the message and reads
+  // `ref`, so its first apply is booked after the element exists (`createMutationEffect` applies at creation).
+  createEffect(
+    depsOf(
+      () =>
+        [
+          props.shouldAffectAppendix,
+          fullMediaData(),
+          props.isOwn,
+          props.isInSelectMode,
+          props.isSelected,
+          props.theme,
+        ] as const,
+    ),
+    ([shouldAffectAppendix, fullMediaData2, isOwn, , isSelected, theme], prevDeps) => {
+      const run = ++appendixRun;
+      const [prevShouldAffectAppendix] = prevDeps ?? [];
+      if (!shouldAffectAppendix) {
         if (prevShouldAffectAppendix) {
-          ref!.closest<HTMLDivElement>(MESSAGE_CONTENT_SELECTOR)!.removeAttribute(CUSTOM_APPENDIX_ATTRIBUTE);
+          ref.closest<HTMLDivElement>(MESSAGE_CONTENT_SELECTOR)!.removeAttribute(CUSTOM_APPENDIX_ATTRIBUTE);
         }
         return;
       }
 
-      const contentEl = ref!.closest<HTMLDivElement>(MESSAGE_CONTENT_SELECTOR)!;
-      if (fullMediaData()) {
+      const contentEl = ref.closest<HTMLDivElement>(MESSAGE_CONTENT_SELECTOR)!;
+      if (fullMediaData2) {
         const messageId = Number(contentEl.closest<HTMLDivElement>('.Message')!.dataset.messageId);
-        getCustomAppendixBg(fullMediaData(), Boolean(props.isOwn), messageId, props.isSelected, props.theme).then((appendixBg) => {
-          requestMutation(() => {
-            contentEl.style.setProperty('--appendix-bg', appendixBg);
-            contentEl.setAttribute(CUSTOM_APPENDIX_ATTRIBUTE, '');
-          });
-        });
+        getCustomAppendixBg(fullMediaData2, Boolean(isOwn), messageId, isSelected, theme)
+          .then((appendixBg) => {
+            if (run !== appendixRun) return;
+
+            requestMutation(() => {
+              contentEl.style.setProperty('--appendix-bg', appendixBg);
+              contentEl.setAttribute(CUSTOM_APPENDIX_ATTRIBUTE, '');
+            });
+          })
+          // Deviation (untrusted): the worker rejects for an undecodable image; tt left an unhandled rejection.
+          .catch(() => undefined);
       } else {
         contentEl.classList.add('has-appendix-thumb');
       }
     },
+    frameMutation,
   );
 
-  const componentClassName = createMemo(() => buildClassName(
-    'media-inner',
-    styles.frame,
-    styles[(props.layout === undefined ? 'intrinsic' : props.layout)],
-    (props.size === undefined ? 'inline' : props.size) === 'pictogram' && styles.pictogram,
-    !isUploading() && !props.nonInteractive && 'interactive',
-    (width() === height() || (props.size === undefined ? 'inline' : props.size) === 'pictogram') && 'square-image',
-    props.className,
-  ));
+  const componentClassName = () =>
+    buildClassName(
+      'media-inner',
+      styles.frame,
+      styles[props.layout],
+      props.size === 'pictogram' && styles.pictogram,
+      !isUploading() && !props.nonInteractive && 'interactive',
+      (width() === height() || props.size === 'pictogram') && 'square-image',
+      props.className,
+    );
 
-  const style =
-    createMemo(() => (props.size === undefined ? 'inline' : props.size) === 'inline' ? buildStyle(`--media-width: ${width()}px`, `--media-aspect-ratio: ${width() / height()}`) : undefined);
+  const style = () =>
+    props.size === 'inline'
+      ? buildStyle(`--media-width: ${width()}px`, `--media-aspect-ratio: ${dimensions().aspectRatio}`)
+      : undefined;
+
+  // Deviation: `usePrevious(mediaData)` -> `previous`, which only sees the changes it is asked for: it is read first,
+  // whatever `fullMediaData()` is.
+  const imageSrc = () => {
+    const prevMediaData2 = prevMediaData();
+    return fullMediaData() || prevMediaData2;
+  };
 
   return (
-    <div id={props.id} ref={ref} class={componentClassName()} style={style()} onClick={isUploading() ? undefined : handleClick}>
+    <div
+      id={props.id}
+      ref={ref}
+      class={componentClassName()}
+      style={style()}
+      // Deviation: a handler is bound once, so `isUploading` is checked at the click.
+      onClick={(e) => {
+        if (!isUploading()) handleClick(e);
+      }}
+    >
       {withBlurredBackground() && <canvas ref={blurredBackgroundRef} class="thumbnail blurred-bg" />}
       {shouldRenderFullMedia() && (
+        // Deviation: `decoding="async"` keeps the decode of the full photo off the main thread.
         <img
           ref={fullMediaRef}
-          src={fullMediaData() || prevMediaData()}
+          src={imageSrc()}
           class="full-media"
           alt=""
-          draggable={!props.isProtected}
+          decoding="async"
+          draggable={props.isProtected ? 'false' : 'true'}
         />
       )}
-      {withThumb() && <canvas ref={thumbRef} class="thumbnail" />}
+      {withThumb && (
+        <canvas
+          ref={(el) => {
+            thumbRef(el);
+            thumbTransitionRef(el);
+          }}
+          class="thumbnail"
+        />
+      )}
       {props.isProtected && <span class="protector" />}
       {shouldRenderSpinner() && !shouldRenderDownloadButton() && (
         <div ref={spinnerRef} class={buildClassName('media-loading', styles.loading)}>
-          <ProgressSpinner progress={transferProgress()} onClick={isUploading() ? handleClick : undefined} />
+          <ProgressSpinner
+            progress={transferProgress()}
+            onClick={(e) => {
+              if (isUploading()) handleClick(e);
+            }}
+          />
         </div>
       )}
       {shouldRenderDownloadButton() && (
@@ -246,38 +357,43 @@ const Photo = <T,>(ownProps: OwnProps<T>) => {
           className={buildClassName(styles.controlButton, styles.downloadButton)}
         />
       )}
-      <MediaSpoiler
-        isVisible={isSpoilerShown()}
-        withAnimation={props.noSpoilerReveal ? undefined : true}
-        thumbDataUri={thumbDataUri()}
-        width={width()}
-        height={height()}
-        className="media-spoiler"
-        isNsfw={props.isMediaNsfw}
-      />
+      {shouldRenderSpoiler() && (
+        <MediaSpoiler
+          isVisible={isSpoilerShown()}
+          withAnimation={props.noSpoilerReveal ? undefined : true}
+          thumbDataUri={getMediaThumbUri(props.photo)}
+          width={width()}
+          height={height()}
+          className="media-spoiler"
+          isNsfw={props.isMediaNsfw}
+        />
+      )}
       {shouldRenderTransferProgress() && (
         <MediaBadge ref={transferProgressRef} className="message-transfer-progress">
           {`${Math.round(transferProgress() * 100)}%`}
         </MediaBadge>
       )}
-      <SensitiveContentConfirmModal
-        isOpen={isNsfwModalOpen()}
-        onClose={closeNsfwModal}
-        shouldAlwaysShow={shouldAlwaysShowNsfw()}
-        onAlwaysShowChanged={setShouldAlwaysShowNsfw}
-        confirmHandler={handleNsfwConfirm}
-      />
+      {/* Deviation: the modal exists only for a sensitive photo (perf: a dialog and a state mapper per photo otherwise). */}
+      {props.isMediaNsfw && (
+        <SensitiveContentConfirmModal
+          isOpen={isNsfwModalOpen()}
+          onClose={closeNsfwModal}
+          shouldAlwaysShow={shouldAlwaysShowNsfw()}
+          onAlwaysShowChanged={setShouldAlwaysShowNsfw}
+          confirmHandler={handleNsfwConfirm}
+        />
+      )}
     </div>
   );
 };
 
 const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
-    const appConfig = global.appConfig;
-    const needsAgeVerification = appConfig.needAgeVideoVerification;
+  const appConfig = global.appConfig;
+  const needsAgeVerification = appConfig.needAgeVideoVerification;
 
-    return {
-      needsAgeVerification,
-    };
+  return {
+    needsAgeVerification,
   };
+};
 
 export default Photo;

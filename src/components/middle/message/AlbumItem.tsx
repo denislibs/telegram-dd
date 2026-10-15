@@ -14,26 +14,25 @@ type OwnProps = {
   className?: string;
 };
 
-// TODO(codemod): props pattern not rewritten: nested pattern for "item"
-const AlbumItem = ({ item: { rect, sides }, children, className }: OwnProps) => {
+const AlbumItem = (props: OwnProps) => {
   return (
     <div
       class={buildClassName(
         styles.root,
-        !(sides & AlbumRectPart.Left) && styles.withLeftGap,
-        !(sides & AlbumRectPart.Top) && styles.withTopGap,
-        !(sides & AlbumRectPart.Right) && styles.withRightGap,
-        !(sides & AlbumRectPart.Bottom) && styles.withBottomGap,
-        className,
+        !(props.item.sides & AlbumRectPart.Left) && styles.withLeftGap,
+        !(props.item.sides & AlbumRectPart.Top) && styles.withTopGap,
+        !(props.item.sides & AlbumRectPart.Right) && styles.withRightGap,
+        !(props.item.sides & AlbumRectPart.Bottom) && styles.withBottomGap,
+        props.className,
       )}
       style={buildStyle(
-        `left: ${rect.x * 100}%`,
-        `top: ${rect.y * 100}%`,
-        `width: ${rect.width * 100}%`,
-        `height: ${rect.height * 100}%`,
+        `left: ${props.item.rect.x * 100}%`,
+        `top: ${props.item.rect.y * 100}%`,
+        `width: ${props.item.rect.width * 100}%`,
+        `height: ${props.item.rect.height * 100}%`,
       )}
     >
-      {children}
+      {props.children}
     </div>
   );
 };

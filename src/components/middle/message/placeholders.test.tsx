@@ -6,14 +6,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type {
   ApiKeyboardButton,
-  ApiMediaExtendedPreview,
   ApiMediaTodo,
   ApiMessage,
   ApiMessagePoll,
-  ApiPhoto,
-  ApiVideo,
 } from '../../../api/types';
-import type { IAlbum } from '../../../types';
 
 import { container, useDomHarness } from '../../../lib/kit/testing/dom';
 import {
@@ -28,7 +24,6 @@ import {
 import Audio from '../../common/Audio';
 import Document from '../../common/Document';
 import MessageRichText from '../../common/MessageRichText';
-import Album from './Album';
 import CommentButton from './CommentButton';
 import Contact from './Contact';
 import DiceWrapper from './dice/DiceWrapper';
@@ -42,24 +37,13 @@ import Location from './Location';
 import MessageEffect from './MessageEffect';
 import MessagePhoneCall from './MessagePhoneCall';
 import PaidMediaOverlay from './PaidMediaOverlay';
-import Photo from './Photo';
 import Poll from './poll/Poll';
-import RoundVideo from './RoundVideo';
 import Story from './Story';
 import StoryMention from './StoryMention';
 import TodoList from './TodoList';
-import Video from './Video';
 import WebPage from './WebPage';
 
 const HOSTILE_NUMBERS = [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -5, 0, 1e308, -1e308, 1e-300];
-
-function photo(width: number, height: number): ApiPhoto {
-  return { mediaType: 'photo', id: '1', date: 1, sizes: [{ type: 'x', width, height }] };
-}
-
-function video(width?: number, height?: number): ApiVideo {
-  return { mediaType: 'video', id: '2', mimeType: 'video/mp4', duration: 3, fileName: 'a.mp4', width, height };
-}
 
 function message(content: ApiMessage['content']): ApiMessage {
   return { id: 1, chatId: '100', date: 1, isOutgoing: false, content };
@@ -132,157 +116,6 @@ describe('FOUNDATION STUB placeholders', () => {
     await harness.frame();
     return el;
   }
-
-  it('Photo: a media frame with the dimensions of the photo and a label', async () => {
-    const el = await mount(() => <Photo photo={photo(800, 600)} theme="light" />);
-
-    const frame = el.firstElementChild as HTMLElement;
-    expect(frame.classList.contains('media-inner')).toBe(true);
-    expect(frame.className).toMatch(/frame/);
-    expect(frame.className).toMatch(/intrinsic/);
-    expect(frame.getAttribute('role')).toBe('img');
-    expect(frame.getAttribute('aria-label')).toBe('Photo, not supported yet');
-    expect(frame.getAttribute('style')).toContain('--media-width: 800px');
-    expect(frame.getAttribute('style')).toContain(`--media-aspect-ratio: ${800 / 600}`);
-    expectInert(el);
-  });
-
-  it('Photo: a square photo is marked, the fill layout and the class name are kept', async () => {
-    const el = await mount(() => (
-      <Photo photo={photo(300, 300)} theme="light" layout="fill" className="extra" id="p1" />
-    ));
-
-    const frame = el.firstElementChild as HTMLElement;
-    expect(frame.classList.contains('square-image')).toBe(true);
-    expect(frame.classList.contains('extra')).toBe(true);
-    expect(frame.className).toMatch(/fill/);
-    expect(frame.id).toBe('p1');
-  });
-
-  it('Photo: a pictogram has no inline size', async () => {
-    const el = await mount(() => <Photo photo={photo(800, 600)} theme="light" size="pictogram" />);
-
-    const frame = el.firstElementChild as HTMLElement;
-    expect(frame.className).toMatch(/pictogram/);
-    expect(frame.getAttribute('style') ?? '').not.toContain('--media-width');
-  });
-
-  it('Photo and Video: hostile dimensions give a bounded box', async () => {
-    const hostile = [
-      [1e308, 1e-300],
-      [1e-300, 1e308],
-      [Number.NaN, 5],
-      [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY],
-      [-1, -1],
-      [0, 0],
-    ];
-    for (const [width, height] of hostile) {
-      const photoEl = await mount(() => <Photo photo={photo(width, height)} theme="light" />);
-      const photoFrame = photoEl.firstElementChild as HTMLElement;
-      expectFiniteStyle(photoFrame);
-      const photoWidth = Number(/--media-width: ([\d.]+)px/.exec(photoFrame.getAttribute('style')!)?.[1]);
-      expect(photoWidth).toBeGreaterThan(0);
-      expect(photoWidth).toBeLessThanOrEqual(PLACEHOLDER_MAX_MEDIA_PX);
-      const ratio = Number(/--media-aspect-ratio: ([\d.]+)/.exec(photoFrame.getAttribute('style')!)?.[1]);
-      expect(ratio).toBeGreaterThanOrEqual(PLACEHOLDER_MIN_ASPECT_RATIO);
-      expect(ratio).toBeLessThanOrEqual(PLACEHOLDER_MAX_ASPECT_RATIO);
-
-      dispose?.();
-      const videoEl = await mount(() => <Video video={video(width, height)} />);
-      expectFiniteStyle(videoEl.firstElementChild as HTMLElement);
-      dispose?.();
-      dispose = undefined;
-      document.body.textContent = '';
-    }
-  });
-
-  it('Video: a media frame in the dark style with the dimensions of the video', async () => {
-    const el = await mount(() => <Video video={video(1280, 720)} className="extra" />);
-
-    const frame = el.firstElementChild as HTMLElement;
-    expect(frame.classList.contains('media-inner')).toBe(true);
-    expect(frame.classList.contains('dark')).toBe(true);
-    expect(frame.classList.contains('extra')).toBe(true);
-    expect(frame.getAttribute('aria-label')).toBe('Video, not supported yet');
-    expect(frame.getAttribute('style')).toContain('--media-width: 1280px');
-    expectInert(el);
-  });
-
-  it('Video: a paid media preview is sized by its dimensions, a missing size by the fallback', async () => {
-    const preview: ApiMediaExtendedPreview = {
-      mediaType: 'extendedMediaPreview',
-      width: 400,
-      height: 200,
-      duration: 1e12,
-    };
-    const el = await mount(() => <Video video={preview} />);
-    expect((el.firstElementChild as HTMLElement).getAttribute('style')).toContain('--media-width: 400px');
-    expectFiniteStyle(el.firstElementChild as HTMLElement);
-
-    dispose?.();
-    const noSize = await mount(() => <Video video={video()} />);
-    const style = (noSize.firstElementChild as HTMLElement).getAttribute('style')!;
-    expectFiniteStyle(noSize.firstElementChild as HTMLElement);
-    expect(style).toContain('--media-width');
-  });
-
-  it('RoundVideo: the round video element of tt, inert', async () => {
-    const el = await mount(() => <RoundVideo message={message({ video: video(240, 240) })} className="extra" />);
-
-    const root = el.firstElementChild as HTMLElement;
-    expect(root.classList.contains('RoundVideo')).toBe(true);
-    expect(root.classList.contains('media-inner')).toBe(true);
-    expect(root.classList.contains('extra')).toBe(true);
-    expect(root.getAttribute('aria-label')).toBe('Round video, not supported yet');
-    expectInert(el);
-  });
-
-  it('Album: an aspect ratio from the layout of the items', async () => {
-    const photoMessage = (id: number, width: number, height: number): ApiMessage => ({
-      ...message({ photo: photo(width, height) }),
-      id,
-    });
-    const messages = [photoMessage(1, 800, 600), photoMessage(2, 800, 600)];
-    const album: IAlbum = { albumId: 'a', messages, mainMessage: messages[0], hasMultipleCaptions: false };
-    const el = await mount(() => (
-      <Album album={album} observeIntersection={() => () => {}} isOwn onMediaClick={() => {}} />
-    ));
-
-    const root = el.firstElementChild as HTMLElement;
-    expect(root.classList.contains('Album')).toBe(true);
-    expect(root.getAttribute('aria-label')).toBe('Album, not supported yet');
-    const ratio = Number(/--album-aspect-ratio: ([\d.]+)/.exec(root.getAttribute('style')!)?.[1]);
-    expect(ratio).toBeGreaterThan(PLACEHOLDER_MIN_ASPECT_RATIO / 10);
-    expect(Number.isFinite(ratio)).toBe(true);
-    expectInert(el);
-  });
-
-  it('Album: hostile items and a huge list give a finite aspect ratio', async () => {
-    const messages: ApiMessage[] = Array.from({ length: 300 }, (_, index) => ({
-      ...message({ photo: photo(index % 2 ? 1e308 : Number.NaN, index % 3 ? 1e-300 : -1) }),
-      id: index + 1,
-    }));
-    const album: IAlbum = { albumId: 'a', messages, mainMessage: messages[0], hasMultipleCaptions: false };
-    const el = await mount(() => (
-      <Album album={album} observeIntersection={() => () => {}} isOwn onMediaClick={() => {}} />
-    ));
-
-    const root = el.firstElementChild as HTMLElement;
-    expectFiniteStyle(root);
-    const ratio = Number(/--album-aspect-ratio: ([\d.]+)/.exec(root.getAttribute('style')!)?.[1]);
-    expect(Number.isFinite(ratio)).toBe(true);
-    expect(ratio).toBeGreaterThan(0);
-  });
-
-  it('Album: an album without media has a square placeholder', async () => {
-    const empty = message({});
-    const album: IAlbum = { albumId: 'a', messages: [empty], mainMessage: empty, hasMultipleCaptions: false };
-    const el = await mount(() => (
-      <Album album={album} observeIntersection={() => () => {}} isOwn onMediaClick={() => {}} />
-    ));
-
-    expect((el.firstElementChild as HTMLElement).getAttribute('style')).toContain('--album-aspect-ratio: 1');
-  });
 
   it('PaidMediaOverlay: wraps its children, without a button or a click handler', async () => {
     const el = await mount(() => (
@@ -475,10 +308,6 @@ describe('FOUNDATION STUB placeholders', () => {
 
   it('keeps the FOUNDATION STUB marker on the first line of every placeholder file', () => {
     const files = [
-      'middle/message/Photo',
-      'middle/message/Video',
-      'middle/message/RoundVideo',
-      'middle/message/Album',
       'middle/message/Contact',
       'middle/message/Location',
       'middle/message/Game',

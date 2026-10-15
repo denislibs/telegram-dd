@@ -28,6 +28,24 @@ export const mediaExtraFiles = [
   ...assetFiles,
 ];
 
+// Patches of the tt COPY only (the same change is made natively in our tree): see the Deviation in src/util/launchMediaWorkers.ts
+export const mediaTtPatches = [
+  {
+    name: 'requestMediaWorker starts the media workers in test mode',
+    file: 'src/util/launchMediaWorkers.ts',
+    find: `export default function launchMediaWorkers() {
+  if (IS_TEST) return [];`,
+    replace: `export default function launchMediaWorkers(isForced = false) {
+  if (IS_TEST && !isForced) return [];`,
+  },
+  {
+    name: 'requestMediaWorker forces the media workers',
+    file: 'src/util/launchMediaWorkers.ts',
+    find: 'return launchMediaWorkers()[index]',
+    replace: 'return launchMediaWorkers(true)[index]',
+  },
+];
+
 export const mediaPatches = [
   {
     name: 'MockClient bundles the media scenario middleware',
@@ -52,5 +70,17 @@ export const mediaPatches = [
     find: "const sizeTypes: SizeType[] = ['u', 'v', 'w', 'y', 'd', 'x', 'c', 'm', 'b', 'a', 's', 'f'];",
     replace: `const sizeTypes: SizeType[] = ['u', 'v', 'w', 'y', 'd', 'x', 'c', 'm', 'b', 'a', 's', 'f'];
 const mediaAssets: Record<string, () => Promise<unknown>> = import.meta.glob('./__data__/media/*', { query: '?url' });`,
+  },
+  {
+    // The downloader (`downloadFile.ts`) awaits `client.getSender(...)`, which is a promise in the real client; the mock returned
+    // the sender itself, so `.then` was not a function and no file could be downloaded (the default scenarios never download one).
+    name: 'MockClient.getSender returns a promise',
+    file: `${CLIENT}/MockClient.ts`,
+    find: `  public getSender() {
+    return new MockSender(this);
+  }`,
+    replace: `  public getSender() {
+    return Promise.resolve(new MockSender(this));
+  }`,
   },
 ];
