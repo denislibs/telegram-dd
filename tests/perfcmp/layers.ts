@@ -72,7 +72,7 @@ try {
       for (const h of hits) props.set(h, (props.get(h) ?? 0) + 1);
       if (hits.length) {
         const k = `${el.tagName.toLowerCase()}.${String(
-          (el as HTMLElement).className?.baseVal ?? (el as HTMLElement).className,
+          (el.className as unknown as { baseVal?: string }).baseVal ?? el.className,
         )
           .split(' ')
           .filter((c) => c && !/^[A-Za-z0-9_-]{8}$/.test(c))

@@ -182,7 +182,7 @@ function traceCounts(events: TraceEvent[], from: string, to: string) {
     } else if (event.name === 'Paint') {
       out.paints++;
       out.paintMs += event.dur! / 1000;
-    } else if (category === 'script' && !stack.some((outer) => categorize(outer.name) === 'script')) {
+    } else if (category === 'script' && !openEvents.some((outer) => categorize(outer.name) === 'script')) {
       out.scriptMs += event.dur! / 1000;
     }
     openEvents.push(event);

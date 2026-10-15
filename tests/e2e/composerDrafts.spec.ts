@@ -96,11 +96,11 @@ test.describe('a chat switch while a heavy animation runs', () => {
   // The main-menu "Saved Messages" item and the hotkeys switch without `forceOnHeavyAnimation`, so the switch lands while a
   // root heavy animation (a closing menu, a scroll animation) holds back the effects that a store write dirtied.
   async function beginHeavyAnimation(page: Page) {
-    await page.evaluate(async () => {
-      const engine = await import(/* @vite-ignore */ '/src/vendor/frameact/src/index.ts');
+    await page.evaluate(async (engineUrl) => {
+      const engine = await import(/* @vite-ignore */ engineUrl);
       (window as unknown as { __endHeavyAnimation: () => void }).__endHeavyAnimation =
         engine.beginHeavyAnimation(Infinity);
-    });
+    }, '/src/vendor/frameact/src/index.ts');
   }
 
   const endHeavyAnimation = (page: Page) =>
