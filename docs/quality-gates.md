@@ -342,7 +342,15 @@ cycles (measured: 15-25 KB per cycle on both apps up to cycle ~60, none after; t
 the same cycle on dev builds). The heap is read after **1.5 s of idle** (`settleMs` of `expectNoLeak`): right after a cycle the open chat is
 still settling (debounced scroll offset, observer reports, ripples) and the state is worth ~2 MB, so without the idle a measurement that caught
 the baseline and the final heap in different states failed about one run in three under load with no growth in between (idle: 184-190 KB and
-313-333 KB over 50 cycles, 3 runs of each). A long task gate: opening the 300-message chat and scrolling its history to the first message under 4x CPU
+313-333 KB over 50 cycles, 3 runs of each).
+What the heap size cannot tell is a _linear retention_ from the code V8 compiles and from what the browser history keeps: opening a chat
+pushes a history record (`useHistoryBack`, `historyState` is never trimmed: about 1 KB per open, in telegram-tt too: the same logic, the
+chat-list report saw the history growth in tt as well), which is why the 512 KB limit has the room it has. `expectNoLeak` therefore also
+takes `maxNodeGrowth` and `maxListenerGrowth`: the growth of the DOM node count and of the JS event listener count
+(`Memory.getDOMCounters`, after the forced GC and the idle) over the runs. A message list that stays in memory after its chat is closed is
+~8000 nodes per open (measured), a retained chat is a linear growth in them, and compiled code, closures and history records are not
+in the counter. The message list gates allow 400 nodes and 60 listeners over 50 runs; a deliberate DOM leak in `perf.spec.ts` proves that the
+counter fails where a generous heap limit does not. A long task gate: opening the 300-message chat and scrolling its history to the first message under 4x CPU
 throttling, capped at telegram-tt's worst task of `perf:compare --scenario open-chat` plus 3% (204 ms). The production build has no mock
 request middleware (a `@vite-ignore` dynamic import is not bundled), so these runs get the whole chat for every history request.
 

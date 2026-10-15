@@ -30,7 +30,16 @@ async function openChat(page: Page, name: string) {
 // The heap is measured after 1.5 s of idle (`settleMs`): right after a cycle the state of the open chat (a debounced scroll
 // offset, pending observer reports, ripples) is still settling and is worth about 2 MB, so a measurement could catch the
 // baseline and the final heap in different states (a flake of 1 run in 3 under load, with no growth in between).
-const LEAK = { runs: 50, maxGrowthKb: 512, warmupRuns: 70, settleMs: 1500 } as const;
+const LEAK = {
+  runs: 50,
+  maxGrowthKb: 512,
+  warmupRuns: 70,
+  settleMs: 1500,
+  // a chat that stays in memory after it is closed is about 8000 nodes (a message list of 60 bubbles): the counter tells it from
+  // the code V8 compiles and from the history records, which the heap size cannot
+  maxNodeGrowth: 400,
+  maxListenerGrowth: 60,
+} as const;
 
 test.describe('message list: leaks', () => {
   test.describe.configure({ timeout: 400_000 });
@@ -52,7 +61,7 @@ test.describe('message list: leaks', () => {
     const result = await expectNoLeak(page, cycle, LEAK);
     test.info().annotations.push({
       type: 'heap',
-      description: `${result.growthKb.toFixed(0)} KB over ${LEAK.runs} open/close cycles`,
+      description: `${result.growthKb.toFixed(0)} KB, ${result.nodeGrowth} nodes, ${result.listenerGrowth} listeners over ${LEAK.runs} open/close cycles`,
     });
   });
 
@@ -69,7 +78,7 @@ test.describe('message list: leaks', () => {
     const result = await expectNoLeak(page, cycle, LEAK);
     test.info().annotations.push({
       type: 'heap',
-      description: `${result.growthKb.toFixed(0)} KB over ${LEAK.runs} chat switches`,
+      description: `${result.growthKb.toFixed(0)} KB, ${result.nodeGrowth} nodes, ${result.listenerGrowth} listeners over ${LEAK.runs} chat switches`,
     });
   });
 });
