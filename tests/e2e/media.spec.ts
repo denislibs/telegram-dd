@@ -4,6 +4,7 @@
 // The gates remove `navigator.serviceWorker` (tests/e2e/fixtures.ts), so every media loads as a blob URL: the streaming path has
 // its own spec, progressive.spec.ts.
 import type { Page } from '@playwright/test';
+import { statSync } from 'node:fs';
 
 import { calculateAlbumLayout } from '../../src/components/middle/message/helpers/calculateAlbumLayout';
 import { expect, test } from './fixtures';
@@ -261,5 +262,250 @@ test.describe('albums', () => {
 
     await album.locator('.media-inner').nth(2).click();
     await expect.poll(() => tabState(page, 'mediaViewer', 'messageId')).toBe(ALBUM4[2]);
+  });
+});
+
+test.describe('videos', () => {
+  const VIDEO = 1;
+  const GIF = 2;
+  const ROUND = 3;
+  const BIG = 6;
+  const ROUND_2 = 7;
+  const playing = (page: Page, id: number) =>
+    message(page, id)
+      .locator('video')
+      .first()
+      .evaluate((video: HTMLVideoElement) => !video.paused && !video.ended);
+  const time = (page: Page, id: number) =>
+    message(page, id)
+      .locator('video')
+      .first()
+      .evaluate((video: HTMLVideoElement) => video.currentTime);
+
+  test('an autoplay video plays while it is on screen, pauses when it is scrolled away and plays again when it is back', async ({
+    page,
+  }) => {
+    await openVic(page);
+    await scrollListTo(page, 'top');
+    await settle(page);
+
+    await expect.poll(() => playing(page, VIDEO)).toBe(true);
+    const t0 = await time(page, VIDEO);
+    await expect.poll(() => time(page, VIDEO)).not.toBe(t0);
+
+    // scrolled away (the 40 text messages are below): the video is removed from the playing set at once
+    await scrollListTo(page, 'bottom');
+    await expect.poll(() => playing(page, VIDEO), { timeout: 2000 }).toBe(false);
+    // (the element is still there or gone: either way nothing plays off screen)
+    await expect
+      .poll(() =>
+        page
+          .locator(`${LIST} video`)
+          .evaluateAll((videos: HTMLVideoElement[]) => videos.filter((v) => !v.paused).length),
+      )
+      .toBe(0);
+
+    await scrollListTo(page, 'top');
+    await expect.poll(() => playing(page, VIDEO)).toBe(true);
+  });
+
+  test('a GIF autoplays with the GIF badge and the video has its duration badge', async ({ page }) => {
+    await openVic(page);
+    await scrollListTo(page, 'top');
+    await settle(page);
+
+    await expect(message(page, GIF).locator('.message-media-duration')).toHaveText('GIF');
+    await expect.poll(() => playing(page, GIF)).toBe(true);
+    await expect(message(page, VIDEO).locator('.message-media-duration')).toContainText(/0:0[0-2]/);
+  });
+
+  test('the box of a video is the declared size before and after it loads', async ({ page }) => {
+    await openVic(page);
+    await scrollListTo(page, 'top');
+    await settle(page);
+    const frame = message(page, VIDEO).locator('.media-inner');
+    await expect(frame.locator('video')).toBeVisible();
+    const box = await frame.evaluate((el: HTMLElement) => ({
+      ratio: Number(el.style.getPropertyValue('--media-aspect-ratio')),
+      rect: el.getBoundingClientRect().toJSON(),
+    }));
+    expect(box.ratio).toBeCloseTo(640 / 360, 3);
+    expect(box.rect.width / box.rect.height).toBeCloseTo(640 / 360, 1);
+  });
+
+  test('a big video (more than three download parts) loads whole through the chunked GetFile', async ({ page }) => {
+    await openVic(page);
+    await scrollListTo(page, 'top');
+    await settle(page);
+    await message(page, BIG).scrollIntoViewIfNeeded();
+    const video = message(page, BIG).locator('video');
+    await expect.poll(() => video.evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThanOrEqual(3);
+    const { size, duration, width } = await video.evaluate(async (el: HTMLVideoElement) => ({
+      size: (await (await fetch(el.currentSrc)).blob()).size,
+      duration: el.duration,
+      width: el.videoWidth,
+    }));
+    expect(size).toBe(statSync('src/lib/gramjs/client/__data__/media/video-206.webm').size);
+    expect(duration).toBeCloseTo(3, 0);
+    expect(width).toBe(640);
+  });
+
+  test('with autoplay off a video shows the play button and does not play', async ({ page }) => {
+    await openScenario(page, 'media', 3);
+    await page.evaluate(() => {
+      (window as unknown as TestWindow).getActions().updatePerformanceSettings({ autoplayVideos: false });
+    });
+    await openChat(page, VIC);
+    await scrollListTo(page, 'top');
+    await settle(page);
+
+    const frame = message(page, VIDEO).locator('.media-inner');
+    await expect(frame.locator('video')).toBeVisible();
+    await expect(frame.locator('.icon-play')).toBeVisible();
+    await page.waitForTimeout(500);
+    expect(await playing(page, VIDEO)).toBe(false);
+  });
+
+  test('leaving the chat releases every video element', async ({ page }) => {
+    await openVic(page);
+    await scrollListTo(page, 'top');
+    await settle(page);
+    await expect.poll(() => page.locator('video').count()).toBeGreaterThan(0);
+
+    await page.keyboard.press('Escape');
+    await page.locator(LIST).waitFor({ state: 'detached' });
+    await expect.poll(() => page.locator('video').count()).toBe(0);
+  });
+
+  test('a click on a video opens the media viewer (tab state) for that message', async ({ page }) => {
+    await openVic(page);
+    await scrollListTo(page, 'top');
+    await settle(page);
+    await message(page, VIDEO).locator('.media-inner').click();
+    await expect.poll(() => tabState(page, 'mediaViewer', 'messageId')).toBe(VIDEO);
+  });
+  // Stopping a round video pauses a video whose own `play()` is still settling; tt's `safePlay` logs that AbortError (DEBUG builds).
+  test.describe('round videos', () => {
+    test.use({
+      strictOptions: { ignoreConsole: [...MOCK_NOISE, /The play\(\) request was interrupted by a call to pause\(\)/] },
+    });
+
+    test('a round video plays with sound on click and starting another one stops the first', async ({ page }) => {
+      await openVic(page);
+      await scrollListTo(page, 'top');
+      await settle(page);
+
+      const roundVideo = (id: number) => message(page, id).locator('.RoundVideo');
+      await roundVideo(ROUND).scrollIntoViewIfNeeded();
+      await expect(roundVideo(ROUND).locator('video')).toBeVisible();
+      const state = (id: number) =>
+        roundVideo(id)
+          .locator('video')
+          .evaluate((video: HTMLVideoElement) => ({ paused: video.paused, muted: video.muted }));
+
+      await roundVideo(ROUND).click();
+      await expect.poll(() => state(ROUND)).toEqual({ paused: false, muted: false });
+
+      await roundVideo(ROUND_2).scrollIntoViewIfNeeded();
+      await roundVideo(ROUND_2).click();
+      await expect.poll(() => state(ROUND_2)).toEqual({ paused: false, muted: false });
+      await expect.poll(async () => (await state(ROUND)).muted).toBe(true);
+    });
+  });
+});
+
+test.describe('downloads', () => {
+  test('a download goes through the DownloadManager: the file is saved under the sanitised name', async ({ page }) => {
+    await openVic(page);
+
+    const download = page.waitForEvent('download');
+    await page.evaluate(() => {
+      const { getGlobal, getActions } = window as unknown as TestWindow;
+      const global = getGlobal();
+      const originMessage = global.messages.byChatId['22'].byId[5];
+      const media = { ...originMessage.content.video, fileName: 'evil‮exe.txt' };
+      getActions().downloadMedia({ media, originMessage });
+    });
+    const file = await download;
+    // the bidi override that would make `evil` + `txt.exe` out of the name is gone
+    expect(file.suggestedFilename()).toBe('evilexe.txt');
+    const path = await file.path();
+    expect(path).toBeTruthy();
+    expect(statSync(path).size).toBe(statSync('src/lib/gramjs/client/__data__/media/video-205.webm').size);
+    // the record is removed from the tab state when the manager is done with it
+    await expect
+      .poll(() => tabState(page, 'activeDownloads').then((record) => Object.keys(record as object).length))
+      .toBe(0);
+  });
+});
+
+test.describe('the message list around media', () => {
+  test('a photo that arrives while the list is scrolled up keeps the anchor', async ({ page }) => {
+    await openMia(page);
+    await page.mouse.move(800, 400);
+    await page.mouse.wheel(0, -900);
+    await settle(page);
+
+    const anchor = () =>
+      page.evaluate(() => {
+        const list = document.querySelector('#MiddleColumn .MessageList') as HTMLElement;
+        const top = list.getBoundingClientRect().top;
+        const item = [...list.querySelectorAll<HTMLElement>('.message-list-item')].find(
+          (el) => el.getBoundingClientRect().bottom > top + 40,
+        )!;
+        return { id: item.dataset.messageId, top: Math.round(item.getBoundingClientRect().top - top) };
+      });
+    const before = await anchor();
+
+    await page.evaluate(() => {
+      (window as unknown as TestWindow).getActions().apiUpdate({
+        '@type': 'newMessage',
+        chatId: '21',
+        id: 500,
+        message: {
+          id: 500,
+          chatId: '21',
+          date: Math.floor(Date.now() / 1000),
+          isOutgoing: false,
+          senderId: '21',
+          content: {
+            photo: { mediaType: 'photo', id: '101', date: 1, sizes: [{ type: 'x', width: 800, height: 600 }] },
+          },
+        },
+      });
+    });
+    await expect(page.locator(`${LIST} #message-500`)).toHaveCount(1);
+    await settle(page);
+
+    expect(await anchor()).toEqual(before);
+  });
+
+  // R5 of the plan: the load of a photo is a state machine over several effects (allowed, intersecting, fetch, resolved); it must
+  // not park under a heavy animation. The left column slide (the main menu -> Settings) is one; the chat is opened while it runs.
+  // (Saved Messages itself cannot be opened through the menu under the mock: it has no `currentUserId`.)
+  test('a chat opened during a heavy animation (the left column slide) loads its photos', async ({ page }) => {
+    await openScenario(page, 'media', 3);
+    await page.locator('#LeftMainHeader .DropdownMenu button').first().click();
+    await page.getByRole('menuitem', { name: 'Settings' }).click();
+
+    // the slide starts when the menu has closed
+    await page.waitForFunction(() => document.querySelector('#LeftColumn .Transition_slide-from'), undefined, {
+      polling: 'raf',
+    });
+    const sliding = await page.evaluate(() => {
+      (window as unknown as TestWindow).getActions().openChat({ id: '1' });
+      return document.querySelectorAll('#LeftColumn .Transition_slide-from, #LeftColumn .Transition_slide-to').length;
+    });
+    expect(sliding, 'the left column is sliding when the chat is opened').toBeGreaterThan(0);
+
+    await expect(page.locator('#MiddleColumn .MiddleHeader')).toContainText(/Saved ?Messages/);
+    await expect(page.locator(`${LIST} img.full-media`)).toHaveCount(3);
+    await expect
+      .poll(() =>
+        page
+          .locator(`${LIST} img.full-media`)
+          .evaluateAll((images: HTMLImageElement[]) => images.every((img) => img.naturalWidth > 0)),
+      )
+      .toBe(true);
   });
 });
