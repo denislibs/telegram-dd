@@ -1,26 +1,24 @@
-import { useEffect, useState } from '../../../../lib/teact/teact';
+import { createEffect, createMemo, createSignal, requestMeasure, requestNextMutation } from 'frameact';
 import { getActions } from '../../../../global';
+import { depsOf } from '../../../../util/effectDeps';
 
 import type { ApiDraft, ApiInputRichMessage, ApiMessage } from '../../../../api/types';
 import type { EditingDraft, MessageListType, ThreadId } from '../../../../types';
 import { ApiMessageEntityTypes } from '../../../../api/types';
 
 import { EDITABLE_INPUT_CSS_SELECTOR } from '../../../../config';
-import { requestMeasure, requestNextMutation } from '../../../../lib/fasterdom/fasterdom';
 import { hasMessageMedia } from '../../../../global/helpers';
 import focusEditableElement from '../../../../util/focusEditableElement';
 import { buildRichMessageFromFormatted, getRichInputAsFormatted } from '../../../ui/textInput/richText';
 
 import { useDebouncedResolver } from '../../../../hooks/useAsyncResolvers';
-import useDerivedSignal from '../../../../hooks/useDerivedSignal';
-import useEffectWithPrevDeps from '../../../../hooks/useEffectWithPrevDeps';
-import useLastCallback from '../../../../hooks/useLastCallback';
 import useBackgroundMode from '../../../../hooks/window/useBackgroundMode';
 import useBeforeUnload from '../../../../hooks/window/useBeforeUnload';
 
 const URL_ENTITIES = new Set<string>([ApiMessageEntityTypes.TextUrl, ApiMessageEntityTypes.Url]);
 const DEBOUNCE_MS = 300;
 
+// TODO(codemod): useEditing: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 const useEditing = (
   richMessage: ApiInputRichMessage | undefined,
   replaceRichMessage: (richMessage?: ApiInputRichMessage) => void,
@@ -34,12 +32,14 @@ const useEditing = (
   editingDraft?: EditingDraft,
 ): [VoidFunction, VoidFunction, boolean] => {
   const { editMessage, setEditingDraft, toggleMessageWebPage, openDeleteMessageModal } = getActions();
-  const [shouldForceShowEditing, setShouldForceShowEditing] = useState(false);
+  const [shouldForceShowEditing, setShouldForceShowEditing] = createSignal(false);
 
   const replyingToId = draft?.replyInfo?.replyToMsgId;
 
-  useEffectWithPrevDeps(
-    ([prevEditedMessage, prevReplyingToId]) => {
+  createEffect(
+    depsOf(() => [editedMessage, replyingToId, editingDraft, replaceRichMessage]),
+    (_deps, prev) => {
+      const [prevEditedMessage, prevReplyingToId] = prev ?? [];
       if (!editedMessage) {
         return;
       }
@@ -72,39 +72,39 @@ const useEditing = (
         }
       });
     },
-    [editedMessage, replyingToId, editingDraft, replaceRichMessage],
   );
 
-  useEffect(() => {
-    if (!editedMessage) {
-      return;
-    }
+  createEffect(
+    depsOf(() => [chatId, threadId, editedMessage]),
+    () => {
+      if (!editedMessage) {
+        return;
+      }
 
-    const shouldSetNoWebPage =
-      !('webPage' in editedMessage.content) &&
-      editedMessage.content.text?.entities?.some((entity) => URL_ENTITIES.has(entity.type));
+      const shouldSetNoWebPage =
+        !('webPage' in editedMessage.content) &&
+        editedMessage.content.text?.entities?.some((entity) => URL_ENTITIES.has(entity.type));
 
-    toggleMessageWebPage({
-      chatId,
-      threadId,
-      noWebPage: shouldSetNoWebPage,
-    });
-  }, [chatId, threadId, editedMessage]);
-
-  const saveEditingDraft = useLastCallback(
-    (scopedChatId: string, scopedThreadId: ThreadId, scopedType: MessageListType) => {
-      setEditingDraft({
-        chatId: scopedChatId,
-        threadId: scopedThreadId,
-        type: scopedType,
-        draft: buildEditingDraft(richMessage),
+      toggleMessageWebPage({
+        chatId,
+        threadId,
+        noWebPage: shouldSetNoWebPage,
       });
     },
   );
 
-  useEffect(
+  const saveEditingDraft = (scopedChatId: string, scopedThreadId: ThreadId, scopedType: MessageListType) => {
+    setEditingDraft({
+      chatId: scopedChatId,
+      threadId: scopedThreadId,
+      type: scopedType,
+      draft: buildEditingDraft(richMessage),
+    });
+  };
+
+  createEffect(
+    depsOf(() => [chatId, editedMessage, threadId, type]),
     () => (editedMessage ? () => saveEditingDraft(chatId, threadId, type) : undefined),
-    [chatId, editedMessage, threadId, type],
   );
 
   const detectLinkDebounced = useDebouncedResolver(
@@ -123,19 +123,17 @@ const useEditing = (
     true,
   );
 
-  const getShouldResetNoWebPageDebounced = useDerivedSignal(
-    detectLinkDebounced,
-    [detectLinkDebounced, richMessage],
-    true,
-  );
+  const getShouldResetNoWebPageDebounced = createMemo(detectLinkDebounced);
 
-  useEffectWithPrevDeps(
-    ([prevEditedMessage]) => {
+  createEffect(
+    depsOf(() => [editedMessage, chatId, threadId, getShouldResetNoWebPageDebounced()]),
+    (_deps, prev) => {
+      const [prevEditedMessage] = prev ?? [];
       if (!editedMessage || prevEditedMessage?.id !== editedMessage.id) {
         return;
       }
 
-      if (getShouldResetNoWebPageDebounced()) {
+      if (getShouldResetNoWebPageDebounced()()) {
         toggleMessageWebPage({
           chatId,
           threadId,
@@ -143,10 +141,9 @@ const useEditing = (
         });
       }
     },
-    [editedMessage, chatId, threadId, getShouldResetNoWebPageDebounced],
   );
 
-  const restoreNewDraftAfterEditing = useLastCallback(() => {
+  const restoreNewDraftAfterEditing = () => {
     if (!draft) return;
 
     // Run one frame after editing draft reset
@@ -161,15 +158,15 @@ const useEditing = (
         }
       });
     });
-  });
+  };
 
-  const handleEditCancel = useLastCallback(() => {
+  const handleEditCancel = () => {
     resetComposer(false, true);
     setEditingDraft({ chatId, threadId, type, draft: undefined });
     restoreNewDraftAfterEditing();
-  });
+  };
 
-  const handleEditComplete = useLastCallback(() => {
+  const handleEditComplete = () => {
     const { text, entities } = richMessage ? getRichInputAsFormatted(richMessage) || { text: '' } : { text: '' };
 
     if (!editedMessage) {
@@ -198,9 +195,9 @@ const useEditing = (
     resetComposer(false, true);
     setEditingDraft({ chatId, threadId, type, draft: undefined });
     restoreNewDraftAfterEditing();
-  });
+  };
 
-  const handleBlur = useLastCallback(() => {
+  const handleBlur = () => {
     if (!editedMessage) return;
 
     setEditingDraft({
@@ -209,7 +206,7 @@ const useEditing = (
       type,
       draft: buildEditingDraft(richMessage),
     });
-  });
+  };
 
   useBackgroundMode(handleBlur);
   useBeforeUnload(handleBlur);

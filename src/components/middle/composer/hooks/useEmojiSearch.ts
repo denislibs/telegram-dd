@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from '../../../../lib/teact/teact';
+import { createEffect, createMemo, createSignal, onMount } from 'frameact';
 import { getActions, getGlobal } from '../../../../global';
+import { depsOf } from '../../../../util/effectDeps';
 
 import type { ApiEmojiGroup, ApiSticker, ApiStickerSet } from '../../../../api/types';
 
@@ -12,7 +13,6 @@ import searchWords from '../../../../util/searchWords';
 import { callApi } from '../../../../api/gramjs';
 
 import useFlag from '../../../../hooks/useFlag';
-import useLastCallback from '../../../../hooks/useLastCallback';
 
 type EmojiQueryResults = {
   key: string;
@@ -32,6 +32,7 @@ const EMOJI_SEARCH_LIMIT = 40;
 const SEARCH_THROTTLE = 500;
 const VARIATION_SELECTOR = '\uFE0F';
 
+// TODO(codemod): useEmojiSearch: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useEmojiSearch({
   allEmojis,
   baseEmojiKeywords,
@@ -49,149 +50,158 @@ export default function useEmojiSearch({
   noNativeResults?: boolean;
   noQueryCustomResults?: boolean;
 }) {
-  const [query, setQuery] = useState('');
-  const [activeGroup, setActiveGroup] = useState<ApiEmojiGroup | undefined>();
+  const [query, setQuery] = createSignal('');
+  const [activeGroup, setActiveGroup] = createSignal<ApiEmojiGroup | undefined>(undefined);
   const [isFocused, markFocused, unmarkFocused] = useFlag();
-  const [loadedEmojis, setLoadedEmojis] = useState<Record<string, Emoji> | undefined>();
-  const [queryResults, setQueryResults] = useState<EmojiQueryResults | undefined>();
-  const [groupResults, setGroupResults] = useState<GroupResults | undefined>();
+  const [loadedEmojis, setLoadedEmojis] = createSignal<Record<string, Emoji> | undefined>(undefined);
+  const [queryResults, setQueryResults] = createSignal<EmojiQueryResults | undefined>(undefined);
+  const [groupResults, setGroupResults] = createSignal<GroupResults | undefined>(undefined);
 
-  const searchIntentRef = useRef<string | undefined>();
-  const activeGroupTitleRef = useRef<string | undefined>();
-  const loadingMoreIntentRef = useRef<string | undefined>();
-  const runThrottledSearchRef = useRef<(cb: NoneToVoidFunction) => void>();
-  runThrottledSearchRef.current ??= throttle((cb: NoneToVoidFunction) => cb(), SEARCH_THROTTLE, false);
+  let searchIntentRef: string | undefined;
+  let activeGroupTitleRef: string | undefined;
+  let loadingMoreIntentRef: string | undefined;
+  let runThrottledSearchRef: (cb: NoneToVoidFunction) => void | undefined;
+  runThrottledSearchRef ??= throttle((cb: NoneToVoidFunction) => cb(), SEARCH_THROTTLE, false);
 
-  const effectiveEmojis = allEmojis || loadedEmojis;
+  const effectiveEmojis = createMemo(() => allEmojis || loadedEmojis());
 
-  const preparedQuery = query.trim().toLowerCase();
-  const hasQuery = Boolean(preparedQuery);
-  const isSearchActive = isFocused || hasQuery || Boolean(activeGroup);
+  const preparedQuery = createMemo(() => query().trim().toLowerCase());
+  const hasQuery = createMemo(() => Boolean(preparedQuery()));
+  const isSearchActive = createMemo(() => isFocused() || hasQuery() || Boolean(activeGroup()));
 
-  useEffect(() => {
-    if (!isSearchActive || effectiveEmojis) {
+  onMount(() => {
+    if (!isSearchActive() || effectiveEmojis()) {
       return;
     }
 
     ensureEmojiData()
       .then((data) => setLoadedEmojis(data.emojis))
       .catch(() => undefined);
-  }, [isSearchActive, effectiveEmojis]);
+  });
 
-  const isGroupLoading = Boolean(activeGroup) && !isLocalOnly && groupResults?.groupTitle !== activeGroup.title;
-  const displayResultsRef = useRef<{ group: ApiEmojiGroup; customIds?: string[] } | undefined>();
-  if (!activeGroup) {
-    displayResultsRef.current = undefined;
-  } else if (!isGroupLoading) {
-    displayResultsRef.current = {
-      group: activeGroup,
-      customIds: !isLocalOnly ? groupResults?.customEmojiIds : undefined,
+  const isGroupLoading = createMemo(
+    () => Boolean(activeGroup()) && !isLocalOnly && groupResults()?.groupTitle !== activeGroup().title,
+  );
+  let displayResultsRef: { group: ApiEmojiGroup; customIds?: string[] } | undefined;
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (!activeGroup()) {
+    displayResultsRef = undefined;
+  } else if (!isGroupLoading()) {
+    displayResultsRef = {
+      group: activeGroup(),
+      customIds: !isLocalOnly ? groupResults()?.customEmojiIds : undefined,
     };
   }
-  const displayGroup = displayResultsRef.current?.group;
+  const displayGroup = displayResultsRef?.group;
 
-  const isShowingResults = hasQuery || Boolean(displayGroup);
+  const isShowingResults = createMemo(() => hasQuery() || Boolean(displayGroup));
 
-  const emojisByNative = useMemo(() => {
-    return effectiveEmojis && buildCollectionByKey(Object.values(effectiveEmojis), 'native');
-  }, [effectiveEmojis]);
+  const emojisByNative = createMemo(() => {
+    return effectiveEmojis() && buildCollectionByKey(Object.values(effectiveEmojis()), 'native');
+  });
 
-  const matchedNatives = useMemo(() => {
-    if (!effectiveEmojis) {
+  const matchedNatives = createMemo(() => {
+    if (!effectiveEmojis()) {
       return undefined;
     }
 
-    if (preparedQuery) {
-      const library = prepareEmojiLibraryMemo(effectiveEmojis, baseEmojiKeywords, emojiKeywords);
-      return searchEmojiLibraryMemo(library, preparedQuery, EMOJI_SEARCH_LIMIT);
+    if (preparedQuery()) {
+      const library = prepareEmojiLibraryMemo(effectiveEmojis(), baseEmojiKeywords, emojiKeywords);
+      return searchEmojiLibraryMemo(library, preparedQuery(), EMOJI_SEARCH_LIMIT);
     }
 
-    if (displayGroup && emojisByNative) {
+    if (displayGroup && emojisByNative()) {
       return displayGroup.emoticons
-        .map((emoticon) => emojisByNative[emoticon] || emojisByNative[emoticon.replace(VARIATION_SELECTOR, '')])
+        .map((emoticon) => emojisByNative()[emoticon] || emojisByNative()[emoticon.replace(VARIATION_SELECTOR, '')])
         .filter(Boolean);
     }
 
     return undefined;
-  }, [displayGroup, effectiveEmojis, baseEmojiKeywords, emojiKeywords, emojisByNative, preparedQuery]);
+  });
 
-  const emoticon = useMemo(
-    () => (hasQuery ? matchedNatives?.map((emoji) => emoji.native).join('') : undefined),
-    [hasQuery, matchedNatives],
+  const emoticon = createMemo(() =>
+    hasQuery()
+      ? matchedNatives()
+          ?.map((emoji) => emoji.native)
+          .join('')
+      : undefined,
   );
 
-  useEffect(() => {
-    if (isLocalOnly) {
-      return;
-    }
-
-    if (!preparedQuery) {
-      searchIntentRef.current = undefined;
-      setQueryResults(undefined);
-      return;
-    }
-
-    const intent = `${preparedQuery}\u0000${emoticon || ''}`;
-    searchIntentRef.current = intent;
-
-    runThrottledSearchRef.current!(async () => {
-      if (searchIntentRef.current !== intent) {
+  createEffect(
+    depsOf(() => [isLocalOnly, preparedQuery(), emoticon()] as const),
+    ([, , emoticon2]) => {
+      if (isLocalOnly) {
         return;
       }
 
-      const langCode = selectSharedSettings(getGlobal()).language;
-      const [setsResult, globalResult] = await Promise.all([
-        callApi('searchEmojiStickerSets', { query: preparedQuery }),
-        callApi('searchStickersGlobal', {
-          query: preparedQuery,
-          emoticon,
-          langCode,
-          isEmoji: true,
-        }),
-      ]);
-
-      if (searchIntentRef.current !== intent) {
+      if (!preparedQuery()) {
+        searchIntentRef = undefined;
+        setQueryResults(undefined);
         return;
       }
 
-      const packSets = setsResult ? [...setsResult.sets] : [];
-      const packIdsSet = new Set(packSets.map(({ id }) => id));
-      const global = getGlobal();
-      global.customEmojis.added.setIds?.forEach((id) => {
-        if (packIdsSet.has(id)) {
+      const intent = `${preparedQuery()}\u0000${emoticon2 || ''}`;
+      searchIntentRef = intent;
+
+      runThrottledSearchRef!(async () => {
+        if (searchIntentRef !== intent) {
           return;
         }
 
-        const addedSet = global.stickers.setsById[id];
-        if (addedSet?.title && searchWords(addedSet.title, preparedQuery)) {
-          packSets.unshift(addedSet);
+        const langCode = selectSharedSettings(getGlobal()).language;
+        const [setsResult, globalResult] = await Promise.all([
+          callApi('searchEmojiStickerSets', { query: preparedQuery() }),
+          callApi('searchStickersGlobal', {
+            query: preparedQuery(),
+            emoticon: emoticon2,
+            langCode,
+            isEmoji: true,
+          }),
+        ]);
+
+        if (searchIntentRef !== intent) {
+          return;
         }
-      });
 
-      setQueryResults({
-        key: preparedQuery,
-        intent,
-        emoticon,
-        packSets,
-        globalStickers: globalResult?.stickers || [],
-        globalNextOffset: globalResult?.nextOffset,
-      });
-    });
-  }, [isLocalOnly, preparedQuery, emoticon]);
+        const packSets = setsResult ? [...setsResult.sets] : [];
+        const packIdsSet = new Set(packSets.map(({ id }) => id));
+        const global = getGlobal();
+        global.customEmojis.added.setIds?.forEach((id) => {
+          if (packIdsSet.has(id)) {
+            return;
+          }
 
-  const searchMore = useLastCallback(() => {
-    const results = queryResults;
+          const addedSet = global.stickers.setsById[id];
+          if (addedSet?.title && searchWords(addedSet.title, preparedQuery())) {
+            packSets.unshift(addedSet);
+          }
+        });
+
+        setQueryResults({
+          key: preparedQuery(),
+          intent,
+          emoticon: emoticon2,
+          packSets,
+          globalStickers: globalResult?.stickers || [],
+          globalNextOffset: globalResult?.nextOffset,
+        });
+      });
+    },
+  );
+
+  const searchMore = () => {
+    const results = queryResults();
     if (
       isLocalOnly ||
       !results ||
-      results.intent !== searchIntentRef.current ||
+      results.intent !== searchIntentRef ||
       results.globalNextOffset === undefined ||
-      loadingMoreIntentRef.current === results.intent
+      loadingMoreIntentRef === results.intent
     ) {
       return;
     }
 
-    loadingMoreIntentRef.current = results.intent;
+    loadingMoreIntentRef = results.intent;
 
     void (async () => {
       try {
@@ -224,15 +234,15 @@ export default function useEmojiSearch({
           };
         });
       } finally {
-        if (loadingMoreIntentRef.current === results.intent) {
-          loadingMoreIntentRef.current = undefined;
+        if (loadingMoreIntentRef === results.intent) {
+          loadingMoreIntentRef = undefined;
         }
       }
     })();
-  });
+  };
 
-  const customResults = useMemo(() => {
-    const searchedNatives = preparedQuery ? matchedNatives?.map((emoji) => emoji.native) : displayGroup?.emoticons;
+  const customResults = createMemo(() => {
+    const searchedNatives = preparedQuery() ? matchedNatives()?.map((emoji) => emoji.native) : displayGroup?.emoticons;
     if (!searchedNatives?.length) {
       return undefined;
     }
@@ -245,20 +255,21 @@ export default function useEmojiSearch({
       );
     }
 
-    if (preparedQuery && noQueryCustomResults) {
+    if (preparedQuery() && noQueryCustomResults) {
       return undefined;
     }
 
+    // TODO(codemod): getGlobal() in a memo / JSX is a one-time read: use useGlobal() (store contract §12.4)
     return uniqueByField(selectCustomEmojiForEmojis(getGlobal(), searchedNatives), 'id');
-  }, [displayGroup, isLocalOnly, localStickers, matchedNatives, noQueryCustomResults, preparedQuery]);
+  });
 
-  const customResultIds = !hasQuery && !isLocalOnly ? displayResultsRef.current?.customIds : undefined;
+  const customResultIds = createMemo(() => (!hasQuery() && !isLocalOnly ? displayResultsRef?.customIds : undefined));
 
-  const nativeResults = noNativeResults ? undefined : matchedNatives;
+  const nativeResults = createMemo(() => (noNativeResults ? undefined : matchedNatives()));
 
-  const selectGroup = useLastCallback((group?: ApiEmojiGroup) => {
+  const selectGroup = (group?: ApiEmojiGroup) => {
     setActiveGroup(group);
-    activeGroupTitleRef.current = group?.title;
+    activeGroupTitleRef = group?.title;
 
     if (isLocalOnly || !group) {
       return;
@@ -266,7 +277,7 @@ export default function useEmojiSearch({
 
     void (async () => {
       const result = await callApi('searchCustomEmojiByEmoticons', { emoticons: group.emoticons });
-      if (activeGroupTitleRef.current !== group.title) {
+      if (activeGroupTitleRef !== group.title) {
         return;
       }
 
@@ -277,26 +288,26 @@ export default function useEmojiSearch({
         getActions().loadCustomEmojis({ ids: customEmojiIds });
       }
     })();
-  });
+  };
 
-  const handleQueryChange = useLastCallback((value: string) => {
+  const handleQueryChange = (value: string) => {
     setQuery(value);
 
-    if (value.trim() && activeGroup) {
+    if (value.trim() && activeGroup()) {
       selectGroup(undefined);
     }
-  });
+  };
 
   return {
     query,
-    hasQuery,
+    hasQuery: hasQuery(),
     activeGroup,
     displayGroup,
-    isSearchActive,
-    isShowingResults,
-    nativeResults,
+    isSearchActive: isSearchActive(),
+    isShowingResults: isShowingResults(),
+    nativeResults: nativeResults(),
     customResults,
-    customResultIds,
+    customResultIds: customResultIds(),
     queryResults,
     setQuery: handleQueryChange,
     selectGroup,

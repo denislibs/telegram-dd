@@ -1,5 +1,6 @@
-import { useEffect } from '../../../../lib/teact/teact';
+import { createEffect } from 'frameact';
 import { getActions } from '../../../../global';
+import { depsOf } from '../../../../util/effectDeps';
 
 import type { ApiAttachment, ApiFormattedText, ApiMessage } from '../../../../api/types';
 import type { RichEditorMediaFilesHandler } from '../richEditorTypes';
@@ -17,6 +18,7 @@ const CLOSEST_CONTENT_EDITABLE_SELECTOR = 'div[contenteditable]';
 
 type ClipboardFilePasteTarget = 'attachmentModal' | 'richMedia' | 'none';
 
+// TODO(codemod): useClipboardPaste: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 const useClipboardPaste = (
   isActive: boolean,
   insertTextAndUpdateCursor: (text: ApiFormattedText) => void,
@@ -31,122 +33,125 @@ const useClipboardPaste = (
   const { showNotification, updateShouldSaveAttachmentsCompression, applyDefaultAttachmentsCompression } = getActions();
   const lang = useLang();
 
-  useEffect(() => {
-    if (!isActive) {
-      return undefined;
-    }
-
-    async function handlePaste(e: ClipboardEvent) {
-      if (!e.clipboardData) {
-        return;
+  createEffect(
+    depsOf(() => [
+      insertTextAndUpdateCursor,
+      editedMessage,
+      setAttachments,
+      isActive,
+      lang,
+      resolveFilePasteTarget,
+      shouldUpdateAttachmentCompression,
+      shouldSkipFilePaste,
+      onRichMediaFiles,
+      getRichMediaPosition,
+    ]),
+    () => {
+      if (!isActive) {
+        return undefined;
       }
 
-      const input = (e.target as HTMLElement)?.closest(CLOSEST_CONTENT_EDITABLE_SELECTOR);
-      if (!input || !VALID_TARGET_IDS.has(input.id)) {
-        return;
-      }
+      async function handlePaste(e: ClipboardEvent) {
+        if (!e.clipboardData) {
+          return;
+        }
 
-      // Some extensions can trigger paste into their panels without focus
-      if (document.activeElement !== input) {
-        return;
-      }
+        const input = (e.target as HTMLElement)?.closest(CLOSEST_CONTENT_EDITABLE_SELECTOR);
+        if (!input || !VALID_TARGET_IDS.has(input.id)) {
+          return;
+        }
 
-      const { items } = e.clipboardData;
-      const hasFiles = Array.from(items).some((item) => item.kind === 'file');
-      if (!hasFiles) {
-        return;
-      }
+        // Some extensions can trigger paste into their panels without focus
+        if (document.activeElement !== input) {
+          return;
+        }
 
-      const filePasteTarget = resolveFilePasteTarget();
-      const richMediaPosition = filePasteTarget === 'richMedia' ? getRichMediaPosition?.() : undefined;
-      e.preventDefault();
-      if (filePasteTarget === 'none') {
-        return;
-      }
+        const { items } = e.clipboardData;
+        const hasFiles = Array.from(items).some((item) => item.kind === 'file');
+        if (!hasFiles) {
+          return;
+        }
 
-      let files = await getFilesFromDataTransferItems(items);
-      if (!files?.length) {
-        return;
-      }
+        const filePasteTarget = resolveFilePasteTarget();
+        const richMediaPosition = filePasteTarget === 'richMedia' ? getRichMediaPosition?.() : undefined;
+        e.preventDefault();
+        if (filePasteTarget === 'none') {
+          return;
+        }
 
-      if (filePasteTarget === 'richMedia') {
-        onRichMediaFiles?.(files, richMediaPosition);
-        return;
-      }
+        let files = await getFilesFromDataTransferItems(items);
+        if (!files?.length) {
+          return;
+        }
 
-      if (editedMessage) {
-        files = files.slice(0, 1);
-      }
+        if (filePasteTarget === 'richMedia') {
+          onRichMediaFiles?.(files, richMediaPosition);
+          return;
+        }
 
-      const pastedText = e.clipboardData.getData('text');
-      const textToPaste: ApiFormattedText | undefined = pastedText ? { text: pastedText } : undefined;
-      const hasText = textToPaste && textToPaste.text;
-      let shouldSetAttachments = files?.length && !shouldSkipFilePaste;
+        if (editedMessage) {
+          files = files.slice(0, 1);
+        }
 
-      const newAttachments = files ? await Promise.all(files.map((file) => buildAttachment(file.name, file))) : [];
-      const canReplace =
-        (editedMessage && newAttachments?.length && canReplaceMessageMedia(editedMessage, newAttachments[0])) ||
-        Boolean(hasText);
-      const isUploadingDocumentSticker = isUploadingFileSticker(newAttachments[0]);
-      const isInAlbum = editedMessage && editedMessage?.groupedId;
+        const pastedText = e.clipboardData.getData('text');
+        const textToPaste: ApiFormattedText | undefined = pastedText ? { text: pastedText } : undefined;
+        const hasText = textToPaste && textToPaste.text;
+        let shouldSetAttachments = files?.length && !shouldSkipFilePaste;
 
-      if (editedMessage && newAttachments?.length > 1) {
-        newAttachments.forEach((attachment) => revokeAttachmentUrls(attachment));
-        showNotification({
-          message: lang('MediaReplaceInvalidError', undefined, { pluralValue: newAttachments.length }),
-        });
-        return;
-      }
+        const newAttachments = files ? await Promise.all(files.map((file) => buildAttachment(file.name, file))) : [];
+        const canReplace =
+          (editedMessage && newAttachments?.length && canReplaceMessageMedia(editedMessage, newAttachments[0])) ||
+          Boolean(hasText);
+        const isUploadingDocumentSticker = isUploadingFileSticker(newAttachments[0]);
+        const isInAlbum = editedMessage && editedMessage?.groupedId;
 
-      if (editedMessage && isUploadingDocumentSticker) {
-        newAttachments.forEach((attachment) => revokeAttachmentUrls(attachment));
-        showNotification({ message: lang('MediaReplaceInvalidError', undefined, { pluralValue: 1 }) });
-        return;
-      }
-
-      if (isInAlbum) {
-        shouldSetAttachments = canReplace;
-        if (!shouldSetAttachments) {
+        if (editedMessage && newAttachments?.length > 1) {
           newAttachments.forEach((attachment) => revokeAttachmentUrls(attachment));
           showNotification({
             message: lang('MediaReplaceInvalidError', undefined, { pluralValue: newAttachments.length }),
           });
           return;
         }
-      }
 
-      if (shouldSetAttachments) {
-        if (shouldUpdateAttachmentCompression) {
-          updateShouldSaveAttachmentsCompression({ shouldSave: true });
-          applyDefaultAttachmentsCompression();
+        if (editedMessage && isUploadingDocumentSticker) {
+          newAttachments.forEach((attachment) => revokeAttachmentUrls(attachment));
+          showNotification({ message: lang('MediaReplaceInvalidError', undefined, { pluralValue: 1 }) });
+          return;
         }
-        setAttachments(editedMessage ? newAttachments : (attachments) => attachments.concat(newAttachments));
-      } else {
-        newAttachments.forEach((attachment) => revokeAttachmentUrls(attachment));
+
+        if (isInAlbum) {
+          shouldSetAttachments = canReplace;
+          if (!shouldSetAttachments) {
+            newAttachments.forEach((attachment) => revokeAttachmentUrls(attachment));
+            showNotification({
+              message: lang('MediaReplaceInvalidError', undefined, { pluralValue: newAttachments.length }),
+            });
+            return;
+          }
+        }
+
+        if (shouldSetAttachments) {
+          if (shouldUpdateAttachmentCompression) {
+            updateShouldSaveAttachmentsCompression({ shouldSave: true });
+            applyDefaultAttachmentsCompression();
+          }
+          setAttachments(editedMessage ? newAttachments : (attachments) => attachments.concat(newAttachments));
+        } else {
+          newAttachments.forEach((attachment) => revokeAttachmentUrls(attachment));
+        }
+
+        if (hasText) {
+          insertTextAndUpdateCursor(textToPaste);
+        }
       }
 
-      if (hasText) {
-        insertTextAndUpdateCursor(textToPaste);
-      }
-    }
+      document.addEventListener('paste', handlePaste, true);
 
-    document.addEventListener('paste', handlePaste, true);
-
-    return () => {
-      document.removeEventListener('paste', handlePaste, true);
-    };
-  }, [
-    insertTextAndUpdateCursor,
-    editedMessage,
-    setAttachments,
-    isActive,
-    lang,
-    resolveFilePasteTarget,
-    shouldUpdateAttachmentCompression,
-    shouldSkipFilePaste,
-    onRichMediaFiles,
-    getRichMediaPosition,
-  ]);
+      return () => {
+        document.removeEventListener('paste', handlePaste, true);
+      };
+    },
+  );
 };
 
 export default useClipboardPaste;

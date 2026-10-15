@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from '../../../../lib/teact/teact';
+import { createEffect, createMemo, createSignal } from 'frameact';
 import { getActions, getGlobal } from '../../../../global';
+import { depsOf } from '../../../../util/effectDeps';
 
 import { PAID_MESSAGES_PURPOSE } from '../../../../config';
 import { selectTabState } from '../../../../global/selectors';
 
-import useLastCallback from '../../../../hooks/useLastCallback';
-
+// TODO(codemod): usePaidMessageConfirmation: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function usePaidMessageConfirmation(
   dialogKey: string,
   starsForAllMessages: number,
@@ -13,36 +13,43 @@ export default function usePaidMessageConfirmation(
   starsBalance: number,
   shouldDelayConfirmHandler?: boolean,
 ) {
-  const { shouldPaidMessageAutoApprove } = getGlobal().settings.byKey;
+  const source = createMemo(() => getGlobal().settings.byKey);
+  const shouldPaidMessageAutoApprove = () => source().shouldPaidMessageAutoApprove;
 
-  const [shouldAutoApprove, setShouldAutoApprove] = useState(Boolean(shouldPaidMessageAutoApprove));
-  const [isWaitingStarsTopup, setIsWaitingStarsTopup] = useState(false);
-  const confirmPaymentHandlerRef = useRef<NoneToVoidFunction | undefined>(undefined);
+  const [shouldAutoApprove, setShouldAutoApprove] = createSignal(Boolean(shouldPaidMessageAutoApprove()));
+  const [isWaitingStarsTopup, setIsWaitingStarsTopup] = createSignal(false);
+  let confirmPaymentHandlerRef: NoneToVoidFunction | undefined;
 
-  const closeConfirmDialog = useLastCallback(() => {
+  const closeConfirmDialog = () => {
     getActions().closePaymentMessageConfirmDialogOpen();
-  });
+  };
 
-  useEffect(() => {
-    return () => {
-      const { paymentMessageConfirmDialogKey } = selectTabState(getGlobal());
-      if (paymentMessageConfirmDialogKey === dialogKey) {
-        getActions().closePaymentMessageConfirmDialogOpen();
+  createEffect(
+    () => dialogKey,
+    () => {
+      return () => {
+        const { paymentMessageConfirmDialogKey } = selectTabState(getGlobal());
+        if (paymentMessageConfirmDialogKey === dialogKey) {
+          getActions().closePaymentMessageConfirmDialogOpen();
+        }
+      };
+    },
+  );
+
+  createEffect(
+    depsOf(() => [isWaitingStarsTopup(), isStarsBalanceModeOpen, starsBalance, starsForAllMessages] as const),
+    ([isWaitingStarsTopup2]) => {
+      if (isWaitingStarsTopup2 && !isStarsBalanceModeOpen) {
+        setIsWaitingStarsTopup(false);
+
+        if (starsBalance > starsForAllMessages) {
+          confirmPaymentHandlerRef?.();
+        }
       }
-    };
-  }, [dialogKey]);
+    },
+  );
 
-  useEffect(() => {
-    if (isWaitingStarsTopup && !isStarsBalanceModeOpen) {
-      setIsWaitingStarsTopup(false);
-
-      if (starsBalance > starsForAllMessages) {
-        confirmPaymentHandlerRef?.current?.();
-      }
-    }
-  }, [isWaitingStarsTopup, isStarsBalanceModeOpen, starsBalance, starsForAllMessages]);
-
-  const handleStarsTopup = useLastCallback(() => {
+  const handleStarsTopup = () => {
     getActions().openStarsBalanceModal({
       topup: {
         balanceNeeded: starsForAllMessages,
@@ -50,41 +57,39 @@ export default function usePaidMessageConfirmation(
       },
     });
     setIsWaitingStarsTopup(true);
-  });
+  };
 
-  const dialogHandler = useLastCallback(() => {
+  const dialogHandler = () => {
     if (starsForAllMessages > starsBalance) {
       handleStarsTopup();
     } else if (shouldDelayConfirmHandler) {
       setTimeout(() => {
-        confirmPaymentHandlerRef?.current?.();
+        confirmPaymentHandlerRef?.();
       }, 250);
     } else {
-      confirmPaymentHandlerRef?.current?.();
+      confirmPaymentHandlerRef?.();
     }
 
     getActions().closePaymentMessageConfirmDialogOpen();
-    if (shouldAutoApprove) getActions().setPaidMessageAutoApprove();
-  });
+    if (shouldAutoApprove()) getActions().setPaidMessageAutoApprove();
+  };
 
-  const handleWithConfirmation = useLastCallback(
-    <T extends (...args: any[]) => void>(handler: T, ...args: Parameters<T>) => {
-      if (starsForAllMessages) {
-        confirmPaymentHandlerRef.current = () => handler(...args);
-        if (!shouldPaidMessageAutoApprove) {
-          getActions().openPaymentMessageConfirmDialogOpen({ dialogKey });
-          return;
-        }
-
-        if (starsForAllMessages > starsBalance) {
-          handleStarsTopup();
-          return;
-        }
+  const handleWithConfirmation = <T extends (...args: any[]) => void>(handler: T, ...args: Parameters<T>) => {
+    if (starsForAllMessages) {
+      confirmPaymentHandlerRef = () => handler(...args);
+      if (!shouldPaidMessageAutoApprove()) {
+        getActions().openPaymentMessageConfirmDialogOpen({ dialogKey });
+        return;
       }
 
-      handler(...args);
-    },
-  );
+      if (starsForAllMessages > starsBalance) {
+        handleStarsTopup();
+        return;
+      }
+    }
+
+    handler(...args);
+  };
 
   return {
     closeConfirmDialog,

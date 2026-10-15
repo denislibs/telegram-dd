@@ -1,6 +1,7 @@
 import type { Editor } from '@tiptap/core';
 import { NodeSelection } from '@tiptap/pm/state';
-import { memo, useEffect, useState } from '../../../lib/teact/teact';
+import { createEffect, createMemo, createSignal } from 'frameact';
+import { depsOf } from '../../../util/effectDeps';
 
 import type { RichEditorListState, RichHeadingLevel, RichListType, RichOrderedListType } from './helpers/richEditor';
 
@@ -22,7 +23,6 @@ import {
 
 import useFlag from '../../../hooks/useFlag';
 import useLang from '../../../hooks/useLang';
-import useLastCallback from '../../../hooks/useLastCallback';
 
 import Button from '../../ui/Button';
 import DropdownMenu from '../../ui/DropdownMenu';
@@ -98,7 +98,7 @@ const LIST_INSERT_OPTIONS = [
     isChecklist: true,
   },
 ] as const;
-const LIST_TYPE_OPTIONS = LIST_INSERT_OPTIONS.filter(({ isChecklist }) => !isChecklist);
+const LIST_TYPE_OPTIONS = LIST_INSERT_OPTIONS.filter((props) => !props.isChecklist);
 const EMPTY_BLOCK_EQUATION_CONTENT = buildEquationContent(MATH_BLOCK_NODE_NAME, '');
 const EMPTY_INLINE_EQUATION_CONTENT = buildEquationContent(MATH_INLINE_NODE_NAME, '');
 const EMPTY_TOOLBAR_AVAILABILITY: RichEditorToolbarAvailability = {
@@ -125,155 +125,158 @@ const EMPTY_TOOLBAR_AVAILABILITY: RichEditorToolbarAvailability = {
   canInsertEquation: false,
 };
 
-const RichEditorToolbar = ({ editor, isEnabled, onOpenAiEditor }: OwnProps) => {
-  const [availability, setAvailability] = useState(EMPTY_TOOLBAR_AVAILABILITY);
+const RichEditorToolbar = (props: OwnProps) => {
+  const [availability, setAvailability] = createSignal(EMPTY_TOOLBAR_AVAILABILITY);
   const [isLinkModalOpen, openLinkModal, closeLinkModal] = useFlag();
   const lang = useLang();
 
-  useEffect(() => {
-    if (!editor || editor.isDestroyed || !isEnabled) {
-      setAvailability(EMPTY_TOOLBAR_AVAILABILITY);
-      return undefined;
-    }
-
-    const activeEditor = editor;
-    let isDestroyed = false;
-    let isUpdateScheduled = false;
-
-    function updateAvailability() {
-      const nextAvailability = buildToolbarAvailability(activeEditor);
-      setAvailability((currentAvailability) =>
-        areDeepEqual(currentAvailability, nextAvailability) ? currentAvailability : nextAvailability,
-      );
-    }
-
-    function scheduleAvailabilityUpdate() {
-      if (isUpdateScheduled) {
-        return;
+  createEffect(
+    depsOf(() => [props.editor, props.isEnabled] as const),
+    ([editor2, isEnabled2]) => {
+      if (!editor2 || editor2.isDestroyed || !isEnabled2) {
+        setAvailability(EMPTY_TOOLBAR_AVAILABILITY);
+        return undefined;
       }
 
-      isUpdateScheduled = true;
-      queueMicrotask(() => {
-        isUpdateScheduled = false;
-        if (!isDestroyed) {
-          updateAvailability();
+      const activeEditor = editor2;
+      let isDestroyed = false;
+      let isUpdateScheduled = false;
+
+      function updateAvailability() {
+        const nextAvailability = buildToolbarAvailability(activeEditor);
+        setAvailability((currentAvailability) =>
+          areDeepEqual(currentAvailability, nextAvailability) ? currentAvailability : nextAvailability,
+        );
+      }
+
+      function scheduleAvailabilityUpdate() {
+        if (isUpdateScheduled) {
+          return;
         }
-      });
-    }
 
-    updateAvailability();
-    activeEditor.on('transaction', scheduleAvailabilityUpdate);
+        isUpdateScheduled = true;
+        queueMicrotask(() => {
+          isUpdateScheduled = false;
+          if (!isDestroyed) {
+            updateAvailability();
+          }
+        });
+      }
 
-    return () => {
-      isDestroyed = true;
-      activeEditor.off('transaction', scheduleAvailabilityUpdate);
-    };
-  }, [editor, isEnabled]);
+      updateAvailability();
+      activeEditor.on('transaction', scheduleAvailabilityUpdate);
 
-  const handleToggleHeading = useLastCallback((level: RichHeadingLevel) => {
-    if (!editor || !checkCanUseBlockOptions(editor)) {
+      return () => {
+        isDestroyed = true;
+        activeEditor.off('transaction', scheduleAvailabilityUpdate);
+      };
+    },
+  );
+
+  const handleToggleHeading = (level: RichHeadingLevel) => {
+    if (!props.editor || !checkCanUseBlockOptions(props.editor)) {
       return;
     }
 
-    editor.chain().focus().toggleHeading({ level }).run();
-  });
+    props.editor.chain().focus().toggleHeading({ level }).run();
+  };
 
-  const handleSetBlockquote = useLastCallback(() => {
-    if (!editor || !checkCanUseBlockOptions(editor)) {
+  const handleSetBlockquote = () => {
+    if (!props.editor || !checkCanUseBlockOptions(props.editor)) {
       return;
     }
 
-    editor.chain().focus().setBlockquote().run();
-  });
+    props.editor.chain().focus().setBlockquote().run();
+  };
 
-  const handleToggleFooter = useLastCallback(() => {
-    if (!editor || !checkCanUseBlockOptions(editor)) {
+  const handleToggleFooter = () => {
+    if (!props.editor || !checkCanUseBlockOptions(props.editor)) {
       return;
     }
 
-    editor.chain().focus().toggleNode(FOOTER_NODE_NAME, PARAGRAPH_NODE_TYPE).run();
-  });
+    props.editor.chain().focus().toggleNode(FOOTER_NODE_NAME, PARAGRAPH_NODE_TYPE).run();
+  };
 
-  const handleTogglePullquote = useLastCallback(() => {
-    if (!editor || !checkCanUseBlockOptions(editor)) {
+  const handleTogglePullquote = () => {
+    if (!props.editor || !checkCanUseBlockOptions(props.editor)) {
       return;
     }
 
-    editor.chain().focus().togglePullquote().run();
-  });
+    props.editor.chain().focus().togglePullquote().run();
+  };
 
-  const handleSetDetails = useLastCallback(() => {
+  const handleSetDetails = () => {
     if (
-      !editor ||
-      !checkCanUseBlockOptions(editor) ||
-      !checkCanSetBlockAtSelection(editor, INSERTED_BLOCK_NODE_TYPES.details)
+      !props.editor ||
+      !checkCanUseBlockOptions(props.editor) ||
+      !checkCanSetBlockAtSelection(props.editor, INSERTED_BLOCK_NODE_TYPES.details)
     ) {
       return;
     }
 
-    editor.chain().focus().setDetails().run();
-  });
+    props.editor.chain().focus().setDetails().run();
+  };
 
-  const handleSetHorizontalRule = useLastCallback(() => {
+  const handleSetHorizontalRule = () => {
     if (
-      !editor ||
-      !checkCanUseBlockOptions(editor) ||
-      !checkCanInsertBlockAtSelection(editor, INSERTED_BLOCK_NODE_TYPES.divider)
+      !props.editor ||
+      !checkCanUseBlockOptions(props.editor) ||
+      !checkCanInsertBlockAtSelection(props.editor, INSERTED_BLOCK_NODE_TYPES.divider)
     ) {
       return;
     }
 
-    editor.chain().focus().setHorizontalRule().run();
-  });
+    props.editor.chain().focus().setHorizontalRule().run();
+  };
 
-  const handleInsertButtonRow = useLastCallback(() => {
-    if (!editor || !availability.canInsertButtonRow) return;
-    editor.chain().focus().insertContent(EMPTY_BUTTON_ROW).run();
-  });
+  const handleInsertButtonRow = () => {
+    if (!props.editor || !availability().canInsertButtonRow) return;
+    props.editor.chain().focus().insertContent(EMPTY_BUTTON_ROW).run();
+  };
 
-  const handleInsertList = useLastCallback((type: RichListType, isChecklist?: boolean) => {
-    if (!editor || !checkCanUseBlockOptions(editor)) {
+  const handleInsertList = (type: RichListType, isChecklist?: boolean) => {
+    if (!props.editor || !checkCanUseBlockOptions(props.editor)) {
       return;
     }
 
-    insertRichEditorList(editor, type, isChecklist);
-  });
+    insertRichEditorList(props.editor, type, isChecklist);
+  };
 
-  const handleSetCurrentListType = useLastCallback((type: RichListType) => {
-    if (editor) {
-      setCurrentRichEditorListType(editor, type);
+  const handleSetCurrentListType = (type: RichListType) => {
+    if (props.editor) {
+      setCurrentRichEditorListType(props.editor, type);
     }
-  });
+  };
 
-  const handleToggleCurrentListChecklist = useLastCallback(() => {
-    if (editor) {
-      toggleCurrentRichEditorListChecklist(editor);
+  const handleToggleCurrentListChecklist = () => {
+    if (props.editor) {
+      toggleCurrentRichEditorListChecklist(props.editor);
     }
-  });
+  };
 
-  const handleSetCurrentOrderedListType = useLastCallback((type: RichOrderedListType) => {
-    if (editor) {
-      setCurrentRichEditorOrderedListType(editor, type);
+  const handleSetCurrentOrderedListType = (type: RichOrderedListType) => {
+    if (props.editor) {
+      setCurrentRichEditorOrderedListType(props.editor, type);
     }
-  });
+  };
 
-  const handleToggleCurrentOrderedListReversed = useLastCallback(() => {
-    if (editor) {
-      toggleCurrentRichEditorOrderedListReversed(editor);
+  const handleToggleCurrentOrderedListReversed = () => {
+    if (props.editor) {
+      toggleCurrentRichEditorOrderedListReversed(props.editor);
     }
-  });
+  };
 
-  const handleInsertTable = useLastCallback(() => {
+  const handleInsertTable = () => {
     if (
-      !editor ||
-      !checkCanUseBlockOptions(editor) ||
-      !checkCanInsertBlockAtSelection(editor, INSERTED_BLOCK_NODE_TYPES.table)
+      !props.editor ||
+      !checkCanUseBlockOptions(props.editor) ||
+      !checkCanInsertBlockAtSelection(props.editor, INSERTED_BLOCK_NODE_TYPES.table)
     ) {
       return;
     }
 
-    const selectedText = getSelectedText(editor);
-    const chain = editor.chain().focus().insertTable(DEFAULT_TABLE_OPTIONS);
+    const selectedText = getSelectedText(props.editor);
+    const chain = props.editor.chain().focus().insertTable(DEFAULT_TABLE_OPTIONS);
     if (selectedText) {
       chain.command(({ tr }) => {
         tr.insertText(selectedText);
@@ -281,23 +284,23 @@ const RichEditorToolbar = ({ editor, isEnabled, onOpenAiEditor }: OwnProps) => {
       });
     }
     chain.run();
-  });
+  };
 
-  const handleOpenLinkModal = useLastCallback(() => {
-    if (!editor || !availability.canInsertLink) {
+  const handleOpenLinkModal = () => {
+    if (!props.editor || !availability().canInsertLink) {
       return;
     }
 
     openLinkModal();
-  });
+  };
 
-  const handleInsertLink = useLastCallback((text: string, url: string) => {
-    if (!editor) {
+  const handleInsertLink = (text: string, url: string) => {
+    if (!props.editor) {
       closeLinkModal();
       return;
     }
 
-    editor
+    props.editor
       .chain()
       .focus()
       .insertContent({
@@ -312,24 +315,24 @@ const RichEditorToolbar = ({ editor, isEnabled, onOpenAiEditor }: OwnProps) => {
       })
       .run();
     closeLinkModal();
-  });
+  };
 
-  const handleToggleCodeBlock = useLastCallback(() => {
-    editor?.chain().focus().toggleCodeBlock().run();
-  });
+  const handleToggleCodeBlock = () => {
+    props.editor?.chain().focus().toggleCodeBlock().run();
+  };
 
-  const handleInsertEquation = useLastCallback(() => {
-    if (!editor) {
+  const handleInsertEquation = () => {
+    if (!props.editor) {
       return;
     }
 
-    const equationNodeType = findInsertableEquationNodeType(editor, editor.can());
+    const equationNodeType = findInsertableEquationNodeType(props.editor, props.editor.can());
     if (!equationNodeType) {
       return;
     }
 
-    const selectedText = getSelectedText(editor);
-    const chain = editor.chain().focus().insertContent(buildEquationContent(equationNodeType, selectedText));
+    const selectedText = getSelectedText(props.editor);
+    const chain = props.editor.chain().focus().insertContent(buildEquationContent(equationNodeType, selectedText));
     if (equationNodeType === MATH_INLINE_NODE_NAME) {
       chain.command(({ tr }) => {
         const insertedNode = tr.selection.$from.nodeBefore;
@@ -343,29 +346,35 @@ const RichEditorToolbar = ({ editor, isEnabled, onOpenAiEditor }: OwnProps) => {
       });
     }
     chain.run();
-  });
+  };
 
-  const canOpenHeadingMenu = RICH_HEADING_LEVELS.some((level) => availability.canToggleHeadingByLevel[level]);
-  const canOpenBlockMenu =
-    canOpenHeadingMenu ||
-    availability.canToggleFooter ||
-    availability.canSetBlockquote ||
-    availability.canTogglePullquote ||
-    availability.canSetDetails ||
-    availability.canSetHorizontalRule ||
-    availability.canInsertButtonRow;
-  const currentList = availability.currentList;
-  const canOpenListMenu = availability.canInsertBulletList || availability.canInsertOrderedList || Boolean(currentList);
+  const canOpenHeadingMenu = createMemo(() =>
+    RICH_HEADING_LEVELS.some((level) => availability().canToggleHeadingByLevel[level]),
+  );
+  const canOpenBlockMenu = createMemo(
+    () =>
+      canOpenHeadingMenu() ||
+      availability().canToggleFooter ||
+      availability().canSetBlockquote ||
+      availability().canTogglePullquote ||
+      availability().canSetDetails ||
+      availability().canSetHorizontalRule ||
+      availability().canInsertButtonRow,
+  );
+  const currentList = createMemo(() => availability().currentList);
+  const canOpenListMenu = createMemo(
+    () => availability().canInsertBulletList || availability().canInsertOrderedList || Boolean(currentList()),
+  );
 
   return (
-    <div className="rich-editor-toolbar-viewport" aria-hidden={!isEnabled} inert={!isEnabled}>
-      <div className="rich-editor-toolbar">
+    <div class="rich-editor-toolbar-viewport" aria-hidden={!props.isEnabled} inert={!props.isEnabled}>
+      <div class="rich-editor-toolbar">
         <Button
           color="translucent"
           iconName="ai"
           ariaLabel={lang('AiMessageEditor')}
-          disabled={!onOpenAiEditor}
-          onClick={onOpenAiEditor}
+          disabled={!props.onOpenAiEditor}
+          onClick={props.onOpenAiEditor}
         />
         <DropdownMenu
           className="rich-editor-toolbar-menu"
@@ -378,7 +387,7 @@ const RichEditorToolbar = ({ editor, isEnabled, onOpenAiEditor }: OwnProps) => {
               className={isOpen ? 'active' : undefined}
               iconName="add"
               ariaLabel={lang('RichEditorBlockMenu')}
-              disabled={!canOpenBlockMenu}
+              disabled={!canOpenBlockMenu()}
               onClick={onTrigger}
             />
           )}
@@ -386,13 +395,13 @@ const RichEditorToolbar = ({ editor, isEnabled, onOpenAiEditor }: OwnProps) => {
           <NestedMenuItem
             icon="heading"
             hasIconPremiumBadge
-            disabled={!canOpenHeadingMenu}
+            disabled={!canOpenHeadingMenu()}
             submenu={
               <>
                 {RICH_HEADING_LEVELS.map((level) => (
                   <MenuItem
                     icon={`heading-${level}`}
-                    disabled={!availability.canToggleHeadingByLevel[level]}
+                    disabled={!availability().canToggleHeadingByLevel[level]}
                     onClick={() => handleToggleHeading(level)}
                   >
                     {lang('RichEditorHeadingLevel', { level })}
@@ -406,18 +415,18 @@ const RichEditorToolbar = ({ editor, isEnabled, onOpenAiEditor }: OwnProps) => {
           <MenuItem
             icon="footer"
             hasIconPremiumBadge
-            disabled={!availability.canToggleFooter}
+            disabled={!availability().canToggleFooter}
             onClick={handleToggleFooter}
           >
             {lang('RichEditorFooter')}
           </MenuItem>
-          <MenuItem icon="blockquote" disabled={!availability.canSetBlockquote} onClick={handleSetBlockquote}>
+          <MenuItem icon="blockquote" disabled={!availability().canSetBlockquote} onClick={handleSetBlockquote}>
             {lang('RichEditorBlockquote')}
           </MenuItem>
           <MenuItem
             icon="pullquote"
             hasIconPremiumBadge
-            disabled={!availability.canTogglePullquote}
+            disabled={!availability().canTogglePullquote}
             onClick={handleTogglePullquote}
           >
             {lang('RichEditorPullquote')}
@@ -425,7 +434,7 @@ const RichEditorToolbar = ({ editor, isEnabled, onOpenAiEditor }: OwnProps) => {
           <MenuItem
             icon="details-block"
             hasIconPremiumBadge
-            disabled={!availability.canSetDetails}
+            disabled={!availability().canSetDetails}
             onClick={handleSetDetails}
           >
             {lang('RichEditorDetails')}
@@ -433,7 +442,7 @@ const RichEditorToolbar = ({ editor, isEnabled, onOpenAiEditor }: OwnProps) => {
           <MenuItem
             icon="remove"
             hasIconPremiumBadge
-            disabled={!availability.canSetHorizontalRule}
+            disabled={!availability().canSetHorizontalRule}
             onClick={handleSetHorizontalRule}
           >
             {lang('RichEditorDivider')}
@@ -441,7 +450,7 @@ const RichEditorToolbar = ({ editor, isEnabled, onOpenAiEditor }: OwnProps) => {
           <MenuItem
             icon="button"
             hasIconPremiumBadge
-            disabled={!availability.canInsertButtonRow}
+            disabled={!availability().canInsertButtonRow}
             onClick={handleInsertButtonRow}
           >
             {lang('RichButtonRow')}
@@ -459,17 +468,16 @@ const RichEditorToolbar = ({ editor, isEnabled, onOpenAiEditor }: OwnProps) => {
               iconName="bullet-list"
               ariaLabel={lang('RichEditorListMenu')}
               iconHasPremiumBadge
-              disabled={!canOpenListMenu}
+              disabled={!canOpenListMenu()}
               onClick={onTrigger}
             />
           )}
         >
           {LIST_INSERT_OPTIONS.map((option) => (
             <MenuItem
-              key={option.label}
               icon={option.icon}
               hasIconPremiumBadge
-              disabled={!availability[option.availability]}
+              disabled={!availability()[option.availability]}
               onClick={() => handleInsertList(option.type, option.isChecklist)}
             >
               {lang(option.label)}
@@ -478,13 +486,12 @@ const RichEditorToolbar = ({ editor, isEnabled, onOpenAiEditor }: OwnProps) => {
           <MenuSeparator />
           <NestedMenuItem
             icon="settings"
-            disabled={!currentList}
+            disabled={!currentList()}
             submenu={
               <>
                 {LIST_TYPE_OPTIONS.map((option) => (
                   <MenuItem
-                    key={option.type}
-                    icon={currentList?.type === option.type ? 'check' : option.icon}
+                    icon={currentList()?.type === option.type ? 'check' : option.icon}
                     onClick={() => handleSetCurrentListType(option.type)}
                   >
                     {lang(option.label)}
@@ -492,20 +499,19 @@ const RichEditorToolbar = ({ editor, isEnabled, onOpenAiEditor }: OwnProps) => {
                 ))}
                 <MenuSeparator />
                 <MenuItem
-                  icon={currentList?.isChecklist ? 'check' : 'task-list'}
+                  icon={currentList()?.isChecklist ? 'check' : 'task-list'}
                   onClick={handleToggleCurrentListChecklist}
                 >
                   {lang('RichEditorListCheckmarks')}
                 </MenuItem>
                 <NestedMenuItem
                   icon="sort-by-number"
-                  disabled={currentList?.type !== 'orderedList'}
+                  disabled={currentList()?.type !== 'orderedList'}
                   submenu={
                     <>
                       {RICH_ORDERED_LIST_TYPES.map((type) => (
                         <MenuItem
-                          key={type}
-                          icon={(currentList?.orderType ?? '1') === type ? 'check' : 'numbered-list'}
+                          icon={(currentList()?.orderType ?? '1') === type ? 'check' : 'numbered-list'}
                           onClick={() => handleSetCurrentOrderedListType(type)}
                         >
                           {lang(ORDERED_LIST_TYPE_LABELS[type])}
@@ -517,8 +523,8 @@ const RichEditorToolbar = ({ editor, isEnabled, onOpenAiEditor }: OwnProps) => {
                   {lang('RichEditorListNumberingType')}
                 </NestedMenuItem>
                 <MenuItem
-                  icon={currentList?.isReversed ? 'check' : 'hamburger'}
-                  disabled={currentList?.type !== 'orderedList'}
+                  icon={currentList()?.isReversed ? 'check' : 'hamburger'}
+                  disabled={currentList()?.type !== 'orderedList'}
                   onClick={handleToggleCurrentOrderedListReversed}
                 >
                   {lang('RichEditorListReverseOrder')}
@@ -534,21 +540,21 @@ const RichEditorToolbar = ({ editor, isEnabled, onOpenAiEditor }: OwnProps) => {
           iconName="table"
           ariaLabel={lang('RichEditorTable')}
           iconHasPremiumBadge
-          disabled={!availability.canInsertTable}
+          disabled={!availability().canInsertTable}
           onClick={handleInsertTable}
         />
         <Button
           color="translucent"
           iconName="link"
           ariaLabel={lang('FormattingAddLinkAria')}
-          disabled={!availability.canInsertLink}
+          disabled={!availability().canInsertLink}
           onClick={handleOpenLinkModal}
         />
         <Button
           color="translucent"
           iconName="code"
           ariaLabel={lang('RichEditorCodeBlock')}
-          disabled={!availability.canToggleCodeBlock}
+          disabled={!availability().canToggleCodeBlock}
           onClick={handleToggleCodeBlock}
         />
         <Button
@@ -556,16 +562,16 @@ const RichEditorToolbar = ({ editor, isEnabled, onOpenAiEditor }: OwnProps) => {
           iconName="formula"
           ariaLabel={lang('RichEditorFormula')}
           iconHasPremiumBadge
-          disabled={!availability.canInsertEquation}
+          disabled={!availability().canInsertEquation}
           onClick={handleInsertEquation}
         />
       </div>
-      <RichEditorLinkModal isOpen={isLinkModalOpen} onClose={closeLinkModal} onSubmit={handleInsertLink} />
+      <RichEditorLinkModal isOpen={isLinkModalOpen()} onClose={closeLinkModal} onSubmit={handleInsertLink} />
     </div>
   );
 };
 
-export default memo(RichEditorToolbar);
+export default RichEditorToolbar;
 
 function buildToolbarAvailability(editor: Editor): RichEditorToolbarAvailability {
   if (editor.isDestroyed) {

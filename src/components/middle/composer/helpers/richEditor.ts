@@ -30,7 +30,7 @@ import type { Node as ProseMirrorNode, ResolvedPos } from '@tiptap/pm/model';
 import { Plugin, TextSelection, type Transaction } from '@tiptap/pm/state';
 import type { DecorationSet, EditorView } from '@tiptap/pm/view';
 import StarterKitExtension from '@tiptap/starter-kit';
-import type { ElementRef } from '../../../../lib/teact/teact';
+import { requestMutation } from 'frameact';
 
 import type { CustomEmojiNodeOptions } from '../../../../util/tiptap/extensions/customEmoji';
 import type { RichEditorDateClickTarget } from '../../../../util/tiptap/extensions/date';
@@ -38,7 +38,6 @@ import type { RichEditorMediaItem } from '../../../../util/tiptap/richMedia';
 import type { RichEditorTooltipsConfig } from '../../../common/tooltips/types';
 import type { RichEditorMediaEditHandler, RichEditorMediaFilesHandler } from '../richEditorTypes';
 
-import { requestMutation } from '../../../../lib/fasterdom/fasterdom';
 import { CODE_HIGHLIGHTING_CHANGED_META, lowlight } from '../../../../util/highlightCode';
 import { addLocalizationCallback, getTranslationFn } from '../../../../util/localization';
 import {
@@ -121,8 +120,8 @@ type RichEditorOrderedListUpdate =
 
 type CreateRichEditorParams = {
   element: HTMLDivElement;
-  sharedCanvasRef?: ElementRef<HTMLCanvasElement>;
-  sharedCanvasHqRef?: ElementRef<HTMLCanvasElement>;
+  sharedCanvasRef?: (el: HTMLCanvasElement) => void;
+  sharedCanvasHqRef?: (el: HTMLCanvasElement) => void;
   content: TiptapJsonContent;
   getIsRichInputExpanded: () => boolean;
   getCanInsertMedia: (type: RichEditorMediaItem['type']) => boolean;

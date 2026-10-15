@@ -1,6 +1,7 @@
-import type { FC } from '../../../lib/teact/teact';
-import { memo, useEffect, useRef, useState } from '../../../lib/teact/teact';
+import { createEffect, createMemo, createSignal } from 'frameact';
+import { mergeProps } from 'frameact/dom';
 import { getActions } from '../../../global';
+import { depsOf } from '../../../util/effectDeps';
 
 import type { ApiSticker, ApiVideo } from '../../../api/types';
 import type { IAnchorPosition, ThreadId } from '../../../types';
@@ -10,7 +11,6 @@ import buildClassName from '../../../util/buildClassName';
 
 import useFlag from '../../../hooks/useFlag';
 import useLang from '../../../hooks/useLang';
-import useLastCallback from '../../../hooks/useLastCallback';
 import useMouseInside from '../../../hooks/useMouseInside';
 
 import Icon from '../../common/icons/Icon';
@@ -55,149 +55,130 @@ type OwnProps = {
   inputCssSelector?: string;
 };
 
-const SymbolMenuButton: FC<OwnProps> = ({
-  chatId,
-  threadId,
-  isMobile,
-  canSendGifs,
-  canSendStickers,
-  isMessageComposer,
-  isReady,
-  isSymbolMenuOpen,
-  idPrefix,
-  isAttachmentModal,
-  canSendPlainText,
-  isSymbolMenuForced,
-  className,
-  forceDarkTheme,
-  inputCssSelector = EDITABLE_INPUT_CSS_SELECTOR,
-  openSymbolMenu,
-  closeSymbolMenu,
-  onCustomEmojiSelect,
-  onStickerSelect,
-  onGifSelect,
-  onGifAddCaption,
-  onRemoveSymbol,
-  onEmojiSelect,
-  closeBotCommandMenu,
-  closeSendAsMenu,
-}) => {
+const SymbolMenuButton = (rawProps: OwnProps) => {
+  const props = mergeProps({ inputCssSelector: EDITABLE_INPUT_CSS_SELECTOR }, rawProps) as OwnProps &
+    Required<Pick<OwnProps, 'inputCssSelector'>>;
   const { addRecentEmoji, addRecentCustomEmoji } = getActions();
 
-  const triggerRef = useRef<HTMLDivElement>();
+  let triggerRef!: HTMLDivElement;
 
   const [isSymbolMenuLoaded, onSymbolMenuLoadingComplete] = useFlag();
-  const [contextMenuAnchor, setContextMenuAnchor] = useState<IAnchorPosition | undefined>(undefined);
+  const [contextMenuAnchor, setContextMenuAnchor] = createSignal<IAnchorPosition | undefined>(undefined);
 
   const lang = useLang();
 
-  const isMenuOpen = isSymbolMenuOpen || Boolean(isSymbolMenuForced);
+  const isMenuOpen = createMemo(() => props.isSymbolMenuOpen || Boolean(props.isSymbolMenuForced));
   const [handleMouseEnter, handleMouseLeave, markMouseInside] = useMouseInside(
-    isMenuOpen,
-    closeSymbolMenu,
+    () => isMenuOpen(),
+    props.closeSymbolMenu,
     undefined,
-    isMobile,
+    () => props.isMobile,
   );
 
-  useEffect(() => {
-    if (isMenuOpen) {
-      markMouseInside();
-    }
-  }, [isMenuOpen, markMouseInside]);
-
-  const symbolMenuButtonClassName = buildClassName(
-    'composer-action-button mobile-symbol-menu-button',
-    !isReady && 'not-ready',
-    isSymbolMenuLoaded ? isSymbolMenuOpen && 'menu-opened' : isSymbolMenuOpen && 'is-loading',
+  createEffect(
+    depsOf(() => [isMenuOpen(), markMouseInside] as const),
+    ([isMenuOpen2, markMouseInside2]) => {
+      if (isMenuOpen2) {
+        markMouseInside2();
+      }
+    },
   );
 
-  const handleActivateSymbolMenu = useLastCallback(() => {
-    closeBotCommandMenu?.();
-    closeSendAsMenu?.();
-    openSymbolMenu();
-    const triggerEl = triggerRef.current;
+  const symbolMenuButtonClassName = createMemo(() =>
+    buildClassName(
+      'composer-action-button mobile-symbol-menu-button',
+      !props.isReady && 'not-ready',
+      isSymbolMenuLoaded() ? props.isSymbolMenuOpen && 'menu-opened' : props.isSymbolMenuOpen && 'is-loading',
+    ),
+  );
+
+  const handleActivateSymbolMenu = () => {
+    props.closeBotCommandMenu?.();
+    props.closeSendAsMenu?.();
+    props.openSymbolMenu();
+    const triggerEl = triggerRef;
     if (!triggerEl) return;
     const { x, y } = triggerEl.getBoundingClientRect();
     setContextMenuAnchor({ x, y });
-  });
+  };
 
-  const handleSymbolMenuOpen = useLastCallback(() => {
+  const handleSymbolMenuOpen = () => {
     const messageInput = document.querySelector<HTMLDivElement>(
-      isAttachmentModal ? EDITABLE_INPUT_MODAL_CSS_SELECTOR : inputCssSelector,
+      props.isAttachmentModal ? EDITABLE_INPUT_MODAL_CSS_SELECTOR : props.inputCssSelector,
     );
 
-    if (!isMobile || messageInput !== document.activeElement) {
-      openSymbolMenu();
+    if (!props.isMobile || messageInput !== document.activeElement) {
+      props.openSymbolMenu();
       return;
     }
 
     messageInput?.blur();
     setTimeout(() => {
-      closeBotCommandMenu?.();
-      openSymbolMenu();
+      props.closeBotCommandMenu?.();
+      props.openSymbolMenu();
     }, MOBILE_KEYBOARD_HIDE_DELAY_MS);
-  });
+  };
 
-  const getTriggerElement = useLastCallback(() => triggerRef.current);
-  const getRootElement = useLastCallback(() => triggerRef.current?.closest('.custom-scroll, .no-scrollbar'));
-  const getMenuElement = useLastCallback(() => document.querySelector('#portals .SymbolMenu .bubble'));
-  const getLayout = useLastCallback(() => ({ withPortal: true }));
+  const getTriggerElement = () => triggerRef;
+  const getRootElement = () => triggerRef?.closest('.custom-scroll, .no-scrollbar');
+  const getMenuElement = () => document.querySelector('#portals .SymbolMenu .bubble');
+  const getLayout = () => ({ withPortal: true });
 
   return (
     <>
       <SymbolMenu
-        chatId={chatId}
-        threadId={threadId}
-        isOpen={isSymbolMenuOpen || Boolean(isSymbolMenuForced)}
-        canSendGifs={canSendGifs}
-        canSendStickers={canSendStickers}
-        isMessageComposer={isMessageComposer}
-        idPrefix={idPrefix}
+        chatId={props.chatId}
+        threadId={props.threadId}
+        isOpen={props.isSymbolMenuOpen || Boolean(props.isSymbolMenuForced)}
+        canSendGifs={props.canSendGifs}
+        canSendStickers={props.canSendStickers}
+        isMessageComposer={props.isMessageComposer}
+        idPrefix={props.idPrefix}
         onLoad={onSymbolMenuLoadingComplete}
-        onClose={closeSymbolMenu}
-        onEmojiSelect={onEmojiSelect}
-        onStickerSelect={onStickerSelect}
-        onCustomEmojiSelect={onCustomEmojiSelect}
-        onGifSelect={onGifSelect}
-        onGifAddCaption={onGifAddCaption}
-        onRemoveSymbol={onRemoveSymbol}
+        onClose={props.closeSymbolMenu}
+        onEmojiSelect={props.onEmojiSelect}
+        onStickerSelect={props.onStickerSelect}
+        onCustomEmojiSelect={props.onCustomEmojiSelect}
+        onGifSelect={props.onGifSelect}
+        onGifAddCaption={props.onGifAddCaption}
+        onRemoveSymbol={props.onRemoveSymbol}
         addRecentEmoji={addRecentEmoji}
         addRecentCustomEmoji={addRecentCustomEmoji}
-        isAttachmentModal={isAttachmentModal}
-        canSendPlainText={canSendPlainText}
-        className={buildClassName(className, forceDarkTheme && 'component-theme-dark')}
-        anchor={isAttachmentModal ? contextMenuAnchor : undefined}
-        getTriggerElement={isAttachmentModal ? getTriggerElement : undefined}
-        getRootElement={isAttachmentModal ? getRootElement : undefined}
-        getMenuElement={isAttachmentModal ? getMenuElement : undefined}
-        getLayout={isAttachmentModal ? getLayout : undefined}
+        isAttachmentModal={props.isAttachmentModal}
+        canSendPlainText={props.canSendPlainText}
+        className={buildClassName(props.className, props.forceDarkTheme && 'component-theme-dark')}
+        anchor={props.isAttachmentModal ? contextMenuAnchor() : undefined}
+        getTriggerElement={props.isAttachmentModal ? getTriggerElement : undefined}
+        getRootElement={props.isAttachmentModal ? getRootElement : undefined}
+        getMenuElement={props.isAttachmentModal ? getMenuElement : undefined}
+        getLayout={props.isAttachmentModal ? getLayout : undefined}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       />
 
-      {isMobile ? (
+      {props.isMobile ? (
         <Button
-          className={symbolMenuButtonClassName}
+          className={symbolMenuButtonClassName()}
           round
           color="translucent"
-          onClick={isSymbolMenuOpen ? closeSymbolMenu : handleSymbolMenuOpen}
+          onClick={props.isSymbolMenuOpen ? props.closeSymbolMenu : handleSymbolMenuOpen}
           ariaLabel={lang('AriaOpenSymbolMenu')}
         >
           <Icon name="smile" />
           <Icon name="keyboard" />
-          {isSymbolMenuOpen && !isSymbolMenuLoaded && <Spinner color="gray" />}
+          {props.isSymbolMenuOpen && !isSymbolMenuLoaded() && <Spinner color="gray" />}
         </Button>
       ) : (
         <ResponsiveHoverButton
-          className={buildClassName('composer-action-button symbol-menu-button', isSymbolMenuOpen && 'activated')}
+          className={buildClassName('composer-action-button symbol-menu-button', props.isSymbolMenuOpen && 'activated')}
           round
           color="translucent"
           onActivate={handleActivateSymbolMenu}
           ariaLabel={lang('AriaOpenSymbolMenu')}
           onMouseEnter={handleMouseEnter}
-          onMouseLeave={isMenuOpen ? handleMouseLeave : undefined}
+          onMouseLeave={isMenuOpen() ? handleMouseLeave : undefined}
         >
-          <div ref={triggerRef} className="symbol-menu-trigger" />
+          <div ref={triggerRef} class="symbol-menu-trigger" />
           <Icon name="smile" />
         </ResponsiveHoverButton>
       )}
@@ -205,4 +186,4 @@ const SymbolMenuButton: FC<OwnProps> = ({
   );
 };
 
-export default memo(SymbolMenuButton);
+export default SymbolMenuButton;

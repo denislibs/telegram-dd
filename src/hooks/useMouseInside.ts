@@ -1,4 +1,5 @@
-import { useEffect, useRef } from '../lib/teact/teact';
+import { createEffect } from 'frameact';
+import { depsOf } from '../util/effectDeps';
 
 import { IS_TOUCH_ENV } from '../util/browser/windowEnvironment';
 import useLastCallback from './useLastCallback';
@@ -6,39 +7,43 @@ import useLastCallback from './useLastCallback';
 const MENU_CLOSE_TIMEOUT = 250;
 let closeTimeout: number | undefined;
 
+// TODO(codemod): useMouseInside: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useMouseInside(
   isOpen: boolean,
   onClose: NoneToVoidFunction,
   menuCloseTimeout = MENU_CLOSE_TIMEOUT,
   isDisabled = false,
 ) {
-  const isMouseInsideRef = useRef(false);
+  let isMouseInsideRef = false;
 
-  const markMouseInside = useLastCallback(() => {
-    isMouseInsideRef.current = true;
-  });
+  const markMouseInside = () => {
+    isMouseInsideRef = true;
+  };
 
-  useEffect(() => {
-    if (closeTimeout) {
-      clearTimeout(closeTimeout);
-      closeTimeout = undefined;
-    }
+  createEffect(
+    depsOf(() => [isDisabled, isOpen, menuCloseTimeout, onClose]),
+    () => {
+      if (closeTimeout) {
+        clearTimeout(closeTimeout);
+        closeTimeout = undefined;
+      }
 
-    if (isOpen && !IS_TOUCH_ENV && !isDisabled) {
-      closeTimeout = window.setTimeout(() => {
-        if (!isMouseInsideRef.current && document.hasFocus()) {
-          onClose();
-        }
-      }, menuCloseTimeout * 2);
-    }
-  }, [isDisabled, isOpen, menuCloseTimeout, onClose]);
+      if (isOpen && !IS_TOUCH_ENV && !isDisabled) {
+        closeTimeout = window.setTimeout(() => {
+          if (!isMouseInsideRef && document.hasFocus()) {
+            onClose();
+          }
+        }, menuCloseTimeout * 2);
+      }
+    },
+  );
 
-  const handleMouseEnter = useLastCallback(() => {
-    isMouseInsideRef.current = true;
-  });
+  const handleMouseEnter = () => {
+    isMouseInsideRef = true;
+  };
 
-  const handleMouseLeave = useLastCallback(() => {
-    isMouseInsideRef.current = false;
+  const handleMouseLeave = () => {
+    isMouseInsideRef = false;
 
     if (closeTimeout) {
       clearTimeout(closeTimeout);
@@ -46,11 +51,11 @@ export default function useMouseInside(
     }
 
     closeTimeout = window.setTimeout(() => {
-      if (!isMouseInsideRef.current) {
+      if (!isMouseInsideRef) {
         onClose();
       }
     }, menuCloseTimeout);
-  });
+  };
 
   return [handleMouseEnter, handleMouseLeave, markMouseInside];
 }

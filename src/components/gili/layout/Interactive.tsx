@@ -1,5 +1,6 @@
-import type { TeactNode } from '../../../lib/teact/teact';
-import { createContext, memo, useMemo } from '../../../lib/teact/teact';
+import { createContext, createMemo } from 'frameact';
+import { Show } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import buildClassName from '../../../util/buildClassName';
 
@@ -29,58 +30,58 @@ type OwnProps = {
   disabled?: boolean;
   loading?: boolean;
   className?: string;
-  children: TeactNode;
+  children: JSX.Element;
   onClick?: (e: React.MouseEvent<HTMLElement>) => void;
 };
 
-const Interactive = ({ asLabel, clickable, ripple, disabled, loading, className, children, onClick }: OwnProps) => {
-  const contextValue = useMemo(
-    () => ({
-      isDisabled: Boolean(disabled),
-      isLoading: Boolean(loading),
-      isLabel: Boolean(asLabel),
-    }),
-    [asLabel, disabled, loading],
-  );
+const Interactive = (props: OwnProps) => {
+  const contextValue = createMemo(() => ({
+    isDisabled: Boolean(props.disabled),
+    isLoading: Boolean(props.loading),
+    isLabel: Boolean(props.asLabel),
+  }));
 
-  const isNonInteractive = disabled || loading;
-  const clickableProps = useClickable(onClick, {
-    disabled: isNonInteractive,
-    withA11y: !asLabel,
+  const isNonInteractive = createMemo(() => props.disabled || props.loading);
+  const clickableProps = useClickable(props.onClick, {
+    disabled: () => isNonInteractive(),
+    withA11y: () => !props.asLabel,
   });
 
-  const blockClassName = buildClassName(
-    styles.interactive,
-    clickable && !isNonInteractive && styles.clickable,
-    isNonInteractive && styles.nonInteractive,
-    disabled && styles.disabled,
-    className,
+  const blockClassName = createMemo(() =>
+    buildClassName(
+      styles.interactive,
+      props.clickable && !isNonInteractive() && styles.clickable,
+      isNonInteractive() && styles.nonInteractive,
+      props.disabled && styles.disabled,
+      props.className,
+    ),
   );
 
   const content = (
     <>
-      {children}
-      {ripple && !isNonInteractive && <RippleEffect />}
+      {props.children}
+      {props.ripple && !isNonInteractive() && <RippleEffect />}
     </>
   );
 
-  if (asLabel) {
-    return (
-      <InteractiveContext.Provider value={contextValue}>
-        <label className={blockClassName} {...clickableProps}>
-          {content}
-        </label>
-      </InteractiveContext.Provider>
-    );
-  }
-
   return (
-    <InteractiveContext.Provider value={contextValue}>
-      <div className={blockClassName} {...clickableProps}>
-        {content}
-      </div>
-    </InteractiveContext.Provider>
+    <Show
+      when={!props.asLabel}
+      fallback={
+        <InteractiveContext.Provider value={contextValue()}>
+          <label class={blockClassName()} {...clickableProps}>
+            {content}
+          </label>
+        </InteractiveContext.Provider>
+      }
+    >
+      <InteractiveContext.Provider value={contextValue()}>
+        <div class={blockClassName()} {...clickableProps}>
+          {content}
+        </div>
+      </InteractiveContext.Provider>
+    </Show>
   );
 };
 
-export default memo(Interactive);
+export default Interactive;

@@ -1,8 +1,8 @@
-import { memo, useEffect, useRef } from '../../../lib/teact/teact';
+import { createEffect, createMeasureEffect, createMemo, requestMutation } from 'frameact';
+import { depsOf } from '../../../util/effectDeps';
 
 import type { IconName } from '../../../types/icons';
 
-import { requestMutation } from '../../../lib/fasterdom/fasterdom';
 import { IS_TAURI } from '../../../util/browser/globalEnvironment';
 import buildClassName from '../../../util/buildClassName';
 import captureEscKeyListener from '../../../util/captureEscKeyListener';
@@ -32,106 +32,99 @@ type OwnProps = {
   onLeadingButtonClick?: NoneToVoidFunction;
 };
 
-const TextFormatterInput = ({
-  value,
-  placeholder,
-  ariaLabel,
-  isActive,
-  leadingButtonIconName,
-  leadingButtonAriaLabel,
-  canSubmitEmpty,
-  shouldSpellCheck,
-  inputMode,
-  dir,
-  onChange,
-  onSubmit,
-  onEscape,
-  onDeleteEmpty,
-  onLeadingButtonClick,
-}: OwnProps) => {
-  const inputRef = useRef<HTMLInputElement>();
+const TextFormatterInput = (props: OwnProps) => {
+  let inputRef!: HTMLInputElement;
   const lang = useLang();
-  const { updateScrollableHint } = useScrollableHint(inputRef, {
-    isDisabled: !isActive,
-    shouldSkipOverflowCheck: true,
-  });
+  const scrollableHintResult = createMemo(() =>
+    useScrollableHint(() => inputRef, {
+      isDisabled: () => !props.isActive,
+      shouldSkipOverflowCheck: true,
+    }),
+  );
+  const updateScrollableHint = () => scrollableHintResult().updateScrollableHint;
 
-  const canSubmit = canSubmitEmpty || Boolean(value.trim().length);
+  const canSubmit = createMemo(() => props.canSubmitEmpty || Boolean(props.value.trim().length));
 
-  useEffect(() => {
-    if (!isActive) {
-      return undefined;
-    }
+  createMeasureEffect(
+    () => props.isActive,
+    (isActive2) => {
+      if (!isActive2) {
+        return undefined;
+      }
 
-    requestMutation(() => {
-      const input = inputRef.current!;
-      input.focus();
-      input.setSelectionRange(input.value.length, input.value.length);
-    });
-  }, [isActive]);
+      requestMutation(() => {
+        const input = inputRef!;
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      });
+    },
+  );
 
-  useEffect(() => (isActive && onEscape ? captureEscKeyListener(onEscape) : undefined), [isActive, onEscape]);
+  createEffect(
+    depsOf(() => [props.isActive, props.onEscape] as const),
+    ([isActive2, onEscape2]) => (isActive2 && onEscape2 ? captureEscKeyListener(onEscape2) : undefined),
+  );
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    onChange(e.currentTarget.value);
-    updateScrollableHint(e.currentTarget);
+    props.onChange(e.currentTarget.value);
+    updateScrollableHint()(e.currentTarget);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (!value && onDeleteEmpty && (e.key === 'Backspace' || e.key === 'Delete')) {
+    if (!props.value && props.onDeleteEmpty && (e.key === 'Backspace' || e.key === 'Delete')) {
       e.preventDefault();
       e.stopPropagation();
-      onDeleteEmpty();
+      props.onDeleteEmpty();
       return;
     }
 
-    if (e.key !== 'Enter' || !canSubmit) {
+    if (e.key !== 'Enter' || !canSubmit()) {
       return;
     }
 
     e.preventDefault();
     e.stopPropagation();
-    onSubmit();
+    props.onSubmit();
   }
 
   return (
-    <div className={buildClassName(styles.buttons, styles.inputControl)} data-text-formatter>
-      {leadingButtonIconName && leadingButtonAriaLabel && onLeadingButtonClick && (
+    <div class={buildClassName(styles.buttons, styles.inputControl)} data-text-formatter>
+      {props.leadingButtonIconName && props.leadingButtonAriaLabel && props.onLeadingButtonClick && (
         <>
           <Button
             color="translucent"
-            ariaLabel={leadingButtonAriaLabel}
-            onClick={onLeadingButtonClick}
-            iconName={leadingButtonIconName}
+            ariaLabel={props.leadingButtonAriaLabel}
+            onClick={props.onLeadingButtonClick}
+            iconName={props.leadingButtonIconName}
           />
-          <div className={styles.divider} />
+          <div class={styles.divider} />
         </>
       )}
-      <div className={styles.inputWrapper}>
+      <div class={styles.inputWrapper}>
         <input
           ref={inputRef}
-          className={buildClassName(styles.inputField, 'custom-scroll-x', 'no-scrollbar')}
+          class={buildClassName(styles.inputField, 'custom-scroll-x', 'no-scrollbar')}
           type="text"
-          value={value}
-          placeholder={placeholder}
-          autoComplete="off"
-          spellCheck={shouldSpellCheck === false || IS_TAURI ? false : undefined}
-          inputMode={inputMode}
-          dir={dir}
-          aria-label={ariaLabel}
-          onChange={handleChange}
+          use:value={() => props.value}
+          placeholder={props.placeholder}
+          autocomplete="off"
+          spellcheck={props.shouldSpellCheck === false || IS_TAURI ? false : undefined}
+          inputMode={props.inputMode}
+          dir={props.dir}
+          aria-label={props.ariaLabel}
+          onInput={handleChange}
           onKeyDown={handleKeyDown}
           onMouseDown={(e) => e.stopPropagation()}
         />
       </div>
-      <div className={styles.inputConfirm}>
-        <div className={styles.divider} />
+      <div class={styles.inputConfirm}>
+        <div class={styles.divider} />
         <Button
           color="translucent"
           ariaLabel={lang('Save')}
           className="color-primary"
-          disabled={!canSubmit}
-          onClick={onSubmit}
+          disabled={!canSubmit()}
+          onClick={props.onSubmit}
           iconName="check"
         />
       </div>
@@ -139,4 +132,4 @@ const TextFormatterInput = ({
   );
 };
 
-export default memo(TextFormatterInput);
+export default TextFormatterInput;

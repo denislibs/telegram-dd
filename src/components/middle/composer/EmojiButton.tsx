@@ -1,11 +1,8 @@
-import type { FC } from '../../../lib/teact/teact';
-import { memo } from '../../../lib/teact/teact';
+import { createMemo } from 'frameact';
 
 import { IS_EMOJI_SUPPORTED } from '../../../util/browser/windowEnvironment';
 import buildClassName from '../../../util/buildClassName';
 import { handleEmojiLoad, LOADED_EMOJIS } from '../../../util/emoji/emoji';
-
-import useLastCallback from '../../../hooks/useLastCallback';
 
 import './EmojiButton.scss';
 
@@ -15,31 +12,31 @@ type OwnProps = {
   onClick: (emoji: string, name: string) => void;
 };
 
-const EmojiButton: FC<OwnProps> = ({ emoji, focus, onClick }) => {
-  const handleClick = useLastCallback((e: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
+const EmojiButton = (props: OwnProps) => {
+  const handleClick = (e: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
     // Preventing safari from losing focus on Composer MessageInput
     e.preventDefault();
 
-    onClick(emoji.native, emoji.id);
-  });
+    props.onClick(props.emoji.native, props.emoji.id);
+  };
 
-  const className = buildClassName('EmojiButton', focus && 'focus');
+  const className = createMemo(() => buildClassName('EmojiButton', props.focus && 'focus'));
 
-  const src = `./img-apple-64/${emoji.image}.png`;
-  const isLoaded = LOADED_EMOJIS.has(src);
+  const src = createMemo(() => `./img-apple-64/${props.emoji.image}.png`);
+  const isLoaded = createMemo(() => LOADED_EMOJIS.has(src()));
 
   return (
-    <div className={className} onMouseDown={handleClick} title={`:${emoji.names[0]}:`}>
+    <div class={className()} onMouseDown={handleClick} title={`:${props.emoji.names[0]}:`}>
       {IS_EMOJI_SUPPORTED ? (
-        emoji.native
+        props.emoji.native
       ) : (
         <img
-          src={src}
-          className={!isLoaded ? 'opacity-transition shown' : undefined}
-          alt={emoji.native}
+          src={src()}
+          class={!isLoaded() ? 'opacity-transition shown' : undefined}
+          alt={props.emoji.native}
           loading="lazy"
-          data-path={src}
-          onLoad={!isLoaded ? handleEmojiLoad : undefined}
+          data-path={src()}
+          onLoad={!isLoaded() ? handleEmojiLoad : undefined}
           draggable={false}
         />
       )}
@@ -47,4 +44,4 @@ const EmojiButton: FC<OwnProps> = ({ emoji, focus, onClick }) => {
   );
 };
 
-export default memo(EmojiButton);
+export default EmojiButton;

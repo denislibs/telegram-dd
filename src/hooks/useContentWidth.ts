@@ -1,40 +1,43 @@
-import type { ElementRef } from '../lib/teact/teact';
-import { useEffect, useRef } from '../lib/teact/teact';
-import { setExtraStyles } from '../lib/teact/teact-dom';
-
-import { requestMeasure, requestMutation, requestNextMutation } from '../lib/fasterdom/fasterdom';
+import { createEffect, requestMeasure, requestMutation, requestNextMutation } from 'frameact';
+import { setExtraStyles } from 'frameact/dom';
 
 const WIDTH_OVERSHOOT = 1;
 
+// TODO(codemod): useContentWidth: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useContentWidth(
-  targetRef: ElementRef<HTMLElement>,
-  contentRef: ElementRef<HTMLElement>,
+  targetRef: (el: HTMLElement) => void,
+  contentRef: (el: HTMLElement) => void,
   deps: readonly unknown[],
 ) {
-  const isFirstRunRef = useRef(true);
+  let isFirstRunRef = true;
 
-  useEffect(() => {
-    requestMeasure(() => {
-      const target = targetRef.current;
-      const content = contentRef.current;
-      if (!target || !content) return;
+  // TODO(codemod): useEffect without a dependency array ran after every render: name the tracked reads in the compute half
+  createEffect(
+    () => undefined,
+    () => {
+      requestMeasure(() => {
+        const target = targetRef.current;
+        const content = contentRef.current;
+        if (!target || !content) return;
 
-      const { paddingLeft, paddingRight } = getComputedStyle(target);
-      const width = content.scrollWidth + parseFloat(paddingLeft) + parseFloat(paddingRight) + WIDTH_OVERSHOOT;
+        const { paddingLeft, paddingRight } = getComputedStyle(target);
+        const width = content.scrollWidth + parseFloat(paddingLeft) + parseFloat(paddingRight) + WIDTH_OVERSHOOT;
 
-      requestMutation(() => {
-        if (!isFirstRunRef.current) {
-          setExtraStyles(target, { width: `${width}px` });
-          return;
-        }
+        requestMutation(() => {
+          if (!isFirstRunRef) {
+            setExtraStyles(target, { width: `${width}px` });
+            return;
+          }
 
-        isFirstRunRef.current = false;
-        setExtraStyles(target, { width: `${width}px`, transition: 'none' });
-        requestNextMutation(() => {
-          setExtraStyles(target, { width: `${width}px`, transition: '' });
+          isFirstRunRef = false;
+          setExtraStyles(target, { width: `${width}px`, transition: 'none' });
+          requestNextMutation(() => {
+            setExtraStyles(target, { width: `${width}px`, transition: '' });
+          });
         });
       });
-    });
-    // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps
-  }, deps);
+      // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps
+    },
+    deps,
+  );
 }

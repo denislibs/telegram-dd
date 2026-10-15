@@ -1,8 +1,7 @@
-import { memo, useLayoutEffect, useRef } from '../../../lib/teact/teact';
+import { createMemo, createMutationEffect } from 'frameact';
+import { splitProps } from 'frameact/dom';
 
 import buildClassName from '../../../util/buildClassName';
-
-import useLastCallback from '../../../hooks/useLastCallback';
 
 import { useControlContext } from '../layout/Control';
 import { useInteractiveContext } from '../layout/Interactive';
@@ -24,47 +23,50 @@ type OwnProps = {
 
 type Props = OwnProps & Omit<InputProps, keyof OwnProps | 'type'>;
 
-const Checkbox = ({
-  checked,
-  disabled,
-  isRound,
-  indeterminate,
-  isInvalid,
-  nonInteractive,
-  className,
-  onChange,
-  onClick,
-  id,
-  tabIndex,
-  ...restProps
-}: Props) => {
+const Checkbox = (props: Props) => {
+  const [, restProps] = splitProps(props, [
+    'checked',
+    'disabled',
+    'isRound',
+    'indeterminate',
+    'isInvalid',
+    'nonInteractive',
+    'className',
+    'onChange',
+    'onClick',
+    'id',
+    'tabIndex',
+  ]);
   const control = useControlContext();
   const interactive = useInteractiveContext();
-  const ref = useRef<HTMLInputElement>();
+  let ref!: HTMLInputElement;
 
-  const resolvedId = id ?? control?.id;
-  const isDisabled = disabled || interactive?.isDisabled || interactive?.isLoading;
-  const isNonInteractive = nonInteractive;
+  const resolvedId = createMemo(() => props.id ?? control?.id);
+  const isDisabled = createMemo(() => props.disabled || interactive?.isDisabled || interactive?.isLoading);
+  const isNonInteractive = createMemo(() => props.nonInteractive);
 
-  useLayoutEffect(() => {
-    if (!ref.current) return;
-    ref.current.indeterminate = Boolean(indeterminate);
-  }, [indeterminate]);
+  createMutationEffect(
+    () => props.indeterminate,
+    (indeterminate2) => {
+      if (!ref) return;
+      ref.indeterminate = Boolean(indeterminate2);
+    },
+  );
 
-  const handleClick = useLastCallback((e: React.MouseEvent<HTMLInputElement>) => {
-    if (isNonInteractive) {
+  const handleClick = (e: React.MouseEvent<HTMLInputElement>) => {
+    if (isNonInteractive()) {
       e.preventDefault();
       return;
     }
 
-    onClick?.(e);
-  });
+    props.onClick?.(e);
+  };
 
-  const handleChange = useLastCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    if (isNonInteractive) return;
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isNonInteractive()) return;
 
-    onChange?.(e.currentTarget.checked);
-  });
+    props.onChange?.(e.currentTarget.checked);
+  };
 
   if (interactive?.isLoading) return undefined;
 
@@ -73,23 +75,23 @@ const Checkbox = ({
       {...restProps}
       ref={ref}
       type="checkbox"
-      id={resolvedId}
-      checked={checked}
-      disabled={isDisabled}
-      className={buildClassName(
+      id={resolvedId()}
+      use:checked={() => props.checked}
+      disabled={isDisabled()}
+      class={buildClassName(
         styles.root,
         control?.inputClassName,
-        isInvalid && styles.invalid,
-        isRound && styles.round,
-        isNonInteractive && styles.nonInteractive,
-        className,
+        props.isInvalid && styles.invalid,
+        props.isRound && styles.round,
+        isNonInteractive() && styles.nonInteractive,
+        props.className,
       )}
-      tabIndex={isNonInteractive ? -1 : tabIndex}
-      aria-disabled={isNonInteractive || undefined}
+      tabIndex={isNonInteractive() ? -1 : props.tabIndex}
+      aria-disabled={isNonInteractive() || undefined}
       onClick={handleClick}
-      onChange={handleChange}
+      onInput={handleChange}
     />
   );
 };
 
-export default memo(Checkbox);
+export default Checkbox;

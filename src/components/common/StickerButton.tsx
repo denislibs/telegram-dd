@@ -1,10 +1,8 @@
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
-import type { ElementRef } from '../../lib/teact/teact';
-import { memo, useEffect, useMemo, useRef } from '../../lib/teact/teact';
+import { createMemo, onMount } from 'frameact';
 import { getActions } from '../../global';
 
 import type { ApiBotInlineMediaResult, ApiSticker } from '../../api/types';
-import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 
 import { IS_TOUCH_ENV } from '../../util/browser/windowEnvironment';
 import buildClassName from '../../util/buildClassName';
@@ -14,7 +12,6 @@ import { preventMessageInputBlurWithBubbling } from '../middle/helpers/preventMe
 import useDynamicColorListener from '../../hooks/stickers/useDynamicColorListener';
 import useContextMenuHandlers from '../../hooks/useContextMenuHandlers';
 import { useIsIntersecting } from '../../hooks/useIntersectionObserver';
-import useLastCallback from '../../hooks/useLastCallback';
 import useOldLang from '../../hooks/useOldLang';
 
 import Button from '../ui/Button';
@@ -38,7 +35,7 @@ type OwnProps<T> = {
   isSelected?: boolean;
   isCurrentUserPremium?: boolean;
   shouldIgnorePremium?: boolean;
-  sharedCanvasRef?: ElementRef<HTMLCanvasElement>;
+  sharedCanvasRef?: (el: HTMLCanvasElement) => void;
   withTranslucentThumb?: boolean;
   forcePlayback?: boolean;
   isEffectEmoji?: boolean;
@@ -62,53 +59,40 @@ const contentForStatusMenuContext = [
   { title: 'SetTimeoutFor.Days', value: 2, arg: 172800 },
 ];
 
-const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult | undefined = undefined>({
-  sticker,
-  size,
-  noPlay,
-  title,
-  className,
-  noContextMenu,
-  isSavedMessages,
-  isStatusPicker,
-  canViewSet,
-  isSelected,
-  isCurrentUserPremium,
-  shouldIgnorePremium,
-  noShowPremium,
-  sharedCanvasRef,
-  withTranslucentThumb,
-  forcePlayback,
-  isEffectEmoji,
-  noIcons,
-  clickArg,
-  onClick,
-  observeIntersection,
-  observeIntersectionForShowing,
-  onFaveClick,
-  onUnfaveClick,
-  onRemoveRecentClick,
-  onDismiss,
-}: OwnProps<T>) => {
+const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult | undefined = undefined>(
+  props: OwnProps<T>,
+) => {
   const { openStickerSet, setEmojiStatus, showNotification } = getActions();
-  const ref = useRef<HTMLDivElement>();
-  const menuRef = useRef<HTMLDivElement>();
+  let ref!: HTMLDivElement;
+  let menuRef!: HTMLDivElement;
   const lang = useOldLang();
-  const hasCustomColor = sticker.shouldUseTextColor;
-  const customColor = useDynamicColorListener(ref, undefined, !hasCustomColor);
+  const hasCustomColor = createMemo(() => props.sticker.shouldUseTextColor);
+  const customColor = useDynamicColorListener(
+    () => ref,
+    undefined,
+    () => !hasCustomColor(),
+  );
 
-  const { id, stickerSetInfo } = sticker;
+  const id = () => props.sticker.id;
+  const stickerSetInfo = () => props.sticker.stickerSetInfo;
+  const isPremium = createMemo(() => !props.sticker.isFree || props.sticker.hasEffect);
+  const isCustomEmoji = createMemo(() => props.sticker.isCustomEmoji || props.isEffectEmoji);
+  const isPremiumSticker = createMemo(() => !isCustomEmoji() && isPremium());
+  const isLocked = createMemo(
+    () => !props.isCurrentUserPremium && isPremium() && !props.shouldIgnorePremium && !props.isSavedMessages,
+  );
 
-  const isPremium = !sticker.isFree || sticker.hasEffect;
-  const isCustomEmoji = sticker.isCustomEmoji || isEffectEmoji;
-  const isPremiumSticker = !isCustomEmoji && isPremium;
-  const isLocked = !isCurrentUserPremium && isPremium && !shouldIgnorePremium && !isSavedMessages;
-
-  const isIntersecting = useIsIntersecting(ref, observeIntersection);
+  const isIntersecting = useIsIntersecting(
+    () => ref,
+    () => props.observeIntersection,
+  );
   const shouldLoad = isIntersecting;
-  const shouldPlay = isIntersecting && !noPlay;
+  const shouldPlay = createMemo(() => isIntersecting && !props.noPlay);
 
-  const isIntesectingForShowing = useIsIntersecting(ref, observeIntersectionForShowing);
+  const isIntesectingForShowing = useIsIntersecting(
+    () => ref,
+    () => props.observeIntersectionForShowing,
+  );
 
   const {
     isContextMenuOpen,
@@ -117,26 +101,26 @@ const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult |
     handleContextMenu,
     handleContextMenuClose,
     handleContextMenuHide,
-  } = useContextMenuHandlers(ref);
-  const shouldRenderContextMenu = Boolean(!noContextMenu && contextMenuAnchor);
+  } = useContextMenuHandlers(() => ref);
+  const shouldRenderContextMenu = createMemo(() => Boolean(!props.noContextMenu && contextMenuAnchor));
 
-  const getTriggerElement = useLastCallback(() => ref.current);
-  const getRootElement = useLastCallback(() => ref.current!.closest('.custom-scroll, .no-scrollbar'));
-  const getMenuElement = useLastCallback(() => {
-    return isStatusPicker ? menuRef.current : ref.current!.querySelector('.sticker-context-menu .bubble');
-  });
-  const getLayout = useLastCallback(() => ({ withPortal: isStatusPicker, shouldAvoidNegativePosition: true }));
+  const getTriggerElement = () => ref;
+  const getRootElement = () => ref!.closest('.custom-scroll, .no-scrollbar');
+  const getMenuElement = () => {
+    return props.isStatusPicker ? menuRef : ref!.querySelector('.sticker-context-menu .bubble');
+  };
+  const getLayout = () => ({ withPortal: props.isStatusPicker, shouldAvoidNegativePosition: true });
 
-  useEffect(() => {
+  onMount(() => {
     if (!isIntersecting) handleContextMenuClose();
-  }, [handleContextMenuClose, isIntersecting]);
+  });
 
   const handleClick = () => {
     if (isContextMenuOpen) return;
-    if (isLocked) {
-      const initialSection = isEffectEmoji ? 'effects' : isCustomEmoji ? 'animated_emoji' : 'premium_stickers';
+    if (isLocked()) {
+      const initialSection = props.isEffectEmoji ? 'effects' : isCustomEmoji() ? 'animated_emoji' : 'premium_stickers';
       showNotification({
-        message: { key: isCustomEmoji || isEffectEmoji ? 'PremiumUnlockEmoji' : 'PremiumUnlockStickers' },
+        message: { key: isCustomEmoji() || props.isEffectEmoji ? 'PremiumUnlockEmoji' : 'PremiumUnlockStickers' },
         actionText: { key: 'PremiumMore' },
         action: {
           action: 'openPremiumModal',
@@ -145,7 +129,7 @@ const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult |
       });
       return;
     }
-    onClick?.(clickArg);
+    props.onClick?.(props.clickArg);
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLElement>) => {
@@ -153,65 +137,67 @@ const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult |
     handleBeforeContextMenu(e);
   };
 
-  const handleRemoveClick = useLastCallback((e: ReactMouseEvent<HTMLButtonElement, MouseEvent>) => {
+  const handleRemoveClick = (e: ReactMouseEvent<HTMLButtonElement, MouseEvent>) => {
     e.stopPropagation();
     e.preventDefault();
 
-    onRemoveRecentClick!(sticker);
-  });
+    props.onRemoveRecentClick!(props.sticker);
+  };
 
-  const handleContextRemoveRecent = useLastCallback(() => {
-    onRemoveRecentClick!(sticker);
-  });
+  const handleContextRemoveRecent = () => {
+    props.onRemoveRecentClick!(props.sticker);
+  };
 
-  const handleContextUnfave = useLastCallback(() => {
-    onUnfaveClick!(sticker);
-  });
+  const handleContextUnfave = () => {
+    props.onUnfaveClick!(props.sticker);
+  };
 
-  const handleContextFave = useLastCallback(() => {
-    onFaveClick!(sticker);
-  });
+  const handleContextFave = () => {
+    props.onFaveClick!(props.sticker);
+  };
 
-  const handleSendQuiet = useLastCallback(() => {
-    onClick?.(clickArg, true);
-  });
+  const handleSendQuiet = () => {
+    props.onClick?.(props.clickArg, true);
+  };
 
-  const handleSendScheduled = useLastCallback(() => {
-    onClick?.(clickArg, undefined, true);
-  });
+  const handleSendScheduled = () => {
+    props.onClick?.(props.clickArg, undefined, true);
+  };
 
-  const handleOpenSet = useLastCallback(() => {
-    openStickerSet({ stickerSetInfo });
-  });
+  const handleOpenSet = () => {
+    openStickerSet({ stickerSetInfo: stickerSetInfo() });
+  };
 
-  const handleEmojiStatusExpiresClick = useLastCallback((e: React.SyntheticEvent, duration = 0) => {
+  const handleEmojiStatusExpiresClick = (e: React.SyntheticEvent, duration = 0) => {
     e.preventDefault();
     e.stopPropagation();
 
     handleContextMenuClose();
-    onDismiss?.();
+    props.onDismiss?.();
     setEmojiStatus({
-      emojiStatus: { type: 'regular', documentId: sticker.id, until: getServerTime() + duration },
+      emojiStatus: { type: 'regular', documentId: props.sticker.id, until: getServerTime() + duration },
     });
-  });
+  };
 
-  const shouldShowCloseButton = !IS_TOUCH_ENV && onRemoveRecentClick;
+  const shouldShowCloseButton = createMemo(() => !IS_TOUCH_ENV && props.onRemoveRecentClick);
 
-  const fullClassName = buildClassName(
-    'StickerButton',
-    onClick && 'interactive',
-    isSelected && 'selected',
-    isCustomEmoji && 'custom-emoji',
-    isEffectEmoji && 'effect-emoji',
-    className,
+  const fullClassName = createMemo(() =>
+    buildClassName(
+      'StickerButton',
+      props.onClick && 'interactive',
+      props.isSelected && 'selected',
+      isCustomEmoji() && 'custom-emoji',
+      props.isEffectEmoji && 'effect-emoji',
+      props.className,
+    ),
   );
 
-  const contextMenuItems = useMemo(() => {
-    if (!shouldRenderContextMenu || noContextMenu || (isCustomEmoji && !isStatusPicker)) return [];
+  const contextMenuItems = createMemo(() => {
+    if (!shouldRenderContextMenu() || props.noContextMenu || (isCustomEmoji() && !props.isStatusPicker)) return [];
 
     const items: ReactNode[] = [];
 
-    if (isCustomEmoji) {
+    if (isCustomEmoji()) {
       contentForStatusMenuContext.forEach((item) => {
         items.push(
           <MenuItem onClick={handleEmojiStatusExpiresClick} clickArg={item.arg}>
@@ -223,7 +209,7 @@ const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult |
       return items;
     }
 
-    if (onUnfaveClick) {
+    if (props.onUnfaveClick) {
       items.push(
         <MenuItem icon="star-regular" onClick={handleContextUnfave}>
           {lang('Stickers.RemoveFromFavorites')}
@@ -231,7 +217,7 @@ const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult |
       );
     }
 
-    if (onFaveClick) {
+    if (props.onFaveClick) {
       items.push(
         <MenuItem icon="star-regular" onClick={handleContextFave}>
           {lang('Stickers.AddToFavorites')}
@@ -239,8 +225,8 @@ const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult |
       );
     }
 
-    if (!isLocked && onClick) {
-      if (!isSavedMessages) {
+    if (!isLocked() && props.onClick) {
+      if (!props.isSavedMessages) {
         items.push(
           <MenuItem onClick={handleSendQuiet} icon="muted">
             {lang('SendWithoutSound')}
@@ -249,19 +235,19 @@ const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult |
       }
       items.push(
         <MenuItem onClick={handleSendScheduled} icon="calendar">
-          {lang(isSavedMessages ? 'SetReminder' : 'ScheduleMessage')}
+          {lang(props.isSavedMessages ? 'SetReminder' : 'ScheduleMessage')}
         </MenuItem>,
       );
     }
 
-    if (canViewSet) {
+    if (props.canViewSet) {
       items.push(
         <MenuItem onClick={handleOpenSet} icon="stickers">
           {lang('ViewPackPreview')}
         </MenuItem>,
       );
     }
-    if (onRemoveRecentClick) {
+    if (props.onRemoveRecentClick) {
       items.push(
         <MenuItem icon="delete" onClick={handleContextRemoveRecent}>
           {lang('DeleteFromRecent')}
@@ -269,72 +255,54 @@ const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult |
       );
     }
     return items;
-  }, [
-    shouldRenderContextMenu,
-    noContextMenu,
-    isCustomEmoji,
-    isStatusPicker,
-    onUnfaveClick,
-    onFaveClick,
-    isLocked,
-    onClick,
-    canViewSet,
-    onRemoveRecentClick,
-    handleEmojiStatusExpiresClick,
-    lang,
-    handleContextUnfave,
-    handleContextFave,
-    isSavedMessages,
-    handleSendScheduled,
-    handleSendQuiet,
-    handleOpenSet,
-    handleContextRemoveRecent,
-  ]);
+  });
 
   return (
     <div
       ref={ref}
-      className={fullClassName}
-      title={title || sticker?.emoji}
-      data-sticker-id={id}
+      class={fullClassName()}
+      title={props.title || props.sticker?.emoji}
+      data-sticker-id={id()}
       onMouseDown={handleMouseDown}
       onClick={handleClick}
       onContextMenu={handleContextMenu}
     >
       {isIntesectingForShowing ? (
         <StickerView
-          containerRef={ref}
-          sticker={sticker}
+          containerRef={(el) => {
+            ref = el;
+          }}
+          sticker={props.sticker}
           isSmall
-          size={size}
+          size={props.size}
           shouldLoop
           shouldPreloadPreview
           noLoad={!shouldLoad}
-          noPlay={!shouldPlay}
+          noPlay={!shouldPlay()}
           noVideoOnMobile
           withSharedAnimation
-          sharedCanvasRef={sharedCanvasRef}
-          withTranslucentThumb={withTranslucentThumb}
+          sharedCanvasRef={props.sharedCanvasRef}
+          withTranslucentThumb={props.withTranslucentThumb}
           customColor={customColor}
-          forceAlways={forcePlayback}
+          forceAlways={props.forcePlayback}
         />
       ) : (
         isIntersecting &&
-        sticker.thumbnail?.dataUri && (
-          <img src={sticker.thumbnail.dataUri} className="sticker-media" alt="" draggable={false} />
+        props.sticker.thumbnail?.dataUri && (
+          <img src={props.sticker.thumbnail.dataUri} class="sticker-media" alt="" draggable={false} />
         )
       )}
-      {!noIcons && !noShowPremium && isLocked && (
-        <div className="sticker-locked">
+      {!props.noIcons && !props.noShowPremium && isLocked() && (
+        <div class="sticker-locked">
           <Icon name="lock-filled" />
         </div>
       )}
-      {!noIcons && !noShowPremium && isPremiumSticker && !isLocked && (
-        <div className="sticker-premium">
+      {!props.noIcons && !props.noShowPremium && isPremiumSticker() && !isLocked() && (
+        <div class="sticker-premium">
           <Icon name="star" />
         </div>
       )}
-      {shouldShowCloseButton && (
+      {shouldShowCloseButton() && (
         <Button
           className="sticker-remove-button"
           color="dark"
@@ -344,7 +312,7 @@ const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult |
           iconName="close"
         />
       )}
-      {Boolean(contextMenuItems.length) && (
+      {Boolean(contextMenuItems().length) && (
         <Menu
           ref={menuRef}
           isOpen={isContextMenuOpen}
@@ -355,15 +323,15 @@ const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult |
           getLayout={getLayout}
           className="sticker-context-menu"
           autoClose
-          withPortal={isStatusPicker}
+          withPortal={props.isStatusPicker}
           onClose={handleContextMenuClose}
           onCloseAnimationEnd={handleContextMenuHide}
         >
-          {contextMenuItems}
+          {contextMenuItems()}
         </Menu>
       )}
     </div>
   );
 };
 
-export default memo(StickerButton);
+export default StickerButton;

@@ -1,12 +1,10 @@
-import type { ElementRef } from '../../../lib/teact/teact';
-import { useRef, useState } from '../../../lib/teact/teact';
+import { createEffect, createSignal } from 'frameact';
+import { depsOf } from '../../../util/effectDeps';
 
 import animateScroll, { isAnimatingScroll } from '../../../util/animateScroll';
 import { REM } from '../helpers/mediaDimensions';
 
 import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
-import useLastCallback from '../../../hooks/useLastCallback';
-import useSyncEffect from '../../../hooks/useSyncEffect';
 
 const STICKER_INTERSECTION_THROTTLE = 200;
 const STICKER_INTERSECTION_MARGIN = 100;
@@ -17,15 +15,16 @@ const SCROLL_MAX_DISTANCE_WHEN_CLOSE = 200;
 const SCROLL_MAX_DISTANCE_WHEN_FAR = 80;
 const FOCUS_MARGIN = 0.5 * REM;
 
+// TODO(codemod): useStickerPickerObservers: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export function useStickerPickerObservers(
-  containerRef: ElementRef<HTMLDivElement>,
-  headerRef: ElementRef<HTMLDivElement>,
+  containerRef: (el: HTMLDivElement) => void,
+  headerRef: (el: HTMLDivElement) => void,
   idPrefix: string,
   isHidden?: boolean,
 ) {
-  const stickerSetIntersectionsRef = useRef<boolean[]>([]);
+  let stickerSetIntersectionsRef: boolean[] = [];
 
-  const [activeSetIndex, setActiveSetIndex] = useState<number>(0);
+  const [activeSetIndex, setActiveSetIndex] = createSignal<number>(0);
 
   const {
     observe: observeIntersectionForSet,
@@ -37,7 +36,7 @@ export function useStickerPickerObservers(
       throttleMs: STICKER_INTERSECTION_THROTTLE,
     },
     (entries) => {
-      const stickerSetIntersections = stickerSetIntersectionsRef.current;
+      const stickerSetIntersections = stickerSetIntersectionsRef;
 
       entries.forEach((entry) => {
         const index = Number(entry.target.id.replace(`${idPrefix}-`, ''));
@@ -82,24 +81,28 @@ export function useStickerPickerObservers(
     margin: COVERS_INTERSECTION_MARGIN,
   });
 
-  useSyncEffect(() => {
-    if (isHidden) {
-      freezeForSet();
-      freezeForShowingItems();
-    } else {
-      const timeout = window.setTimeout(() => {
-        unfreezeForShowingItems();
-        unfreezeForSet();
-      }, UNFREEZE_DELAY);
+  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
+  createEffect(
+    depsOf(() => [freezeForSet, freezeForShowingItems, isHidden, unfreezeForSet, unfreezeForShowingItems]),
+    () => {
+      if (isHidden) {
+        freezeForSet();
+        freezeForShowingItems();
+      } else {
+        const timeout = window.setTimeout(() => {
+          unfreezeForShowingItems();
+          unfreezeForSet();
+        }, UNFREEZE_DELAY);
 
-      return () => {
-        clearTimeout(timeout);
-      };
-    }
-    return undefined;
-  }, [freezeForSet, freezeForShowingItems, isHidden, unfreezeForSet, unfreezeForShowingItems]);
+        return () => {
+          clearTimeout(timeout);
+        };
+      }
+      return undefined;
+    },
+  );
 
-  const selectStickerSet = useLastCallback((index: number) => {
+  const selectStickerSet = (index: number) => {
     setActiveSetIndex((currentIndex) => {
       const stickerSetEl = document.getElementById(`${idPrefix}-${index}`)!;
       const isClose = Math.abs(currentIndex - index) === 1;
@@ -115,7 +118,7 @@ export function useStickerPickerObservers(
 
       return index;
     });
-  });
+  };
 
   return {
     activeSetIndex,

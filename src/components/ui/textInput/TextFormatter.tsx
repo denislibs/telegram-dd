@@ -1,5 +1,6 @@
 import type { Editor } from '@tiptap/core';
-import { memo, useEffect, useState } from '../../../lib/teact/teact';
+import { createEffect, createMemo, createSignal } from 'frameact';
+import { depsOf } from '../../../util/effectDeps';
 
 import type { IconName } from '../../../types/icons';
 import type { RichEditorFormatterState } from '../../common/tooltips/types';
@@ -14,7 +15,6 @@ import { buildRichTextFromTiptapContent, buildTiptapInlineContentFromRichText } 
 
 import useFlag from '../../../hooks/useFlag';
 import useLang from '../../../hooks/useLang';
-import useLastCallback from '../../../hooks/useLastCallback';
 
 import CalendarModal from '../../common/CalendarModal';
 import Button from '../Button';
@@ -73,191 +73,196 @@ const MARK_NAME_BY_TEXT_FORMAT: Partial<Record<SelectedTextFormat, string>> = {
   superscript: 'superscript',
 };
 
-const TextFormatter = ({
-  editor,
-  range,
-  capabilities,
-  controlRequest,
-  isRichInputExpanded,
-  onClose,
-  onDismissalChange,
-}: OwnProps) => {
+const TextFormatter = (props: OwnProps) => {
   const [isLinkControlOpen, openLinkControl, closeLinkControl] = useFlag();
   const [isDatePickerOpen, openDatePicker, closeDatePicker] = useFlag();
-  const [linkUrl, setLinkUrl] = useState('');
-  const [selectedDateAt, setSelectedDateAt] = useState(() => roundDateToMinute(new Date()).getTime());
+  const [linkUrl, setLinkUrl] = createSignal('');
+  const [selectedDateAt, setSelectedDateAt] = createSignal((() => roundDateToMinute(new Date()).getTime())());
 
   const lang = useLang();
-  const { formats: selectedTextFormats, hasFormatting: hasSelectedTextFormatting } = getSelectedEditorTextState(
-    editor,
-    range,
-    Boolean(isRichInputExpanded),
+  const getSelectedEditorTextStateResult = createMemo(() =>
+    getSelectedEditorTextState(props.editor, props.range, Boolean(props.isRichInputExpanded)),
   );
-  const selectedLinkHref = getSelectedLinkHref(editor, range);
+  const selectedTextFormats = () => getSelectedEditorTextStateResult().formats;
+  const hasSelectedTextFormatting = () => getSelectedEditorTextStateResult().hasFormatting;
+  const selectedLinkHref = createMemo(() => getSelectedLinkHref(props.editor, props.range));
 
-  useEffect(() => {
-    if (!isLinkControlOpen) {
-      setLinkUrl('');
-    }
-  }, [isLinkControlOpen]);
-
-  useEffect(() => {
-    return () => {
-      if (!editor.isDestroyed) {
-        editor.commands.setFormatterSelectionHighlight(false);
+  createEffect(
+    () => isLinkControlOpen(),
+    (isLinkControlOpen2) => {
+      if (!isLinkControlOpen2) {
+        setLinkUrl('');
       }
-    };
-  }, [editor]);
+    },
+  );
 
-  useEffect(() => {
-    onDismissalChange(isDatePickerOpen);
-    return () => onDismissalChange(false);
-  }, [isDatePickerOpen, onDismissalChange]);
+  createEffect(
+    () => props.editor,
+    (editor2) => {
+      return () => {
+        if (!editor2.isDestroyed) {
+          editor2.commands.setFormatterSelectionHighlight(false);
+        }
+      };
+    },
+  );
 
-  const restoreEditorSelection = useLastCallback(() => {
-    if (editor.isDestroyed) {
+  createEffect(
+    depsOf(() => [isDatePickerOpen(), props.onDismissalChange] as const),
+    ([isDatePickerOpen2, onDismissalChange2]) => {
+      onDismissalChange2(isDatePickerOpen2);
+      return () => onDismissalChange2(false);
+    },
+  );
+
+  const restoreEditorSelection = () => {
+    if (props.editor.isDestroyed) {
       return false;
     }
 
-    return editor.chain().focus().setTextSelection(range).run();
-  });
+    return props.editor.chain().focus().setTextSelection(props.range).run();
+  };
 
   function getFormatButtonClassName(key: SelectedTextFormat) {
-    return selectedTextFormats[key] ? 'active' : undefined;
+    return selectedTextFormats()[key] ? 'active' : undefined;
   }
 
   function isFormatButtonDisabled(key: SelectedTextFormat) {
-    if (selectedTextFormats[key]) {
+    if (selectedTextFormats()[key]) {
       return false;
     }
     if (key === 'subscript') {
-      return Boolean(selectedTextFormats.superscript);
+      return Boolean(selectedTextFormats().superscript);
     }
     if (key === 'superscript') {
-      return Boolean(selectedTextFormats.subscript);
+      return Boolean(selectedTextFormats().subscript);
     }
 
-    return key !== 'monospace' && key !== 'blockquote' && Boolean(selectedTextFormats.monospace);
+    return key !== 'monospace' && key !== 'blockquote' && Boolean(selectedTextFormats().monospace);
   }
 
-  const handleToggleEditorMark = useLastCallback((format: SelectedTextFormat) => {
+  const handleToggleEditorMark = (format: SelectedTextFormat) => {
     if (!restoreEditorSelection()) {
       return;
     }
 
     const markName = MARK_NAME_BY_TEXT_FORMAT[format]!;
-    const chain = editor.chain();
-    if (selectedTextFormats[format]) {
+    const chain = props.editor.chain();
+    if (selectedTextFormats()[format]) {
       chain.unsetMark(markName).run();
     } else {
       chain.setMark(markName).run();
     }
-  });
+  };
 
-  const handleClearFormatting = useLastCallback(() => {
+  const handleClearFormatting = () => {
     if (!restoreEditorSelection()) {
       return;
     }
 
-    editor.chain().unsetAllMarks({ ignoreClearable: true }).run();
-  });
+    props.editor.chain().unsetAllMarks({ ignoreClearable: true }).run();
+  };
 
-  const handleStructuralText = useLastCallback((format: 'blockquote' | 'code') => {
+  const handleStructuralText = (format: 'blockquote' | 'code') => {
     if (!restoreEditorSelection()) {
       return;
     }
 
-    const chain = editor.chain();
+    const chain = props.editor.chain();
     if (format === 'code') {
       chain.toggleSelectionCode().run();
     } else {
       chain.toggleSelectionBlockquote().run();
     }
-  });
+  };
 
-  const handleOpenLinkControl = useLastCallback(() => {
+  const handleOpenLinkControl = () => {
     if (!restoreEditorSelection()) {
       return;
     }
 
-    const commandChain = editor.chain();
-    if (selectedLinkHref !== undefined) {
+    const commandChain = props.editor.chain();
+    if (selectedLinkHref() !== undefined) {
       commandChain.extendMarkRange('link');
     }
     commandChain.setFormatterSelectionHighlight(true).run();
-    if (selectedLinkHref !== undefined) {
-      setLinkUrl(selectedLinkHref);
+    if (selectedLinkHref() !== undefined) {
+      setLinkUrl(selectedLinkHref());
     }
     openLinkControl();
-  });
+  };
 
-  const handleCloseLinkControl = useLastCallback(() => {
+  const handleCloseLinkControl = () => {
     if (restoreEditorSelection()) {
-      editor.commands.setFormatterSelectionHighlight(false);
+      props.editor.commands.setFormatterSelectionHighlight(false);
     }
     closeLinkControl();
-  });
+  };
 
-  const handleLinkUrlConfirm = useLastCallback(() => {
+  const handleLinkUrlConfirm = () => {
     if (!restoreEditorSelection()) {
       return;
     }
 
-    const commandChain = editor.chain();
-    if (!linkUrl.trim()) {
+    const commandChain = props.editor.chain();
+    if (!linkUrl().trim()) {
       commandChain.unsetLink().run();
     } else {
-      commandChain.setLink({ href: formatLinkUrl(linkUrl) }).run();
+      commandChain.setLink({ href: formatLinkUrl(linkUrl()) }).run();
     }
-    onClose();
-  });
+    props.onClose();
+  };
 
-  const handleInsertButton = useLastCallback(() => {
+  const handleInsertButton = () => {
     if (!restoreEditorSelection()) return;
-    const content = editor.state.doc.slice(range.from, range.to).content.toJSON();
+    const content = props.editor.state.doc.slice(props.range.from, props.range.to).content.toJSON();
     const text = normalizeButtonText(buildRichTextFromTiptapContent(content));
-    editor
+    props.editor
       .chain()
       .insertContent({ ...EMPTY_RICH_BUTTON, content: buildTiptapInlineContentFromRichText(text) })
       .run();
-    onClose();
-  });
+    props.onClose();
+  };
 
-  const handleOpenDatePicker = useLastCallback(() => {
+  const handleOpenDatePicker = () => {
     closeLinkControl();
     setSelectedDateAt(roundDateToMinute(new Date()).getTime());
     openDatePicker();
-  });
+  };
 
-  const handleFormattedDateConfirm = useLastCallback((date: Date) => {
-    const text = editor.state.doc.textBetween(range.from, range.to, '\n', '\n');
+  const handleFormattedDateConfirm = (date: Date) => {
+    const text = props.editor.state.doc.textBetween(props.range.from, props.range.to, '\n', '\n');
     if (!text || !restoreEditorSelection()) {
       return;
     }
 
-    editor
+    props.editor
       .chain()
       .setMark('date', {
         date: Math.round(date.getTime() / 1000),
       })
       .run();
     closeDatePicker();
-    onClose();
-  });
+    props.onClose();
+  };
 
-  useEffect(() => {
-    if (controlRequest?.control === 'link') {
-      handleOpenLinkControl();
-    } else if (controlRequest?.control === 'date') {
-      handleOpenDatePicker();
-    }
-  }, [controlRequest, handleOpenDatePicker, handleOpenLinkControl]);
+  // TODO(codemod): dependency on a container (controlRequest) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)
+  createEffect(
+    depsOf(() => [props.controlRequest, handleOpenDatePicker, handleOpenLinkControl] as const),
+    ([controlRequest2, , handleOpenLinkControl2]) => {
+      if (controlRequest2?.control === 'link') {
+        handleOpenLinkControl2();
+      } else if (controlRequest2?.control === 'date') {
+        handleOpenDatePicker();
+      }
+    },
+  );
 
-  const className = buildClassName(styles.root, isLinkControlOpen && styles.linkControlShown);
+  const className = createMemo(() => buildClassName(styles.root, isLinkControlOpen() && styles.linkControlShown));
 
   return (
-    <div className={className} data-text-formatter role="toolbar" onMouseDown={stopEvent}>
-      <div className={buildClassName(styles.buttons, 'no-scrollbar')}>
+    <div class={className()} data-text-formatter role="toolbar" onMouseDown={stopEvent}>
+      <div class={buildClassName(styles.buttons, 'no-scrollbar')}>
         <FormatButton
           ariaLabel={lang('RichEditorBlockquote')}
           className={getFormatButtonClassName('blockquote')}
@@ -271,7 +276,7 @@ const TextFormatter = ({
           isDisabled={isFormatButtonDisabled('spoiler')}
           onClick={() => handleToggleEditorMark('spoiler')}
         />
-        <div className={styles.divider} />
+        <div class={styles.divider} />
         <FormatButton
           ariaLabel={lang('FormattingBoldAria')}
           className={getFormatButtonClassName('bold')}
@@ -306,17 +311,17 @@ const TextFormatter = ({
           iconName="monospace"
           onClick={() => handleStructuralText('code')}
         />
-        <div className={styles.divider} />
+        <div class={styles.divider} />
         <FormatButton ariaLabel={lang('FormattingAddDateAria')} iconName="calendar" onClick={handleOpenDatePicker} />
         <FormatButton
-          ariaLabel={lang(selectedLinkHref !== undefined ? 'EditLink' : 'FormattingAddLinkAria')}
+          ariaLabel={lang(selectedLinkHref() !== undefined ? 'EditLink' : 'FormattingAddLinkAria')}
           iconName="link"
           onClick={handleOpenLinkControl}
         />
-        {capabilities === 'full' && isRichInputExpanded && (
+        {props.capabilities === 'full' && props.isRichInputExpanded && (
           <>
             <FormatButton ariaLabel={lang('RichButtonInline')} iconName="button" onClick={handleInsertButton} />
-            <div className={styles.divider} />
+            <div class={styles.divider} />
             <FormatButton
               ariaLabel={lang('FormattingMarkedAria')}
               className={buildClassName(styles.markButton, getFormatButtonClassName('marked'))}
@@ -343,27 +348,27 @@ const TextFormatter = ({
             />
           </>
         )}
-        <div className={styles.divider} />
+        <div class={styles.divider} />
         <FormatButton
           ariaLabel={lang('FormattingClearAria')}
           iconName="clear-formatting"
-          isDisabled={!hasSelectedTextFormatting}
+          isDisabled={!hasSelectedTextFormatting()}
           onClick={handleClearFormatting}
         />
       </div>
       <div
-        className={buildClassName(styles.linkControl, styles.inputPopup)}
-        aria-hidden={!isLinkControlOpen}
-        inert={!isLinkControlOpen}
+        class={buildClassName(styles.linkControl, styles.inputPopup)}
+        aria-hidden={!isLinkControlOpen()}
+        inert={!isLinkControlOpen()}
       >
         <TextFormatterInput
-          value={linkUrl}
+          value={linkUrl()}
           placeholder={lang('FormattingEnterUrl')}
           ariaLabel={lang('FormattingEnterUrl')}
-          isActive={isLinkControlOpen}
+          isActive={isLinkControlOpen()}
           leadingButtonIconName="arrow-left"
           leadingButtonAriaLabel={lang('Cancel')}
-          canSubmitEmpty={selectedLinkHref !== undefined}
+          canSubmitEmpty={selectedLinkHref() !== undefined}
           inputMode="url"
           dir="auto"
           onChange={setLinkUrl}
@@ -373,8 +378,8 @@ const TextFormatter = ({
         />
       </div>
       <CalendarModal
-        isOpen={isDatePickerOpen}
-        selectedAt={selectedDateAt}
+        isOpen={isDatePickerOpen()}
+        selectedAt={selectedDateAt()}
         withTimePicker
         submitButtonLabel={lang('Save')}
         onClose={closeDatePicker}
@@ -385,16 +390,9 @@ const TextFormatter = ({
   );
 };
 
-export default memo(TextFormatter);
+export default TextFormatter;
 
-function FormatButton({
-  ariaLabel,
-  className,
-  iconName,
-  hasPremiumBadge,
-  isDisabled,
-  onClick,
-}: {
+function FormatButton(props: {
   ariaLabel: string;
   className?: string;
   iconName: IconName;
@@ -405,12 +403,12 @@ function FormatButton({
   return (
     <Button
       color="translucent"
-      ariaLabel={ariaLabel}
-      className={className}
-      iconName={iconName}
-      iconHasPremiumBadge={hasPremiumBadge}
-      disabled={isDisabled}
-      onClick={onClick}
+      ariaLabel={props.ariaLabel}
+      className={props.className}
+      iconName={props.iconName}
+      iconHasPremiumBadge={props.hasPremiumBadge}
+      disabled={props.isDisabled}
+      onClick={props.onClick}
     />
   );
 }

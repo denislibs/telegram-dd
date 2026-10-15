@@ -1,5 +1,4 @@
 import type { Editor, Range as TiptapRange } from '@tiptap/core';
-import type { ElementRef } from '../../../lib/teact/teact';
 
 import type { ApiFormattedText, ApiInputRichMessage, ApiSticker } from '../../../api/types';
 import type { RichEditorDateClickTarget } from '../../../util/tiptap/extensions/date';
@@ -23,8 +22,8 @@ export type RichEditorMediaEditHandler = (uploadId: string) => void;
 
 export type RichEditorRoot = {
   element: HTMLDivElement;
-  sharedCanvasRef?: ElementRef<HTMLCanvasElement>;
-  sharedCanvasHqRef?: ElementRef<HTMLCanvasElement>;
+  sharedCanvasRef?: (el: HTMLCanvasElement) => void;
+  sharedCanvasHqRef?: (el: HTMLCanvasElement) => void;
   tooltips?: RichEditorTooltipsConfig;
   getIsRichInputExpanded: () => boolean;
   onReady: (source: HTMLElement) => void;

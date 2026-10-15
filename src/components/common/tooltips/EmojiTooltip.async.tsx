@@ -1,13 +1,13 @@
+import { lazy } from 'frameact/dom';
+
 import type { OwnProps } from './EmojiTooltip';
 
-import { Bundles } from '../../../util/moduleLoader';
+import { Bundles, loadBundle } from '../../../util/moduleLoader';
 
-import useModuleLoader from '../../../hooks/useModuleLoader';
+const EmojiTooltip = lazy<OwnProps>(() => loadBundle(Bundles.Extra).then((m) => ({ default: m.EmojiTooltip })));
 
 const EmojiTooltipAsync = (props: OwnProps) => {
-  const EmojiTooltip = useModuleLoader(Bundles.Extra, 'EmojiTooltip');
-
-  return EmojiTooltip ? <EmojiTooltip {...props} /> : undefined;
+  return <EmojiTooltip {...props} />;
 };
 
 export default EmojiTooltipAsync;

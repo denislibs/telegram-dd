@@ -1,5 +1,16 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from '../../../lib/teact/teact';
+import {
+  createEffect,
+  createMeasureEffect,
+  createMemo,
+  createMutationEffect,
+  createSignal,
+  onMount,
+  requestMeasure,
+} from 'frameact';
+import { For } from 'frameact/dom';
 import { getActions, getGlobal, withGlobal } from '../../../global';
+import { depsOf } from '../../../util/effectDeps';
+import type { GlobalState } from '../../../global/types';
 
 import type { ApiEmojiGroup, ApiSticker, ApiStickerSet } from '../../../api/types';
 import type { StickerSetOrReactionsSetOrRecent } from '../../../types';
@@ -14,7 +25,6 @@ import {
   RECENT_SYMBOL_SET_ID,
   SLIDE_TRANSITION_DURATION,
 } from '../../../config';
-import { requestMeasure } from '../../../lib/fasterdom/fasterdom';
 import {
   selectCanPlayAnimatedEmojis,
   selectChatFullInfo,
@@ -37,11 +47,9 @@ import { useTransitionActiveKey } from '../../../hooks/animations/useTransitionA
 import useAppLayout from '../../../hooks/useAppLayout';
 import useHorizontalScroll from '../../../hooks/useHorizontalScroll';
 import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
-import useLastCallback from '../../../hooks/useLastCallback';
 import useOldLang from '../../../hooks/useOldLang';
 import usePrevDuringAnimation from '../../../hooks/usePrevDuringAnimation';
 import useScrolledState from '../../../hooks/useScrolledState';
-import useSyncEffect from '../../../hooks/useSyncEffect';
 import { useStickerPickerObservers } from '../../common/hooks/useStickerPickerObservers';
 import useAsyncRendering from '../../right/hooks/useAsyncRendering';
 import useEmojiSearch from './hooks/useEmojiSearch';
@@ -112,147 +120,145 @@ const INTERSECTION_THROTTLE = 200;
 const LOAD_MORE_THRESHOLD = 500;
 const DEFAULT_ID_PREFIX = 'emoji-picker';
 
-const EmojiPicker = ({
-  chatId,
-  className,
-  isHidden,
-  loadAndPlay,
-  idPrefix = DEFAULT_ID_PREFIX,
-  isTranslucent,
-  recentEmojis,
-  baseEmojiKeywords,
-  emojiKeywords,
-  customEmojisById,
-  recentCustomEmojiIds,
-  stickerSetsById,
-  addedCustomEmojiIds,
-  customEmojiFeaturedIds,
-  chatEmojiSetId,
-  canAnimate,
-  isSavedMessages,
-  isCurrentUserPremium,
-  emojiGroups,
-  onEmojiSelect,
-  onCustomEmojiSelect,
-}: OwnProps & StateProps) => {
+const EmojiPicker = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const { loadStickers } = getActions();
 
-  const containerRef = useRef<HTMLDivElement>();
-  const headerRef = useRef<HTMLDivElement>();
+  let containerRef!: HTMLDivElement;
+  let headerRef!: HTMLDivElement;
 
-  const [categories, setCategories] = useState<EmojiCategoryData[]>();
-  const [emojis, setEmojis] = useState<EmojiData['emojis']>();
+  const [categories, setCategories] = createSignal<EmojiCategoryData[] | undefined>(undefined);
+  const [emojis, setEmojis] = createSignal<EmojiData['emojis'] | undefined>(undefined);
   const { isMobile } = useAppLayout();
   const { handleScroll: handleContentScroll, isAtBeginning: shouldHideTopBorder } = useScrolledState();
 
-  const {
-    query,
-    hasQuery,
-    activeGroup,
-    displayGroup,
-    isSearchActive,
-    nativeResults,
-    customResults,
-    customResultIds,
-    queryResults,
-    setQuery,
-    selectGroup,
-    searchMore,
-    markSearchFocused,
-    unmarkSearchFocused,
-  } = useEmojiSearch({
-    allEmojis: emojis,
-    baseEmojiKeywords,
-    emojiKeywords,
-    noQueryCustomResults: true,
-  });
+  const emojiSearchResult = createMemo(() =>
+    useEmojiSearch({
+      allEmojis: () => emojis(),
+      baseEmojiKeywords: () => props.baseEmojiKeywords,
+      emojiKeywords: () => props.emojiKeywords,
+      noQueryCustomResults: true,
+    }),
+  );
+  const query = () => emojiSearchResult().query;
+  const hasQuery = () => emojiSearchResult().hasQuery;
+  const activeGroup = () => emojiSearchResult().activeGroup;
+  const displayGroup = () => emojiSearchResult().displayGroup;
+  const isSearchActive = () => emojiSearchResult().isSearchActive;
+  const nativeResults = () => emojiSearchResult().nativeResults;
+  const customResults = () => emojiSearchResult().customResults;
+  const customResultIds = () => emojiSearchResult().customResultIds;
+  const queryResults = () => emojiSearchResult().queryResults;
+  const setQuery = () => emojiSearchResult().setQuery;
+  const selectGroup = () => emojiSearchResult().selectGroup;
+  const searchMore = () => emojiSearchResult().searchMore;
+  const markSearchFocused = () => emojiSearchResult().markSearchFocused;
+  const unmarkSearchFocused = () => emojiSearchResult().unmarkSearchFocused;
 
-  const trimmedQuery = query.trim().toLowerCase();
+  const trimmedQuery = createMemo(() => query().trim().toLowerCase());
 
-  const textResultsRef = useRef<{
-    key: string;
-    natives?: Emoji[];
-    localCustom?: ApiSticker[];
-    packSets?: ApiStickerSet[];
-    globalStickers?: ApiSticker[];
-  }>();
-  const currentQueryResults = queryResults?.key === trimmedQuery ? queryResults : undefined;
-  if (hasQuery && (nativeResults !== undefined || currentQueryResults)) {
-    textResultsRef.current = {
-      key: trimmedQuery,
-      natives: nativeResults,
-      localCustom: nativeResults
+  let textResultsRef:
+    | {
+        key: string;
+        natives?: Emoji[];
+        localCustom?: ApiSticker[];
+        packSets?: ApiStickerSet[];
+        globalStickers?: ApiSticker[];
+      }
+    | undefined;
+  const currentQueryResults = createMemo(() => (queryResults()?.key === trimmedQuery() ? queryResults() : undefined));
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (hasQuery() && (nativeResults() !== undefined || currentQueryResults())) {
+    textResultsRef = {
+      key: trimmedQuery(),
+      natives: nativeResults(),
+      localCustom: nativeResults()
         ? uniqueByField(
             selectCustomEmojiForEmojis(
               getGlobal(),
-              nativeResults.map(({ native }) => native),
+              nativeResults().map(({ native }) => native),
             ),
             'id',
           )
         : undefined,
       // Full sets loaded on demand (e.g. for covers) land in `stickerSetsById`, so prefer them over search snapshots
-      packSets: currentQueryResults?.packSets?.map((set) => stickerSetsById[set.id] || set),
-      globalStickers: currentQueryResults?.globalStickers,
+      packSets: currentQueryResults()?.packSets?.map((set) => props.stickerSetsById[set.id] || set),
+      globalStickers: currentQueryResults()?.globalStickers,
     };
   }
-  const textResults = hasQuery ? textResultsRef.current : undefined;
-  const isShowingResults = displayGroup ? true : Boolean(textResults);
-  const isSearchLoading = hasQuery && !currentQueryResults;
+  const textResults = createMemo(() => (hasQuery() ? textResultsRef : undefined));
+  const isShowingResults = createMemo(() => (displayGroup() ? true : Boolean(textResults())));
+  const isSearchLoading = createMemo(() => hasQuery() && !currentQueryResults());
 
-  const [openedPack, setOpenedPack] = useState<ApiStickerSet | undefined>();
-  const [isLocalSectionCollapsed, setIsLocalSectionCollapsed] = useState(false);
-  const [isGlobalSectionCollapsed, setIsGlobalSectionCollapsed] = useState(false);
+  const [openedPack, setOpenedPack] = createSignal<ApiStickerSet | undefined>(undefined);
+  const [isLocalSectionCollapsed, setIsLocalSectionCollapsed] = createSignal(false);
+  const [isGlobalSectionCollapsed, setIsGlobalSectionCollapsed] = createSignal(false);
 
-  useSyncEffect(() => {
-    setIsLocalSectionCollapsed(false);
-    setIsGlobalSectionCollapsed(false);
-  }, [trimmedQuery]);
-  const openedSet = openedPack && (stickerSetsById[openedPack.id] || openedPack);
+  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
+  createEffect(
+    () => trimmedQuery(),
+    (trimmedQuery2) => {
+      setIsLocalSectionCollapsed(false);
+      setIsGlobalSectionCollapsed(false);
+    },
+  );
+  const openedSet = createMemo(() => openedPack() && (props.stickerSetsById[openedPack().id] || openedPack()));
 
-  const contentActiveKey = useTransitionActiveKey([
-    isShowingResults,
-    displayGroup?.title,
-    textResults?.key,
-    openedSet?.id,
+  const contentActiveKey = useTransitionActiveKey(() => [
+    isShowingResults(),
+    displayGroup()?.title,
+    textResults()?.key,
+    openedSet()?.id,
   ]);
 
-  const prefix = `${idPrefix}-emoji-section`;
-  const {
-    activeSetIndex,
-    observeIntersectionForSet,
-    observeIntersectionForPlayingItems,
-    observeIntersectionForShowingItems,
-    observeIntersectionForCovers,
-    selectStickerSet: selectSection,
-  } = useStickerPickerObservers(containerRef, headerRef, prefix, isHidden);
+  const prefix = createMemo(() => `${props.idPrefix === undefined ? DEFAULT_ID_PREFIX : props.idPrefix}-emoji-section`);
+  const stickerPickerObserversResult = createMemo(() =>
+    useStickerPickerObservers(
+      () => containerRef,
+      () => headerRef,
+      () => prefix(),
+      () => props.isHidden,
+    ),
+  );
+  const activeSetIndex = () => stickerPickerObserversResult().activeSetIndex;
+  const observeIntersectionForSet = () => stickerPickerObserversResult().observeIntersectionForSet;
+  const observeIntersectionForPlayingItems = () => stickerPickerObserversResult().observeIntersectionForPlayingItems;
+  const observeIntersectionForShowingItems = () => stickerPickerObserversResult().observeIntersectionForShowingItems;
+  const observeIntersectionForCovers = () => stickerPickerObserversResult().observeIntersectionForCovers;
+  const selectSection = () => stickerPickerObserversResult().selectStickerSet;
 
   const { observe: observeIntersectionForResults } = useIntersectionObserver({
-    rootRef: containerRef,
+    rootRef: () => containerRef,
     throttleMs: INTERSECTION_THROTTLE,
   });
 
-  useLayoutEffect(() => {
-    if (containerRef.current) {
-      resetScroll(containerRef.current, 0);
-    }
-  }, [isShowingResults, displayGroup, textResults?.key, openedSet?.id]);
+  createMutationEffect(
+    depsOf(() => [isShowingResults(), displayGroup(), textResults()?.key, openedSet()?.id] as const),
+    ([isShowingResults2, displayGroup2]) => {
+      if (containerRef) {
+        resetScroll(containerRef, 0);
+      }
+    },
+  );
 
-  const canLoadAndPlay = usePrevDuringAnimation(loadAndPlay || undefined, SLIDE_TRANSITION_DURATION);
+  // TODO(codemod): usePrevDuringAnimation: frozenWhile(source, isAnimating) or currentOrPrev
+  const canLoadAndPlay = usePrevDuringAnimation(props.loadAndPlay || undefined, SLIDE_TRANSITION_DURATION);
 
   const canRenderContents = useAsyncRendering([], MENU_TRANSITION_DURATION);
-  const shouldRenderContent = emojis && canRenderContents;
+  const shouldRenderContent = createMemo(() => emojis() && canRenderContents);
 
-  useHorizontalScroll(headerRef, isMobile || !shouldRenderContent);
+  useHorizontalScroll(() => headerRef, isMobile || !shouldRenderContent());
 
   const oldLang = useOldLang();
 
-  const customSets = useMemo(() => {
+  // TODO(codemod): dependency on a container (customEmojisById, stickerSetsById) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
+  const customSets = createMemo(() => {
     const defaultSets: StickerSetOrReactionsSetOrRecent[] = [];
 
-    if (isCurrentUserPremium || isSavedMessages) {
+    if (props.isCurrentUserPremium || props.isSavedMessages) {
       const recentCustomEmojis =
-        customEmojisById && recentCustomEmojiIds
-          ? Object.values(pickTruthy(customEmojisById, recentCustomEmojiIds))
+        props.customEmojisById && props.recentCustomEmojiIds
+          ? Object.values(pickTruthy(props.customEmojisById, props.recentCustomEmojiIds))
           : undefined;
       if (recentCustomEmojis?.length) {
         defaultSets.push({
@@ -266,101 +272,95 @@ const EmojiPicker = ({
       }
     }
 
-    const userSetIds = [...(addedCustomEmojiIds || [])];
-    if (chatEmojiSetId) {
-      userSetIds.unshift(chatEmojiSetId);
+    const userSetIds = [...(props.addedCustomEmojiIds || [])];
+    if (props.chatEmojiSetId) {
+      userSetIds.unshift(props.chatEmojiSetId);
     }
 
-    const setIdsToDisplay = unique(userSetIds.concat(customEmojiFeaturedIds || []));
-    const setsToDisplay = Object.values(pickTruthy(stickerSetsById, setIdsToDisplay));
+    const setIdsToDisplay = unique(userSetIds.concat(props.customEmojiFeaturedIds || []));
+    const setsToDisplay = Object.values(pickTruthy(props.stickerSetsById, setIdsToDisplay));
 
     return [...defaultSets, ...setsToDisplay];
-  }, [
-    isCurrentUserPremium,
-    isSavedMessages,
-    customEmojisById,
-    recentCustomEmojiIds,
-    addedCustomEmojiIds,
-    chatEmojiSetId,
-    customEmojiFeaturedIds,
-    stickerSetsById,
-    oldLang,
-  ]);
+  });
 
-  const sections = useMemo((): EmojiSection[] => {
-    if (!categories) {
+  const sections = createMemo((): EmojiSection[] => {
+    if (!categories()) {
       return MEMO_EMPTY_ARRAY;
     }
 
     const list: EmojiSection[] = [];
 
-    if (recentEmojis?.length) {
+    if (props.recentEmojis?.length) {
       list.push({
         type: 'category',
-        category: { id: RECENT_SYMBOL_SET_ID, name: oldLang('RecentStickers'), emojis: recentEmojis },
+        category: { id: RECENT_SYMBOL_SET_ID, name: oldLang('RecentStickers'), emojis: props.recentEmojis },
         title: oldLang('RecentStickers'),
       });
     }
 
-    categories.forEach((category, index) => {
+    categories().forEach((category, index) => {
       list.push({ type: 'category', category, title: oldLang(`Emoji${index + 1}`) });
     });
 
-    customSets.forEach((set) => {
-      list.push({ type: 'set', set, isChatEmojiSet: set.id === chatEmojiSetId });
+    customSets().forEach((set) => {
+      list.push({ type: 'set', set, isChatEmojiSet: set.id === props.chatEmojiSetId });
     });
 
     return list;
-  }, [categories, recentEmojis, customSets, chatEmojiSetId, oldLang]);
+  });
 
-  const firstCategoryIndex = recentEmojis?.length ? 1 : 0;
-  const lastCategoryIndex = firstCategoryIndex + (categories?.length || 0) - 1;
-  const isPillActive =
-    Boolean(categories) && activeSetIndex >= firstCategoryIndex && activeSetIndex <= lastCategoryIndex;
+  const firstCategoryIndex = createMemo(() => (props.recentEmojis?.length ? 1 : 0));
+  const lastCategoryIndex = createMemo(() => firstCategoryIndex() + (categories()?.length || 0) - 1);
+  const isPillActive = createMemo(
+    () => Boolean(categories()) && activeSetIndex() >= firstCategoryIndex() && activeSetIndex() <= lastCategoryIndex(),
+  );
 
-  const pillCategories = useMemo((): PillCategory[] => {
-    if (!categories) {
+  const pillCategories = createMemo((): PillCategory[] => {
+    if (!categories()) {
       return MEMO_EMPTY_ARRAY;
     }
 
-    return categories.map(({ id, name }) => ({ id, name, icon: ICONS_BY_CATEGORY[id] || 'smile' }));
-  }, [categories]);
+    return categories().map(({ id, name }) => ({ id, name, icon: ICONS_BY_CATEGORY[id] || 'smile' }));
+  });
 
-  useEffect(() => {
-    if (!shouldRenderContent) {
-      return;
-    }
-
-    const activeSection = sections[activeSetIndex];
-    if (activeSection?.type === 'set' && activeSection.set.id === RECENT_SYMBOL_SET_ID) {
-      return;
-    }
-
-    requestMeasure(() => {
-      const header = headerRef.current;
-      if (!header) {
+  createMeasureEffect(
+    depsOf(() => [activeSetIndex(), isPillActive(), shouldRenderContent()] as const),
+    ([activeSetIndex2, isPillActive2]) => {
+      if (!shouldRenderContent()) {
         return;
       }
 
-      const target = isPillActive
-        ? header.querySelector<HTMLElement>('.EmojiPicker-header-pill')
-        : header.querySelector<HTMLElement>('.symbol-set-button.activated');
-      if (!target) {
+      const activeSection = sections()[activeSetIndex2];
+      if (activeSection?.type === 'set' && activeSection.set.id === RECENT_SYMBOL_SET_ID) {
         return;
       }
 
-      const headerRect = header.getBoundingClientRect();
-      const targetRect = target.getBoundingClientRect();
-      const targetWidth = isPillActive ? PILL_EXPANDED_WIDTH : targetRect.width;
-      const targetLeftInContent = targetRect.left - headerRect.left + header.scrollLeft;
-      const newLeft = targetLeftInContent - (headerRect.width - targetWidth) / 2;
-      animateHorizontalScroll(header, newLeft);
-    });
-    // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps
-  }, [activeSetIndex, isPillActive, shouldRenderContent]);
+      requestMeasure(() => {
+        const header = headerRef;
+        if (!header) {
+          return;
+        }
+
+        const target = isPillActive2
+          ? header.querySelector<HTMLElement>('.EmojiPicker-header-pill')
+          : header.querySelector<HTMLElement>('.symbol-set-button.activated');
+        if (!target) {
+          return;
+        }
+
+        const headerRect = header.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        const targetWidth = isPillActive2 ? PILL_EXPANDED_WIDTH : targetRect.width;
+        const targetLeftInContent = targetRect.left - headerRect.left + header.scrollLeft;
+        const newLeft = targetLeftInContent - (headerRect.width - targetWidth) / 2;
+        animateHorizontalScroll(header, newLeft);
+      });
+      // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps
+    },
+  );
 
   // Initialize data on first render.
-  useEffect(() => {
+  onMount(() => {
     const timeout = setTimeout(() => {
       void ensureEmojiData().then((data) => {
         setCategories(data.categories);
@@ -371,66 +371,66 @@ const EmojiPicker = ({
     return () => {
       clearTimeout(timeout);
     };
-  }, []);
-
-  const handleEmojiSelect = useLastCallback((emoji: string, name: string) => {
-    onEmojiSelect(emoji, name);
   });
 
-  const handleCustomEmojiSelect = useLastCallback((sticker: ApiSticker) => {
-    onCustomEmojiSelect(sticker);
-  });
+  const handleEmojiSelect = (emoji: string, name: string) => {
+    props.onEmojiSelect(emoji, name);
+  };
 
-  const handlePillCategorySelect = useLastCallback((index: number) => {
-    selectSection(firstCategoryIndex + index);
-  });
+  const handleCustomEmojiSelect = (sticker: ApiSticker) => {
+    props.onCustomEmojiSelect(sticker);
+  };
 
-  const handleRecentSelect = useLastCallback(() => {
-    selectSection(0);
-  });
+  const handlePillCategorySelect = (index: number) => {
+    selectSection()(firstCategoryIndex() + index);
+  };
 
-  const handlePackSelect = useLastCallback((set: ApiStickerSet) => {
+  const handleRecentSelect = () => {
+    selectSection()(0);
+  };
+
+  const handlePackSelect = (set: ApiStickerSet) => {
     setOpenedPack(set);
 
-    if (!stickerSetsById[set.id] || !set.stickers || set.stickers.length < set.count) {
+    if (!props.stickerSetsById[set.id] || !set.stickers || set.stickers.length < set.count) {
       loadStickers({ stickerSetInfo: { id: set.id, accessHash: set.accessHash } });
     }
-  });
+  };
 
-  const handlePackBackClick = useLastCallback(() => {
+  const handlePackBackClick = () => {
     setOpenedPack(undefined);
-  });
+  };
 
-  const handleLocalSectionToggle = useLastCallback(() => {
-    setIsLocalSectionCollapsed(!isLocalSectionCollapsed);
-  });
+  const handleLocalSectionToggle = () => {
+    setIsLocalSectionCollapsed(!isLocalSectionCollapsed());
+  };
 
-  const handleGlobalSectionToggle = useLastCallback(() => {
-    setIsGlobalSectionCollapsed(!isGlobalSectionCollapsed);
-  });
+  const handleGlobalSectionToggle = () => {
+    setIsGlobalSectionCollapsed(!isGlobalSectionCollapsed());
+  };
 
-  const handleQueryChange = useLastCallback((value: string) => {
+  const handleQueryChange = (value: string) => {
     setOpenedPack(undefined);
-    setQuery(value);
-  });
+    setQuery()(value);
+  };
 
-  const handleGroupSelect = useLastCallback((group?: ApiEmojiGroup) => {
+  const handleGroupSelect = (group?: ApiEmojiGroup) => {
     setOpenedPack(undefined);
-    selectGroup(group);
-  });
+    selectGroup()(group);
+  };
 
-  const handleScroll = useLastCallback((e: React.UIEvent<HTMLDivElement>) => {
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     handleContentScroll(e);
 
-    if (!textResults || openedSet || isGlobalSectionCollapsed) {
+    if (!textResults() || openedSet() || isGlobalSectionCollapsed()) {
       return;
     }
 
     const container = e.currentTarget;
     if (container.scrollHeight - container.scrollTop - container.clientHeight < LOAD_MORE_THRESHOLD) {
-      searchMore();
+      searchMore()();
     }
-  });
+  };
 
   function renderCover(section: EmojiSection, index: number) {
     if (section.type !== 'set' || section.set.id === RECENT_SYMBOL_SET_ID) {
@@ -442,29 +442,29 @@ const EmojiPicker = ({
     const buttonClassName = buildClassName(
       'symbol-set-button',
       'EmojiPicker-header-cover',
-      index === activeSetIndex && 'activated',
+      index === activeSetIndex() && 'activated',
     );
 
-    const isLockedSet = !isCurrentUserPremium && !isSavedMessages && !section.isChatEmojiSet && selectIsSetPremium(set);
+    const isLockedSet =
+      !props.isCurrentUserPremium && !props.isSavedMessages && !section.isChatEmojiSet && selectIsSetPremium(set);
     const lockBadge = isLockedSet && <Icon name="lock" className="EmojiPicker-cover-lock" />;
 
     return (
       <Button
-        key={set.id}
         className={buttonClassName}
         ariaLabel={set.title}
         round
         color="translucent"
 
-        onClick={() => selectSection(index)}
+        onClick={() => selectSection()(index)}
       >
         {set.hasThumbnail || !firstSticker ? (
           <StickerSetCover
             stickerSet={set as ApiStickerSet}
             size={COVER_SIZE}
-            noPlay={!canAnimate || !canLoadAndPlay}
+            noPlay={!props.canAnimate || !canLoadAndPlay}
             forcePlayback
-            observeIntersection={observeIntersectionForCovers}
+            observeIntersection={observeIntersectionForCovers()}
           />
         ) : (
           <StickerButton
@@ -472,11 +472,11 @@ const EmojiPicker = ({
             size={COVER_SIZE}
             title={set.title}
             className="EmojiPicker-cover-icon"
-            noPlay={!canAnimate || !canLoadAndPlay}
-            observeIntersection={observeIntersectionForCovers}
+            noPlay={!props.canAnimate || !canLoadAndPlay}
+            observeIntersection={observeIntersectionForCovers()}
             noContextMenu
             isCurrentUserPremium
-            withTranslucentThumb={isTranslucent}
+            withTranslucentThumb={props.isTranslucent}
             clickArg={index}
             forcePlayback
           />
@@ -489,42 +489,42 @@ const EmojiPicker = ({
   function renderBrowseContent() {
     return (
       <div>
-        {sections.map((section, index) => {
-          if (section.type === 'category') {
+        <For each={sections()} keyed={(section) => section.set.id}>
+          {(section, index) => {
+            if (section().type === 'category') {
+              return (
+                <EmojiCategory
+                  category={section().category}
+                  sectionId={`${prefix()}-${index()}`}
+                  title={section().title}
+                  allEmojis={emojis()!}
+                  observeIntersection={observeIntersectionForSet()}
+                  shouldRender={activeSetIndex() >= index() - 1 && activeSetIndex() <= index() + 1}
+                  onEmojiSelect={handleEmojiSelect}
+                />
+              );
+            }
+
             return (
-              <EmojiCategory
-                key={`category-${section.category.id}`}
-                category={section.category}
-                sectionId={`${prefix}-${index}`}
-                title={section.title}
-                allEmojis={emojis!}
-                observeIntersection={observeIntersectionForSet}
-                shouldRender={activeSetIndex >= index - 1 && activeSetIndex <= index + 1}
-                onEmojiSelect={handleEmojiSelect}
+              <StickerSet
+                stickerSet={section().set}
+                loadAndPlay={Boolean(props.canAnimate && canLoadAndPlay)}
+                index={index()}
+                idPrefix={prefix()}
+                observeIntersection={observeIntersectionForSet()}
+                observeIntersectionForPlayingItems={observeIntersectionForPlayingItems()}
+                observeIntersectionForShowingItems={observeIntersectionForShowingItems()}
+                isNearActive={activeSetIndex() >= index() - 1 && activeSetIndex() <= index() + 1}
+                isSavedMessages={props.isSavedMessages}
+                isChatEmojiSet={section().isChatEmojiSet}
+                isCurrentUserPremium={props.isCurrentUserPremium}
+                isTranslucent={props.isTranslucent}
+                onStickerSelect={handleCustomEmojiSelect}
+                forcePlayback
               />
             );
-          }
-
-          return (
-            <StickerSet
-              key={section.set.id}
-              stickerSet={section.set}
-              loadAndPlay={Boolean(canAnimate && canLoadAndPlay)}
-              index={index}
-              idPrefix={prefix}
-              observeIntersection={observeIntersectionForSet}
-              observeIntersectionForPlayingItems={observeIntersectionForPlayingItems}
-              observeIntersectionForShowingItems={observeIntersectionForShowingItems}
-              isNearActive={activeSetIndex >= index - 1 && activeSetIndex <= index + 1}
-              isSavedMessages={isSavedMessages}
-              isChatEmojiSet={section.isChatEmojiSet}
-              isCurrentUserPremium={isCurrentUserPremium}
-              isTranslucent={isTranslucent}
-              onStickerSelect={handleCustomEmojiSelect}
-              forcePlayback
-            />
-          );
-        })}
+          }}
+        </For>
       </div>
     );
   }
@@ -532,28 +532,28 @@ const EmojiPicker = ({
   function renderOpenedPack() {
     return (
       <InlineStickerSetView
-        stickerSet={openedSet!}
+        stickerSet={openedSet()!}
         stickerSize={EMOJI_SIZE_PICKER}
         observeIntersection={observeIntersectionForResults}
-        noPlay={!canAnimate || !canLoadAndPlay}
-        isSavedMessages={isSavedMessages}
-        isCurrentUserPremium={isCurrentUserPremium}
-        isTranslucent={isTranslucent}
+        noPlay={!props.canAnimate || !canLoadAndPlay}
+        isSavedMessages={props.isSavedMessages}
+        isCurrentUserPremium={props.isCurrentUserPremium}
+        isTranslucent={props.isTranslucent}
         onStickerSelect={handleCustomEmojiSelect}
       />
     );
   }
 
   function renderSearchResults() {
-    if (displayGroup) {
+    if (displayGroup()) {
       return (
         <div>
           <EmojiSearchResults
-            nativeResults={nativeResults}
-            customResults={customResults}
-            customResultIds={customResultIds}
-            isCurrentUserPremium={isCurrentUserPremium}
-            isSavedMessages={isSavedMessages}
+            nativeResults={nativeResults()}
+            customResults={customResults()}
+            customResultIds={customResultIds()}
+            isCurrentUserPremium={props.isCurrentUserPremium}
+            isSavedMessages={props.isSavedMessages}
             observeIntersection={observeIntersectionForResults}
             onEmojiSelect={handleEmojiSelect}
             onCustomEmojiSelect={handleCustomEmojiSelect}
@@ -565,15 +565,15 @@ const EmojiPicker = ({
     return (
       <div>
         <EmojiSearchResults
-          nativeResults={textResults!.natives}
-          customResults={textResults!.localCustom}
-          packSets={textResults!.packSets}
-          globalResults={textResults!.globalStickers}
+          nativeResults={textResults()!.natives}
+          customResults={textResults()!.localCustom}
+          packSets={textResults()!.packSets}
+          globalResults={textResults()!.globalStickers}
           withSections
-          isCurrentUserPremium={isCurrentUserPremium}
-          isSavedMessages={isSavedMessages}
-          isLocalSectionCollapsed={isLocalSectionCollapsed}
-          isGlobalSectionCollapsed={isGlobalSectionCollapsed}
+          isCurrentUserPremium={props.isCurrentUserPremium}
+          isSavedMessages={props.isSavedMessages}
+          isLocalSectionCollapsed={isLocalSectionCollapsed()}
+          isGlobalSectionCollapsed={isGlobalSectionCollapsed()}
           observeIntersection={observeIntersectionForResults}
           onEmojiSelect={handleEmojiSelect}
           onCustomEmojiSelect={handleCustomEmojiSelect}
@@ -585,7 +585,7 @@ const EmojiPicker = ({
     );
   }
 
-  const containerClassName = buildClassName('EmojiPicker', className);
+  const containerClassName = createMemo(() => buildClassName('EmojiPicker', props.className));
   const headerClassName = buildClassName(
     'EmojiPicker-header',
     'no-scrollbar',
@@ -593,19 +593,20 @@ const EmojiPicker = ({
   );
 
   return (
-    <Transition className={containerClassName} activeKey={shouldRenderContent ? 1 : 0} name="fade" shouldCleanup>
-      {!shouldRenderContent ? (
+    // TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6)
+    <Transition className={containerClassName()} activeKey={shouldRenderContent() ? 1 : 0} name="fade" shouldCleanup>
+      {!shouldRenderContent() ? (
         <Loading />
       ) : (
-        <div className={buildClassName('EmojiPicker-inner', isSearchActive && 'is-search-active')}>
-          <div ref={headerRef} className={headerClassName} dir={oldLang.isRtl ? 'rtl' : undefined}>
-            <div className="EmojiPicker-header-items">
-              {Boolean(recentEmojis?.length) && (
+        <div class={buildClassName('EmojiPicker-inner', isSearchActive() && 'is-search-active')}>
+          <div ref={headerRef} class={headerClassName} dir={oldLang.isRtl ? 'rtl' : undefined}>
+            <div class="EmojiPicker-header-items">
+              {Boolean(props.recentEmojis?.length) && (
                 <Button
                   className={buildClassName(
                     'symbol-set-button',
                     'EmojiPicker-header-recent',
-                    activeSetIndex === 0 && 'activated',
+                    activeSetIndex() === 0 && 'activated',
                   )}
                   round
                   faded
@@ -616,65 +617,66 @@ const EmojiPicker = ({
                 />
               )}
               <EmojiCategoryPill
-                categories={pillCategories}
+                categories={pillCategories()}
                 className="EmojiPicker-header-pill"
-                activeCategoryIndex={isPillActive ? activeSetIndex - firstCategoryIndex : undefined}
-                isActive={isPillActive}
+                activeCategoryIndex={isPillActive() ? activeSetIndex() - firstCategoryIndex() : undefined}
+                isActive={isPillActive()}
                 onCategorySelect={handlePillCategorySelect}
               />
-              {sections.map(renderCover)}
+              {sections().map(renderCover)}
             </div>
           </div>
           <div
             ref={containerRef}
             onScroll={handleScroll}
-            className={buildClassName('EmojiPicker-main', IS_TOUCH_ENV ? 'no-scrollbar' : 'custom-scroll')}
+            class={buildClassName('EmojiPicker-main', IS_TOUCH_ENV ? 'no-scrollbar' : 'custom-scroll')}
           >
             <EmojiSearch
-              value={query}
-              groups={emojiGroups}
-              activeGroup={activeGroup}
-              isLoading={isSearchLoading}
-              hasBackButton={Boolean(openedSet)}
+              value={query()}
+              groups={props.emojiGroups}
+              activeGroup={activeGroup()}
+              isLoading={isSearchLoading()}
+              hasBackButton={Boolean(openedSet())}
               onChange={handleQueryChange}
               onGroupSelect={handleGroupSelect}
               onBackClick={handlePackBackClick}
-              onFocus={markSearchFocused}
-              onBlur={unmarkSearchFocused}
+              onFocus={markSearchFocused()}
+              onBlur={unmarkSearchFocused()}
             />
+            {/* TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6) */}
             <Transition name="zoomFade" activeKey={contentActiveKey} className="EmojiPicker-content-transition">
-              {openedSet ? renderOpenedPack() : isShowingResults ? renderSearchResults() : renderBrowseContent()}
+              {openedSet() ? renderOpenedPack() : isShowingResults() ? renderSearchResults() : renderBrowseContent()}
             </Transition>
           </div>
-          {openedSet && <StickerSetToggleButton stickerSet={openedSet} />}
+          {openedSet() && <StickerSetToggleButton stickerSet={openedSet()} />}
         </div>
       )}
     </Transition>
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global, { chatId }): Complete<StateProps> => {
-    const { language } = selectSharedSettings(global);
-    const baseEmojiKeywords = global.emojiKeywords[BASE_EMOJI_KEYWORD_LANG];
-    const emojiKeywords = language !== BASE_EMOJI_KEYWORD_LANG ? global.emojiKeywords[language] : undefined;
-    const chatFullInfo = chatId ? selectChatFullInfo(global, chatId) : undefined;
-    const isSavedMessages = Boolean(chatId && selectIsChatWithSelf(global, chatId));
+const mapStateToProps = (global: GlobalState, { chatId }: OwnProps): Complete<StateProps> => {
+  const { language } = selectSharedSettings(global);
+  const baseEmojiKeywords = global.emojiKeywords[BASE_EMOJI_KEYWORD_LANG];
+  const emojiKeywords = language !== BASE_EMOJI_KEYWORD_LANG ? global.emojiKeywords[language] : undefined;
+  const chatFullInfo = chatId ? selectChatFullInfo(global, chatId) : undefined;
+  const isSavedMessages = Boolean(chatId && selectIsChatWithSelf(global, chatId));
 
-    return {
-      recentEmojis: global.recentEmojis,
-      baseEmojiKeywords: baseEmojiKeywords?.keywords,
-      emojiKeywords: emojiKeywords?.keywords,
-      customEmojisById: global.customEmojis.byId,
-      recentCustomEmojiIds: global.recentCustomEmojis,
-      stickerSetsById: global.stickers.setsById,
-      addedCustomEmojiIds: global.customEmojis.added.setIds,
-      customEmojiFeaturedIds: global.customEmojis.featuredIds,
-      chatEmojiSetId: chatFullInfo?.emojiSet?.id,
-      canAnimate: selectCanPlayAnimatedEmojis(global),
-      isSavedMessages,
-      isCurrentUserPremium: selectIsCurrentUserPremium(global),
-      emojiGroups: global.emojiGroups.groups,
-    };
-  })(EmojiPicker),
-);
+  return {
+    recentEmojis: global.recentEmojis,
+    baseEmojiKeywords: baseEmojiKeywords?.keywords,
+    emojiKeywords: emojiKeywords?.keywords,
+    customEmojisById: global.customEmojis.byId,
+    recentCustomEmojiIds: global.recentCustomEmojis,
+    stickerSetsById: global.stickers.setsById,
+    addedCustomEmojiIds: global.customEmojis.added.setIds,
+    customEmojiFeaturedIds: global.customEmojis.featuredIds,
+    chatEmojiSetId: chatFullInfo?.emojiSet?.id,
+    canAnimate: selectCanPlayAnimatedEmojis(global),
+    isSavedMessages,
+    isCurrentUserPremium: selectIsCurrentUserPremium(global),
+    emojiGroups: global.emojiGroups.groups,
+  };
+};
+
+export default EmojiPicker;

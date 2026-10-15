@@ -1,15 +1,14 @@
-import { memo, useMemo } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import { For, Show } from 'frameact/dom';
 import { getActions, getGlobal } from '../../global';
 
 import type { ApiSticker, ApiStickerSet } from '../../api/types';
-import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 
 import { EMOJI_SIZE_PICKER } from '../../config';
 import buildClassName from '../../util/buildClassName';
 import { REM } from './helpers/mediaDimensions';
 
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
 import useOldLang from '../../hooks/useOldLang';
 
 import EmojiButton from '../middle/composer/EmojiButton';
@@ -44,34 +43,17 @@ type OwnProps = {
 
 const FOUND_PACK_COVER_SIZE = 3 * REM;
 
-const EmojiSearchResults = ({
-  nativeResults,
-  customResults,
-  customResultIds,
-  packSets,
-  globalResults,
-  withSections,
-  isCurrentUserPremium,
-  isSavedMessages,
-  isLocalSectionCollapsed,
-  isGlobalSectionCollapsed,
-  observeIntersection,
-  onEmojiSelect,
-  onCustomEmojiSelect,
-  onPackSelect,
-  onLocalSectionToggle,
-  onGlobalSectionToggle,
-}: OwnProps) => {
+const EmojiSearchResults = (props: OwnProps) => {
   const oldLang = useOldLang();
   const lang = useLang();
 
-  const handleGroupCustomEmojiClick = useLastCallback((documentId: string) => {
+  const handleGroupCustomEmojiClick = (documentId: string) => {
     const sticker = getGlobal().customEmojis.byId[documentId];
     if (!sticker) {
       return;
     }
 
-    const isLocked = !isCurrentUserPremium && !isSavedMessages && !sticker.isFree;
+    const isLocked = !props.isCurrentUserPremium && !props.isSavedMessages && !sticker.isFree;
     if (isLocked) {
       getActions().showNotification({
         message: { key: 'PremiumUnlockEmoji' },
@@ -84,85 +66,82 @@ const EmojiSearchResults = ({
       return;
     }
 
-    onCustomEmojiSelect(sticker);
-  });
+    props.onCustomEmojiSelect(sticker);
+  };
 
-  const handleGroupCustomEmojiKeyDown = useLastCallback((e: React.KeyboardEvent, documentId: string) => {
+  const handleGroupCustomEmojiKeyDown = (e: React.KeyboardEvent, documentId: string) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       handleGroupCustomEmojiClick(documentId);
     }
+  };
+
+  const localIds = createMemo(() => new Set((props.customResults || []).map(({ id }) => id)));
+
+  const serverResultIds = createMemo(() => {
+    if (!props.customResultIds?.length) {
+      return undefined;
+    }
+
+    return props.customResultIds.filter((id) => !localIds().has(id));
   });
 
-  const localIds = useMemo(() => new Set((customResults || []).map(({ id }) => id)), [customResults]);
-
-  const serverResultIds = useMemo(() => {
-    if (!customResultIds?.length) {
+  const dedupedGlobalResults = createMemo(() => {
+    if (!props.globalResults?.length) {
       return undefined;
     }
 
-    return customResultIds.filter((id) => !localIds.has(id));
-  }, [customResultIds, localIds]);
+    return props.globalResults.filter(({ id }) => !localIds().has(id));
+  });
 
-  const dedupedGlobalResults = useMemo(() => {
-    if (!globalResults?.length) {
-      return undefined;
-    }
-
-    return globalResults.filter(({ id }) => !localIds.has(id));
-  }, [globalResults, localIds]);
-
-  const hasLocalResults = Boolean(nativeResults?.length || customResults?.length || serverResultIds?.length);
-  const hasResults = hasLocalResults || Boolean(packSets?.length || dedupedGlobalResults?.length);
-
-  if (!hasResults) {
-    return <div className={styles.noResults}>{lang('NoEmojiFound')}</div>;
-  }
+  const hasLocalResults = createMemo(() =>
+    Boolean(props.nativeResults?.length || props.customResults?.length || serverResultIds()?.length),
+  );
+  const hasResults = createMemo(
+    () => hasLocalResults() || Boolean(props.packSets?.length || dedupedGlobalResults()?.length),
+  );
 
   function renderCustomStickers(stickers: ApiSticker[]) {
     return stickers.map((sticker) => (
       <StickerButton
-        key={sticker.id}
         sticker={sticker}
         size={EMOJI_SIZE_PICKER}
-        observeIntersection={observeIntersection}
-        onClick={onCustomEmojiSelect}
+        observeIntersection={props.observeIntersection}
+        onClick={props.onCustomEmojiSelect}
         clickArg={sticker}
-        isSavedMessages={isSavedMessages}
-        isCurrentUserPremium={isCurrentUserPremium}
+        isSavedMessages={props.isSavedMessages}
+        isCurrentUserPremium={props.isCurrentUserPremium}
       />
     ));
   }
 
   function renderLocalGrid() {
     return (
-      <div
-        className={buildClassName('symbol-set-container', 'shown', styles.grid)}
-        dir={oldLang.isRtl ? 'rtl' : undefined}
-      >
-        {customResults && renderCustomStickers(customResults)}
-        {onEmojiSelect &&
-          nativeResults?.map((emoji) => <EmojiButton key={emoji.id} emoji={emoji} onClick={onEmojiSelect} />)}
-        {serverResultIds?.map((documentId) => (
-          <div
-            key={documentId}
-            role="button"
-            tabIndex={0}
-            className={styles.customCell}
-            onClick={() => handleGroupCustomEmojiClick(documentId)}
-            onKeyDown={(e) => handleGroupCustomEmojiKeyDown(e, documentId)}
-          >
-            <CustomEmoji
-              documentId={documentId}
-              size={EMOJI_SIZE_PICKER}
-              isBig
-              noPlaceholder
-              forceOnHeavyAnimation
-              observeIntersectionForLoading={observeIntersection}
-              observeIntersectionForPlaying={observeIntersection}
-            />
-          </div>
-        ))}
+      <div class={buildClassName('symbol-set-container', 'shown', styles.grid)} dir={oldLang.isRtl ? 'rtl' : undefined}>
+        {props.customResults && renderCustomStickers(props.customResults)}
+        {props.onEmojiSelect &&
+          props.nativeResults?.map((emoji) => <EmojiButton emoji={emoji} onClick={props.onEmojiSelect} />)}
+        <For each={serverResultIds()} keyed={(documentId) => documentId}>
+          {(documentId) => (
+            <div
+              role="button"
+              tabIndex={0}
+              class={styles.customCell}
+              onClick={() => handleGroupCustomEmojiClick(documentId())}
+              onKeyDown={(e) => handleGroupCustomEmojiKeyDown(e, documentId())}
+            >
+              <CustomEmoji
+                documentId={documentId()}
+                size={EMOJI_SIZE_PICKER}
+                isBig
+                noPlaceholder
+                forceOnHeavyAnimation
+                observeIntersectionForLoading={props.observeIntersection}
+                observeIntersectionForPlaying={props.observeIntersection}
+              />
+            </div>
+          )}
+        </For>
       </div>
     );
   }
@@ -172,18 +151,17 @@ const EmojiSearchResults = ({
 
     return (
       <Button
-        key={set.id}
         className={pickerStyles.foundPack}
         color="translucent"
         ariaLabel={set.title}
 
-        onClick={() => onPackSelect?.(set)}
+        onClick={() => props.onPackSelect?.(set)}
       >
         {set.hasThumbnail || !firstSticker ? (
           <StickerSetCover
             stickerSet={set}
             size={FOUND_PACK_COVER_SIZE}
-            observeIntersection={observeIntersection}
+            observeIntersection={props.observeIntersection}
             forcePlayback
           />
         ) : (
@@ -191,52 +169,52 @@ const EmojiSearchResults = ({
             sticker={firstSticker}
             size={FOUND_PACK_COVER_SIZE}
             className={pickerStyles.foundPackCover}
-            observeIntersection={observeIntersection}
+            observeIntersection={props.observeIntersection}
             noContextMenu
             isCurrentUserPremium
             clickArg={0}
             forcePlayback
           />
         )}
-        <span className={pickerStyles.foundPackTitle}>{set.title}</span>
+        <span class={pickerStyles.foundPackTitle}>{set.title}</span>
       </Button>
     );
   }
 
-  if (!withSections) {
-    return renderLocalGrid();
-  }
-
   return (
-    <div>
-      {Boolean(packSets?.length) && <FoundPacksRow>{packSets.map(renderFoundPack)}</FoundPacksRow>}
-      {hasLocalResults && (
-        <CollapsibleSection
-          className={pickerStyles.resultSection}
-          title={lang('StickerSearchResult')}
-          isCollapsed={Boolean(isLocalSectionCollapsed)}
-          onToggle={onLocalSectionToggle!}
-        >
-          {renderLocalGrid()}
-        </CollapsibleSection>
-      )}
-      {Boolean(dedupedGlobalResults?.length) && (
-        <CollapsibleSection
-          className={pickerStyles.resultSection}
-          title={lang('StickerSearchGlobalResult')}
-          isCollapsed={Boolean(isGlobalSectionCollapsed)}
-          onToggle={onGlobalSectionToggle!}
-        >
-          <div
-            className={buildClassName('symbol-set-container', 'shown', styles.grid)}
-            dir={oldLang.isRtl ? 'rtl' : undefined}
-          >
-            {renderCustomStickers(dedupedGlobalResults)}
-          </div>
-        </CollapsibleSection>
-      )}
-    </div>
+    <Show when={hasResults()} fallback={<div class={styles.noResults}>{lang('NoEmojiFound')}</div>}>
+      <Show when={props.withSections} fallback={renderLocalGrid()}>
+        <div>
+          {Boolean(props.packSets?.length) && <FoundPacksRow>{props.packSets.map(renderFoundPack)}</FoundPacksRow>}
+          {hasLocalResults() && (
+            <CollapsibleSection
+              className={pickerStyles.resultSection}
+              title={lang('StickerSearchResult')}
+              isCollapsed={Boolean(props.isLocalSectionCollapsed)}
+              onToggle={props.onLocalSectionToggle!}
+            >
+              {renderLocalGrid()}
+            </CollapsibleSection>
+          )}
+          {Boolean(dedupedGlobalResults()?.length) && (
+            <CollapsibleSection
+              className={pickerStyles.resultSection}
+              title={lang('StickerSearchGlobalResult')}
+              isCollapsed={Boolean(props.isGlobalSectionCollapsed)}
+              onToggle={props.onGlobalSectionToggle!}
+            >
+              <div
+                class={buildClassName('symbol-set-container', 'shown', styles.grid)}
+                dir={oldLang.isRtl ? 'rtl' : undefined}
+              >
+                {renderCustomStickers(dedupedGlobalResults())}
+              </div>
+            </CollapsibleSection>
+          )}
+        </div>
+      </Show>
+    </Show>
   );
 };
 
-export default memo(EmojiSearchResults);
+export default EmojiSearchResults;

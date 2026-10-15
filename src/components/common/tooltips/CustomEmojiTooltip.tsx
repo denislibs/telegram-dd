@@ -1,4 +1,5 @@
-import { memo, useRef } from '../../../lib/teact/teact';
+import { createMemo, frozenWhile } from 'frameact';
+import { For, Show, splitProps } from 'frameact/dom';
 import { getActions } from '../../../global';
 
 import type { ApiSticker } from '../../../api/types';
@@ -7,10 +8,8 @@ import type { GlobalActions } from '../../../global';
 import { COMPOSER_EMOJI_SIZE_PICKER } from '../../../config';
 import buildClassName from '../../../util/buildClassName';
 
-import useFrozenProps from '../../../hooks/useFrozenProps';
 import useHorizontalScroll from '../../../hooks/useHorizontalScroll';
 import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
-import useLastCallback from '../../../hooks/useLastCallback';
 
 import StickerButton from '../StickerButton';
 import RichEditorTooltipPanel from './RichEditorTooltipPanel';
@@ -30,57 +29,68 @@ export type OwnProps = {
 
 const INTERSECTION_THROTTLE = 200;
 
-const CustomEmojiTooltip = ({ isOpen, ...props }: OwnProps) => {
-  const { addRecentCustomEmoji, onCustomEmojiSelect, customEmoji, isSavedMessages, isCurrentUserPremium, noPlay } =
-    useFrozenProps(props, !isOpen);
+const CustomEmojiTooltip = (p: OwnProps) => {
+  const [, props] = splitProps(p, ['isOpen']);
+  const frozen = frozenWhile(
+    () => props,
+    () => !p.isOpen,
+  );
+  const addRecentCustomEmoji = () => frozen().addRecentCustomEmoji;
+  const onCustomEmojiSelect = () => frozen().onCustomEmojiSelect;
+  const customEmoji = () => frozen().customEmoji;
+  const isSavedMessages = () => frozen().isSavedMessages;
+  const isCurrentUserPremium = () => frozen().isCurrentUserPremium;
+  const noPlay = () => frozen().noPlay;
 
   const { clearCustomEmojiForEmoji } = getActions();
 
-  const containerRef = useRef<HTMLDivElement>();
-  const hasCustomEmoji = Boolean(customEmoji?.length);
+  let containerRef!: HTMLDivElement;
+  const hasCustomEmoji = createMemo(() => Boolean(customEmoji()?.length));
 
-  useHorizontalScroll(containerRef, !isOpen || !hasCustomEmoji);
+  useHorizontalScroll(
+    () => containerRef,
+    () => !p.isOpen || !hasCustomEmoji(),
+  );
 
   const { observe: observeIntersection } = useIntersectionObserver({
-    rootRef: containerRef,
+    rootRef: () => containerRef,
     throttleMs: INTERSECTION_THROTTLE,
   });
 
-  const handleCustomEmojiSelect = useLastCallback((ce: ApiSticker) => {
-    onCustomEmojiSelect(ce);
-    addRecentCustomEmoji({
+  const handleCustomEmojiSelect = (ce: ApiSticker) => {
+    onCustomEmojiSelect()(ce);
+    addRecentCustomEmoji()({
       documentId: ce.id,
     });
     clearCustomEmojiForEmoji();
-  });
+  };
 
   const className = buildClassName(sharedStyles.root, styles.root, 'composer-tooltip no-scrollbar');
 
-  if (!hasCustomEmoji) {
-    return undefined;
-  }
-
   return (
-    <RichEditorTooltipPanel isOpen={isOpen}>
-      <div ref={containerRef} className={className}>
-        {customEmoji.map((sticker) => (
-          <StickerButton
-            key={sticker.id}
-            sticker={sticker}
-            className={styles.emojiButton}
-            size={COMPOSER_EMOJI_SIZE_PICKER}
-            observeIntersection={observeIntersection}
-            onClick={handleCustomEmojiSelect}
-            clickArg={sticker}
-            isSavedMessages={isSavedMessages}
-            canViewSet
-            isCurrentUserPremium={isCurrentUserPremium}
-            noPlay={noPlay}
-          />
-        ))}
-      </div>
-    </RichEditorTooltipPanel>
+    <Show when={hasCustomEmoji()}>
+      <RichEditorTooltipPanel isOpen={p.isOpen}>
+        <div ref={containerRef} class={className}>
+          <For each={customEmoji()} keyed={(sticker) => sticker.id}>
+            {(sticker) => (
+              <StickerButton
+                sticker={sticker()}
+                className={styles.emojiButton}
+                size={COMPOSER_EMOJI_SIZE_PICKER}
+                observeIntersection={observeIntersection}
+                onClick={handleCustomEmojiSelect}
+                clickArg={sticker()}
+                isSavedMessages={isSavedMessages()}
+                canViewSet
+                isCurrentUserPremium={isCurrentUserPremium()}
+                noPlay={noPlay()}
+              />
+            )}
+          </For>
+        </div>
+      </RichEditorTooltipPanel>
+    </Show>
   );
 };
 
-export default memo(CustomEmojiTooltip);
+export default CustomEmojiTooltip;

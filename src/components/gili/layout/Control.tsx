@@ -1,5 +1,6 @@
-import type { TeactNode } from '../../../lib/teact/teact';
-import { createContext, memo, useMemo } from '../../../lib/teact/teact';
+import { createContext, createMemo } from 'frameact';
+import { Show } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import type { IconName } from '../../../types/icons';
 
@@ -31,31 +32,28 @@ export function useControlContext() {
 type ControlProps = {
   inputEnd?: boolean;
   className?: string;
-  children: TeactNode;
+  children: JSX.Element;
 };
 
-const Control = ({ inputEnd, className, children }: ControlProps) => {
+const Control = (props: ControlProps) => {
   const uniqueId = useUniqueId();
   const lang = useLang();
   const interactive = useInteractiveContext();
   const id = `control-${uniqueId}`;
 
-  const contextValue = useMemo(
-    () => ({
-      id,
-      inputClassName: styles.input,
-    }),
-    [id],
-  );
+  const contextValue = createMemo(() => ({
+    id,
+    inputClassName: styles.input,
+  }));
 
   return (
-    <ControlContext.Provider value={contextValue}>
+    <ControlContext.Provider value={contextValue()}>
       <div
-        className={buildClassName(styles.control, inputEnd && styles.inputEnd, className)}
+        class={buildClassName(styles.control, props.inputEnd && styles.inputEnd, props.className)}
         dir={lang.isRtl ? 'rtl' : undefined}
       >
         {interactive?.isLoading && <Spinner className={styles.spinner} />}
-        {children}
+        {props.children}
       </div>
     </ControlContext.Provider>
   );
@@ -68,27 +66,28 @@ const Control = ({ inputEnd, className, children }: ControlProps) => {
 type ControlTextProps = {
   htmlFor?: string;
   className?: string;
-  children: TeactNode;
+  children: JSX.Element;
 };
 
-function ControlText({ htmlFor, className, baseClassName, children }: ControlTextProps & { baseClassName: string }) {
+function ControlText(props: ControlTextProps & { baseClassName: string }) {
   const control = useControlContext();
   const interactive = useInteractiveContext();
-  const resolvedHtmlFor = htmlFor ?? control?.id;
-  const shouldRenderLabel = !interactive?.isLabel && resolvedHtmlFor;
-
-  if (shouldRenderLabel) {
-    return (
-      <label htmlFor={resolvedHtmlFor} className={buildClassName(baseClassName, className)} dir="auto">
-        {children}
-      </label>
-    );
-  }
+  const resolvedHtmlFor = createMemo(() => props.htmlFor ?? control?.id);
+  const shouldRenderLabel = createMemo(() => !interactive?.isLabel && resolvedHtmlFor());
 
   return (
-    <span className={buildClassName(baseClassName, className)} dir="auto">
-      {children}
-    </span>
+    <Show
+      when={!shouldRenderLabel()}
+      fallback={
+        <label htmlFor={resolvedHtmlFor()} class={buildClassName(props.baseClassName, props.className)} dir="auto">
+          {props.children}
+        </label>
+      }
+    >
+      <span class={buildClassName(props.baseClassName, props.className)} dir="auto">
+        {props.children}
+      </span>
+    </Show>
   );
 }
 
@@ -104,7 +103,7 @@ const ControlDescription = (props: ControlTextProps) => (
 
 type ControlSlotProps = {
   className?: string;
-  children: TeactNode;
+  children: JSX.Element;
 };
 
 type ControlIconProps = {
@@ -113,22 +112,22 @@ type ControlIconProps = {
   backgroundColor?: string;
 };
 
-const ControlBefore = ({ className, children }: ControlSlotProps) => {
-  return <div className={buildClassName(styles.controlBefore, className)}>{children}</div>;
+const ControlBefore = (props: ControlSlotProps) => {
+  return <div class={buildClassName(styles.controlBefore, props.className)}>{props.children}</div>;
 };
 
-const ControlAfter = ({ className, children }: ControlSlotProps) => {
-  return <div className={buildClassName(styles.controlAfter, className)}>{children}</div>;
+const ControlAfter = (props: ControlSlotProps) => {
+  return <div class={buildClassName(styles.controlAfter, props.className)}>{props.children}</div>;
 };
 
-const ControlIcon = ({ iconName, className, backgroundColor }: ControlIconProps) => {
+const ControlIcon = (props: ControlIconProps) => {
   return (
-    <ControlBefore className={className}>
+    <ControlBefore className={props.className}>
       <div
-        className={buildClassName(styles.controlIcon, backgroundColor && styles.controlIconFilled)}
-        style={backgroundColor ? `--control-icon-background-color: ${backgroundColor};` : undefined}
+        class={buildClassName(styles.controlIcon, props.backgroundColor && styles.controlIconFilled)}
+        style={props.backgroundColor ? `--control-icon-background-color: ${props.backgroundColor};` : undefined}
       >
-        {iconName && <Icon name={iconName} className={styles.controlIconGlyph} />}
+        {props.iconName && <Icon name={props.iconName} className={styles.controlIconGlyph} />}
       </div>
     </ControlBefore>
   );
@@ -136,5 +135,5 @@ const ControlIcon = ({ iconName, className, backgroundColor }: ControlIconProps)
 
 // #endregion
 
-export default memo(Control);
+export default Control;
 export { ControlLabel, ControlDescription, ControlBefore, ControlAfter, ControlIcon };

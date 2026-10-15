@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from '../../../../lib/teact/teact';
+import { createEffect, createMemo, createSignal } from 'frameact';
 
 import type { IAnchorPosition } from '../../../../types';
 
@@ -10,7 +10,6 @@ import { type TeactNodeViewComponentProps } from '../../../../util/tiptap';
 
 import useFlag from '../../../../hooks/useFlag';
 import useLang from '../../../../hooks/useLang';
-import useLastCallback from '../../../../hooks/useLastCallback';
 
 import Icon from '../../../common/icons/Icon';
 import Menu from '../../../ui/Menu';
@@ -20,59 +19,59 @@ import styles from './EditableCodeBlock.module.scss';
 
 const CODE_BLOCK_TEXT_SEPARATOR = '\n';
 
-const EditableCodeBlock = ({
-  editor,
-  node,
-  HTMLAttributes,
-  getPos,
-  contentDOMElement,
-}: TeactNodeViewComponentProps) => {
-  const triggerRef = useRef<HTMLButtonElement>();
-  const menuRef = useRef<HTMLDivElement>();
+const EditableCodeBlock = (props: TeactNodeViewComponentProps) => {
+  let triggerRef!: HTMLButtonElement;
+  let menuRef!: HTMLDivElement;
   const [isMenuOpen, openMenu, closeMenu] = useFlag();
-  const [menuAnchor, setMenuAnchor] = useState<IAnchorPosition | undefined>();
+  const [menuAnchor, setMenuAnchor] = createSignal<IAnchorPosition | undefined>(undefined);
   const lang = useLang();
 
-  const language = typeof node.attrs.language === 'string' ? node.attrs.language : undefined;
-  const languageLabel = language ? getPrettyCodeLanguageName(language) : lang('RichEditorCodeLanguageAuto');
-  const isCodeBlockEmpty = !node.textContent;
-  const codeBlockClassName = buildClassName(
-    styles.codeBlock,
-    typeof HTMLAttributes.class === 'string' && HTMLAttributes.class,
+  const language = createMemo(() =>
+    typeof props.node.attrs.language === 'string' ? props.node.attrs.language : undefined,
+  );
+  const languageLabel = createMemo(() =>
+    language() ? getPrettyCodeLanguageName(language()) : lang('RichEditorCodeLanguageAuto'),
+  );
+  const isCodeBlockEmpty = createMemo(() => !props.node.textContent);
+  const codeBlockClassName = createMemo(() =>
+    buildClassName(styles.codeBlock, typeof props.HTMLAttributes.class === 'string' && props.HTMLAttributes.class),
   );
 
   function handleCodeBlockWrapperRef(element?: HTMLDivElement) {
-    if (!element || !contentDOMElement) {
+    if (!element || !props.contentDOMElement) {
       return;
     }
 
-    contentDOMElement.className = codeBlockClassName;
-    if (contentDOMElement.parentElement !== element) {
-      element.prepend(contentDOMElement);
+    props.contentDOMElement.className = codeBlockClassName();
+    if (props.contentDOMElement.parentElement !== element) {
+      element.prepend(props.contentDOMElement);
     }
   }
 
-  useEffect(() => {
-    if (language) {
-      void ensureCodeLanguage(language);
-      return;
-    }
+  createEffect(
+    () => language(),
+    (language2) => {
+      if (language2) {
+        void ensureCodeLanguage(language2);
+        return;
+      }
 
-    SUPPORTED_CODE_LANGUAGES.forEach((langCode) => {
-      void ensureCodeLanguage(langCode);
-    });
-  }, [language]);
+      SUPPORTED_CODE_LANGUAGES.forEach((langCode) => {
+        void ensureCodeLanguage(langCode);
+      });
+    },
+  );
 
-  const handleTriggerMouseDown = useLastCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+  const handleTriggerMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
     e.stopPropagation();
-  });
+  };
 
-  const handleTriggerClick = useLastCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+  const handleTriggerClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
     e.stopPropagation();
 
-    const trigger = triggerRef.current;
+    const trigger = triggerRef;
     if (!trigger) {
       return;
     }
@@ -85,34 +84,34 @@ const EditableCodeBlock = ({
       height: rect.height,
     });
     openMenu();
-  });
+  };
 
-  const handleCloseMenu = useLastCallback(() => {
+  const handleCloseMenu = () => {
     closeMenu();
-  });
+  };
 
-  const handleSetLanguage = useLastCallback((newLanguage?: string) => {
+  const handleSetLanguage = (newLanguage?: string) => {
     closeMenu();
 
-    if ((newLanguage || undefined) === language) {
+    if ((newLanguage || undefined) === language()) {
       return;
     }
 
     fastRaf(() => {
       void updateCodeBlockLanguage(newLanguage);
     });
-  });
+  };
 
-  const updateCodeBlockLanguage = useLastCallback(async (newLanguage?: string) => {
-    const pos = getPos();
+  const updateCodeBlockLanguage = async (newLanguage?: string) => {
+    const pos = props.getPos();
     if (typeof pos !== 'number') {
-      editor.commands.focus();
+      props.editor.commands.focus();
       return;
     }
 
-    const didUpdate = editor.commands.command(({ tr, state }) => {
+    const didUpdate = props.editor.commands.command(({ tr, state }) => {
       const currentNode = tr.doc.nodeAt(pos);
-      if (!currentNode || currentNode.type.name !== node.type.name) {
+      if (!currentNode || currentNode.type.name !== props.node.type.name) {
         return false;
       }
 
@@ -134,7 +133,7 @@ const EditableCodeBlock = ({
     });
 
     if (!didUpdate) {
-      editor.commands.focus();
+      props.editor.commands.focus();
       return;
     }
 
@@ -143,40 +142,40 @@ const EditableCodeBlock = ({
     }
 
     requestCodeBlockHighlightRefresh();
-    editor.commands.focus();
-  });
+    props.editor.commands.focus();
+  };
 
-  const getTriggerElement = useLastCallback(() => triggerRef.current);
-  const getRootElement = useLastCallback(() => document.body);
-  const getMenuElement = useLastCallback(() => menuRef.current);
-  const getMenuLayout = useLastCallback(() => ({ withPortal: true }));
+  const getTriggerElement = () => triggerRef;
+  const getRootElement = () => document.body;
+  const getMenuElement = () => menuRef;
+  const getMenuLayout = () => ({ withPortal: true });
 
   return (
-    <div className={styles.root}>
+    <div class={styles.root}>
       <button
         ref={triggerRef}
         type="button"
-        className={buildClassName(styles.languageButton, 'no-selection')}
+        class={buildClassName(styles.languageButton, 'no-selection')}
         contentEditable={false}
         tabIndex={-1}
         aria-label={lang('Language')}
         onMouseDown={handleTriggerMouseDown}
         onClick={handleTriggerClick}
       >
-        {languageLabel}
+        {languageLabel()}
         <Icon name="dropdown-arrows" className={styles.languageIcon} />
       </button>
-      <div ref={handleCodeBlockWrapperRef} className={styles.codeBlockWrapper}>
-        {isCodeBlockEmpty && (
-          <div className={styles.placeholder} contentEditable={false} aria-hidden>
+      <div ref={handleCodeBlockWrapperRef} class={styles.codeBlockWrapper}>
+        {isCodeBlockEmpty() && (
+          <div class={styles.placeholder} contentEditable={false} aria-hidden>
             {lang('RichEditorBlockPlaceholder')}
           </div>
         )}
       </div>
       <Menu
         ref={menuRef}
-        isOpen={isMenuOpen}
-        anchor={menuAnchor}
+        isOpen={isMenuOpen()}
+        anchor={menuAnchor()}
         ariaLabel={lang('Language')}
         getTriggerElement={getTriggerElement}
         getRootElement={getRootElement}
@@ -187,9 +186,9 @@ const EditableCodeBlock = ({
         withPortal
         onClose={handleCloseMenu}
       >
-        <div className={buildClassName(styles.languageItems, 'custom-scroll')}>
+        <div class={buildClassName(styles.languageItems, 'custom-scroll')}>
           <MenuItem
-            customIcon={language ? <Icon name="placeholder" /> : <Icon name="check" />}
+            customIcon={language() ? <Icon name="placeholder" /> : <Icon name="check" />}
             withPreventDefaultOnMouseDown
             onClick={() => handleSetLanguage(undefined)}
           >
@@ -197,8 +196,7 @@ const EditableCodeBlock = ({
           </MenuItem>
           {SUPPORTED_CODE_LANGUAGES.map((langCode) => (
             <MenuItem
-              key={langCode}
-              customIcon={language === langCode ? <Icon name="check" /> : <Icon name="placeholder" />}
+              customIcon={language() === langCode ? <Icon name="check" /> : <Icon name="placeholder" />}
               withPreventDefaultOnMouseDown
               onClick={() => handleSetLanguage(langCode)}
             >

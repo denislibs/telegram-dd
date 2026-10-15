@@ -1,12 +1,10 @@
-import { memo, useEffect, useMemo, useRef } from '../../../lib/teact/teact';
+import { createMeasureEffect, createMemo, frozenWhile } from 'frameact';
+import { For, Show, splitProps } from 'frameact/dom';
 import { getGlobal } from '../../../global';
 
 import type { ApiBotCommand, ApiMessage, ApiQuickReply, ApiUser } from '../../../api/types';
 
 import buildClassName from '../../../util/buildClassName';
-
-import useFrozenProps from '../../../hooks/useFrozenProps';
-import useLastCallback from '../../../hooks/useLastCallback';
 
 import ChatCommand from '../../middle/composer/ChatCommand';
 import RichEditorTooltipPanel from './RichEditorTooltipPanel';
@@ -30,69 +28,83 @@ type QuickReplyWithDescription = {
   description: string;
 };
 
-const ChatCommandTooltip = ({ isOpen, ...props }: OwnProps) => {
-  const { selectedIndex, botCommands, quickReplies, quickReplyMessages, self, onCommandSelect, onQuickReplySelect } =
-    useFrozenProps(props, !isOpen);
+const ChatCommandTooltip = (p: OwnProps) => {
+  const [, props] = splitProps(p, ['isOpen']);
+  const frozen = frozenWhile(
+    () => props,
+    () => !p.isOpen,
+  );
+  const selectedIndex = () => frozen().selectedIndex;
+  const botCommands = () => frozen().botCommands;
+  const quickReplies = () => frozen().quickReplies;
+  const quickReplyMessages = () => frozen().quickReplyMessages;
+  const self = () => frozen().self;
+  const onCommandSelect = () => frozen().onCommandSelect;
+  const onQuickReplySelect = () => frozen().onQuickReplySelect;
 
-  const containerRef = useRef<HTMLDivElement>();
+  let containerRef!: HTMLDivElement;
 
-  const handleSendCommand = useLastCallback((command: ApiBotCommand) => onCommandSelect(command));
-  const handleSendQuickReply = useLastCallback((quickReply: ApiQuickReply) => onQuickReplySelect(quickReply));
+  const handleSendCommand = (command: ApiBotCommand) => onCommandSelect()(command);
+  const handleSendQuickReply = (quickReply: ApiQuickReply) => onQuickReplySelect()(quickReply);
 
-  const quickRepliesWithDescription = useMemo(() => {
-    if (!quickReplies?.length || !quickReplyMessages) return undefined;
-    return quickReplies.map((reply) => {
-      const message = quickReplyMessages[reply.topMessageId];
+  const quickRepliesWithDescription = createMemo(() => {
+    if (!quickReplies()?.length || !quickReplyMessages()) return undefined;
+    return quickReplies().map((reply) => {
+      const message = quickReplyMessages()[reply.topMessageId];
       return {
         quickReply: reply,
         command: reply.shortcut,
         description: message?.content.text?.text || '',
       } satisfies QuickReplyWithDescription;
     });
-  }, [quickReplies, quickReplyMessages]);
+  });
 
-  const isEmpty = !botCommands?.length && !quickReplies?.length;
+  const isEmpty = createMemo(() => !botCommands()?.length && !quickReplies()?.length);
 
-  useEffect(() => {
-    containerRef.current?.querySelector<HTMLElement>('.focus')?.scrollIntoView({ block: 'nearest' });
-  }, [selectedIndex]);
-
-  if (isEmpty) {
-    return undefined;
-  }
+  createMeasureEffect(
+    () => selectedIndex(),
+    (selectedIndex2) => {
+      containerRef?.querySelector<HTMLElement>('.focus')?.scrollIntoView({ block: 'nearest' });
+    },
+  );
 
   return (
-    <RichEditorTooltipPanel isOpen={isOpen}>
-      <div ref={containerRef} className={buildClassName(sharedStyles.root, 'composer-tooltip custom-scroll')}>
-        {quickRepliesWithDescription?.map((reply, index) => (
-          <ChatCommand
-            key={`quickReply_${reply.quickReply.id}`}
-            command={reply.command}
-            description={reply.description}
-            peer={self}
-            withAvatar
-            clickArg={reply.quickReply}
-            onClick={handleSendQuickReply}
-            focus={selectedIndex === index}
-          />
-        ))}
-        {botCommands?.map((command, index) => (
-          <ChatCommand
-            key={`${command.botId}_${command.command}`}
-            command={command.command}
-            description={command.description}
-            isEphemeral={command.isEphemeral}
-            // No need for expensive global updates on users and chats, so we avoid them
-            peer={getGlobal().users.byId[command.botId]}
-            withAvatar
-            clickArg={command}
-            onClick={handleSendCommand}
-            focus={selectedIndex - (quickRepliesWithDescription?.length || 0) === index}
-          />
-        ))}
-      </div>
-    </RichEditorTooltipPanel>
+    <Show when={!isEmpty()}>
+      <RichEditorTooltipPanel isOpen={p.isOpen}>
+        <div ref={containerRef} class={buildClassName(sharedStyles.root, 'composer-tooltip custom-scroll')}>
+          <For each={quickRepliesWithDescription()} keyed={(reply) => `quickReply_${reply.quickReply.id}`}>
+            {(reply, index) => (
+              <ChatCommand
+                command={reply().command}
+                description={reply().description}
+                peer={self()}
+                withAvatar
+                clickArg={reply().quickReply}
+                onClick={handleSendQuickReply}
+                focus={selectedIndex() === index()}
+              />
+            )}
+          </For>
+          <For each={botCommands()} keyed={(command) => `${command.botId}_${command.command}`}>
+            {(command, index) => (
+              // TODO(codemod): getGlobal() in a memo / JSX is a one-time read: use useGlobal() (store contract §12.4)
+              <ChatCommand
+                command={command().command}
+                description={command().description}
+                isEphemeral={command().isEphemeral}
+                // No need for expensive global updates on users and chats, so we avoid them
+                peer={getGlobal().users.byId[command().botId]}
+                withAvatar
+                clickArg={command()}
+                onClick={handleSendCommand}
+                focus={selectedIndex() - (quickRepliesWithDescription()?.length || 0) === index()}
+              />
+            )}
+          </For>
+        </div>
+      </RichEditorTooltipPanel>
+    </Show>
   );
 };
 
-export default memo(ChatCommandTooltip);
+export default ChatCommandTooltip;

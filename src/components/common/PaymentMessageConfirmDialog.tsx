@@ -1,5 +1,4 @@
-import type { FC, StateHookSetter } from '../../lib/teact/teact';
-import { memo } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
 
 import { formatStarsAsText } from '../../util/localization/format';
 
@@ -21,59 +20,54 @@ type OwnProps = {
   confirmHandler: NoneToVoidFunction;
 };
 
-const PaymentMessageConfirmDialog: FC<OwnProps> = ({
-  isOpen,
-  onClose,
-  userName,
-  messagePriceInStars,
-  messagesCount,
-  shouldAutoApprove: shouldPaidMessageAutoApprove,
-  setAutoApprove: setShouldPaidMessageAutoApprove,
-  confirmHandler,
-}) => {
+const PaymentMessageConfirmDialog = (props: OwnProps) => {
   const lang = useLang();
 
-  const confirmPaymentMessage = lang(
-    'ConfirmationModalPaymentForMessage',
-    {
-      user: userName,
-      amount: formatStarsAsText(lang, messagePriceInStars),
-      totalAmount: formatStarsAsText(lang, messagePriceInStars * messagesCount),
-      count: messagesCount,
-    },
-    {
-      withMarkdown: true,
-      withNodes: true,
-      pluralValue: messagesCount,
-    },
+  const confirmPaymentMessage = createMemo(() =>
+    lang(
+      'ConfirmationModalPaymentForMessage',
+      {
+        user: props.userName,
+        amount: formatStarsAsText(lang, props.messagePriceInStars),
+        totalAmount: formatStarsAsText(lang, props.messagePriceInStars * props.messagesCount),
+        count: props.messagesCount,
+      },
+      {
+        withMarkdown: true,
+        withNodes: true,
+        pluralValue: props.messagesCount,
+      },
+    ),
   );
 
-  const confirmLabel = lang(
-    'PayForMessage',
-    { count: messagesCount },
-    {
-      withNodes: true,
-      pluralValue: messagesCount,
-    },
+  const confirmLabel = createMemo(() =>
+    lang(
+      'PayForMessage',
+      { count: props.messagesCount },
+      {
+        withNodes: true,
+        pluralValue: props.messagesCount,
+      },
+    ),
   );
 
   return (
     <ConfirmDialog
       title={lang('TitleConfirmPayment')}
-      confirmLabel={confirmLabel}
-      isOpen={isOpen}
-      onClose={onClose}
-      confirmHandler={confirmHandler}
+      confirmLabel={confirmLabel()}
+      isOpen={props.isOpen}
+      onClose={props.onClose}
+      confirmHandler={props.confirmHandler}
     >
-      {confirmPaymentMessage}
+      {confirmPaymentMessage()}
       <Checkbox
         className={styles.checkBox}
         label={lang('DoNotAskAgain')}
-        checked={shouldPaidMessageAutoApprove}
-        onCheck={setShouldPaidMessageAutoApprove}
+        checked={props.shouldAutoApprove}
+        onCheck={props.setAutoApprove}
       />
     </ConfirmDialog>
   );
 };
 
-export default memo(PaymentMessageConfirmDialog);
+export default PaymentMessageConfirmDialog;

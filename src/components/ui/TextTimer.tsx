@@ -1,4 +1,6 @@
-import { useEffect } from '../../lib/teact/teact';
+import { createEffect, createMemo } from 'frameact';
+import { mergeProps, Show } from 'frameact/dom';
+import { depsOf } from '../../util/effectDeps';
 
 import { formatCountdown } from '../../util/dates/oldDateFormat';
 import { formatClockDuration, formatCountdownDateTime, secondsToDate } from '../../util/localization/dateFormat';
@@ -23,55 +25,49 @@ const DAY_IN_SECONDS = 24 * 60 * 60;
 const UPDATE_FREQUENCY = 500; // Sometimes second gets skipped if using 1000
 const SECOND_IN_MS = 1000;
 
-const TextTimer = ({ className, endsAt, mode = 'clock', shouldShowZeroOnEnd, onEnd }: OwnProps) => {
+const TextTimer = (rawProps: OwnProps) => {
+  const props = mergeProps({ mode: 'clock' }, rawProps) as OwnProps & Required<Pick<OwnProps, 'mode'>>;
+  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
   const forceUpdate = useForceUpdate();
   const lang = useLang();
 
   const serverTime = getServerTime();
-  const isActive = serverTime < endsAt;
-  const timeLeft = Math.max(0, endsAt - serverTime);
-  const shouldUseClock = mode === 'clock' || timeLeft < DAY_IN_SECONDS;
-  const switchToClockDelay =
-    isActive && mode !== 'clock' && !shouldUseClock
-      ? (timeLeft - DAY_IN_SECONDS) * SECOND_IN_MS + UPDATE_FREQUENCY
-      : undefined;
-  const nextUpdateDelay =
-    mode === 'rounded' && switchToClockDelay !== undefined
-      ? Math.min(switchToClockDelay, (timeLeft % DAY_IN_SECONDS || DAY_IN_SECONDS) * SECOND_IN_MS + UPDATE_FREQUENCY)
-      : switchToClockDelay;
+  const isActive = createMemo(() => serverTime < props.endsAt);
+  const timeLeft = createMemo(() => Math.max(0, props.endsAt - serverTime));
+  const shouldUseClock = createMemo(() => props.mode === 'clock' || timeLeft() < DAY_IN_SECONDS);
+  const switchToClockDelay = createMemo(() =>
+    isActive() && props.mode !== 'clock' && !shouldUseClock()
+      ? (timeLeft() - DAY_IN_SECONDS) * SECOND_IN_MS + UPDATE_FREQUENCY
+      : undefined,
+  );
+  const nextUpdateDelay = createMemo(() =>
+    props.mode === 'rounded' && switchToClockDelay() !== undefined
+      ? Math.min(
+          switchToClockDelay(),
+          (timeLeft() % DAY_IN_SECONDS || DAY_IN_SECONDS) * SECOND_IN_MS + UPDATE_FREQUENCY,
+        )
+      : switchToClockDelay(),
+  );
 
-  useTimeout(forceUpdate, nextUpdateDelay);
-  useInterval(forceUpdate, isActive && shouldUseClock ? UPDATE_FREQUENCY : undefined);
+  useTimeout(forceUpdate, () => nextUpdateDelay());
+  useInterval(forceUpdate, () => (isActive() && shouldUseClock() ? UPDATE_FREQUENCY : undefined));
 
-  useEffect(() => {
-    if (!isActive) {
-      onEnd?.();
-    }
-  }, [isActive, onEnd]);
+  createEffect(
+    depsOf(() => [isActive(), props.onEnd] as const),
+    ([isActive2, onEnd2]) => {
+      if (!isActive2) {
+        onEnd2?.();
+      }
+    },
+  );
 
-  if (!isActive && !shouldShowZeroOnEnd) return undefined;
+  const time = createMemo(() => formatClockDuration(timeLeft()));
 
-  if (mode === 'rounded' && !shouldUseClock) {
-    return <span className={className}>{formatCountdown(lang, timeLeft)}</span>;
-  }
-
-  if (mode === 'countdown' && !shouldUseClock) {
-    return (
-      <span className={className}>
-        {formatCountdownDateTime(lang, secondsToDate(endsAt), {
-          anchorDate: secondsToDate(serverTime),
-        })}
-      </span>
-    );
-  }
-
-  const time = formatClockDuration(timeLeft);
-
-  const timeParts = time.split(':');
+  const timeParts = createMemo(() => time().split(':'));
   const clockNode = (
     <>
-      {timeParts.map((part, index) => (
-        <span key={index}>
+      {timeParts().map((part, index) => (
+        <span>
           {index > 0 && ':'}
           <AnimatedCounter text={part} />
         </span>
@@ -80,9 +76,27 @@ const TextTimer = ({ className, endsAt, mode = 'clock', shouldShowZeroOnEnd, onE
   );
 
   return (
-    <span className={className} style="font-variant-numeric: tabular-nums;">
-      {mode === 'countdown' ? lang('TimeIn', { time: clockNode }, { withNodes: true }) : clockNode}
-    </span>
+    <Show when={!(!isActive() && !props.shouldShowZeroOnEnd)}>
+      <Show
+        when={!(props.mode === 'rounded' && !shouldUseClock())}
+        fallback={<span class={props.className}>{formatCountdown(lang, timeLeft())}</span>}
+      >
+        <Show
+          when={!(props.mode === 'countdown' && !shouldUseClock())}
+          fallback={
+            <span class={props.className}>
+              {formatCountdownDateTime(lang, secondsToDate(props.endsAt), {
+                anchorDate: secondsToDate(serverTime),
+              })}
+            </span>
+          }
+        >
+          <span class={props.className} style="font-variant-numeric: tabular-nums;">
+            {props.mode === 'countdown' ? lang('TimeIn', { time: clockNode }, { withNodes: true }) : clockNode}
+          </span>
+        </Show>
+      </Show>
+    </Show>
   );
 };
 

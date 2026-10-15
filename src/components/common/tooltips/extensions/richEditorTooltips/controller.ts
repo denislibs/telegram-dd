@@ -11,7 +11,7 @@ import type {
   RichEditorTooltipSurface,
 } from '../../types';
 
-import { requestMeasure, requestMutation } from '../../../../../lib/fasterdom/fasterdom';
+import { requestMeasure, requestMutation } from 'frameact';
 import captureKeyboardListeners from '../../../../../util/captureKeyboardListeners';
 import cycleRestrict from '../../../../../util/cycleRestrict';
 import TeactRenderer from '../../../../../util/tiptap/TeactRenderer';

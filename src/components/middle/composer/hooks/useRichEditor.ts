@@ -1,5 +1,6 @@
 import type { Editor, JSONContent as TiptapJsonContent } from '@tiptap/core';
-import { useEffect, useMemo, useRef, useState, useUnmountCleanup } from '../../../../lib/teact/teact';
+import { createEffect, createMemo, createSignal, onDestroy } from 'frameact';
+import { depsOf } from '../../../../util/effectDeps';
 
 import type { ApiInputRichMessage } from '../../../../api/types';
 import type { RichEditorMediaAttrs, RichEditorMediaItem } from '../../../../util/tiptap/richMedia';
@@ -26,8 +27,6 @@ import {
   replaceEditorRange,
 } from '../helpers/richEditorComposer';
 
-import useLastCallback from '../../../../hooks/useLastCallback';
-
 const EMPTY_RICH_MESSAGE: ApiInputRichMessage = { blocks: [] };
 
 type EditorBundle = {
@@ -35,29 +34,31 @@ type EditorBundle = {
   getRichEditorCanUndo: (editor: Editor) => boolean;
 };
 
+// TODO(codemod): useRichEditor: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useRichEditor(
   canSendPhotos?: boolean,
   canSendVideos?: boolean,
   canSendDocuments?: boolean,
   canSendAudios?: boolean,
 ) {
-  const valueRef = useRef(EMPTY_RICH_MESSAGE);
-  const metadataRef = useRef<Pick<ApiInputRichMessage, 'isRtl' | 'shouldDisableAutoLink'>>({});
-  const ownedUploadIdsRef = useRef(new Set<string>());
-  const editorRef = useRef<Editor>();
-  const editorBundleRef = useRef<EditorBundle>();
-  const isEditorEmptyRef = useRef<(editor: Editor) => boolean>();
-  const rootRef = useRef<RichEditorRoot>();
-  const [currentValue, setCurrentValue] = useState(EMPTY_RICH_MESSAGE);
-  const [root, setRoot] = useState<RichEditorRoot | undefined>();
-  const [isReady, setIsReady] = useState(false);
-  const [hasUnresolvedMedia, setHasUnresolvedMedia] = useState(false);
-  const canUndo = Boolean(editorRef.current && editorBundleRef.current?.getRichEditorCanUndo(editorRef.current));
-  const canRedo = Boolean(editorRef.current && editorBundleRef.current?.getRichEditorCanRedo(editorRef.current));
+  let valueRef = EMPTY_RICH_MESSAGE;
+  let metadataRef: Pick<ApiInputRichMessage, 'isRtl' | 'shouldDisableAutoLink'> = {};
+  let ownedUploadIdsRef = new Set<string>();
+  let editorRef: Editor | undefined;
+  let editorBundleRef: EditorBundle | undefined;
+  let isEditorEmptyRef: (editor: Editor) => boolean | undefined;
+  let rootRef: RichEditorRoot | undefined;
+  const [currentValue, setCurrentValue] = createSignal(EMPTY_RICH_MESSAGE);
+  const [root, setRoot] = createSignal<RichEditorRoot | undefined>(undefined);
+  const [isReady, setIsReady] = createSignal(false);
+  const [hasUnresolvedMedia, setHasUnresolvedMedia] = createSignal(false);
+  const canUndo = Boolean(editorRef && editorBundleRef?.getRichEditorCanUndo(editorRef));
+  const canRedo = Boolean(editorRef && editorBundleRef?.getRichEditorCanRedo(editorRef));
 
-  valueRef.current = currentValue;
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  valueRef = currentValue();
 
-  const getCanInsertMedia = useLastCallback((type: RichEditorMediaItem['type']) =>
+  const getCanInsertMedia = (type: RichEditorMediaItem['type']) =>
     Boolean(
       type === 'document'
         ? canSendDocuments
@@ -66,164 +67,160 @@ export default function useRichEditor(
           : type === 'photo'
             ? canSendPhotos
             : canSendVideos,
-    ),
-  );
+    );
 
-  const clearMediaUploads = useLastCallback(() => {
-    ownedUploadIdsRef.current.forEach(removeRichMediaUpload);
-    ownedUploadIdsRef.current.clear();
-  });
+  const clearMediaUploads = () => {
+    ownedUploadIdsRef.forEach(removeRichMediaUpload);
+    ownedUploadIdsRef.clear();
+  };
 
-  useUnmountCleanup(clearMediaUploads);
+  onDestroy(clearMediaUploads);
 
-  const registerRoot = useLastCallback((nextRoot: RichEditorRoot) => {
-    rootRef.current = nextRoot;
+  const registerRoot = (nextRoot: RichEditorRoot) => {
+    rootRef = nextRoot;
     setRoot(nextRoot);
 
     return () => {
-      if (rootRef.current !== nextRoot) return;
+      if (rootRef !== nextRoot) return;
 
-      rootRef.current = undefined;
+      rootRef = undefined;
       setRoot(undefined);
     };
-  });
+  };
 
-  useEffect(() => {
-    if (!root) {
-      editorRef.current?.destroy();
-      editorRef.current = undefined;
-      setIsReady(false);
-      return undefined;
-    }
-
-    const currentRoot = root;
-    let isDestroyed = false;
-    setIsReady(false);
-
-    async function initEditor() {
-      const editorBundle = await loadBundle(Bundles.Editor);
-      const { createRichEditor, isRichEditorEmpty } = editorBundle;
-      editorBundleRef.current = editorBundle;
-      isEditorEmptyRef.current = isRichEditorEmpty;
-      const editor = createRichEditor({
-        element: currentRoot.element,
-        sharedCanvasRef: currentRoot.sharedCanvasRef,
-        sharedCanvasHqRef: currentRoot.sharedCanvasHqRef,
-        content: buildTiptapJsonFromRichMessage(valueRef.current),
-        tooltips: currentRoot.tooltips,
-        getIsRichInputExpanded: currentRoot.getIsRichInputExpanded,
-        getCanInsertMedia,
-        onUpdate: (updatedEditor) => {
-          const json = updatedEditor.getJSON();
-          const richMessage = buildRichMessage(json, metadataRef.current);
-          valueRef.current = richMessage;
-          setCurrentValue(richMessage);
-          setHasUnresolvedMedia(checkHasUnresolvedMedia(json));
-          // Undo history retains media blocks and their local uploads until the document is reset
-          getRichMediaUploadIds(json).forEach((uploadId) => ownedUploadIdsRef.current.add(uploadId));
-          currentRoot.onUpdate(isRichEditorEmpty(updatedEditor), updatedEditor.view.dom);
-        },
-        onDateClick: currentRoot.onDateClick,
-        onMediaEdit: currentRoot.onMediaEdit,
-        onMediaFiles: currentRoot.onMediaFiles,
-      });
-      if (isDestroyed) {
-        editor.destroy();
-        return;
+  createEffect(
+    depsOf(() => [getCanInsertMedia, root()] as const),
+    ([, root2]) => {
+      if (!root2) {
+        editorRef?.destroy();
+        editorRef = undefined;
+        setIsReady(false);
+        return undefined;
       }
 
-      editorRef.current = editor;
-      setIsReady(true);
-      currentRoot.onReady(editor.view.dom);
-    }
-
-    void initEditor();
-
-    return () => {
-      isDestroyed = true;
-      editorRef.current?.destroy();
-      editorRef.current = undefined;
+      const currentRoot = root2;
+      let isDestroyed = false;
       setIsReady(false);
-    };
-  }, [getCanInsertMedia, root]);
 
-  return useMemo<RichEditor>(
-    () => ({
-      editor: editorRef.current,
-      isReady,
-      value: currentValue,
-      canUndo,
-      canRedo,
-      deleteCharacterBeforeSelection: () => deleteEditorCharacterBeforeSelection(editorRef.current),
-      focus: () => {
-        editorRef.current?.commands.focus();
-      },
-      getAsFormatted: () => {
-        const valueToFormat = editorRef.current
-          ? buildRichMessage(editorRef.current.getJSON(), metadataRef.current)
-          : valueRef.current;
-
-        return getRichInputAsFormatted(valueToFormat);
-      },
-      getValue: () => {
-        if (editorRef.current) {
-          return buildRichMessage(editorRef.current.getJSON(), metadataRef.current);
+      async function initEditor() {
+        const editorBundle = await loadBundle(Bundles.Editor);
+        const { createRichEditor, isRichEditorEmpty } = editorBundle;
+        editorBundleRef = editorBundle;
+        isEditorEmptyRef = isRichEditorEmpty;
+        const editor = createRichEditor({
+          element: currentRoot.element,
+          sharedCanvasRef: currentRoot.sharedCanvasRef,
+          sharedCanvasHqRef: currentRoot.sharedCanvasHqRef,
+          content: buildTiptapJsonFromRichMessage(valueRef),
+          tooltips: currentRoot.tooltips,
+          getIsRichInputExpanded: currentRoot.getIsRichInputExpanded,
+          getCanInsertMedia,
+          onUpdate: (updatedEditor) => {
+            const json = updatedEditor.getJSON();
+            const richMessage = buildRichMessage(json, metadataRef);
+            valueRef = richMessage;
+            setCurrentValue(richMessage);
+            setHasUnresolvedMedia(checkHasUnresolvedMedia(json));
+            // Undo history retains media blocks and their local uploads until the document is reset
+            getRichMediaUploadIds(json).forEach((uploadId) => ownedUploadIdsRef.add(uploadId));
+            currentRoot.onUpdate(isRichEditorEmpty(updatedEditor), updatedEditor.view.dom);
+          },
+          onDateClick: currentRoot.onDateClick,
+          onMediaEdit: currentRoot.onMediaEdit,
+          onMediaFiles: currentRoot.onMediaFiles,
+        });
+        if (isDestroyed) {
+          editor.destroy();
+          return;
         }
 
-        return valueRef.current;
-      },
-      hasCollapsedSelection: () => hasEditorCollapsedSelection(editorRef.current),
-      hasUnresolvedMedia,
-      isEmpty: () => {
-        const editor = editorRef.current;
-        if (!editor) {
-          return !valueRef.current.blocks.length;
-        }
+        editorRef = editor;
+        setIsReady(true);
+        currentRoot.onReady(editor.view.dom);
+      }
 
-        return isEditorEmptyRef.current ? isEditorEmptyRef.current(editor) : !valueRef.current.blocks.length;
-      },
-      insertContent: (content, shouldPrepend) => insertEditorContent(editorRef.current, content, shouldPrepend),
-      insertMedia: (items, position, shouldAppend) =>
-        insertRichEditorMedia(editorRef.current, items, position, shouldAppend),
-      redo: () => {
-        editorRef.current?.chain().focus().redo().run();
-      },
-      replaceValue: (nextValue) => {
-        metadataRef.current = getRichMessageMetadata(nextValue);
-        valueRef.current = nextValue;
-        setCurrentValue(nextValue);
-        const json = buildTiptapJsonFromRichMessage(nextValue);
-        setHasUnresolvedMedia(checkHasUnresolvedMedia(json));
-        editorRef.current?.chain().setContent(json, { emitUpdate: false }).focus('end').run();
-      },
-      replaceRange: (range, content) => {
-        replaceEditorRange(editorRef.current, range, content);
-      },
-      registerRoot,
-      resetMedia: (uploadId) => {
-        setRichEditorMedia(editorRef.current, uploadId);
-      },
-      resolveMedia: (uploadId, media) => {
-        if (media) setRichEditorMedia(editorRef.current, uploadId, media);
-      },
-      setValue: (nextValue) => {
-        clearMediaUploads();
-        const valueToSet = nextValue || EMPTY_RICH_MESSAGE;
-        metadataRef.current = getRichMessageMetadata(valueToSet);
-        valueRef.current = valueToSet;
-        setCurrentValue(valueToSet);
-        const json = buildTiptapJsonFromRichMessage(valueToSet);
-        setHasUnresolvedMedia(checkHasUnresolvedMedia(json));
-        if (editorRef.current) {
-          setEditorContentWithoutHistory(editorRef.current, json);
-        }
-      },
-      undo: () => {
-        editorRef.current?.chain().focus().undo().run();
-      },
-    }),
-    [canRedo, canUndo, clearMediaUploads, currentValue, hasUnresolvedMedia, isReady, registerRoot],
+      void initEditor();
+
+      return () => {
+        isDestroyed = true;
+        editorRef?.destroy();
+        editorRef = undefined;
+        setIsReady(false);
+      };
+    },
   );
+
+  return createMemo<RichEditor>(() => ({
+    editor: editorRef,
+    isReady: isReady(),
+    value: currentValue(),
+    canUndo,
+    canRedo,
+    deleteCharacterBeforeSelection: () => deleteEditorCharacterBeforeSelection(editorRef),
+    focus: () => {
+      editorRef?.commands.focus();
+    },
+    getAsFormatted: () => {
+      const valueToFormat = editorRef ? buildRichMessage(editorRef.getJSON(), metadataRef) : valueRef;
+
+      return getRichInputAsFormatted(valueToFormat);
+    },
+    getValue: () => {
+      if (editorRef) {
+        return buildRichMessage(editorRef.getJSON(), metadataRef);
+      }
+
+      return valueRef;
+    },
+    hasCollapsedSelection: () => hasEditorCollapsedSelection(editorRef),
+    hasUnresolvedMedia: hasUnresolvedMedia(),
+    isEmpty: () => {
+      const editor = editorRef;
+      if (!editor) {
+        return !valueRef.blocks.length;
+      }
+
+      return isEditorEmptyRef ? isEditorEmptyRef(editor) : !valueRef.blocks.length;
+    },
+    insertContent: (content, shouldPrepend) => insertEditorContent(editorRef, content, shouldPrepend),
+    insertMedia: (items, position, shouldAppend) => insertRichEditorMedia(editorRef, items, position, shouldAppend),
+    redo: () => {
+      editorRef?.chain().focus().redo().run();
+    },
+    replaceValue: (nextValue) => {
+      metadataRef = getRichMessageMetadata(nextValue);
+      valueRef = nextValue;
+      setCurrentValue(nextValue);
+      const json = buildTiptapJsonFromRichMessage(nextValue);
+      setHasUnresolvedMedia(checkHasUnresolvedMedia(json));
+      editorRef?.chain().setContent(json, { emitUpdate: false }).focus('end').run();
+    },
+    replaceRange: (range, content) => {
+      replaceEditorRange(editorRef, range, content);
+    },
+    registerRoot,
+    resetMedia: (uploadId) => {
+      setRichEditorMedia(editorRef, uploadId);
+    },
+    resolveMedia: (uploadId, media) => {
+      if (media) setRichEditorMedia(editorRef, uploadId, media);
+    },
+    setValue: (nextValue) => {
+      clearMediaUploads();
+      const valueToSet = nextValue || EMPTY_RICH_MESSAGE;
+      metadataRef = getRichMessageMetadata(valueToSet);
+      valueRef = valueToSet;
+      setCurrentValue(valueToSet);
+      const json = buildTiptapJsonFromRichMessage(valueToSet);
+      setHasUnresolvedMedia(checkHasUnresolvedMedia(json));
+      if (editorRef) {
+        setEditorContentWithoutHistory(editorRef, json);
+      }
+    },
+    undo: () => {
+      editorRef?.chain().focus().undo().run();
+    },
+  }));
 }
 
 function insertRichEditorMedia(

@@ -1,13 +1,15 @@
+import { lazy } from 'frameact/dom';
+
 import type { OwnProps } from './ChatCommandTooltip';
 
-import { Bundles } from '../../../util/moduleLoader';
+import { Bundles, loadBundle } from '../../../util/moduleLoader';
 
-import useModuleLoader from '../../../hooks/useModuleLoader';
+const ChatCommandTooltip = lazy<OwnProps>(() =>
+  loadBundle(Bundles.Extra).then((m) => ({ default: m.ChatCommandTooltip })),
+);
 
 const ChatCommandTooltipAsync = (props: OwnProps) => {
-  const ChatCommandTooltip = useModuleLoader(Bundles.Extra, 'ChatCommandTooltip');
-
-  return ChatCommandTooltip ? <ChatCommandTooltip {...props} /> : undefined;
+  return <ChatCommandTooltip {...props} />;
 };
 
 export default ChatCommandTooltipAsync;

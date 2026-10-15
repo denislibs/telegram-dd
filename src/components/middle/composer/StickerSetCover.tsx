@@ -1,9 +1,10 @@
-import type { ElementRef, FC } from '../../../lib/teact/teact';
-import { memo, useEffect, useRef } from '../../../lib/teact/teact';
+import { createEffect, createMemo } from 'frameact';
+import { mergeProps } from 'frameact/dom';
 import { getActions, getGlobal } from '../../../global';
+import { createMediaTransition } from '../../../lib/kit';
+import { depsOf } from '../../../util/effectDeps';
 
 import type { ApiStickerSet } from '../../../api/types';
-import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 
 import { STICKER_SIZE_PICKER_HEADER } from '../../../config';
 import { getStickerMediaHash } from '../../../global/helpers';
@@ -16,7 +17,6 @@ import useDynamicColorListener from '../../../hooks/stickers/useDynamicColorList
 import useCoordsInSharedCanvas from '../../../hooks/useCoordsInSharedCanvas';
 import { useIsIntersecting } from '../../../hooks/useIntersectionObserver';
 import useMedia from '../../../hooks/useMedia';
-import useMediaTransitionDeprecated from '../../../hooks/useMediaTransitionDeprecated';
 import useCustomEmoji from '../../common/hooks/useCustomEmoji';
 
 import AnimatedSticker from '../../common/AnimatedSticker';
@@ -31,81 +31,97 @@ type OwnProps = {
   noPlay?: boolean;
   forcePlayback?: boolean;
   observeIntersection: ObserveFn;
-  sharedCanvasRef?: ElementRef<HTMLCanvasElement>;
+  sharedCanvasRef?: (el: HTMLCanvasElement) => void;
 };
 
-const StickerSetCover: FC<OwnProps> = ({
-  stickerSet,
-  size = STICKER_SIZE_PICKER_HEADER,
-  noPlay,
-  forcePlayback,
-  observeIntersection,
-  sharedCanvasRef,
-}) => {
+const StickerSetCover = (rawProps: OwnProps) => {
+  const props = mergeProps({ size: STICKER_SIZE_PICKER_HEADER }, rawProps) as OwnProps &
+    Required<Pick<OwnProps, 'size'>>;
   const { loadStickers } = getActions();
-  const containerRef = useRef<HTMLDivElement>();
+  let containerRef!: HTMLDivElement;
 
-  const { hasThumbnail, hasVideoThumb, hasAnimatedThumb, hasStaticThumb, thumbCustomEmojiId } = stickerSet;
+  const source = createMemo(() => props.stickerSet);
+  const hasThumbnail = () => source().hasThumbnail;
+  const hasVideoThumb = () => source().hasVideoThumb;
+  const hasAnimatedThumb = () => source().hasAnimatedThumb;
+  const hasStaticThumb = () => source().hasStaticThumb;
+  const thumbCustomEmojiId = () => source().thumbCustomEmojiId;
 
-  const { customEmoji } = useCustomEmoji(thumbCustomEmojiId);
-  const hasCustomColor = customEmoji?.shouldUseTextColor;
-  const customColor = useDynamicColorListener(containerRef, undefined, !hasCustomColor);
+  const customEmojiResult = createMemo(() => useCustomEmoji(() => thumbCustomEmojiId()));
+  const customEmoji = () => customEmojiResult().customEmoji;
+  const hasCustomColor = createMemo(() => customEmoji()?.shouldUseTextColor);
+  const customColor = useDynamicColorListener(
+    () => containerRef,
+    undefined,
+    () => !hasCustomColor(),
+  );
   const colorFilter = useColorFilter(customColor);
 
-  const isIntersecting = useIsIntersecting(containerRef, observeIntersection);
-  const shouldPlay = isIntersecting && !noPlay;
+  const isIntersecting = useIsIntersecting(
+    () => containerRef,
+    () => props.observeIntersection,
+  );
+  const shouldPlay = createMemo(() => isIntersecting && !props.noPlay);
 
-  const shouldFallbackToSticker =
-    !hasThumbnail || (hasVideoThumb && !IS_WEBM_SUPPORTED && !hasAnimatedThumb && !hasStaticThumb);
-  const fallbackSticker = shouldFallbackToSticker ? stickerSet.stickers?.[0] : undefined;
+  const shouldFallbackToSticker = createMemo(
+    () => !hasThumbnail() || (hasVideoThumb() && !IS_WEBM_SUPPORTED && !hasAnimatedThumb() && !hasStaticThumb()),
+  );
+  const fallbackSticker = createMemo(() => (shouldFallbackToSticker() ? props.stickerSet.stickers?.[0] : undefined));
 
-  const mediaHash = ((hasThumbnail && !fallbackSticker) || hasAnimatedThumb) && `stickerSet${stickerSet.id}`;
-  const mediaData = useMedia(mediaHash, !isIntersecting);
-  const fallbackStickerHash = fallbackSticker && getStickerMediaHash(fallbackSticker, 'preview');
-  const fallbackStickerMediaData = useMedia(fallbackStickerHash, !isIntersecting);
+  const mediaHash = createMemo(
+    () => ((hasThumbnail() && !fallbackSticker()) || hasAnimatedThumb()) && `stickerSet${props.stickerSet.id}`,
+  );
+  const mediaData = useMedia(() => mediaHash(), !isIntersecting);
+  const fallbackStickerHash = createMemo(() => fallbackSticker() && getStickerMediaHash(fallbackSticker(), 'preview'));
+  const fallbackStickerMediaData = useMedia(() => fallbackStickerHash(), !isIntersecting);
 
-  const isReady = thumbCustomEmojiId || mediaData || fallbackStickerMediaData;
-  const thumbDataUri = stickerSet.thumbnail?.dataUri || fallbackSticker?.thumbnail?.dataUri;
-  const transitionClassNames = useMediaTransitionDeprecated(isReady);
+  const isReady = createMemo(() => thumbCustomEmojiId() || mediaData || fallbackStickerMediaData);
+  const thumbDataUri = createMemo(() => props.stickerSet.thumbnail?.dataUri || fallbackSticker()?.thumbnail?.dataUri);
+  // TODO(codemod): useMediaTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element
+  const transitionClassNames = createMemo(() => createMediaTransition({ hasMediaData: () => Boolean(isReady()) }));
 
-  const coords = useCoordsInSharedCanvas(containerRef, sharedCanvasRef);
+  const coords = useCoordsInSharedCanvas(() => containerRef, props.sharedCanvasRef);
 
-  useEffect(() => {
-    if (isIntersecting && shouldFallbackToSticker && !stickerSet.stickers?.length) {
-      loadStickers({
-        stickerSetInfo: stickerSet,
-      });
-    }
-  }, [isIntersecting, shouldFallbackToSticker, loadStickers, stickerSet]);
+  createEffect(
+    depsOf(() => [isIntersecting, shouldFallbackToSticker(), loadStickers, props.stickerSet] as const),
+    ([, shouldFallbackToSticker2, , stickerSet2]) => {
+      if (isIntersecting && shouldFallbackToSticker2 && !stickerSet2.stickers?.length) {
+        loadStickers({
+          stickerSetInfo: stickerSet2,
+        });
+      }
+    },
+  );
 
   return (
-    <div ref={containerRef} className={buildClassName(styles.root, 'sticker-set-cover')} style={`--_size: ${size}px`}>
-      {isReady ? (
-        thumbCustomEmojiId ? (
+    <div ref={containerRef} class={buildClassName(styles.root, 'sticker-set-cover')} style={`--_size: ${props.size}px`}>
+      {isReady() ? (
+        thumbCustomEmojiId() ? (
           <CustomEmoji
-            documentId={thumbCustomEmojiId}
-            size={size}
-            observeIntersectionForPlaying={observeIntersection}
-            noPlay={noPlay}
+            documentId={thumbCustomEmojiId()}
+            size={props.size}
+            observeIntersectionForPlaying={props.observeIntersection}
+            noPlay={props.noPlay}
           />
-        ) : hasAnimatedThumb ? (
+        ) : hasAnimatedThumb() ? (
+          // TODO(codemod): getGlobal() in a memo / JSX is a one-time read: use useGlobal() (store contract §12.4)
           <AnimatedSticker
-            className={transitionClassNames}
+            className={transitionClassNames()}
             tgsUrl={mediaData}
-            size={size}
-            play={shouldPlay}
-            isLowPriority={!selectIsAlwaysHighPriorityEmoji(getGlobal(), stickerSet)}
-            sharedCanvas={sharedCanvasRef?.current || undefined}
+            size={props.size}
+            play={shouldPlay()}
+            isLowPriority={!selectIsAlwaysHighPriorityEmoji(getGlobal(), props.stickerSet)}
+            sharedCanvas={props.sharedCanvasRef?.current || undefined}
             sharedCanvasCoords={coords}
-            forceAlways={forcePlayback}
+            forceAlways={props.forcePlayback}
           />
-        ) : hasVideoThumb && !shouldFallbackToSticker ? (
+        ) : hasVideoThumb() && !shouldFallbackToSticker() ? (
           <OptimizedVideo
-            className={buildClassName(styles.video, transitionClassNames)}
+            className={buildClassName(styles.video, transitionClassNames())}
             src={mediaData}
-            canPlay={shouldPlay}
+            canPlay={shouldPlay()}
             style={colorFilter}
-            isPriority={forcePlayback}
+            isPriority={props.forcePlayback}
             loop
             disablePictureInPicture
           />
@@ -113,16 +129,16 @@ const StickerSetCover: FC<OwnProps> = ({
           <img
             src={mediaData || fallbackStickerMediaData}
             style={colorFilter}
-            className={buildClassName(styles.image, transitionClassNames)}
+            class={buildClassName(styles.image, transitionClassNames())}
             alt=""
             draggable={false}
           />
         )
-      ) : thumbDataUri ? (
-        <img src={thumbDataUri} className={styles.image} alt="" draggable={false} />
+      ) : thumbDataUri() ? (
+        <img src={thumbDataUri()} class={styles.image} alt="" draggable={false} />
       ) : undefined}
     </div>
   );
 };
 
-export default memo(StickerSetCover);
+export default StickerSetCover;

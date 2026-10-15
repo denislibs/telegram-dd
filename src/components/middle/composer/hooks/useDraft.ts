@@ -1,18 +1,16 @@
-import { useEffect, useLayoutEffect, useRef } from '../../../../lib/teact/teact';
+import { createEffect, createMutationEffect, requestMeasure, requestNextMutation } from 'frameact';
 import { getActions } from '../../../../global';
+import { depsOf } from '../../../../util/effectDeps';
 
 import type { ApiDraft, ApiMessage } from '../../../../api/types';
 import type { ThreadId } from '../../../../types';
 import { ApiMessageEntityTypes } from '../../../../api/types';
 
 import { DRAFT_DEBOUNCE, EDITABLE_INPUT_CSS_SELECTOR } from '../../../../config';
-import { requestMeasure, requestNextMutation } from '../../../../lib/fasterdom/fasterdom';
 import { areDeepEqual } from '../../../../util/areDeepEqual';
 import focusEditableElement from '../../../../util/focusEditableElement';
 import { buildRichMessageFromFormatted, getRichInputAsFormatted } from '../../../ui/textInput/richText';
 
-import useLastCallback from '../../../../hooks/useLastCallback';
-import useLayoutEffectWithPrevDeps from '../../../../hooks/useLayoutEffectWithPrevDeps';
 import useRunDebounced from '../../../../hooks/useRunDebounced';
 import { useStateRef } from '../../../../hooks/useStateRef';
 import useBackgroundMode from '../../../../hooks/window/useBackgroundMode';
@@ -28,6 +26,7 @@ function freeze() {
   });
 }
 
+// TODO(codemod): useDraft: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 const useDraft = ({
   draft,
   chatId,
@@ -49,23 +48,29 @@ const useDraft = ({
 }) => {
   const { saveDraft, clearDraft, loadCustomEmojis } = getActions();
 
-  const isTouchedRef = useRef(false);
+  let isTouchedRef = false;
 
-  useEffect(() => {
-    if (!hasUnresolvedMedia && areDeepEqual(getDraftRichMessage(draft), richMessage) && !draft?.isLocal) {
-      isTouchedRef.current = false;
-    } else {
-      isTouchedRef.current = true;
-    }
-  }, [draft, hasUnresolvedMedia, richMessage]);
-  useEffect(() => {
-    isTouchedRef.current = false;
-  }, [chatId, threadId]);
+  createEffect(
+    depsOf(() => [draft, hasUnresolvedMedia, richMessage]),
+    () => {
+      if (!hasUnresolvedMedia && areDeepEqual(getDraftRichMessage(draft), richMessage) && !draft?.isLocal) {
+        isTouchedRef = false;
+      } else {
+        isTouchedRef = true;
+      }
+    },
+  );
+  createEffect(
+    depsOf(() => [chatId, threadId]),
+    () => {
+      isTouchedRef = false;
+    },
+  );
 
   const isEditing = Boolean(editedMessage);
 
-  const updateDraft = useLastCallback((prevState: { chatId?: string; threadId?: ThreadId } = {}) => {
-    if (isDisabled || isEditing || !isTouchedRef.current) return;
+  const updateDraft = (prevState: { chatId?: string; threadId?: ThreadId } = {}) => {
+    if (isDisabled || isEditing || !isTouchedRef) return;
 
     const currentRichMessage = richMessage?.blocks.length ? richMessage : undefined;
     const formattedRichMessage = currentRichMessage ? getRichInputAsFormatted(currentRichMessage) : undefined;
@@ -95,17 +100,19 @@ const useDraft = ({
         shouldKeepSuggestedPost: true,
       });
     }
-  });
+  };
 
   const runDebouncedForSaveDraft = useRunDebounced(DRAFT_DEBOUNCE, true, undefined, [chatId, threadId]);
 
   // Restore draft on chat change
-  useLayoutEffectWithPrevDeps(
-    ([prevChatId, prevThreadId, prevDraft]) => {
+  createMutationEffect(
+    depsOf(() => [chatId, threadId, draft, replaceRichMessage, editedMessage, isDisabled, hasUnresolvedMedia]),
+    (_deps, prev) => {
+      const [prevChatId, prevThreadId, prevDraft] = prev ?? [];
       if (isDisabled) {
         return;
       }
-      const isTouched = isTouchedRef.current;
+      const isTouched = isTouchedRef;
       const shouldUpdateSuggestedPost = draft?.suggestedPostInfo && !prevDraft?.suggestedPostInfo;
 
       if (chatId === prevChatId && threadId === prevThreadId) {
@@ -148,46 +155,53 @@ const useDraft = ({
           .filter(Boolean) || [];
       if (customEmojiIds.length) loadCustomEmojis({ ids: customEmojiIds });
     },
-    [chatId, threadId, draft, replaceRichMessage, editedMessage, isDisabled, hasUnresolvedMedia],
   );
 
   // Save draft on chat change. Should be layout effect to read correct editor value on cleanup
-  useLayoutEffect(() => {
-    if (isDisabled) {
-      return undefined;
-    }
-
-    return () => {
-      if (!isEditing) {
-        updateDraft({ chatId, threadId });
+  createMutationEffect(
+    depsOf(() => [chatId, threadId, isEditing, updateDraft, isDisabled]),
+    () => {
+      if (isDisabled) {
+        return undefined;
       }
 
-      freeze();
-    };
-  }, [chatId, threadId, isEditing, updateDraft, isDisabled]);
+      return () => {
+        if (!isEditing) {
+          updateDraft({ chatId, threadId });
+        }
 
+        freeze();
+      };
+    },
+  );
+
+  // TODO(codemod): useStateRef: a handler reads the current value through the accessor; replace ref.current with the accessor call
   const chatIdRef = useStateRef(chatId);
+  // TODO(codemod): useStateRef: a handler reads the current value through the accessor; replace ref.current with the accessor call
   const threadIdRef = useStateRef(threadId);
-  useEffect(() => {
-    if (isDisabled || isFrozen) {
-      return;
-    }
-
-    if (!richMessage?.blocks.length) {
-      updateDraft();
-
-      return;
-    }
-
-    const scopedСhatId = chatIdRef.current;
-    const scopedThreadId = threadIdRef.current;
-
-    runDebouncedForSaveDraft(() => {
-      if (chatIdRef.current === scopedСhatId && threadIdRef.current === scopedThreadId) {
-        updateDraft();
+  createEffect(
+    depsOf(() => [chatIdRef, isDisabled, richMessage, runDebouncedForSaveDraft, threadIdRef, updateDraft]),
+    () => {
+      if (isDisabled || isFrozen) {
+        return;
       }
-    });
-  }, [chatIdRef, isDisabled, richMessage, runDebouncedForSaveDraft, threadIdRef, updateDraft]);
+
+      if (!richMessage?.blocks.length) {
+        updateDraft();
+
+        return;
+      }
+
+      const scopedСhatId = chatIdRef.current;
+      const scopedThreadId = threadIdRef.current;
+
+      runDebouncedForSaveDraft(() => {
+        if (chatIdRef.current === scopedСhatId && threadIdRef.current === scopedThreadId) {
+          updateDraft();
+        }
+      });
+    },
+  );
 
   useBackgroundMode(updateDraft);
   useBeforeUnload(updateDraft);

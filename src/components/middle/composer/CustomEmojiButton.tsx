@@ -1,12 +1,8 @@
-import type { FC } from '../../../lib/teact/teact';
-import { memo } from '../../../lib/teact/teact';
+import { createMemo } from 'frameact';
 
 import type { ApiSticker } from '../../../api/types';
-import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 
 import buildClassName from '../../../util/buildClassName';
-
-import useLastCallback from '../../../hooks/useLastCallback';
 
 import CustomEmoji from '../../common/CustomEmoji';
 
@@ -21,27 +17,27 @@ type OwnProps = {
   observeIntersection?: ObserveFn;
 };
 
-const CustomEmojiButton: FC<OwnProps> = ({ emoji, focus, onClick, observeIntersection }) => {
-  const handleClick = useLastCallback((e: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
+const CustomEmojiButton = (props: OwnProps) => {
+  const handleClick = (e: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
     // Preventing safari from losing focus on Composer MessageInput
     e.preventDefault();
 
-    onClick?.(emoji);
-  });
+    props.onClick?.(props.emoji);
+  };
 
-  const className = buildClassName('EmojiButton', focus && 'focus');
+  const className = createMemo(() => buildClassName('EmojiButton', props.focus && 'focus'));
 
   return (
-    <div className={className} onMouseDown={handleClick} title={emoji.emoji}>
+    <div class={className()} onMouseDown={handleClick} title={props.emoji.emoji}>
       <CustomEmoji
-        documentId={emoji.id}
+        documentId={props.emoji.id}
         size={CUSTOM_EMOJI_SIZE}
         withSharedAnimation
         shouldPreloadPreview
-        observeIntersectionForPlaying={observeIntersection}
+        observeIntersectionForPlaying={props.observeIntersection}
       />
     </div>
   );
 };
 
-export default memo(CustomEmojiButton);
+export default CustomEmojiButton;

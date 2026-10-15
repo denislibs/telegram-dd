@@ -1,7 +1,5 @@
-import type { FC } from '../../../lib/teact/teact';
-import { memo, useRef } from '../../../lib/teact/teact';
-
-import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
+import { createMemo } from 'frameact';
+import { createMediaTransition } from '../../../lib/kit';
 
 import { EMOJI_SIZE_PICKER } from '../../../config';
 import buildClassName from '../../../util/buildClassName';
@@ -10,7 +8,6 @@ import { REM } from '../../common/helpers/mediaDimensions';
 
 import useAppLayout from '../../../hooks/useAppLayout';
 import { useIsIntersecting } from '../../../hooks/useIntersectionObserver';
-import useMediaTransitionDeprecated from '../../../hooks/useMediaTransitionDeprecated';
 import useOldLang from '../../../hooks/useOldLang';
 
 import EmojiButton from './EmojiButton';
@@ -31,21 +28,19 @@ type OwnProps = {
   onEmojiSelect: (emoji: string, name: string) => void;
 };
 
-const EmojiCategory: FC<OwnProps> = ({
-  category,
-  sectionId,
-  title,
-  allEmojis,
-  observeIntersection,
-  shouldRender,
-  onEmojiSelect,
-}) => {
-  const ref = useRef<HTMLDivElement>();
+const EmojiCategory = (props: OwnProps) => {
+  let ref!: HTMLDivElement;
 
-  const isIntersecting = useIsIntersecting(ref, observeIntersection);
-  const shouldRenderContent = shouldRender || isIntersecting;
+  const isIntersecting = useIsIntersecting(
+    () => ref,
+    () => props.observeIntersection,
+  );
+  const shouldRenderContent = createMemo(() => props.shouldRender || isIntersecting);
 
-  const transitionClassNames = useMediaTransitionDeprecated(shouldRenderContent);
+  // TODO(codemod): useMediaTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element
+  const transitionClassNames = createMemo(() =>
+    createMediaTransition({ hasMediaData: () => Boolean(shouldRenderContent()) }),
+  );
 
   const lang = useOldLang();
   const { isMobile } = useAppLayout();
@@ -55,25 +50,28 @@ const EmojiCategory: FC<OwnProps> = ({
         (windowSize.get().width - MOBILE_CONTAINER_PADDING + EMOJI_MARGIN) / (EMOJI_SIZE_PICKER + EMOJI_MARGIN),
       )
     : EMOJIS_PER_ROW_ON_DESKTOP;
-  const height =
-    Math.ceil(category.emojis.length / emojisPerRow) *
-    (EMOJI_SIZE_PICKER + (isMobile ? EMOJI_VERTICAL_MARGIN_MOBILE : EMOJI_VERTICAL_MARGIN));
+  const height = createMemo(
+    () =>
+      Math.ceil(props.category.emojis.length / emojisPerRow) *
+      (EMOJI_SIZE_PICKER + (isMobile ? EMOJI_VERTICAL_MARGIN_MOBILE : EMOJI_VERTICAL_MARGIN)),
+  );
 
   return (
-    <div ref={ref} key={category.id} id={sectionId} className="symbol-set">
-      <div className="symbol-set-header">
-        <p className="symbol-set-name" dir="auto">
-          {title}
+    // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{(key) => …}</Show> (the callback MUST take an argument, a zero-argument child is a plain child and never remounts; a falsy key such as 0 renders nothing: use when={{ id: key }})
+    <div ref={ref} key={props.category.id} id={props.sectionId} class="symbol-set">
+      <div class="symbol-set-header">
+        <p class="symbol-set-name" dir="auto">
+          {props.title}
         </p>
       </div>
       <div
-        className={buildClassName('symbol-set-container', transitionClassNames)}
-        style={`height: ${height}px;`}
+        class={buildClassName('symbol-set-container', transitionClassNames())}
+        style={`height: ${height()}px;`}
         dir={lang.isRtl ? 'rtl' : undefined}
       >
-        {shouldRenderContent &&
-          category.emojis.map((name) => {
-            const emoji = allEmojis[name];
+        {shouldRenderContent() &&
+          props.category.emojis.map((name) => {
+            const emoji = props.allEmojis[name];
             // Recent emojis may contain emoticons that are no longer in the list
             if (!emoji) {
               return undefined;
@@ -82,11 +80,11 @@ const EmojiCategory: FC<OwnProps> = ({
             // For now, we select only the first emoji with 'neutral' skin.
             const displayedEmoji = 'id' in emoji ? emoji : emoji[1];
 
-            return <EmojiButton key={displayedEmoji.id} emoji={displayedEmoji} onClick={onEmojiSelect} />;
+            return <EmojiButton emoji={displayedEmoji} onClick={props.onEmojiSelect} />;
           })}
       </div>
     </div>
   );
 };
 
-export default memo(EmojiCategory);
+export default EmojiCategory;

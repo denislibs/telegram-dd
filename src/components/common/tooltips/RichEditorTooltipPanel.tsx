@@ -1,4 +1,4 @@
-import type { TeactNode } from '../../../lib/teact/teact';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import buildClassName from '../../../util/buildClassName';
 
@@ -6,11 +6,11 @@ import styles from './RichEditorTooltipContainer.module.scss';
 
 type OwnProps = {
   isOpen: boolean;
-  children: TeactNode;
+  children: JSX.Element;
 };
 
-const RichEditorTooltipPanel = ({ isOpen, children }: OwnProps) => {
-  return <div className={buildClassName(styles.fade, isOpen && styles.open)}>{children}</div>;
+const RichEditorTooltipPanel = (props: OwnProps) => {
+  return <div class={buildClassName(styles.fade, props.isOpen && styles.open)}>{props.children}</div>;
 };
 
 export default RichEditorTooltipPanel;

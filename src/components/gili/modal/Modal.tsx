@@ -1,7 +1,17 @@
-import type { TeactNode } from '../../../lib/teact/teact';
-import { createContext, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from '../../../lib/teact/teact';
+import {
+  createContext,
+  createEffect,
+  createMemo,
+  createMutationEffect,
+  createSignal,
+  frozenWhile,
+  onMount,
+  requestMutation,
+} from 'frameact';
+import { mergeProps, Show } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
+import { depsOf } from '../../../util/effectDeps';
 
-import { requestMutation } from '../../../lib/fasterdom/fasterdom';
 import buildClassName from '../../../util/buildClassName';
 import captureKeyboardListeners from '../../../util/captureKeyboardListeners';
 import { waitForAnimationEnd } from '../../../util/cssAnimationEndListeners';
@@ -9,10 +19,8 @@ import { disableDirectTextInput, enableDirectTextInput } from '../../../util/dir
 import { countOpenModal } from '../../../util/openModals';
 
 import useContext from '../../../hooks/data/useContext';
-import useFrozenProps from '../../../hooks/useFrozenProps';
 import useHistoryBack from '../../../hooks/useHistoryBack';
 import useLang from '../../../hooks/useLang';
-import useLastCallback from '../../../hooks/useLastCallback';
 import useUniqueId from '../../../hooks/useUniqueId';
 
 import Button from '../../ui/Button';
@@ -30,8 +38,8 @@ export type ModalHeight = 'auto' | 'regular' | 'tall' | 'fullscreen';
 
 export type ModalProps = {
   isOpen: boolean;
-  children: TeactNode;
-  header?: TeactNode;
+  children: JSX.Element;
+  header?: JSX.Element;
   dialogClassName?: string;
   contentClassName?: string;
   width?: ModalWidth;
@@ -41,7 +49,7 @@ export type ModalProps = {
   noScrollable?: boolean;
   noContentInlinePadding?: boolean;
   keepMounted?: boolean;
-  stickyFooter?: TeactNode;
+  stickyFooter?: JSX.Element;
   ariaLabel?: string;
   noContainment?: boolean;
   onClose: NoneToVoidFunction;
@@ -60,7 +68,7 @@ type ModalContextType = {
 
 type ModalSlotProps = {
   className?: string;
-  children?: TeactNode;
+  children?: JSX.Element;
 };
 
 type ModalHeaderProps = {
@@ -123,403 +131,409 @@ function addBodyDialogClass() {
   };
 }
 
-const Modal = ({
-  isOpen,
-  children,
-  header,
-  dialogClassName,
-  contentClassName,
-  width = 'regular',
-  height = 'regular',
-  noBackdrop,
-  noLightDismiss,
-  noScrollable,
-  noContentInlinePadding,
-  keepMounted,
-  stickyFooter,
-  ariaLabel,
-  noContainment,
-  onClose,
-  onCloseAnimationEnd,
-  onEsc,
-}: ModalProps) => {
-  const [hasEverOpened, setHasEverOpened] = useState(Boolean(isOpen));
-  const [shouldRender, setShouldRender] = useState(Boolean(isOpen));
-  const [isClosing, setIsClosing] = useState(false);
-  const [hasTitle, setHasTitle] = useState(false);
-  const [hasSubtitle, setHasSubtitle] = useState(false);
+const Modal = (rawProps: ModalProps) => {
+  const props = mergeProps({ width: 'regular', height: 'regular' }, rawProps) as ModalProps &
+    Required<Pick<ModalProps, 'width' | 'height'>>;
+  const [hasEverOpened, setHasEverOpened] = createSignal(Boolean(props.isOpen));
+  const [shouldRender, setShouldRender] = createSignal(Boolean(props.isOpen));
+  const [isClosing, setIsClosing] = createSignal(false);
+  const [hasTitle, setHasTitle] = createSignal(false);
+  const [hasSubtitle, setHasSubtitle] = createSignal(false);
 
-  const dialogRef = useRef<HTMLDialogElement>();
-  const panelRef = useRef<HTMLDivElement>();
-  const closeAnimationCleanupRef = useRef<NoneToVoidFunction>();
+  let dialogRef!: HTMLDialogElement;
+  let panelRef!: HTMLDivElement;
+  let closeAnimationCleanupRef: NoneToVoidFunction | undefined;
 
   const uniqueId = useUniqueId();
   const titleId = `modal-title-${uniqueId}`;
   const subtitleId = `modal-subtitle-${uniqueId}`;
 
-  const frozenProps = useFrozenProps(
-    {
-      header,
-      children,
-      stickyFooter,
-      dialogClassName,
-      contentClassName,
-      width,
-      height,
-      noBackdrop,
-      noScrollable,
-      noContentInlinePadding,
-      ariaLabel,
-      noContainment,
-    },
-    !isOpen,
+  const frozenProps = frozenWhile(
+    () => ({
+      header: props.header,
+      children: props.children,
+      stickyFooter: props.stickyFooter,
+      dialogClassName: props.dialogClassName,
+      contentClassName: props.contentClassName,
+      width: props.width,
+      height: props.height,
+      noBackdrop: props.noBackdrop,
+      noScrollable: props.noScrollable,
+      noContentInlinePadding: props.noContentInlinePadding,
+      ariaLabel: props.ariaLabel,
+      noContainment: props.noContainment,
+    }),
+    () => !props.isOpen,
   );
 
-  const shouldShowHeader = Boolean(frozenProps.header);
+  const shouldShowHeader = createMemo(() => Boolean(frozenProps().header));
 
-  const cleanupCloseAnimation = useLastCallback(() => {
-    closeAnimationCleanupRef.current?.();
-    closeAnimationCleanupRef.current = undefined;
-  });
+  const cleanupCloseAnimation = () => {
+    closeAnimationCleanupRef?.();
+    closeAnimationCleanupRef = undefined;
+  };
 
-  const finishClose = useLastCallback(() => {
+  const finishClose = () => {
     cleanupCloseAnimation();
     setIsClosing(false);
     setShouldRender(false);
-    onCloseAnimationEnd?.();
-  });
+    props.onCloseAnimationEnd?.();
+  };
 
-  const handleRequestClose = useLastCallback(() => {
-    if (isClosing) return;
+  const handleRequestClose = () => {
+    if (isClosing()) return;
 
-    onClose();
-  });
+    props.onClose();
+  };
 
-  const handleEsc = useLastCallback((event: KeyboardEvent) => {
-    if (noLightDismiss || !isOpen || isClosing) return;
+  const handleEsc = (event: KeyboardEvent) => {
+    if (props.noLightDismiss || !props.isOpen || isClosing()) return;
 
     event.preventDefault();
 
-    if (onEsc) {
-      onEsc();
+    if (props.onEsc) {
+      props.onEsc();
       return;
     }
 
     handleRequestClose();
-  });
+  };
 
-  const registerTitle = useLastCallback((isPresent: boolean) => {
+  const registerTitle = (isPresent: boolean) => {
     setHasTitle(isPresent);
-  });
+  };
 
-  const registerSubtitle = useLastCallback((isPresent: boolean) => {
+  const registerSubtitle = (isPresent: boolean) => {
     setHasSubtitle(isPresent);
-  });
+  };
 
-  const contextValue = useMemo<ModalContextType>(
-    () => ({
-      onClose: handleRequestClose,
-      titleId,
-      subtitleId,
-      hasSubtitle,
-      registerTitle,
-      registerSubtitle,
-    }),
-    [handleRequestClose, hasSubtitle, registerSubtitle, registerTitle, subtitleId, titleId],
+  const contextValue = createMemo<ModalContextType>(() => ({
+    onClose: handleRequestClose,
+    titleId,
+    subtitleId,
+    hasSubtitle: hasSubtitle(),
+    registerTitle,
+    registerSubtitle,
+  }));
+
+  createEffect(
+    depsOf(() => [hasEverOpened(), props.isOpen] as const),
+    ([hasEverOpened2, isOpen2]) => {
+      if (isOpen2 && !hasEverOpened2) {
+        setHasEverOpened(true);
+      }
+    },
   );
 
-  useEffect(() => {
-    if (isOpen && !hasEverOpened) {
-      setHasEverOpened(true);
-    }
-  }, [hasEverOpened, isOpen]);
+  createEffect(
+    depsOf(() => [isClosing(), props.isOpen, shouldRender()] as const),
+    ([isClosing2, isOpen2, shouldRender2]) => {
+      if (isOpen2) {
+        cleanupCloseAnimation();
 
-  useEffect(() => {
-    if (isOpen) {
-      cleanupCloseAnimation();
+        if (!shouldRender2) {
+          setShouldRender(true);
+          return;
+        }
 
-      if (!shouldRender) {
-        setShouldRender(true);
+        if (isClosing2) {
+          setIsClosing(false);
+        }
+
         return;
       }
 
-      if (isClosing) {
-        setIsClosing(false);
-      }
-
-      return;
-    }
-
-    if (!shouldRender || isClosing) {
-      return;
-    }
-
-    setIsClosing(true);
-  }, [isClosing, isOpen, shouldRender]);
-
-  useEffect(() => {
-    if (!isClosing) {
-      cleanupCloseAnimation();
-      return undefined;
-    }
-
-    const panelElement = panelRef.current;
-
-    if (!panelElement) {
-      finishClose();
-      return undefined;
-    }
-
-    if (document.body.classList.contains('no-page-transitions')) {
-      finishClose();
-      return undefined;
-    }
-
-    closeAnimationCleanupRef.current = waitForAnimationEnd(
-      panelElement,
-      finishClose,
-      undefined,
-      CLOSE_ANIMATION_DURATION + 100,
-    );
-
-    return cleanupCloseAnimation;
-  }, [isClosing]);
-
-  useLayoutEffect(() => {
-    if (!shouldRender) {
-      return undefined;
-    }
-
-    const dialogElement = dialogRef.current;
-
-    if (!dialogElement) {
-      return undefined;
-    }
-
-    if (!dialogElement.open) {
-      dialogElement.showModal();
-    }
-
-    return () => {
-      cleanupCloseAnimation();
-
-      if (dialogElement.open) {
-        dialogElement.close();
-      }
-    };
-  }, [shouldRender]);
-
-  useEffect(() => {
-    if (!shouldRender) {
-      return undefined;
-    }
-
-    return captureKeyboardListeners({ onEsc: handleEsc });
-  }, [handleEsc, shouldRender]);
-
-  useEffect(() => {
-    if (!shouldRender) {
-      return undefined;
-    }
-
-    return addBodyDialogClass();
-  }, [shouldRender]);
-
-  useEffect(() => {
-    if (!shouldRender) {
-      return undefined;
-    }
-
-    disableDirectTextInput();
-
-    return enableDirectTextInput;
-  }, [shouldRender]);
-
-  useEffect(() => {
-    if (!shouldRender) {
-      return undefined;
-    }
-
-    const dialogElement = dialogRef.current;
-
-    if (!dialogElement) {
-      return undefined;
-    }
-
-    const handleCancel = (event: Event) => {
-      event.preventDefault();
-
-      if (noLightDismiss || !isOpen || isClosing) {
+      if (!shouldRender2 || isClosing2) {
         return;
       }
 
-      handleRequestClose();
-    };
+      setIsClosing(true);
+    },
+  );
 
-    dialogElement.addEventListener('cancel', handleCancel);
+  createEffect(
+    () => isClosing(),
+    (isClosing2) => {
+      if (!isClosing2) {
+        cleanupCloseAnimation();
+        return undefined;
+      }
 
-    return () => {
-      dialogElement.removeEventListener('cancel', handleCancel);
-    };
-  }, [isClosing, isOpen, noLightDismiss, shouldRender]);
+      const panelElement = panelRef;
+
+      if (!panelElement) {
+        finishClose();
+        return undefined;
+      }
+
+      if (document.body.classList.contains('no-page-transitions')) {
+        finishClose();
+        return undefined;
+      }
+
+      closeAnimationCleanupRef = waitForAnimationEnd(
+        panelElement,
+        finishClose,
+        undefined,
+        CLOSE_ANIMATION_DURATION + 100,
+      );
+
+      return cleanupCloseAnimation;
+    },
+  );
+
+  createMutationEffect(
+    () => shouldRender(),
+    (shouldRender2) => {
+      if (!shouldRender2) {
+        return undefined;
+      }
+
+      const dialogElement = dialogRef;
+
+      if (!dialogElement) {
+        return undefined;
+      }
+
+      if (!dialogElement.open) {
+        dialogElement.showModal();
+      }
+
+      return () => {
+        cleanupCloseAnimation();
+
+        if (dialogElement.open) {
+          dialogElement.close();
+        }
+      };
+    },
+  );
+
+  createEffect(
+    depsOf(() => [handleEsc, shouldRender()] as const),
+    ([, shouldRender2]) => {
+      if (!shouldRender2) {
+        return undefined;
+      }
+
+      return captureKeyboardListeners({ onEsc: handleEsc });
+    },
+  );
+
+  createEffect(
+    () => shouldRender(),
+    (shouldRender2) => {
+      if (!shouldRender2) {
+        return undefined;
+      }
+
+      return addBodyDialogClass();
+    },
+  );
+
+  createEffect(
+    () => shouldRender(),
+    (shouldRender2) => {
+      if (!shouldRender2) {
+        return undefined;
+      }
+
+      disableDirectTextInput();
+
+      return enableDirectTextInput;
+    },
+  );
+
+  createEffect(
+    depsOf(() => [isClosing(), props.isOpen, props.noLightDismiss, shouldRender()] as const),
+    ([isClosing2, isOpen2, noLightDismiss2, shouldRender2]) => {
+      if (!shouldRender2) {
+        return undefined;
+      }
+
+      const dialogElement = dialogRef;
+
+      if (!dialogElement) {
+        return undefined;
+      }
+
+      const handleCancel = (event: Event) => {
+        event.preventDefault();
+
+        if (noLightDismiss2 || !isOpen2 || isClosing2) {
+          return;
+        }
+
+        handleRequestClose();
+      };
+
+      dialogElement.addEventListener('cancel', handleCancel);
+
+      return () => {
+        dialogElement.removeEventListener('cancel', handleCancel);
+      };
+    },
+  );
 
   useHistoryBack({
-    isActive: Boolean(isOpen && !noLightDismiss),
+    isActive: () => Boolean(props.isOpen && !props.noLightDismiss),
     onBack: handleRequestClose,
   });
 
-  const handleDialogClick = useLastCallback((event: React.MouseEvent<HTMLDialogElement>) => {
-    if (event.target !== event.currentTarget || noLightDismiss || !isOpen || isClosing) {
+  const handleDialogClick = (event: React.MouseEvent<HTMLDialogElement>) => {
+    if (event.target !== event.currentTarget || props.noLightDismiss || !props.isOpen || isClosing()) {
       return;
     }
 
     handleRequestClose();
-  });
-
-  if (!shouldRender && !(keepMounted && hasEverOpened)) {
-    return undefined;
-  }
+  };
 
   return (
-    <Portal>
-      <ModalContext.Provider value={contextValue}>
-        <dialog
-          ref={dialogRef}
-          className={buildClassName(
-            styles.dialog,
-            WIDTH_CLASS_NAME[frozenProps.width],
-            HEIGHT_CLASS_NAME[frozenProps.height],
-            frozenProps.noBackdrop && styles.noBackdrop,
-            (frozenProps.width === 'fullscreen' || frozenProps.height === 'fullscreen') && styles.fullscreen,
-            isClosing ? styles.closing : styles.open,
-            frozenProps.dialogClassName,
-            !frozenProps.noContainment && styles.contained,
-          )}
-          aria-modal="true"
-          aria-label={!hasTitle ? frozenProps.ariaLabel : undefined}
-          aria-labelledby={hasTitle ? titleId : undefined}
-          aria-describedby={hasSubtitle ? subtitleId : undefined}
-          onClick={handleDialogClick}
-        >
-          <div ref={panelRef} className={styles.panel}>
-            {shouldShowHeader && <div className={styles.headerSlot}>{frozenProps.header}</div>}
+    <Show when={!(!shouldRender() && !(props.keepMounted && hasEverOpened()))}>
+      <Portal>
+        <ModalContext.Provider value={contextValue()}>
+          <dialog
+            ref={dialogRef}
+            class={buildClassName(
+              styles.dialog,
+              WIDTH_CLASS_NAME[frozenProps().width],
+              HEIGHT_CLASS_NAME[frozenProps().height],
+              frozenProps().noBackdrop && styles.noBackdrop,
+              (frozenProps().width === 'fullscreen' || frozenProps().height === 'fullscreen') && styles.fullscreen,
+              isClosing() ? styles.closing : styles.open,
+              frozenProps().dialogClassName,
+              !frozenProps().noContainment && styles.contained,
+            )}
+            aria-modal="true"
+            aria-label={!hasTitle() ? frozenProps().ariaLabel : undefined}
+            aria-labelledby={hasTitle() ? titleId : undefined}
+            aria-describedby={hasSubtitle() ? subtitleId : undefined}
+            onClick={handleDialogClick}
+          >
+            <div ref={panelRef} class={styles.panel}>
+              {shouldShowHeader() && <div class={styles.headerSlot}>{frozenProps().header}</div>}
 
-            <Surface
-              scrollable={!frozenProps.noScrollable}
-              noPadding={frozenProps.noContentInlinePadding}
-              className={buildClassName(
-                styles.content,
-                shouldShowHeader && styles.withHeader,
-                frozenProps.contentClassName,
+              <Surface
+                scrollable={!frozenProps().noScrollable}
+                noPadding={frozenProps().noContentInlinePadding}
+                className={buildClassName(
+                  styles.content,
+                  shouldShowHeader() && styles.withHeader,
+                  frozenProps().contentClassName,
+                )}
+              >
+                <div class={styles.body}>{frozenProps().children}</div>
+              </Surface>
+              {Boolean(frozenProps().stickyFooter) && (
+                <div class={styles.stickyFooter}>{frozenProps().stickyFooter}</div>
               )}
-            >
-              <div className={styles.body}>{frozenProps.children}</div>
-            </Surface>
-            {Boolean(frozenProps.stickyFooter) && <div className={styles.stickyFooter}>{frozenProps.stickyFooter}</div>}
-          </div>
-        </dialog>
-      </ModalContext.Provider>
-    </Portal>
+            </div>
+          </dialog>
+        </ModalContext.Provider>
+      </Portal>
+    </Show>
   );
 };
 
-const ModalHeader = ({ noMask, className, children }: ModalHeaderProps) => {
+const ModalHeader = (props: ModalHeaderProps) => {
   const modalContext = useModalContext();
 
   return (
     <div
-      className={buildClassName(
+      class={buildClassName(
         styles.header,
         modalContext?.hasSubtitle && styles.headerWithSubtitle,
-        !noMask && styles.scrollMask,
-        className,
+        !props.noMask && styles.scrollMask,
+        props.className,
       )}
     >
-      {children}
+      {props.children}
     </div>
   );
 };
 
-const ModalHeaderAction = ({ className, children }: ModalSlotProps) => {
-  return <div className={buildClassName(styles.headerAction, className)}>{children}</div>;
+const ModalHeaderAction = (props: ModalSlotProps) => {
+  return <div class={buildClassName(styles.headerAction, props.className)}>{props.children}</div>;
 };
 
-const ModalFooterActions = ({ isVertical, className, children }: ModalFooterActionsProps) => {
+const ModalFooterActions = (props: ModalFooterActionsProps) => {
   return (
-    <div className={buildClassName(styles.footerActions, isVertical && styles.footerActionsVertical, className)}>
-      {children}
+    <div
+      class={buildClassName(styles.footerActions, props.isVertical && styles.footerActionsVertical, props.className)}
+    >
+      {props.children}
     </div>
   );
 };
 
-const ModalTitle = ({ noAutoFocus, className, children }: ModalTitleProps) => {
+const ModalTitle = (props: ModalTitleProps) => {
   const modalContext = useModalContext();
 
-  useLayoutEffect(() => {
+  onMount(() => {
     modalContext?.registerTitle(true);
 
     return () => {
       modalContext?.registerTitle(false);
     };
-  }, [modalContext]);
+  });
 
   return (
     <div
       id={modalContext?.titleId}
-      className={buildClassName(styles.title, className)}
+      class={buildClassName(styles.title, props.className)}
       dir="auto"
       tabIndex={-1}
-      autoFocus={!noAutoFocus}
+      autofocus={!props.noAutoFocus}
     >
-      {children}
+      {props.children}
     </div>
   );
 };
 
-const ModalSubtitle = ({ className, children }: ModalSlotProps) => {
+const ModalSubtitle = (props: ModalSlotProps) => {
   const modalContext = useModalContext();
 
-  useLayoutEffect(() => {
+  onMount(() => {
     modalContext?.registerSubtitle(true);
 
     return () => {
       modalContext?.registerSubtitle(false);
     };
-  }, [modalContext]);
+  });
 
   return (
-    <div id={modalContext?.subtitleId} className={buildClassName(styles.subtitle, className)} dir="auto">
-      {children}
+    <div id={modalContext?.subtitleId} class={buildClassName(styles.subtitle, props.className)} dir="auto">
+      {props.children}
     </div>
   );
 };
 
-const ModalCloseButton = ({ asAbsolute, className, onBack }: ModalCloseButtonProps) => {
+const ModalCloseButton = (props: ModalCloseButtonProps) => {
   const lang = useLang();
   const modalContext = useModalContext();
 
-  const handleClick = useLastCallback(() => {
-    if (onBack) {
-      onBack();
+  const handleClick = () => {
+    if (props.onBack) {
+      props.onBack();
       return;
     }
 
     modalContext?.onClose();
-  });
+  };
 
   return (
     <Button
       round
       color="translucent"
       size="tiny"
-      ariaLabel={onBack ? lang('Back') : lang('Close')}
-      className={buildClassName(styles.closeButton, asAbsolute && styles.closeButtonAbsolute, className)}
+      ariaLabel={props.onBack ? lang('Back') : lang('Close')}
+      className={buildClassName(styles.closeButton, props.asAbsolute && styles.closeButtonAbsolute, props.className)}
       onClick={handleClick}
     >
-      <div className={buildClassName('animated-close-icon', onBack && 'state-back')} />
+      <div class={buildClassName('animated-close-icon', props.onBack && 'state-back')} />
     </Button>
   );
 };
 
-export default memo(Modal);
+export default Modal;
 export { ModalHeader, ModalHeaderAction, ModalFooterActions, ModalTitle, ModalSubtitle, ModalCloseButton };

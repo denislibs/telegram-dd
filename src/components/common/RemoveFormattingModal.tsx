@@ -1,4 +1,4 @@
-import { memo, useMemo } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
 
 import useLang from '../../hooks/useLang';
 
@@ -13,42 +13,33 @@ type OwnProps = {
   onSubscribeToPremium: NoneToVoidFunction;
 };
 
-const RemoveFormattingModal = ({
-  isOpen,
-  onClose,
-  onCloseAnimationEnd,
-  onRemoveFormatting,
-  onSubscribeToPremium,
-}: OwnProps) => {
+const RemoveFormattingModal = (props: OwnProps) => {
   const lang = useLang();
-  const title = lang('RemoveRichFormattingTitle');
+  const title = createMemo(() => lang('RemoveRichFormattingTitle'));
 
-  const header = useMemo(
-    () => (
-      <ModalHeader>
-        <ModalCloseButton />
-        <ModalTitle>{title}</ModalTitle>
-      </ModalHeader>
-    ),
-    [title],
-  );
+  const header = createMemo(() => (
+    <ModalHeader>
+      <ModalCloseButton />
+      <ModalTitle>{title()}</ModalTitle>
+    </ModalHeader>
+  ));
 
   return (
     <Modal
-      isOpen={isOpen}
-      header={header}
+      isOpen={props.isOpen}
+      header={header()}
       width="slim"
       height="auto"
-      ariaLabel={title}
-      onClose={onClose}
-      onCloseAnimationEnd={onCloseAnimationEnd}
+      ariaLabel={title()}
+      onClose={props.onClose}
+      onCloseAnimationEnd={props.onCloseAnimationEnd}
     >
       <p>{lang('RemoveRichFormattingText', undefined, { withNodes: true, withMarkdown: true })}</p>
       <ModalFooterActions isVertical>
-        <Button size="smaller" color="primary" fluid onClick={onSubscribeToPremium}>
+        <Button size="smaller" color="primary" fluid onClick={props.onSubscribeToPremium}>
           {lang('RichFormattingSubscribe')}
         </Button>
-        <Button isText size="smaller" color="primary" fluid onClick={onRemoveFormatting}>
+        <Button isText size="smaller" color="primary" fluid onClick={props.onRemoveFormatting}>
           {lang('RemoveRichFormatting')}
         </Button>
       </ModalFooterActions>
@@ -56,4 +47,4 @@ const RemoveFormattingModal = ({
   );
 };
 
-export default memo(RemoveFormattingModal);
+export default RemoveFormattingModal;

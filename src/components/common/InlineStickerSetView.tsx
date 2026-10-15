@@ -1,8 +1,8 @@
-import { memo, useCallback, useRef } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import { For } from 'frameact/dom';
 import { getActions } from '../../global';
 
 import type { ApiSticker, ApiStickerSet } from '../../api/types';
-import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 
 import { selectStickerSet } from '../../global/selectors';
 import renderText from './helpers/renderText';
@@ -10,7 +10,6 @@ import renderText from './helpers/renderText';
 import useSelector from '../../hooks/data/useSelector';
 import useContentWidth from '../../hooks/useContentWidth';
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
 
 import Button from '../ui/Button';
 import Loading from '../ui/Loading';
@@ -31,40 +30,31 @@ type OwnProps = {
   onStickerSelect?: (sticker: ApiSticker) => void;
 };
 
-const InlineStickerSetView = ({
-  stickerSet,
-  stickerSize,
-  observeIntersection,
-  noPlay,
-  noContextMenus,
-  isSavedMessages,
-  isCurrentUserPremium,
-  isTranslucent,
-  onStickerSelect,
-}: OwnProps) => {
+const InlineStickerSetView = (props: OwnProps) => {
   return (
-    <div className={styles.root}>
-      <div className={styles.header}>
-        <p className={styles.title}>{renderText(stickerSet.title, ['emoji', 'links'])}</p>
+    <div class={styles.root}>
+      <div class={styles.header}>
+        <p class={styles.title}>{renderText(props.stickerSet.title, ['emoji', 'links'])}</p>
       </div>
-      {stickerSet.stickers?.length ? (
-        <div className={styles.grid} style={`--inline-set-item-size: ${stickerSize / 16}rem`}>
-          {stickerSet.stickers.map((sticker) => (
-            <StickerButton
-              key={sticker.id}
-              sticker={sticker}
-              size={stickerSize}
-              observeIntersection={observeIntersection}
-              noPlay={noPlay}
-              noContextMenu={noContextMenus}
-              isSavedMessages={isSavedMessages}
-              isCurrentUserPremium={isCurrentUserPremium}
-              withTranslucentThumb={isTranslucent}
-              onClick={onStickerSelect}
-              clickArg={sticker}
-              forcePlayback
-            />
-          ))}
+      {props.stickerSet.stickers?.length ? (
+        <div class={styles.grid} style={`--inline-set-item-size: ${props.stickerSize / 16}rem`}>
+          <For each={props.stickerSet.stickers} keyed={(sticker) => sticker.id}>
+            {(sticker) => (
+              <StickerButton
+                sticker={sticker()}
+                size={props.stickerSize}
+                observeIntersection={props.observeIntersection}
+                noPlay={props.noPlay}
+                noContextMenu={props.noContextMenus}
+                isSavedMessages={props.isSavedMessages}
+                isCurrentUserPremium={props.isCurrentUserPremium}
+                withTranslucentThumb={props.isTranslucent}
+                onClick={props.onStickerSelect}
+                clickArg={sticker()}
+                forcePlayback
+              />
+            )}
+          </For>
         </div>
       ) : (
         <Loading />
@@ -73,50 +63,55 @@ const InlineStickerSetView = ({
   );
 };
 
-export default memo(InlineStickerSetView);
+export default InlineStickerSetView;
 
-export function StickerSetToggleButton({ stickerSet }: { stickerSet: ApiStickerSet }) {
+export function StickerSetToggleButton(props: { stickerSet: ApiStickerSet }) {
   const { toggleStickerSet } = getActions();
 
-  const buttonRef = useRef<HTMLButtonElement>();
-  const labelRef = useRef<HTMLSpanElement>();
+  let buttonRef!: HTMLButtonElement;
+  let labelRef!: HTMLSpanElement;
 
   const lang = useLang();
 
-  const isRegistered = useSelector(
-    useCallback((global) => Boolean(selectStickerSet(global, stickerSet.id)), [stickerSet.id]),
+  const isRegistered = useSelector((global) => Boolean(selectStickerSet(global, props.stickerSet.id)));
+
+  const isAdded = createMemo(() => Boolean(!props.stickerSet.isArchived && props.stickerSet.installedDate));
+  const suffix = createMemo(() => (props.stickerSet.isEmoji ? 'Emoji' : 'Sticker'));
+  const label = createMemo(() =>
+    lang(
+      isAdded() ? `StickerPackRemove${suffix()}Count` : `StickerPackAdd${suffix()}Count`,
+      { count: props.stickerSet.count },
+      { pluralValue: props.stickerSet.count },
+    ),
   );
 
-  const isAdded = Boolean(!stickerSet.isArchived && stickerSet.installedDate);
-  const suffix = stickerSet.isEmoji ? 'Emoji' : 'Sticker';
-  const label = lang(
-    isAdded ? `StickerPackRemove${suffix}Count` : `StickerPackAdd${suffix}Count`,
-    { count: stickerSet.count },
-    { pluralValue: stickerSet.count },
+  useContentWidth(
+    () => buttonRef,
+    () => labelRef,
+    () => [label()],
   );
 
-  useContentWidth(buttonRef, labelRef, [label]);
-
-  const handleClick = useLastCallback(() => {
-    toggleStickerSet({ stickerSetId: stickerSet.id });
-  });
+  const handleClick = () => {
+    toggleStickerSet({ stickerSetId: props.stickerSet.id });
+  };
 
   return (
     <Button
       ref={buttonRef}
       className={styles.toggleButton}
       size="tiny"
-      color={isAdded ? 'danger' : 'primary'}
+      color={isAdded() ? 'danger' : 'primary'}
       pill
       noClickTransitionReset
-      disabled={!isRegistered}
+      disabled={!isRegistered()}
       onClick={handleClick}
     >
-      <span ref={labelRef} className={styles.toggleMeasure} aria-hidden>
-        {label}
+      <span ref={labelRef} class={styles.toggleMeasure} aria-hidden>
+        {label()}
       </span>
-      <Transition name="fade" activeKey={isAdded ? 1 : 0} className={styles.toggleTransition} shouldCleanup>
-        <span className={styles.toggleLabel}>{label}</span>
+      {/* TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6) */}
+      <Transition name="fade" activeKey={isAdded() ? 1 : 0} className={styles.toggleTransition} shouldCleanup>
+        <span class={styles.toggleLabel}>{label()}</span>
       </Transition>
     </Button>
   );

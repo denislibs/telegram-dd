@@ -1,8 +1,7 @@
-import type { ElementRef } from '../lib/teact/teact';
-import { useLayoutEffect } from '../lib/teact/teact';
-import { addExtraClass, removeExtraClass, setExtraStyles } from '../lib/teact/teact-dom';
+import { createMutationEffect, requestMeasure, requestMutation } from 'frameact';
+import { addExtraClass, removeExtraClass, setExtraStyles } from 'frameact/dom';
+import { depsOf } from '../util/effectDeps';
 
-import { requestMeasure, requestMutation } from '../lib/fasterdom/fasterdom';
 import useLastCallback from './useLastCallback';
 import useResizeObserver from './useResizeObserver';
 import useThrottledCallback from './useThrottledCallback';
@@ -26,8 +25,9 @@ const HINT_MASK_SIZE = 'var(--scrollable-hint-mask-size)';
 const SCROLLABLE_HINT_CLASS_NAME = 'with-scrollable-hint';
 const SCROLLABLE_OVERFLOW_VALUES = new Set(['auto', 'overlay', 'scroll']);
 
+// TODO(codemod): useScrollableHint: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useScrollableHint(
-  containerRef: ElementRef<HTMLElement>,
+  containerRef: (el: HTMLElement) => void,
   { threshold = DEFAULT_THRESHOLD, isDisabled = false, shouldSkipOverflowCheck }: Options = {},
 ) {
   const applyScrollableHintThrottled = useThrottledCallback(
@@ -44,40 +44,43 @@ export default function useScrollableHint(
     UPDATE_THROTTLE,
   );
 
-  const updateScrollableHint = useLastCallback((element = containerRef.current) => {
+  const updateScrollableHint = (element = containerRef.current) => {
     if (!element || isDisabled) {
       return;
     }
 
     applyScrollableHintThrottled(element);
-  });
+  };
 
-  const handleScroll = useLastCallback((event: Event | React.UIEvent<HTMLElement>) => {
+  const handleScroll = (event: Event | React.UIEvent<HTMLElement>) => {
     const element = event.currentTarget instanceof HTMLElement ? event.currentTarget : containerRef.current;
     updateScrollableHint(element);
-  });
+  };
 
   useResizeObserver(containerRef, () => updateScrollableHint(), isDisabled);
 
-  useLayoutEffect(() => {
-    const element = containerRef.current;
-    if (!element) {
-      return undefined;
-    }
+  createMutationEffect(
+    depsOf(() => [containerRef, handleScroll, isDisabled, threshold, updateScrollableHint]),
+    () => {
+      const element = containerRef.current;
+      if (!element) {
+        return undefined;
+      }
 
-    if (isDisabled) {
-      requestMutation(() => clearScrollableHint(element));
-      return undefined;
-    }
+      if (isDisabled) {
+        requestMutation(() => clearScrollableHint(element));
+        return undefined;
+      }
 
-    updateScrollableHint(element);
-    element.addEventListener('scroll', handleScroll, { passive: true });
+      updateScrollableHint(element);
+      element.addEventListener('scroll', handleScroll, { passive: true });
 
-    return () => {
-      element.removeEventListener('scroll', handleScroll);
-      requestMutation(() => clearScrollableHint(element));
-    };
-  }, [containerRef, handleScroll, isDisabled, threshold, updateScrollableHint]);
+      return () => {
+        element.removeEventListener('scroll', handleScroll);
+        requestMutation(() => clearScrollableHint(element));
+      };
+    },
+  );
 
   return { handleScroll, updateScrollableHint };
 }

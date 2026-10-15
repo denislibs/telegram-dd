@@ -1,6 +1,9 @@
 import type { Editor } from '@tiptap/core';
-import { memo, useEffect } from '../../../lib/teact/teact';
+import { createEffect, createMemo } from 'frameact';
+import { Show } from 'frameact/dom';
 import { getActions, withGlobal } from '../../../global';
+import { depsOf } from '../../../util/effectDeps';
+import type { GlobalState } from '../../../global/types';
 
 import type {
   ApiBotCommand,
@@ -22,8 +25,6 @@ import type {
 import { selectTabState } from '../../../global/selectors';
 import buildClassName from '../../../util/buildClassName';
 import { parseInlineBotQuery } from './extensions/richEditorTooltips/suggestion';
-
-import useLastCallback from '../../../hooks/useLastCallback';
 
 import TextFormatter from '../../ui/textInput/TextFormatter';
 import ChatCommandTooltip from './ChatCommandTooltip.async';
@@ -62,122 +63,120 @@ type StateProps = {
   inlineBots?: RichEditorTooltipContext['inlineBots'];
 };
 
-const RichEditorTooltipContainer = ({
-  editor,
-  surface,
-  suggestion,
-  customEmojiSuggestion,
-  stickerSuggestion,
-  formatter,
-  isOpen,
-  isCustomEmojiOpen,
-  isStickerOpen,
-  isFormatterOpen,
-  selectedIndex,
-  config,
-  context,
-  customEmoji,
-  stickers,
-  inlineBots,
-  onCloseFormatter,
-  onFormatterDismissalChange,
-}: OwnProps & StateProps) => {
+const RichEditorTooltipContainer = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const { queryInlineBot } = getActions();
 
-  const inlineBotState = surface === 'inlineBot' ? parseInlineBotQuery(suggestion?.text) : undefined;
-  const inlineBot = inlineBotState ? inlineBots?.[inlineBotState.username.toLowerCase()] || undefined : undefined;
-  const canShowInlineBotHelp = inlineBotState?.query === '' && !RE_MULTIPLE_NEWLINES.test(suggestion?.text || '');
-  const inlineBotHelp = canShowInlineBotHelp && inlineBot ? inlineBot.help : undefined;
-  const inlineBotUsername = inlineBotState?.username;
-  const onInlineBotHelpChange = config.inlineBot?.onHelpChange;
-
-  const handleMentionSelect = useLastCallback((user: ApiUser) => suggestion?.command(user));
-  const handleEmojiSelect = useLastCallback((emoji: string) => {
-    const item = suggestion ? findEmojiItem(suggestion.items, emoji) : undefined;
-    if (item) {
-      suggestion!.command(item);
-    }
-  });
-  const handleCustomEmojiSelect = useLastCallback((emoji: ApiSticker) => suggestion?.command(emoji));
-  const handleStickerSelect = useLastCallback((sticker: ApiSticker, isSilent?: boolean, shouldSchedule?: boolean) =>
-    config.sticker?.onSelect(sticker, isSilent, shouldSchedule),
+  const inlineBotState = createMemo(() =>
+    props.surface === 'inlineBot' ? parseInlineBotQuery(props.suggestion?.text) : undefined,
   );
-  const handleStackCustomEmojiSelect = useLastCallback((emoji: ApiSticker) => customEmojiSuggestion?.command(emoji));
-  const handleCommandSelect = useLastCallback((command: ApiBotCommand) => suggestion?.command(command));
-  const handleQuickReplySelect = useLastCallback((quickReply: ApiQuickReply) => suggestion?.command(quickReply));
-  const handleInlineBotLoadMore = useLastCallback(() => {
-    if (!inlineBotState || !inlineBot) {
+  const inlineBot = createMemo(() =>
+    inlineBotState() ? props.inlineBots?.[inlineBotState().username.toLowerCase()] || undefined : undefined,
+  );
+  const canShowInlineBotHelp = createMemo(
+    () => inlineBotState()?.query === '' && !RE_MULTIPLE_NEWLINES.test(props.suggestion?.text || ''),
+  );
+  const inlineBotHelp = createMemo(() => (canShowInlineBotHelp() && inlineBot() ? inlineBot().help : undefined));
+  const inlineBotUsername = createMemo(() => inlineBotState()?.username);
+  const onInlineBotHelpChange = createMemo(() => props.config.inlineBot?.onHelpChange);
+
+  const handleMentionSelect = (user: ApiUser) => props.suggestion?.command(user);
+  const handleEmojiSelect = (emoji: string) => {
+    const item = props.suggestion ? findEmojiItem(props.suggestion.items, emoji) : undefined;
+    if (item) {
+      props.suggestion!.command(item);
+    }
+  };
+  const handleCustomEmojiSelect = (emoji: ApiSticker) => props.suggestion?.command(emoji);
+  const handleStickerSelect = (sticker: ApiSticker, isSilent?: boolean, shouldSchedule?: boolean) =>
+    props.config.sticker?.onSelect(sticker, isSilent, shouldSchedule);
+  const handleStackCustomEmojiSelect = (emoji: ApiSticker) => props.customEmojiSuggestion?.command(emoji);
+  const handleCommandSelect = (command: ApiBotCommand) => props.suggestion?.command(command);
+  const handleQuickReplySelect = (quickReply: ApiQuickReply) => props.suggestion?.command(quickReply);
+  const handleInlineBotLoadMore = () => {
+    if (!inlineBotState() || !inlineBot()) {
       return;
     }
 
     queryInlineBot({
-      chatId: context.chatId,
-      username: inlineBotState.username.toLowerCase(),
-      query: inlineBotState.query,
-      offset: inlineBot.offset,
+      chatId: props.context.chatId,
+      username: inlineBotState().username.toLowerCase(),
+      query: inlineBotState().query,
+      offset: inlineBot().offset,
     });
-  });
-  const handleInlineBotResultSelect = useLastCallback(
-    (result: ApiBotInlineResult | ApiBotInlineMediaResult, isSilent?: boolean, shouldSchedule?: boolean) => {
-      if (inlineBot) {
-        config.inlineBot?.onSelect(inlineBot.id, result, isSilent, shouldSchedule);
-      }
+  };
+  const handleInlineBotResultSelect = (
+    result: ApiBotInlineResult | ApiBotInlineMediaResult,
+    isSilent?: boolean,
+    shouldSchedule?: boolean,
+  ) => {
+    if (inlineBot()) {
+      props.config.inlineBot?.onSelect(inlineBot().id, result, isSilent, shouldSchedule);
+    }
+  };
+
+  createEffect(
+    depsOf(() => [inlineBotHelp(), inlineBotUsername(), onInlineBotHelpChange()] as const),
+    ([inlineBotHelp2, inlineBotUsername2, onInlineBotHelpChange2]) => {
+      onInlineBotHelpChange2?.(
+        inlineBotHelp2 && inlineBotUsername2 ? `@${inlineBotUsername2} ${inlineBotHelp2}` : undefined,
+      );
+      return () => onInlineBotHelpChange2?.();
     },
   );
 
-  useEffect(() => {
-    onInlineBotHelpChange?.(inlineBotHelp && inlineBotUsername ? `@${inlineBotUsername} ${inlineBotHelp}` : undefined);
-    return () => onInlineBotHelpChange?.();
-  }, [inlineBotHelp, inlineBotUsername, onInlineBotHelpChange]);
-
-  if (formatter && !editor.isDestroyed) {
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (props.formatter && !props.editor.isDestroyed) {
     return (
-      <div className={styles.formatter}>
-        <RichEditorTooltipPanel isOpen={isFormatterOpen}>
+      <div class={styles.formatter}>
+        <RichEditorTooltipPanel isOpen={props.isFormatterOpen}>
           <TextFormatter
-            editor={editor}
-            range={formatter.range}
-            capabilities={formatter.capabilities}
-            controlRequest={formatter.controlRequest}
-            isRichInputExpanded={context.isRichInputExpanded}
-            onClose={onCloseFormatter}
-            onDismissalChange={onFormatterDismissalChange}
+            editor={props.editor}
+            range={props.formatter.range}
+            capabilities={props.formatter.capabilities}
+            controlRequest={props.formatter.controlRequest}
+            isRichInputExpanded={props.context.isRichInputExpanded}
+            onClose={props.onCloseFormatter}
+            onDismissalChange={props.onFormatterDismissalChange}
           />
         </RichEditorTooltipPanel>
       </div>
     );
   }
 
-  if (!surface || !suggestion) {
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (!props.surface || !props.suggestion) {
     return undefined;
   }
 
-  if (surface === 'mention') {
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (props.surface === 'mention') {
     return (
-      <div className={buildClassName(styles.root, styles.compact)}>
+      <div class={buildClassName(styles.root, styles.compact)}>
         <MentionTooltip
-          isOpen={isOpen}
-          selectedIndex={selectedIndex}
-          filteredUsers={suggestion.items as ApiUser[]}
+          isOpen={props.isOpen}
+          selectedIndex={props.selectedIndex}
+          filteredUsers={props.suggestion.items as ApiUser[]}
           onInsertUserName={handleMentionSelect}
         />
       </div>
     );
   }
 
-  if (surface === 'emoji') {
-    if (!config.emoji) {
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (props.surface === 'emoji') {
+    if (!props.config.emoji) {
       return undefined;
     }
 
-    const emojis = suggestion.items.filter((item): item is Emoji => 'native' in item);
-    const customEmojis = suggestion.items.filter((item): item is ApiSticker => !('native' in item));
+    const emojis = props.suggestion.items.filter((item): item is Emoji => 'native' in item);
+    const customEmojis = props.suggestion.items.filter((item): item is ApiSticker => !('native' in item));
 
     return (
-      <div className={styles.root}>
+      <div class={styles.root}>
         <EmojiTooltip
-          isOpen={isOpen}
-          selectedIndex={selectedIndex}
+          isOpen={props.isOpen}
+          selectedIndex={props.selectedIndex}
           emojis={emojis}
           customEmojis={customEmojis}
           onEmojiSelect={handleEmojiSelect}
@@ -187,27 +186,28 @@ const RichEditorTooltipContainer = ({
     );
   }
 
-  if (surface === 'customEmoji' || surface === 'sticker') {
-    const customEmojiConfig = config.customEmoji;
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (props.surface === 'customEmoji' || props.surface === 'sticker') {
+    const customEmojiConfig = props.config.customEmoji;
     return (
-      <div className={styles.emojiStack}>
-        {stickerSuggestion ? (
+      <div class={styles.emojiStack}>
+        {props.stickerSuggestion ? (
           <StickerTooltip
-            isOpen={isStickerOpen}
-            chatId={context.chatId}
-            threadId={context.threadId}
-            stickers={stickers}
-            isSavedMessages={context.isSavedMessages}
-            isCurrentUserPremium={context.isCurrentUserPremium}
+            isOpen={props.isStickerOpen}
+            chatId={props.context.chatId}
+            threadId={props.context.threadId}
+            stickers={props.stickers}
+            isSavedMessages={props.context.isSavedMessages}
+            isCurrentUserPremium={props.context.isCurrentUserPremium}
             onStickerSelect={handleStickerSelect}
           />
         ) : undefined}
-        {customEmojiSuggestion && customEmojiConfig ? (
+        {props.customEmojiSuggestion && customEmojiConfig ? (
           <CustomEmojiTooltip
-            isOpen={isCustomEmojiOpen}
-            customEmoji={customEmoji}
-            isSavedMessages={context.isSavedMessages}
-            isCurrentUserPremium={context.isCurrentUserPremium}
+            isOpen={props.isCustomEmojiOpen}
+            customEmoji={props.customEmoji}
+            isSavedMessages={props.context.isSavedMessages}
+            isCurrentUserPremium={props.context.isCurrentUserPremium}
             addRecentCustomEmoji={customEmojiConfig.addRecentCustomEmoji}
             onCustomEmojiSelect={handleStackCustomEmojiSelect}
           />
@@ -216,19 +216,20 @@ const RichEditorTooltipContainer = ({
     );
   }
 
-  if (surface === 'command' && context.currentUser) {
-    const botCommands = suggestion.items.filter((item): item is ApiBotCommand => 'botId' in item);
-    const filteredQuickReplies = suggestion.items.filter((item): item is ApiQuickReply => 'shortcut' in item);
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (props.surface === 'command' && props.context.currentUser) {
+    const botCommands = props.suggestion.items.filter((item): item is ApiBotCommand => 'botId' in item);
+    const filteredQuickReplies = props.suggestion.items.filter((item): item is ApiQuickReply => 'shortcut' in item);
 
     return (
-      <div className={buildClassName(styles.root, styles.compact, styles.command)}>
+      <div class={buildClassName(styles.root, styles.compact, styles.command)}>
         <ChatCommandTooltip
-          isOpen={isOpen}
-          selectedIndex={selectedIndex}
+          isOpen={props.isOpen}
+          selectedIndex={props.selectedIndex}
           botCommands={botCommands}
           quickReplies={filteredQuickReplies}
-          quickReplyMessages={context.quickReplyMessages}
-          self={context.currentUser}
+          quickReplyMessages={props.context.quickReplyMessages}
+          self={props.context.currentUser}
           onCommandSelect={handleCommandSelect}
           onQuickReplySelect={handleQuickReplySelect}
         />
@@ -236,40 +237,43 @@ const RichEditorTooltipContainer = ({
     );
   }
 
-  if (surface === 'inlineBot' && inlineBot && inlineBotState) {
-    return (
-      <div className={styles.root}>
-        <InlineBotTooltip
-          isOpen={isOpen}
-          selectedIndex={selectedIndex}
-          botId={inlineBot.id}
-          isGallery={inlineBot.isGallery}
-          inlineBotResults={inlineBot.results}
-          switchPm={inlineBot.switchPm}
-          switchWebview={inlineBot.switchWebview}
-          isSavedMessages={context.isSavedMessages}
-          canSendGifs={context.canSendGifs}
-          isCurrentUserPremium={context.isCurrentUserPremium}
-          loadMore={handleInlineBotLoadMore}
-          onSelectResult={handleInlineBotResultSelect}
-        />
-      </div>
-    );
-  }
-
-  return undefined;
+  return (
+    <Show
+      when={!(props.surface === 'inlineBot' && inlineBot() && inlineBotState())}
+      fallback={
+        <div class={styles.root}>
+          <InlineBotTooltip
+            isOpen={props.isOpen}
+            selectedIndex={props.selectedIndex}
+            botId={inlineBot().id}
+            isGallery={inlineBot().isGallery}
+            inlineBotResults={inlineBot().results}
+            switchPm={inlineBot().switchPm}
+            switchWebview={inlineBot().switchWebview}
+            isSavedMessages={props.context.isSavedMessages}
+            canSendGifs={props.context.canSendGifs}
+            isCurrentUserPremium={props.context.isCurrentUserPremium}
+            loadMore={handleInlineBotLoadMore}
+            onSelectResult={handleInlineBotResultSelect}
+          />
+        </div>
+      }
+    >
+      {undefined}
+    </Show>
+  );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global): Complete<StateProps> => {
-    const tabState = selectTabState(global);
-    return {
-      customEmoji: global.customEmojis.forEmoji.stickers,
-      stickers: global.stickers.forEmoji.stickers,
-      inlineBots: tabState.inlineBots.byUsername,
-    };
-  })(RichEditorTooltipContainer),
-);
+const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
+  const tabState = selectTabState(global);
+  return {
+    customEmoji: global.customEmojis.forEmoji.stickers,
+    stickers: global.stickers.forEmoji.stickers,
+    inlineBots: tabState.inlineBots.byUsername,
+  };
+};
+
+export default RichEditorTooltipContainer;
 
 function findEmojiItem(items: RichEditorTooltipItem[], native: string) {
   return items.find((item): item is Emoji => 'native' in item && item.native === native);

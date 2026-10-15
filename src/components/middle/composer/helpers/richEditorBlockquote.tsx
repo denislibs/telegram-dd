@@ -1,3 +1,5 @@
+import { createMemo } from 'frameact';
+
 import { InputRule, mergeAttributes, Node as TiptapNode, wrappingInputRule } from '@tiptap/core';
 
 import { NodeViewContent, type TeactNodeViewComponentProps, TeactNodeViewRenderer } from '../../../../util/tiptap';
@@ -10,8 +12,6 @@ import {
   type RichEditorQuoteHtmlAttributes,
   unsetRichEditorQuote,
 } from './richEditorQuote';
-
-import useLastCallback from '../../../../hooks/useLastCallback';
 
 import Blockquote from '../../../common/quote/Blockquote';
 
@@ -31,27 +31,32 @@ declare module '@tiptap/core' {
 
 const BLOCKQUOTE_INPUT_REGEX = /^\s*>\s$/;
 
-function RichEditorBlockquoteView({ HTMLAttributes, node, updateAttributes }: TeactNodeViewComponentProps) {
-  const className = typeof HTMLAttributes.class === 'string' ? HTMLAttributes.class : undefined;
+function RichEditorBlockquoteView(props: TeactNodeViewComponentProps) {
+  const className = createMemo(() =>
+    typeof props.HTMLAttributes.class === 'string' ? props.HTMLAttributes.class : undefined,
+  );
   let canCollapse = true;
-  node.forEach((child) => {
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  props.node.forEach((child) => {
     if (child.type.name !== 'paragraph' && child.type.name !== CAPTION_NODE_NAME) canCollapse = false;
   });
-  const isCollapsed = Boolean(node.attrs[BLOCKQUOTE_COLLAPSED_ATTR]);
-  const hasEmptyCaption = node.lastChild?.type.name === CAPTION_NODE_NAME && !node.lastChild.content.size;
+  const isCollapsed = createMemo(() => Boolean(props.node.attrs[BLOCKQUOTE_COLLAPSED_ATTR]));
+  const hasEmptyCaption = createMemo(
+    () => props.node.lastChild?.type.name === CAPTION_NODE_NAME && !props.node.lastChild.content.size,
+  );
 
-  const handleCollapseChange = useLastCallback((isNextCollapsed: boolean) => {
-    updateAttributes({ [BLOCKQUOTE_COLLAPSED_ATTR]: isNextCollapsed });
-  });
+  const handleCollapseChange = (isNextCollapsed: boolean) => {
+    props.updateAttributes({ [BLOCKQUOTE_COLLAPSED_ATTR]: isNextCollapsed });
+  };
 
   return (
     <Blockquote
-      className={className}
+      className={className()}
       canBeCollapsible={canCollapse}
-      noInitialCollapse={!isCollapsed}
-      recalculationKey={node}
-      ignoredLines={hasEmptyCaption ? 1 : undefined}
-      isCollapsed={isCollapsed}
+      noInitialCollapse={!isCollapsed()}
+      recalculationKey={props.node}
+      ignoredLines={hasEmptyCaption() ? 1 : undefined}
+      isCollapsed={isCollapsed()}
       onCollapseChange={handleCollapseChange}
     >
       <NodeViewContent />

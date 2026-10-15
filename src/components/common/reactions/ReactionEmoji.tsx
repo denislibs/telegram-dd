@@ -1,8 +1,8 @@
-import type { ElementRef, FC } from '../../../lib/teact/teact';
-import { memo, useEffect, useMemo, useRef } from '../../../lib/teact/teact';
+import { createEffect, createMemo } from 'frameact';
+import { depsOf } from '../../../util/effectDeps';
+import { createMediaTransition } from '../../../lib/kit';
 
 import type { ApiAvailableReaction, ApiReactionWithPaid } from '../../../api/types';
-import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 
 import { EMOJI_SIZE_PICKER } from '../../../config';
 import { getDocumentMediaHash, isSameReaction } from '../../../global/helpers';
@@ -11,9 +11,7 @@ import { LOCAL_TGS_URLS } from '../helpers/animatedAssets';
 
 import useContextMenuHandlers from '../../../hooks/useContextMenuHandlers';
 import useCoordsInSharedCanvas from '../../../hooks/useCoordsInSharedCanvas';
-import useLastCallback from '../../../hooks/useLastCallback';
 import useMedia from '../../../hooks/useMedia';
-import useMediaTransitionDeprecated from '../../../hooks/useMediaTransitionDeprecated';
 
 import AnimatedIconWithPreview from '../AnimatedIconWithPreview';
 import CustomEmoji from '../CustomEmoji';
@@ -27,102 +25,115 @@ type OwnProps = {
   isSelected?: boolean;
   loadAndPlay?: boolean;
   observeIntersection?: ObserveFn;
-  sharedCanvasRef?: ElementRef<HTMLCanvasElement>;
-  sharedCanvasHqRef?: ElementRef<HTMLCanvasElement>;
+  sharedCanvasRef?: (el: HTMLCanvasElement) => void;
+  sharedCanvasHqRef?: (el: HTMLCanvasElement) => void;
   forcePlayback?: boolean;
   onClick: (reaction: ApiReactionWithPaid) => void;
   onContextMenu?: (reaction: ApiReactionWithPaid) => void;
 };
 
-const ReactionEmoji: FC<OwnProps> = ({
-  reaction,
-  availableReactions,
-  isSelected,
-  loadAndPlay,
-  observeIntersection,
-  sharedCanvasRef,
-  sharedCanvasHqRef,
-  forcePlayback,
-  onClick,
-  onContextMenu,
-}) => {
-  const ref = useRef<HTMLDivElement>();
-  const isCustom = reaction.type === 'custom';
-  const availableReaction = useMemo(
-    () => availableReactions?.find((available) => isSameReaction(available.reaction, reaction)),
-    [availableReactions, reaction],
+const ReactionEmoji = (props: OwnProps) => {
+  let ref!: HTMLDivElement;
+  const isCustom = createMemo(() => props.reaction.type === 'custom');
+  const availableReaction = createMemo(() =>
+    props.availableReactions?.find((available) => isSameReaction(available.reaction, props.reaction)),
   );
-  const thumbDataUri = availableReaction?.staticIcon?.thumbnail?.dataUri;
-  const animationId = availableReaction?.selectAnimation?.id;
-  const coords = useCoordsInSharedCanvas(ref, sharedCanvasRef);
+  const thumbDataUri = createMemo(() => availableReaction()?.staticIcon?.thumbnail?.dataUri);
+  const animationId = createMemo(() => availableReaction()?.selectAnimation?.id);
+  const coords = useCoordsInSharedCanvas(() => ref, props.sharedCanvasRef);
   const mediaData = useMedia(
-    availableReaction?.selectAnimation ? getDocumentMediaHash(availableReaction.selectAnimation, 'full') : undefined,
-    !animationId,
+    availableReaction()?.selectAnimation
+      ? getDocumentMediaHash(availableReaction().selectAnimation, 'full')
+      : undefined,
+    !animationId(),
   );
 
-  const {
-    isContextMenuOpen,
-    handleBeforeContextMenu,
-    handleContextMenu,
-    handleContextMenuClose,
-    handleContextMenuHide,
-  } = useContextMenuHandlers(ref, reaction.type !== 'paid', undefined, undefined, undefined, true);
+  const contextMenuHandlersResult = createMemo(() =>
+    useContextMenuHandlers(
+      () => ref,
+      () => props.reaction.type !== 'paid',
+      undefined,
+      undefined,
+      undefined,
+      true,
+    ),
+  );
+  const isContextMenuOpen = () => contextMenuHandlersResult().isContextMenuOpen;
+  const handleBeforeContextMenu = () => contextMenuHandlersResult().handleBeforeContextMenu;
+  const handleContextMenu = () => contextMenuHandlersResult().handleContextMenu;
+  const handleContextMenuClose = () => contextMenuHandlersResult().handleContextMenuClose;
+  const handleContextMenuHide = () => contextMenuHandlersResult().handleContextMenuHide;
 
-  useEffect(() => {
-    if (isContextMenuOpen) {
-      onContextMenu?.(reaction);
+  createEffect(
+    depsOf(
+      () =>
+        [
+          handleContextMenuClose(),
+          props.onContextMenu,
+          handleContextMenuHide(),
+          isContextMenuOpen(),
+          props.reaction,
+        ] as const,
+    ),
+    ([handleContextMenuClose2, onContextMenu2, handleContextMenuHide2, isContextMenuOpen2, reaction2]) => {
+      if (isContextMenuOpen2) {
+        onContextMenu2?.(reaction2);
 
-      handleContextMenuClose();
-      handleContextMenuHide();
-    }
-  }, [handleContextMenuClose, onContextMenu, handleContextMenuHide, isContextMenuOpen, reaction]);
+        handleContextMenuClose2();
+        handleContextMenuHide2();
+      }
+    },
+  );
 
-  const tgsUrl = reaction.type === 'paid' ? LOCAL_TGS_URLS.StarReaction : mediaData;
-  const handleClick = useLastCallback(() => {
-    onClick(reaction);
-  });
+  const tgsUrl = createMemo(() => (props.reaction.type === 'paid' ? LOCAL_TGS_URLS.StarReaction : mediaData));
+  const handleClick = () => {
+    props.onClick(props.reaction);
+  };
 
-  const transitionClassNames = useMediaTransitionDeprecated(mediaData);
-  const fullClassName = buildClassName(styles.root, isSelected && styles.selected, !isCustom && 'sticker-reaction');
+  // TODO(codemod): useMediaTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element
+  const transitionClassNames = createMediaTransition({ hasMediaData: () => Boolean(mediaData) });
+  const fullClassName = createMemo(() =>
+    buildClassName(styles.root, props.isSelected && styles.selected, !isCustom() && 'sticker-reaction'),
+  );
 
   return (
     <div
       ref={ref}
-      className={fullClassName}
+      class={fullClassName()}
       onClick={handleClick}
-      title={availableReaction?.title}
-      data-sticker-id={isCustom ? reaction.documentId : undefined}
-      onMouseDown={handleBeforeContextMenu}
-      onContextMenu={handleContextMenu}
+      title={availableReaction()?.title}
+      data-sticker-id={isCustom() ? props.reaction.documentId : undefined}
+      onMouseDown={handleBeforeContextMenu()}
+      onContextMenu={handleContextMenu()}
     >
-      {isCustom ? (
+      {isCustom() ? (
         <CustomEmoji
           ref={ref}
-          documentId={reaction.documentId}
+          documentId={props.reaction.documentId}
           size={EMOJI_SIZE_PICKER}
-          noPlay={!loadAndPlay}
-          observeIntersectionForPlaying={observeIntersection}
-          sharedCanvasRef={sharedCanvasRef}
-          sharedCanvasHqRef={sharedCanvasHqRef}
+          noPlay={!props.loadAndPlay}
+          observeIntersectionForPlaying={props.observeIntersection}
+          sharedCanvasRef={props.sharedCanvasRef}
+          sharedCanvasHqRef={props.sharedCanvasHqRef}
           withTranslucentThumb
-          forceAlways={forcePlayback}
+          forceAlways={props.forcePlayback}
         />
       ) : (
         <AnimatedIconWithPreview
-          tgsUrl={tgsUrl}
-          thumbDataUri={thumbDataUri}
-          play={loadAndPlay}
+          tgsUrl={tgsUrl()}
+          thumbDataUri={thumbDataUri()}
+          play={props.loadAndPlay}
           noLoop={false}
           size={EMOJI_SIZE_PICKER}
           isLowPriority
           className={transitionClassNames}
-          sharedCanvas={sharedCanvasRef!.current || undefined}
+          sharedCanvas={props.sharedCanvasRef!.current || undefined}
           sharedCanvasCoords={coords}
-          forceAlways={forcePlayback}
+          forceAlways={props.forcePlayback}
         />
       )}
     </div>
   );
 };
 
-export default memo(ReactionEmoji);
+export default ReactionEmoji;

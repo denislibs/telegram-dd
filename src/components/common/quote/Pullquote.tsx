@@ -1,4 +1,4 @@
-import type { TeactNode } from '../../../lib/teact/teact';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import buildClassName from '../../../util/buildClassName';
 
@@ -8,15 +8,15 @@ import styles from './Pullquote.module.scss';
 
 type OwnProps = {
   className?: string;
-  children: TeactNode;
+  children: JSX.Element;
 };
 
-const Pullquote = ({ className, children }: OwnProps) => {
+const Pullquote = (props: OwnProps) => {
   return (
-    <aside className={buildClassName(styles.root, 'pullquote', className)} data-pullquote>
+    <aside class={buildClassName(styles.root, 'pullquote', props.className)} data-pullquote>
       <Icon name="quote-open" className={buildClassName(styles.quote, styles.quoteOpen)} />
-      <div className={styles.content} data-rich-copy-wrapper>
-        {children}
+      <div class={styles.content} data-rich-copy-wrapper>
+        {props.children}
       </div>
       <Icon name="quote-close" className={buildClassName(styles.quote, styles.quoteClose)} />
     </aside>

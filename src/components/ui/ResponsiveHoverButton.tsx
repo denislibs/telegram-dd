@@ -1,10 +1,8 @@
-import { useRef } from '../../lib/teact/teact';
+import { splitProps } from 'frameact/dom';
 
 import type { OwnProps as ButtonProps } from './Button';
 
 import { IS_TOUCH_ENV } from '../../util/browser/windowEnvironment';
-
-import useLastCallback from '../../hooks/useLastCallback';
 
 import Button from './Button';
 
@@ -19,23 +17,18 @@ const BUTTON_ACTIVATE_DELAY = 200;
 let openTimeout: number | undefined;
 let isFirstTimeActivation = true;
 
-const ResponsiveHoverButton = ({
-  onActivate,
-  noClickActivation,
-  onMouseEnter,
-  onMouseLeave,
-  ...buttonProps
-}: OwnProps) => {
-  const isMouseInsideRef = useRef(false);
+const ResponsiveHoverButton = (props: OwnProps) => {
+  const [, buttonProps] = splitProps(props, ['onActivate', 'noClickActivation', 'onMouseEnter', 'onMouseLeave']);
+  let isMouseInsideRef = false;
 
-  const handleMouseEnter = useLastCallback((e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
-    isMouseInsideRef.current = true;
-    onMouseEnter?.();
+  const handleMouseEnter = (e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
+    isMouseInsideRef = true;
+    props.onMouseEnter?.();
 
     // This is used to counter additional delay caused by asynchronous module loading
     if (isFirstTimeActivation) {
       isFirstTimeActivation = false;
-      onActivate(e);
+      props.onActivate(e);
       return;
     }
 
@@ -44,28 +37,28 @@ const ResponsiveHoverButton = ({
       openTimeout = undefined;
     }
     openTimeout = window.setTimeout(() => {
-      if (isMouseInsideRef.current) {
-        onActivate(e);
+      if (isMouseInsideRef) {
+        props.onActivate(e);
       }
     }, BUTTON_ACTIVATE_DELAY);
-  });
+  };
 
-  const handleMouseLeave = useLastCallback(() => {
-    isMouseInsideRef.current = false;
-    onMouseLeave?.();
-  });
+  const handleMouseLeave = () => {
+    isMouseInsideRef = false;
+    props.onMouseLeave?.();
+  };
 
-  const handleClick = useLastCallback((e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
-    isMouseInsideRef.current = true;
-    onActivate(e);
-  });
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
+    isMouseInsideRef = true;
+    props.onActivate(e);
+  };
 
   return (
     <Button
       {...buttonProps}
       onMouseEnter={!IS_TOUCH_ENV ? handleMouseEnter : undefined}
       onMouseLeave={!IS_TOUCH_ENV ? handleMouseLeave : undefined}
-      onClick={!IS_TOUCH_ENV ? (noClickActivation ? undefined : onActivate) : handleClick}
+      onClick={!IS_TOUCH_ENV ? (props.noClickActivation ? undefined : props.onActivate) : handleClick}
     />
   );
 };

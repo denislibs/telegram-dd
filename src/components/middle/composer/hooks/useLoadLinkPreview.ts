@@ -1,5 +1,6 @@
-import { useEffect, useRef } from '@teact';
+import { createEffect, createMemo } from 'frameact';
 import { getActions } from '../../../../global';
+import { depsOf } from '../../../../util/effectDeps';
 
 import type { ThreadId } from '../../../../types';
 import {
@@ -13,12 +14,11 @@ import { RE_LINK_TEMPLATE } from '../../../../config';
 import { getRichInputAsFormatted } from '../../../ui/textInput/richText';
 
 import { useDebouncedResolver } from '../../../../hooks/useAsyncResolvers';
-import useDerivedSignal from '../../../../hooks/useDerivedSignal';
-import useSyncEffect from '../../../../hooks/useSyncEffect';
 
 const DEBOUNCE_MS = 300;
 const RE_LINK = new RegExp(RE_LINK_TEMPLATE, 'i');
 
+// TODO(codemod): useLoadLinkPreview: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useLoadLinkPreview({
   richMessage,
   chatId,
@@ -30,7 +30,7 @@ export default function useLoadLinkPreview({
 }) {
   const { loadWebPagePreview, clearWebPagePreview, toggleMessageWebPage } = getActions();
 
-  const formattedTextWithLinkRef = useRef<ApiFormattedText>();
+  let formattedTextWithLinkRef: ApiFormattedText | undefined;
 
   const detectLinkDebounced = useDebouncedResolver(
     () => {
@@ -39,7 +39,7 @@ export default function useLoadLinkPreview({
         (entity): entity is ApiMessageEntityTextUrl => entity.type === ApiMessageEntityTypes.TextUrl,
       );
 
-      formattedTextWithLinkRef.current = formattedText;
+      formattedTextWithLinkRef = formattedText;
 
       return linkEntity?.url || formattedText.text.match(RE_LINK)?.[0];
     },
@@ -48,22 +48,29 @@ export default function useLoadLinkPreview({
     true,
   );
 
-  const getLink = useDerivedSignal(detectLinkDebounced, [detectLinkDebounced, richMessage], true);
+  const getLink = createMemo(detectLinkDebounced);
 
-  useEffect(() => {
-    const link = getLink();
-    const formattedText = formattedTextWithLinkRef.current;
+  createEffect(
+    depsOf(() => [getLink(), chatId, threadId] as const),
+    ([getLink2]) => {
+      const link = getLink2();
+      const formattedText = formattedTextWithLinkRef;
 
-    if (link) {
-      loadWebPagePreview({ text: formattedText! });
-    } else {
+      if (link) {
+        loadWebPagePreview({ text: formattedText! });
+      } else {
+        clearWebPagePreview();
+        toggleMessageWebPage({ chatId, threadId });
+      }
+    },
+  );
+
+  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
+  createEffect(
+    depsOf(() => [chatId, clearWebPagePreview, threadId, toggleMessageWebPage]),
+    () => {
       clearWebPagePreview();
       toggleMessageWebPage({ chatId, threadId });
-    }
-  }, [getLink, chatId, threadId]);
-
-  useSyncEffect(() => {
-    clearWebPagePreview();
-    toggleMessageWebPage({ chatId, threadId });
-  }, [chatId, clearWebPagePreview, threadId, toggleMessageWebPage]);
+    },
+  );
 }

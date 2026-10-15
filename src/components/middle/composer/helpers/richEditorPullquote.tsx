@@ -1,3 +1,5 @@
+import { createMemo } from 'frameact';
+
 import { mergeAttributes, Node as TiptapNode } from '@tiptap/core';
 
 import { NodeViewContent, type TeactNodeViewComponentProps, TeactNodeViewRenderer } from '../../../../util/tiptap';
@@ -27,11 +29,13 @@ declare module '@tiptap/core' {
   }
 }
 
-function RichEditorPullquoteView({ HTMLAttributes }: TeactNodeViewComponentProps) {
-  const className = typeof HTMLAttributes.class === 'string' ? HTMLAttributes.class : undefined;
+function RichEditorPullquoteView(props: TeactNodeViewComponentProps) {
+  const className = createMemo(() =>
+    typeof props.HTMLAttributes.class === 'string' ? props.HTMLAttributes.class : undefined,
+  );
 
   return (
-    <Pullquote className={className}>
+    <Pullquote className={className()}>
       <NodeViewContent />
     </Pullquote>
   );

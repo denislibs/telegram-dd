@@ -1,6 +1,3 @@
-import type { FC } from '../../../lib/teact/teact';
-import { memo } from '../../../lib/teact/teact';
-
 import buildClassName from '../../../util/buildClassName';
 
 import useOldLang from '../../../hooks/useOldLang';
@@ -33,27 +30,21 @@ const SYMBOL_MENU_TAB_ICONS = {
   [SymbolMenuTabs.GIFs]: 'icon-gifs',
 };
 
-const SymbolMenuFooter: FC<OwnProps> = ({
-  activeTab,
-  onSwitchTab,
-  onRemoveSymbol,
-  isAttachmentModal,
-  canSendPlainText,
-}) => {
+const SymbolMenuFooter = (props: OwnProps) => {
   const lang = useOldLang();
 
   function renderTabButton(tab: SymbolMenuTabs) {
     return (
       <Button
-        className={`symbol-tab-button ${activeTab === tab ? 'activated' : ''}`}
+        className={`symbol-tab-button ${props.activeTab === tab ? 'activated' : ''}`}
 
-        onClick={() => onSwitchTab(tab)}
+        onClick={() => props.onSwitchTab(tab)}
         ariaLabel={lang(SYMBOL_MENU_TAB_TITLES[tab])}
         round
         faded
         color="translucent"
       >
-        <i className={buildClassName('icon', SYMBOL_MENU_TAB_ICONS[tab])} />
+        <i class={buildClassName('icon', SYMBOL_MENU_TAB_ICONS[tab])} />
       </Button>
     );
   }
@@ -63,15 +54,15 @@ const SymbolMenuFooter: FC<OwnProps> = ({
   }
 
   return (
-    <div className="SymbolMenu-footer" onClick={stopPropagation} dir={lang.isRtl ? 'rtl' : undefined}>
-      {canSendPlainText && renderTabButton(SymbolMenuTabs.Emoji)}
-      {!isAttachmentModal && renderTabButton(SymbolMenuTabs.Stickers)}
-      {!isAttachmentModal && renderTabButton(SymbolMenuTabs.GIFs)}
+    <div class="SymbolMenu-footer" onClick={stopPropagation} dir={lang.isRtl ? 'rtl' : undefined}>
+      {props.canSendPlainText && renderTabButton(SymbolMenuTabs.Emoji)}
+      {!props.isAttachmentModal && renderTabButton(SymbolMenuTabs.Stickers)}
+      {!props.isAttachmentModal && renderTabButton(SymbolMenuTabs.GIFs)}
 
-      {activeTab === SymbolMenuTabs.Emoji && (
+      {props.activeTab === SymbolMenuTabs.Emoji && (
         <Button
           className="symbol-delete-button"
-          onClick={onRemoveSymbol}
+          onClick={props.onRemoveSymbol}
           ariaLabel="Remove Symbol"
           round
           faded
@@ -83,4 +74,4 @@ const SymbolMenuFooter: FC<OwnProps> = ({
   );
 };
 
-export default memo(SymbolMenuFooter);
+export default SymbolMenuFooter;

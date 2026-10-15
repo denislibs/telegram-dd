@@ -1,5 +1,3 @@
-import { useRef } from '../../lib/teact/teact';
-
 import buildClassName from '../../util/buildClassName';
 
 import useHorizontalScroll from '../../hooks/useHorizontalScroll';
@@ -10,14 +8,14 @@ type OwnProps = {
   children: React.ReactNode;
 };
 
-function FoundPacksRow({ children }: OwnProps) {
-  const ref = useRef<HTMLDivElement>();
+function FoundPacksRow(props: OwnProps) {
+  let ref!: HTMLDivElement;
 
-  useHorizontalScroll(ref, undefined, true);
+  useHorizontalScroll(() => ref, undefined, true);
 
   return (
-    <div ref={ref} className={buildClassName(pickerStyles.foundPacks, 'no-scrollbar')}>
-      {children}
+    <div ref={ref} class={buildClassName(pickerStyles.foundPacks, 'no-scrollbar')}>
+      {props.children}
     </div>
   );
 }

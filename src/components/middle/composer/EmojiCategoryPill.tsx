@@ -1,8 +1,9 @@
-import { memo, useEffect, useRef } from '../../../lib/teact/teact';
+import { createMeasureEffect, requestMeasure } from 'frameact';
+import { For } from 'frameact/dom';
+import { depsOf } from '../../../util/effectDeps';
 
 import type { IconName } from '../../../types/icons';
 
-import { requestMeasure } from '../../../lib/fasterdom/fasterdom';
 import animateHorizontalScroll from '../../../util/animateHorizontalScroll';
 import buildClassName from '../../../util/buildClassName';
 import { REM } from '../../common/helpers/mediaDimensions';
@@ -29,56 +30,60 @@ type OwnProps = {
 
 const BUTTON_WIDTH = 2.25 * REM;
 
-const EmojiCategoryPill = ({ categories, activeCategoryIndex, isActive, className, onCategorySelect }: OwnProps) => {
-  const stripRef = useRef<HTMLDivElement>();
+const EmojiCategoryPill = (props: OwnProps) => {
+  let stripRef!: HTMLDivElement;
 
-  useHorizontalScroll(stripRef, undefined, true, true);
+  useHorizontalScroll(() => stripRef, undefined, true, true);
 
-  useEffect(() => {
-    requestMeasure(() => {
-      const strip = stripRef.current;
-      if (!strip) {
-        return;
-      }
+  createMeasureEffect(
+    depsOf(() => [props.isActive, props.activeCategoryIndex] as const),
+    ([isActive2, activeCategoryIndex2]) => {
+      requestMeasure(() => {
+        const strip = stripRef;
+        if (!strip) {
+          return;
+        }
 
-      if (!isActive) {
-        animateHorizontalScroll(strip, 0);
-        return;
-      }
+        if (!isActive2) {
+          animateHorizontalScroll(strip, 0);
+          return;
+        }
 
-      if (activeCategoryIndex === undefined) {
-        return;
-      }
+        if (activeCategoryIndex2 === undefined) {
+          return;
+        }
 
-      const newLeft = activeCategoryIndex * BUTTON_WIDTH - strip.offsetWidth / 2 + BUTTON_WIDTH / 2;
-      animateHorizontalScroll(strip, newLeft);
-    });
-  }, [isActive, activeCategoryIndex]);
+        const newLeft = activeCategoryIndex2 * BUTTON_WIDTH - strip.offsetWidth / 2 + BUTTON_WIDTH / 2;
+        animateHorizontalScroll(strip, newLeft);
+      });
+    },
+  );
 
   return (
-    <div className={buildClassName(styles.root, className, isActive && styles.expanded)}>
-      <div ref={stripRef} className={buildClassName(styles.strip, 'no-scrollbar')}>
-        {categories.map((category, index) => (
-          <Button
-            key={category.id}
-            className={buildClassName(
-              'symbol-set-button',
-              styles.categoryButton,
-              index === 0 && styles.firstCategory,
-              isActive && index === activeCategoryIndex && 'activated',
-            )}
-            round
-            faded
-            color="translucent"
-            tabIndex={!isActive && index !== 0 ? -1 : undefined}
-            onClick={() => onCategorySelect(index)}
-            ariaLabel={category.name}
-            iconName={category.icon}
-          />
-        ))}
+    <div class={buildClassName(styles.root, props.className, props.isActive && styles.expanded)}>
+      <div ref={stripRef} class={buildClassName(styles.strip, 'no-scrollbar')}>
+        <For each={props.categories} keyed={(category) => category.id}>
+          {(category, index) => (
+            <Button
+              className={buildClassName(
+                'symbol-set-button',
+                styles.categoryButton,
+                index() === 0 && styles.firstCategory,
+                props.isActive && index() === props.activeCategoryIndex && 'activated',
+              )}
+              round
+              faded
+              color="translucent"
+              tabIndex={!props.isActive && index() !== 0 ? -1 : undefined}
+              onClick={() => props.onCategorySelect(index())}
+              ariaLabel={category().name}
+              iconName={category().icon}
+            />
+          )}
+        </For>
       </div>
     </div>
   );
 };
 
-export default memo(EmojiCategoryPill);
+export default EmojiCategoryPill;
