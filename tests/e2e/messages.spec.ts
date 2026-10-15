@@ -1,5 +1,5 @@
 // The middle column of an open chat (messages slice): the mocked client's `messages` scenario (chat "Alice Tester": 300
-// messages, 50 unread, "Bob Reader": 60 read, "Carol Short": 3 read; `__invokeMiddlewares__/messages.ts` pages the history like
+// messages, 33 unread, "Bob Reader": 60 read, "Carol Short": 3 read; `__invokeMiddlewares__/messages.ts` pages the history like
 // the server) plus messages that the test plays as the server with `apiUpdate`.
 import type { Page } from '@playwright/test';
 
@@ -18,7 +18,13 @@ const ITEM = `${LIST} .message-list-item`;
 // The known noise of the mocked client: no full user info / folders / language pack (see tests/e2e/strictMonitor.ts)
 test.use({
   strictOptions: {
-    ignoreConsole: [/GetFullUser|buildApiUserFullInfo|reading 'id'/, /action "loadFullUser" failed/],
+    // tt's SafeLink logs a link it cannot parse (the `javascript:` URL of the security test); the mocked client has no
+    // full user info (`users.GetFullUser` answers without the user)
+    ignoreConsole: [
+      /GetFullUser|buildApiUserFullInfo|reading 'id'/,
+      /action "loadFullUser" failed/,
+      /SafeLink.getDecodedUrl error/,
+    ],
   },
 });
 
@@ -40,7 +46,8 @@ async function settle(page: Page, quietMs = 500) {
     (ms) =>
       new Promise<void>((resolve) => {
         const list = document.querySelector('#MiddleColumn .MessageList') as HTMLElement;
-        const state = () => `${list.scrollTop}|${list.scrollHeight}|${list.querySelectorAll('.message-list-item').length}`;
+        const state = () =>
+          `${list.scrollTop}|${list.scrollHeight}|${list.querySelectorAll('.message-list-item').length}`;
         let last = state();
         let since = performance.now();
         const tick = () => {
@@ -108,9 +115,10 @@ function expectNoGap(s: Snapshot, ends: { first?: number; last?: number } = {}, 
     ).toBeLessThanOrEqual(VIEWPORT_GAP + 120);
   }
   for (let i = 1; i < visible.length; i++) {
-    expect(visible[i].top - visible[i - 1].bottom, `${label}: gap between ${visible[i - 1].id} and ${visible[i].id}`).toBeLessThan(
-      VIEWPORT_GAP,
-    );
+    expect(
+      visible[i].top - visible[i - 1].bottom,
+      `${label}: gap between ${visible[i - 1].id} and ${visible[i].id}`,
+    ).toBeLessThan(VIEWPORT_GAP);
   }
 }
 
@@ -123,9 +131,13 @@ async function wheel(page: Page, dy: number) {
 const middleItem = (s: Snapshot) =>
   [...s.items]
     .filter((i) => i.bottom > 0 && i.top < s.clientHeight)
-    .sort((a, b) => Math.abs((a.top + a.bottom) / 2 - s.clientHeight / 2) - Math.abs((b.top + b.bottom) / 2 - s.clientHeight / 2))[0];
+    .sort(
+      (a, b) =>
+        Math.abs((a.top + a.bottom) / 2 - s.clientHeight / 2) - Math.abs((b.top + b.bottom) / 2 - s.clientHeight / 2),
+    )[0];
 
-const unreadBadge = (page: Page, name: string) => page.locator(ROW).filter({ hasText: name }).locator('[class*="unread"]');
+const unreadBadge = (page: Page, name: string) =>
+  page.locator(ROW).filter({ hasText: name }).locator('[class*="unread"]');
 
 test.describe('message list', () => {
   test('renders the history with date separators, the header and the bubbles of a short chat', async ({ page }) => {
@@ -155,7 +167,8 @@ test.describe('message list', () => {
     expect(dates.length).toBeGreaterThanOrEqual(3);
     expect(new Set(dates).size).toBe(dates.length);
 
-    // a service message played as the server: rendered by ActionMessage between the bubbles
+    // a service message played as the server (into the open chat): rendered by ActionMessage after the bubbles
+    await openChat(page, 'Bob Reader');
     await page.evaluate(() => {
       (window as unknown as TestWindow).getActions().apiUpdate({
         '@type': 'newMessage',
@@ -171,16 +184,15 @@ test.describe('message list', () => {
         },
       });
     });
-    await openChat(page, 'Bob Reader');
     await expect(page.locator(`${LIST} .ActionMessage`)).toHaveCount(1);
-    await expect(page.locator(`${LIST} .ActionMessage`)).toContainText(/photo/i);
+    await expect(page.locator(`${LIST} .ActionMessage`)).toContainText('removed group photo');
   });
 
   test('opens at the first unread message with the divider, and marking as read updates the chat list badge', async ({
     page,
   }) => {
     await openMessages(page);
-    await expect(unreadBadge(page, 'Alice Tester')).toContainText('50');
+    await expect(unreadBadge(page, 'Alice Tester')).toContainText('33');
     await openChat(page, 'Alice Tester');
 
     const s = await snapshot(page);
@@ -194,7 +206,9 @@ test.describe('message list', () => {
     expectNoGap(s, { first: 1, last: 300 }, 'first unread');
 
     // the messages in the viewport were marked as read: the badge went down, but not to zero
-    await expect.poll(async () => Number((await unreadBadge(page, 'Alice Tester').textContent()) || 0)).toBeLessThan(50);
+    await expect
+      .poll(async () => Number((await unreadBadge(page, 'Alice Tester').textContent()) || 0))
+      .toBeLessThan(33);
     // reading the rest (scroll down to the end of the history) clears it
     for (let i = 0; i < 40; i++) {
       await wheel(page, 700);
@@ -269,5 +283,232 @@ test.describe('message list', () => {
       expectNoGap(await snapshot(page), { first: 1, last: 300 }, `jump down ${round} (settled)`);
     }
     expect(maxId(await snapshot(page))).toBe(300);
+  });
+
+  test('a new incoming message appends; it scrolls to the bottom only when the list is at the bottom', async ({
+    page,
+  }) => {
+    await openMessages(page);
+    await openChat(page, 'Bob Reader');
+
+    const play = (id: number, text: string) =>
+      page.evaluate(
+        ([messageId, messageText]) => {
+          (window as unknown as TestWindow).getActions().apiUpdate({
+            '@type': 'newMessage',
+            chatId: '6',
+            id: messageId,
+            message: {
+              id: messageId,
+              chatId: '6',
+              date: Math.floor(Date.now() / 1000),
+              isOutgoing: false,
+              senderId: '6',
+              content: { text: { text: messageText } },
+            },
+          });
+        },
+        [id, text] as const,
+      );
+
+    // at the bottom: the new message is appended and the list follows it
+    await play(1062, 'new at the bottom');
+    await expect(page.locator(`${LIST} #message-1062`)).toBeVisible();
+    await settle(page);
+    let s = await snapshot(page);
+    expect(s.scrollTop + s.clientHeight).toBeGreaterThanOrEqual(s.scrollHeight - 3);
+    expect(s.items.find((i) => i.id === 1062)!.bottom).toBeLessThanOrEqual(s.clientHeight);
+    await expect(page.locator(`${LIST} ~ * [class*="ScrollDownButton-module__unread-count"]`)).toHaveCount(0);
+
+    // scrolled up (past the bottom snap and the "near bottom" threshold): the list stays, the button shows a counter
+    for (let i = 0; i < 4; i++) {
+      await wheel(page, -400);
+      await page.waitForTimeout(100);
+    }
+    await settle(page);
+    const before = await snapshot(page);
+    expect(before.scrollTop + before.clientHeight).toBeLessThan(before.scrollHeight - 300);
+    const anchor = middleItem(before);
+    await play(1063, 'new while scrolled up');
+    // the viewport moved into the past (tt keeps a window of the history), so the message is counted, not rendered
+    await expect(page.locator('[class*="ScrollDownButton-module__unread-count"]')).toHaveText('1');
+    await settle(page);
+    const after = await snapshot(page);
+    const moved = after.items.find((i) => i.id === anchor.id)!;
+    expect(Math.abs(moved.top - anchor.top), 'the list did not move').toBeLessThanOrEqual(2);
+    const button = page.locator('[class*="ScrollDownButton-module__unread-count"]');
+    await expect(button).toHaveText('1');
+    await play(1064, 'and another');
+    await expect(button).toHaveText('2');
+    // the counter button scrolls to the bottom
+    // (the mocked build has no language pack: the label is tt's key, `AccDescrPageDown`)
+    await page.locator('[aria-label="AccDescrPageDown"]').click();
+    await settle(page, 800);
+    s = await snapshot(page);
+    expect(s.scrollTop + s.clientHeight).toBeGreaterThanOrEqual(s.scrollHeight - 3);
+    await expect(button).toHaveCount(0);
+  });
+
+  test('switching chats keeps the scroll position of each chat, as tt does', async ({ page }) => {
+    await openMessages(page);
+    await openChat(page, 'Alice Tester');
+    for (let i = 0; i < 6; i++) {
+      await wheel(page, -450);
+      await page.waitForTimeout(120);
+    }
+    await settle(page, 700);
+    // tt saves the position (`setScrollOffset`) 200 ms after the last scroll event
+    await page.waitForTimeout(600);
+    const before = await snapshot(page);
+    const anchor = middleItem(before);
+    expect(minId(before)).toBeLessThan(anchor.id);
+
+    await openChat(page, 'Bob Reader');
+    await expect(page.locator(`${LIST} #message-${anchor.id}`)).toHaveCount(0);
+    await openChat(page, 'Alice Tester');
+    await settle(page, 700);
+    const after = await snapshot(page);
+    const back = after.items.find((i) => i.id === anchor.id);
+    expect(back, `message ${anchor.id} is rendered again`).toBeDefined();
+    expect(Math.abs(back!.top - anchor.top), 'the same message is at the same place').toBeLessThanOrEqual(3);
+    expectNoGap(after, { first: 1, last: 300 }, 'after switching back');
+  });
+
+  test('entities render as tt renders them, a spoiler stays concealed until it is clicked', async ({ page }) => {
+    await openMessages(page);
+    await openChat(page, 'Carol Short');
+    const text = 'bold italic under strike code pre link mention #hash $CASH /cmd secret https://example.com/x quote';
+    const at = (word: string) => ({ offset: text.indexOf(word), length: word.length });
+    const entities = [
+      { type: 'MessageEntityBold', ...at('bold') },
+      { type: 'MessageEntityItalic', ...at('italic') },
+      { type: 'MessageEntityUnderline', ...at('under') },
+      { type: 'MessageEntityStrike', ...at('strike') },
+      { type: 'MessageEntityCode', ...at('code') },
+      { type: 'MessageEntityPre', ...at('pre'), language: 'js' },
+      { type: 'MessageEntityTextUrl', ...at('link'), url: 'https://example.org/a?b=c' },
+      { type: 'MessageEntityMention', ...at('mention') },
+      { type: 'MessageEntityHashtag', ...at('#hash') },
+      { type: 'MessageEntityCashtag', ...at('$CASH') },
+      { type: 'MessageEntityBotCommand', ...at('/cmd') },
+      { type: 'MessageEntitySpoiler', ...at('secret') },
+      { type: 'MessageEntityUrl', ...at('https://example.com/x') },
+      { type: 'MessageEntityBlockquote', ...at('quote') },
+    ];
+    await page.evaluate(
+      ([messageText, messageEntities]) => {
+        (window as unknown as TestWindow).getActions().apiUpdate({
+          '@type': 'newMessage',
+          chatId: '7',
+          id: 2100,
+          message: {
+            id: 2100,
+            chatId: '7',
+            date: Math.floor(Date.now() / 1000),
+            isOutgoing: false,
+            senderId: '7',
+            content: { text: { text: messageText, entities: messageEntities } },
+          },
+        });
+      },
+      [text, entities] as const,
+    );
+
+    const content = page.locator(`${LIST} #message-2100 .text-content`);
+    await expect(content).toBeVisible();
+    await expect(content.locator('strong[data-entity-type="MessageEntityBold"]')).toHaveText('bold');
+    await expect(content.locator('em')).toHaveText('italic');
+    await expect(content.locator('ins')).toHaveText('under');
+    await expect(content.locator('del')).toHaveText('strike');
+    await expect(content.locator('code.text-entity-code')).toHaveText('code');
+    await expect(content.locator('.CodeBlock pre.code-block')).toContainText('pre');
+    const link = content.locator('a[data-entity-type="MessageEntityTextUrl"]');
+    await expect(link).toHaveAttribute('href', 'https://example.org/a?b=c');
+    await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    await expect(content.locator('a[data-entity-type="MessageEntityUrl"]')).toHaveAttribute(
+      'href',
+      'https://example.com/x',
+    );
+    for (const [type, label] of [
+      ['MessageEntityMention', 'mention'],
+      ['MessageEntityHashtag', '#hash'],
+      ['MessageEntityCashtag', '$CASH'],
+      ['MessageEntityBotCommand', '/cmd'],
+    ]) {
+      await expect(content.locator(`a[data-entity-type="${type}"]`)).toHaveText(label);
+    }
+    await expect(content.locator('blockquote[data-entity-type="MessageEntityBlockquote"]')).toContainText('quote');
+
+    // a spoiler: concealed (the dots over transparent text) until it is clicked, then revealed for good
+    const spoiler = content.locator('.Spoiler');
+    await expect(spoiler).toHaveClass(/Spoiler--concealed/);
+    await expect(spoiler.locator('.Spoiler__content')).toHaveCSS('opacity', '0');
+    await spoiler.click();
+    await expect(spoiler).not.toHaveClass(/Spoiler--concealed/);
+    await expect(spoiler.locator('.Spoiler__content')).toHaveCSS('opacity', '1');
+  });
+
+  test('a javascript: link is never rendered as a live href', async ({ page }) => {
+    await openMessages(page);
+    await openChat(page, 'Carol Short');
+    page.on('dialog', async (dialog) => {
+      await dialog.dismiss();
+      throw new Error(`a dialog opened: ${dialog.message()}`);
+    });
+    const hostile = [
+      'javascript:alert(1)',
+      'JaVaScRiPt:alert(2)',
+      ' \tjava\tscript:alert(3)',
+      'data:text/html,<script>alert(4)</script>',
+      'vbscript:x',
+    ];
+    const text = `${hostile.map((_, i) => `link${i}`).join(' ')} javascript:alert(5)`;
+    const entities = [
+      ...hostile.map((url, i) => ({
+        type: 'MessageEntityTextUrl',
+        offset: text.indexOf(`link${i}`),
+        length: `link${i}`.length,
+        url,
+      })),
+      { type: 'MessageEntityUrl', offset: text.indexOf('javascript:alert(5)'), length: 'javascript:alert(5)'.length },
+    ];
+    await page.evaluate(
+      ([messageText, messageEntities]) => {
+        (window as unknown as TestWindow).getActions().apiUpdate({
+          '@type': 'newMessage',
+          chatId: '7',
+          id: 2101,
+          message: {
+            id: 2101,
+            chatId: '7',
+            date: Math.floor(Date.now() / 1000),
+            isOutgoing: false,
+            senderId: '7',
+            content: { text: { text: messageText, entities: messageEntities } },
+          },
+        });
+      },
+      [text, entities] as const,
+    );
+    const content = page.locator(`${LIST} #message-2101 .text-content`);
+    await expect(content.locator('a')).toHaveCount(hostile.length + 1);
+    const hrefs = await content.locator('a').evaluateAll((anchors) => anchors.map((a) => a.getAttribute('href') ?? ''));
+    for (const href of hrefs) {
+      // strip what a URL parser strips (tab, newline, leading control characters and spaces) before looking at the scheme
+      const scheme = href.replace(/[\u0000-\u0020]/g, '').toLowerCase();
+      expect(scheme, `href ${JSON.stringify(href)}`).not.toMatch(/^(javascript|data|vbscript):/);
+      expect(scheme).toMatch(/^https:\/\//);
+    }
+    // and no element anywhere in the page has a script URL attribute
+    expect(
+      await page.evaluate(
+        () =>
+          [...document.querySelectorAll('[href], [src], [action], [formaction]')].filter((el) =>
+            ['href', 'src', 'action', 'formaction'].some((name) =>
+              /^\s*(javascript|vbscript):/i.test(el.getAttribute(name) ?? ''),
+            ),
+          ).length,
+      ),
+    ).toBe(0);
   });
 });

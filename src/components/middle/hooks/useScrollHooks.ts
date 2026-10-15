@@ -147,15 +147,36 @@ export default function useScrollHooks({
 
   // Deviation: tt's `useOnIntersect(ref, observe)` reads the element once; the triggers are rendered and removed by
   // `withHistoryTriggers`, so the element is tracked.
-  const observeTarget = (target: Accessor<HTMLElement | undefined>, observe: Accessor<ObserveFn | undefined>) => {
+  const observeTarget = (
+    target: Accessor<HTMLElement | undefined>,
+    observe: Accessor<ObserveFn | undefined>,
+    inNextFrame = false,
+  ) => {
     createEffect(
       depsOf(() => [target(), observe()] as const),
-      ([el, observe2]) => (el && observe2 ? observe2(el) : undefined),
+      ([el, observe2]) => {
+        if (!el || !observe2) return undefined;
+        if (!inNextFrame) return observe2(el);
+
+        // Deviation (history triggers): observed in the measure phase of the next frame. An observer reports a trigger once,
+        // when its state changes, and `isReplacingHistoryRef` drops the reports that arrive while the history is being
+        // replaced (the frame in which the list is rendered and positioned). tt observed from `useEffect`, i.e. after that
+        // frame; observing at once here would get the first report of a new list dropped and no load would ever start.
+        let stop: NoneToVoidFunction | undefined;
+        let isCancelled = false;
+        requestMeasure(() => {
+          if (!isCancelled) stop = observe2(el);
+        });
+        return () => {
+          isCancelled = true;
+          stop?.();
+        };
+      },
     );
   };
 
-  observeTarget(backwardsTrigger, () => (withHistoryTriggers() ? observeIntersectionForHistory : undefined));
-  observeTarget(forwardsTrigger, () => (withHistoryTriggers() ? observeIntersectionForHistory : undefined));
+  observeTarget(backwardsTrigger, () => (withHistoryTriggers() ? observeIntersectionForHistory : undefined), true);
+  observeTarget(forwardsTrigger, () => (withHistoryTriggers() ? observeIntersectionForHistory : undefined), true);
 
   const {
     observe: observeIntersectionForFab,

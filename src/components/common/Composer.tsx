@@ -24,7 +24,10 @@ export type OwnProps = {
 };
 export type ComposerType = 'messageList' | 'story';
 
+// The stub keeps the outer size of tt's composer (a 3rem high row and 1rem below it: the message list reserves
+// the space under its messages from the height of the footer), so that the layout of the list is tt's until the composer is
+// ported. It is blank and inert (no input, no buttons).
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const Composer = (_props: OwnProps) => undefined;
+const Composer = (_props: OwnProps) => <div class="Composer" style="height: 3rem; margin-bottom: 1rem" aria-hidden="true" />;
 
 export default Composer;

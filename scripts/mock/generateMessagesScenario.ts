@@ -2,7 +2,8 @@
 // middle column (messages slice) e2e/visual/leak gates. `pnpm exec tsx scripts/mock/generateMessagesScenario.ts`.
 //
 //   chat 5 "Alice Tester": 300 messages over ~37 days (8 a day, so date separators appear while scrolling), lines of
-//                          different heights, every third message outgoing; the last 50 are unread (first unread: 251)
+//                          different heights, every third message outgoing; messages 251..300 are unread (first unread: 251,
+//                          33 of them are incoming: that is the unread count, as the server counts it)
 //   chat 6 "Bob Reader":   60 short messages, all read (the second chat: "switching chats keeps the scroll position")
 //   chat 7 "Carol Short":  3 messages, all read (fits the viewport: no scrolling, no history to load)
 //
@@ -59,7 +60,7 @@ const json = {
     active: [
       { id: '7', topMessage: 2003, readInboxMaxId: 2003, unreadCount: 0 },
       { id: '6', topMessage: 1060, readInboxMaxId: 1060, unreadCount: 0 },
-      { id: '5', topMessage: 300, readInboxMaxId: 250, unreadCount: 50 },
+      { id: '5', topMessage: 300, readInboxMaxId: 250, unreadCount: 33 },
     ],
     archived: [],
   },
