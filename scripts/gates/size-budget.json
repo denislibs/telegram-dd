@@ -67,26 +67,26 @@
         "gzip": 45834
       }
     },
-    "assets/index.css": {
-      "kind": "entry",
-      "baseline": {
-        "brotli": 29744,
-        "gzip": 35248
-      },
-      "budget": {
-        "brotli": 32719,
-        "gzip": 38773
-      }
-    },
     "assets/index.js": {
       "kind": "entry",
       "baseline": {
-        "brotli": 70576,
-        "gzip": 82415
+        "brotli": 100884,
+        "gzip": 115792
       },
       "budget": {
-        "brotli": 77634,
-        "gzip": 90657
+        "brotli": 110973,
+        "gzip": 127372
+      }
+    },
+    "assets/index.css": {
+      "kind": "entry",
+      "baseline": {
+        "brotli": 31497,
+        "gzip": 37336
+      },
+      "budget": {
+        "brotli": 34647,
+        "gzip": 41070
       }
     },
     "assets/preload-helper.js": {
@@ -100,26 +100,26 @@
         "gzip": 878
       }
     },
-    "assets/stopEvent.js": {
-      "kind": "entry",
-      "baseline": {
-        "brotli": 104378,
-        "gzip": 119217
-      },
-      "budget": {
-        "brotli": 114816,
-        "gzip": 131139
-      }
-    },
     "assets/stopEvent.css": {
       "kind": "entry",
       "baseline": {
-        "brotli": 3420,
-        "gzip": 3801
+        "brotli": 1210,
+        "gzip": 1407
       },
       "budget": {
-        "brotli": 3763,
-        "gzip": 4182
+        "brotli": 1331,
+        "gzip": 1548
+      }
+    },
+    "assets/stopEvent.js": {
+      "kind": "entry",
+      "baseline": {
+        "brotli": 75007,
+        "gzip": 88072
+      },
+      "budget": {
+        "brotli": 82508,
+        "gzip": 96880
       }
     },
     "assets/waveWorker.min.js": {
@@ -214,22 +214,22 @@
   "totals": {
     "js": {
       "baseline": {
-        "brotli": 1087061,
-        "gzip": 1288386
+        "brotli": 1047325,
+        "gzip": 1237752
       },
       "budget": {
-        "brotli": 1195768,
-        "gzip": 1417225
+        "brotli": 1152058,
+        "gzip": 1361528
       }
     },
     "css": {
       "baseline": {
-        "brotli": 63104,
-        "gzip": 74007
+        "brotli": 62924,
+        "gzip": 74048
       },
       "budget": {
-        "brotli": 69415,
-        "gzip": 81408
+        "brotli": 69217,
+        "gzip": 81453
       }
     }
   }

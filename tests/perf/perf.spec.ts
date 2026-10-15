@@ -67,8 +67,9 @@ test.describe('leaks', () => {
             // a detached tree of 400 nodes kept alive per run: about 100 KB of heap, 8000 nodes over 20 runs
             const bucket = ((window as unknown as { __domLeak?: unknown[] }).__domLeak ??= []);
             const tree = document.createElement('div');
-            for (let i = 0; i < 200; i++)
+            for (let i = 0; i < 200; i++) {
               tree.appendChild(document.createElement('span')).appendChild(document.createTextNode('x'));
+            }
             bucket.push(tree);
           }),
         { runs: 20, maxGrowthKb: 100_000, warmupRuns: 1, maxNodeGrowth: 500 },
