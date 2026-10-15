@@ -510,4 +510,20 @@ describe('MessageListContent', () => {
     await frames();
     expect(root.querySelectorAll('.local-action-message')).toHaveLength(1);
   });
+
+  it('keeps the avatar of a sender group (the same element) when the profile of the sender is updated (M6)', async () => {
+    const chatId = GROUP_ID;
+    const { root } = await mountContent({
+      chatId,
+      withUsers: true,
+      messages: [msg(chatId, { sender: ALICE, at: 0 }), msg(chatId, { sender: ALICE, at: 60 })],
+    });
+    const avatar = root.querySelector('.sender-group-container .Avatar[data-peer-id]')!;
+    expect(avatar).not.toBeNull();
+
+    setGlobal(updateUser(getGlobal(), ALICE, { firstName: 'Alicia', lastName: 'Renamed' }));
+    await frames();
+
+    expect(root.querySelector('.sender-group-container .Avatar[data-peer-id]')).toBe(avatar);
+  });
 });

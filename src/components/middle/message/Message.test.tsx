@@ -211,6 +211,31 @@ describe('Message (text)', () => {
     expect(bubble.querySelector('.content-inner')!.classList.contains('with-subheader')).toBe(true);
   });
 
+  it('does not rebuild the text of the reply header when the replied message is updated (views)', async () => {
+    seed(
+      [
+        message(PEER_ID, 32, 'the original', { viewsCount: 1 }),
+        message(PEER_ID, 33, 'the reply', {
+          replyInfo: { type: 'message', replyToMsgId: 32 } as ApiMessage['replyInfo'],
+        }),
+      ],
+      [privateChat(PEER_ID)],
+    );
+    const el = await mount(PEER_ID, 33);
+    const wrapper = el.querySelector('.embedded-text-wrapper')!;
+    expect(wrapper.textContent).toContain('the original');
+    const before = Array.from(wrapper.childNodes);
+    const avatarOrTitle = el.querySelector('.EmbeddedMessage')!;
+
+    setGlobal(updateChatMessage(getGlobal(), PEER_ID, 32, { viewsCount: 20 }));
+    await frames();
+
+    expect(el.querySelector('.EmbeddedMessage')).toBe(avatarOrTitle);
+    const after = Array.from(el.querySelector('.embedded-text-wrapper')!.childNodes);
+    expect(after).toHaveLength(before.length);
+    before.forEach((node, index) => expect(after[index]).toBe(node));
+  });
+
   it('renders the forwarded header', async () => {
     seed(
       [
