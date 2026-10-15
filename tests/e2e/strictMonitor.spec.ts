@@ -2,7 +2,14 @@
 // Uses the plain Playwright `test` on purpose: the fixture would (correctly) fail these tests.
 import { expect, type Page, test } from '@playwright/test';
 
+import { DISABLE_SERVICE_WORKER } from './fixtures';
 import { createStrictMonitor } from './strictMonitor';
+
+// the plain `test` has no fixture that removes `navigator.serviceWorker`: the app would register its worker, which Playwright blocks
+// with a console warning (the media slice registers the progressive-streaming worker)
+test.beforeEach(async ({ context }) => {
+  await context.addInitScript(DISABLE_SERVICE_WORKER);
+});
 
 async function openApp(page: Page, baseURL: string) {
   const monitor = createStrictMonitor(page, new URL(baseURL).origin);

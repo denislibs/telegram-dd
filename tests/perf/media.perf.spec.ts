@@ -133,8 +133,8 @@ test.describe('media chats: leaks', () => {
 
 test.describe('media chats: long tasks under calibrated CPU throttling', () => {
   // The caps are telegram-tt's own worst task on the same run (`pnpm perf:compare --scenario open-media-chat`) plus 3%, see
-  // docs/reports/slice-media-5a1.md. MEDIA_OPEN_CAP_MS is that number.
-  const MEDIA_OPEN_CAP_MS = Number(process.env.MEDIA_OPEN_CAP_MS || 204);
+  // docs/reports/slice-media-5a1.md. MEDIA_OPEN_CAP_MS is that number: tt's worst task 225 ms (113-225 over 9 runs) plus 3%, 232 ms.
+  const MEDIA_OPEN_CAP_MS = Number(process.env.MEDIA_OPEN_CAP_MS || 232);
 
   test("opening a chat of photos and scrolling its history stays under telegram-tt's worst task", async ({ page }) => {
     await openMedia(page);
