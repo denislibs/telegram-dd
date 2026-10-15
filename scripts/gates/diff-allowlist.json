@@ -535,6 +535,10 @@
     "src/hooks/useTextLanguage.ts": {
       "reason": "Hook ported with accessor parameters and accessor results (porting guide 4.2): a component runs once, so refs / signals / effects take their frameact forms.",
       "maxRatio": 0.58
+    },
+    "src/components/middle/footer/FooterActionBar.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for the main button and the side slots, a keyed Show for tt's `key={mainButton.key}`); the markup, the classes and the logic are tt's.",
+      "maxRatio": 0.52
     }
   }
 }

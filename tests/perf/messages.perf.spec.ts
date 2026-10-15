@@ -14,7 +14,7 @@ const LIST = '#MiddleColumn .MessageList';
 
 async function openMessages(page: Page) {
   await openApp(page, '/#?mockScenario=messages');
-  await expect(page.locator(ROW)).toHaveCount(4);
+  await expect(page.locator(ROW)).toHaveCount(6);
   await page.waitForTimeout(1000);
 }
 
@@ -98,6 +98,25 @@ test.describe('message list: long tasks under 4x CPU throttling', () => {
           await page.waitForTimeout(80);
         }
         await page.waitForTimeout(500);
+      },
+      { maxMs: 204 },
+    );
+  });
+
+  // The group (sender groups with avatars, an album stub, forwards) and the channel: a cold open of each, after a warm-up open
+  // of the first chat, with the same cap
+  test("opening the group and the channel stays under telegram-tt's worst task (204 ms)", async ({ page }) => {
+    await openMessages(page);
+    await openChat(page, 'Bob Reader');
+    await page.waitForTimeout(800);
+
+    await expectNoLongTasks(
+      page,
+      async () => {
+        for (const name of ['Team Chat', 'Daily News', 'Team Chat']) {
+          await openChat(page, name);
+          await page.waitForTimeout(600);
+        }
       },
       { maxMs: 204 },
     );

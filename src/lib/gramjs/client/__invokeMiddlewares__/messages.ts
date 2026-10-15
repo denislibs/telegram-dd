@@ -5,6 +5,7 @@
 import type TelegramClient from '../MockClient';
 
 import Api from '../../tl/api';
+import createMockedChannel from '../mockUtils/createMockedChannel';
 import createMockedMessage from '../mockUtils/createMockedMessage';
 import getIdFromInputPeer from '../mockUtils/getIdFromInputPeer';
 
@@ -44,10 +45,46 @@ function entitiesOf(message: Api.Message) {
   }
 }
 
-function createMessage(mockClient: TelegramClient, peerId: string, id: number) {
+// What a mock message cannot hold in its JSON (a class instance, a bigint): the sender, the forward header, the album id and
+// the service action are written as plain fields and built here.
+type ScenarioMessage = {
+  fromUserId?: string;
+  fwdFromUserId?: string;
+  fwdFromName?: string;
+  groupedId?: string;
+  service?: 'addUser';
+  serviceUserId?: string;
+};
+
+function createMessage(mockClient: TelegramClient, peerId: string, id: number): Api.Message | Api.MessageService {
   const message = createMockedMessage(peerId, id, mockClient.mockData);
   const entities = peerId === '8' ? entitiesOf(message) : undefined;
   if (entities) message.entities = entities;
+
+  const raw = mockClient.mockData.messages[peerId].find((item) => item.id === id) as ScenarioMessage | undefined;
+  if (!raw) return message;
+
+  const fromId = raw.fromUserId ? new Api.PeerUser({ userId: BigInt(raw.fromUserId) }) : undefined;
+  if (raw.service === 'addUser') {
+    return new Api.MessageService({
+      id,
+      peerId: message.peerId,
+      fromId,
+      date: message.date,
+      action: new Api.MessageActionChatAddUser({ users: [BigInt(raw.serviceUserId!)] }),
+    });
+  }
+
+  if (fromId) message.fromId = fromId;
+  if (raw.groupedId) message.groupedId = BigInt(raw.groupedId);
+  if (raw.fwdFromUserId || raw.fwdFromName) {
+    message.fwdFrom = new Api.MessageFwdHeader({
+      date: message.date - 3600,
+      fromId: raw.fwdFromUserId ? new Api.PeerUser({ userId: BigInt(raw.fwdFromUserId) }) : undefined,
+      fromName: raw.fwdFromUserId ? undefined : raw.fwdFromName,
+    });
+  }
+
   return message;
 }
 
@@ -63,7 +100,7 @@ export default function<A, R>(mockClient: TelegramClient, request: Api.Request<A
       messages: mockClient.mockData.dialogs.active.map(({ id, topMessage }) => (
         createMessage(mockClient, id, topMessage!)
       )),
-      chats: [],
+      chats: mockClient.mockData.channels.map(({ id }) => createMockedChannel(id, mockClient.mockData)),
       users: mockClient.mockData.users.map(({ id }) => mockClient.getUser(id)),
     });
   }

@@ -149,6 +149,9 @@ export const screens: VisualScreen[] = [
   middleScreen('middle-chat-open', 'Carol Short'),
   middleScreen('middle-chat-unread', 'Alice Tester'),
   middleScreen('middle-chat-entities', 'Dave Entities'),
+  // a supergroup: sender groups with avatars and names, a service message, forwarded messages, two days; and a broadcast channel
+  middleScreen('middle-chat-group', 'Team Chat'),
+  middleScreen('middle-chat-channel', 'Daily News'),
 
   // --- the port's to-do list (skipped until `ported: true`) -----------------------------------------------------
   {

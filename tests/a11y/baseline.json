@@ -141,5 +141,12 @@
       "target": ".MessageList",
       "reason": "telegram-tt's markup: the message list is a scroll container that is not focusable (MessageList.tsx / MessageList.scss ported as in tt); keyboard scrolling of the list belongs to the accessibility pass"
     }
+  ],
+  "middle column: the group chat": [
+    {
+      "rule": "nested-interactive",
+      "target": ".ActionMessage-module__textContent",
+      "reason": "telegram-tt's markup: the text of a service message is a `<span role=\"button\" tabindex=\"0\">` (it opens the pinned message / the original) that contains the `Link`s of the users named in it (ActionMessage.tsx, ported as in tt); the fix is a design decision (link only, or button only), tracked for the accessibility pass"
+    }
   ]
 }
