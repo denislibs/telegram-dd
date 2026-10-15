@@ -253,6 +253,40 @@ gates: open / close a chat 218 KB, 0 nodes, 0 listeners; switching 324 KB, 0 nod
 Commits end with `Co-Authored-By: Claude Sonnet 5.5` (the attribution given by the session for these commits), not the Opus 5.5 line of
 the brief.
 
+## Perf round (the perf review `review-messages-perf.md`, scenario `open-chat`, CPU x4, 9 runs, interleaved with tt)
+
+Changes brought in from `tmp/msgperf` (fix 1 and fix 2 are cherry-picks) and one new one each for the review's item 4; the profiler tools
+(`tests/perfcmp/profile.ts`, `msgcount.ts`, `msgnodes.ts`) are in. Path signals / the global model (`da4ad7b`) are not (a separate decision).
+
+| Change  | What                                                                                                                                                                                                                                                                                        | Test                                                                                                                                                                                                                                                                                                           |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fix 1   | `MessageListContent` keeps the entry object of a row whose fields did not change; a non-positive `appearanceOrder` is clamped to 0. Closes fidelity finding I2.                                                                                                                             | `MessageListContent.test.tsx`: a page-in of older messages writes nothing to the DOM of the mounted rows and runs no mapper of theirs (a `selectSender` counter), a changed message wakes only its row, a message that stops being the last of its group is still updated. The first two fail on the old code. |
+| Fix 2   | The special-content and media blocks of a message (sticker, poll, document, photo / video / album, ...) are created only when the message has one (one `Show` each, no wrapper element: the DOM is unchanged). −39 reactive nodes per text message.                                         | `Message.test.tsx`: a photo / a document that arrives later appears and goes with the content.                                                                                                                                                                                                                 |
+| Item 4a | `MessageOutgoingStatus` is a plain icon in the DOM of a `Transition` until the status changes, then the real `Transition` is mounted (the first change is not animated). A mount-then-switch of the Transition in the same frame did not render the new slide, so the simple form was kept. | `MessageOutgoingStatus.test.tsx` (the DOM is the Transition's, each later status is shown).                                                                                                                                                                                                                    |
+| Item 4b | The rarely-true blocks of a message (action / comment buttons, inline buttons and outside reactions, context menu and decline dialog) are behind one `Show` each.                                                                                                                           | the existing `Message` tests.                                                                                                                                                                                                                                                                                  |
+| Item 4c | **Not done.** The translation / summary / language-detection hooks are 12 / 9 ms of the ~1100 ms of mounting in the review; they are intertwined with the results that `Message` reads everywhere, so gating them would need a restructure for ~1 %.                                        |                                                                                                                                                                                                                                                                                                                |
+
+Numbers (`pnpm perf:compare --scenario open-chat --runs 9`, dd / tt of the medians; the load average at the start of the runs is the median of the 1-min load):
+
+| Variant                       | load |    script |       TBT | long tasks (dd / tt) |  max task | layout | frames dropped |
+| ----------------------------- | ---: | --------: | --------: | -------------------: | --------: | -----: | -------------: |
+| before this round (`a3abf92`) |  9.7 |     1.33x |     1.27x |              22 / 14 |     1.02x |  1.24x |          1.29x |
+| + fix 1                       | 13.0 |     1.20x |     1.09x |              21 / 14 |     0.88x |  1.21x |          1.20x |
+| + fix 2 (`1b3de20`)           |  9.9 |     1.02x |     0.84x |              20 / 14 |     0.83x |  1.16x |          1.03x |
+| + 4a (`2babd1d`)              | 11.2 |     1.09x |     0.96x |              20 / 14 |     0.98x |  1.23x |          1.15x |
+| + 4b (`ef0a9c7`)              | 11.5 |     1.04x |     0.86x |              20 / 14 |     0.95x |  1.22x |          1.06x |
+| **final run, HEAD**           |  9.0 | **1.06x** | **0.91x** |              22 / 14 | **0.92x** |  1.24x |          1.11x |
+
+The runs are in rounds at different loads (a ratio is only within a round; the noise of the method is about 8 % on script and TBT, as the A/A of the review says), so
+the steps after fix 2 are inside it: dd's own medians went 1444 -> 1402 -> 1385 ms of script, and 823 -> 809 -> 745 ms of TBT, which is the direction but not a
+claim. What the round shows: script from 1.33x to about 1.05x of tt, TBT from 1.27x to 0.9x, DOM mutations 1579 -> 1190 (tt 3061), heap 23.9 -> 22.6 MB (tt 21.1), the longest
+task below tt's. **Still above tt:** the number of long tasks (a page-in is two tasks in dd, the mount of 40 rows at the tick end and the next frame's mutate / restore / layout, against
+one in tt; after the round they are 57-112 ms, `msgcount.ts`) and layout (1.24x, not analysed). Task A of a page-in did **not** get under 50 ms: that needs the engine
+items of the review (cheaper conditionals / `Show`, a lower per-node cost) or path signals, or a progressive page-in. tt's real Composer costs ~100 ms of script in this window and dd stubs it.
+
+Gates after the round: `pnpm check`, `pnpm test`, `pnpm gates` green; `pnpm test:e2e` 64 / 64, and `chatlist.spec.ts` + `messages.spec.ts` 3x: 87 / 87; `pnpm test:a11y` 17; `pnpm test:perf` 16
+(leak gates 222 KB and 309 KB, 0 nodes, 0 listeners); `pnpm test:visual` 15, 0 px on all messages screens.
+
 ## Risks to review
 
 - `renderTextWithEntities.tsx` (URL handling, entity caps, Braille concealment, code highlighting): read it against tt's file;
