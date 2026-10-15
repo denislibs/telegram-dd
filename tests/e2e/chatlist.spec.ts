@@ -652,7 +652,6 @@ test.describe('chat list', () => {
 
   test('no gap after a jump by scrollTop assignment (down, then up) once the user scrolls on', async ({ page }) => {
     test.setTimeout(120_000); // 400 chats and ~80 scroll steps; a loaded machine doubles that
-    test.setTimeout(120_000); // 400 chats and ~80 scroll steps; a loaded machine doubles that
     await openApp(page);
     await addContacts(page, 400);
     await expect.poll(() => visualOrder(page).then((titles) => titles[0])).toBe('Contact 400');
@@ -684,5 +683,63 @@ test.describe('chat list', () => {
       await page.waitForTimeout(150);
     }
     await expectNoGap(page, 'after the jump down');
+  });
+  type GapSample = { above: number; below: number; fresh: number; top: number; at: number; rows: number };
+
+  // A page-in mounts its rows over a few frames (`useProgressiveIds`, 15 per frame); the rows that wait are below the
+  // visible part, so the viewport must show no empty space at ANY frame of it, not only once it has settled.
+  test('no gap in any frame while a page-in is mounted progressively, scrolling down and up', async ({ page }) => {
+    test.setTimeout(120_000);
+    await openApp(page);
+    await addContacts(page, 400);
+    await expect.poll(() => visualOrder(page).then((titles) => titles[0])).toBe('Contact 400');
+    await page.mouse.move(150, 400);
+
+    await page.evaluate((selector) => {
+      const list = document.querySelector('#LeftColumn .Transition_slide-active > .chat-list') as HTMLElement;
+      const seen = new WeakSet<Element>();
+      const samples: GapSample[] = [];
+      (window as unknown as { __samples: typeof samples }).__samples = samples;
+      const sample = () => {
+        const box = list.getBoundingClientRect();
+        const rows = [...document.querySelectorAll<HTMLElement>(selector)];
+        let fresh = 0;
+        for (const row of rows) {
+          if (!seen.has(row)) {
+            seen.add(row);
+            fresh++;
+          }
+        }
+        const rects = rows.map((row) => row.getBoundingClientRect());
+        samples.push({
+          above: Math.max(0, Math.round(Math.min(...rects.map((rect) => rect.top)) - box.top)),
+          below: Math.max(0, Math.round(box.bottom - Math.max(...rects.map((rect) => rect.bottom)))),
+          fresh,
+          top: Math.round(list.scrollTop),
+          at: Math.round(performance.now()),
+          rows: rows.length,
+        });
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    }, ACTIVE_ROW);
+
+    for (let i = 0; i < 24; i++) {
+      await page.mouse.wheel(0, 500);
+      await page.waitForTimeout(120);
+    }
+    for (let i = 0; i < 24; i++) {
+      await page.mouse.wheel(0, -500);
+      await page.waitForTimeout(120);
+    }
+    await page.waitForTimeout(500);
+
+    const samples = await page.evaluate(() => (window as unknown as { __samples: GapSample[] }).__samples);
+    // a page-in really was progressive: a frame that mounted a full chunk is followed by one that mounted more
+    const progressive = samples.filter((sample, i) => sample.fresh >= 10 && (samples[i + 1]?.fresh ?? 0) > 0);
+    expect(progressive.length, 'frames of a page-in that went on in the next frame').toBeGreaterThan(0);
+    // the list's own 8 px top padding shows above the first row at scrollTop 0: not a gap
+    const gaps = samples.map((sample) => (sample.top === 0 ? 0 : sample.above) + sample.below);
+    expect(Math.max(...gaps), 'the worst gap of any frame').toBe(0);
   });
 });

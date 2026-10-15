@@ -2,6 +2,7 @@
 // machine and its load, and (for tt vs tt) the measured noise of the method.
 import type { RunResult } from './runner';
 
+import { type CpuCalibration, describeCalibration } from './cpuCalibration';
 import { INFORMATIONAL, METRIC_BY_KEY, METRICS } from './metrics';
 import { formatNumber, formatRatio, median, quantile, ratio, relativeMad } from './stats';
 
@@ -48,7 +49,7 @@ export interface Machine {
 export interface Report {
   generatedAt: string;
   mode: 'compare' | 'aa';
-  config: { runs: number; cpuRate: number; trace: boolean; scenarios: string[] };
+  config: { runs: number; cpuRate: number; cpuCalibration?: CpuCalibration; trace: boolean; scenarios: string[] };
   machine: Machine;
   apps: AppSummary[];
   scenarios: ScenarioResult[];
@@ -173,6 +174,9 @@ export function renderMarkdown(report: Report): string {
   for (const app of report.apps) lines.push(`| ${app.label} | ${app.description} |`);
   const { machine } = report;
   lines.push(`| machine | ${machine.cpu}, ${machine.cores} cores, ${machine.memoryGb} GB, ${machine.platform} |`);
+  if (report.config.cpuCalibration) {
+    lines.push(`| CPU throttling | ${describeCalibration(report.config.cpuCalibration)} |`);
+  }
   lines.push(`| software | node ${machine.node}, Chromium ${machine.chromium} (headless) |`);
   lines.push(`| load (\`uptime\`) before | ${machine.uptimeBefore} |`);
   lines.push(`| load (\`uptime\`) after | ${machine.uptimeAfter} |`);
