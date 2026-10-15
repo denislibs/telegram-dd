@@ -77,8 +77,8 @@ test('type and send: the message appears at the bottom, sending then sent, the c
 }) => {
   await openMessages(page);
   await openChat(page, 'Carol Short');
-  // Carol is not on top: the channel is
-  await expect(page.locator(ROW).first()).toContainText('Daily News');
+  // Carol is not on top: the group is
+  await expect(page.locator(ROW).first()).toContainText('Team Chat');
   const before = await page.locator(ITEM).count();
 
   await typeText(page, 'Hello from the composer [slow]');
