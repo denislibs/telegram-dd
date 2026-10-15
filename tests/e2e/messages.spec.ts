@@ -150,7 +150,7 @@ test.describe('message list', () => {
     await expect(page.locator(`#MiddleColumn .MiddleHeader`)).toContainText('Carol Short');
     await expect(page.locator(ITEM)).toHaveCount(3);
     await expect(page.locator(`${LIST} .sticky-date`)).toHaveCount(1);
-    await expect(page.locator(`${LIST} .sticky-date`)).toContainText('December 26, 2023');
+    await expect(page.locator(`${LIST} .sticky-date`)).toContainText('December 25, 2023');
     // own and other bubbles, time and the outgoing status
     await expect(page.locator(`${LIST} .Message.own`)).toHaveCount(1);
     await expect(page.locator(`${LIST} .Message:not(.own)`)).toHaveCount(2);

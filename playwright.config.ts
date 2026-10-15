@@ -19,6 +19,9 @@ export default defineConfig({
     baseURL: DEV_URL,
     trace: 'retain-on-failure',
     serviceWorkers: 'block',
+    // the dates of the mocked scenarios are written in UTC: the same day separators and times on every machine and in CI
+    locale: 'en-US',
+    timezoneId: 'UTC',
     ...devices['Desktop Chrome'],
   },
   projects: [

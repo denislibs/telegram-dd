@@ -202,27 +202,37 @@ describe('ActionMessage', () => {
   });
 
   it('hides the buttons of a request when it expires, without any update of the message', async () => {
-    seed();
-    const period = 3600;
-    setGlobal({ ...getGlobal(), appConfig: { ...getGlobal().appConfig, noForwardsRequestExpirePeriod: period } });
-    // expires in about a second
-    const date = Math.floor(Date.now() / 1000) - period + 1;
-    setGlobal(
-      addMessages(getGlobal(), [
-        {
-          ...pinMessage(8, 5),
-          date,
-          replyInfo: undefined,
-          content: { action: { type: 'noForwardsRequest', isExpired: false, isEnabled: true } },
-        } as unknown as ApiMessage,
-      ]),
-    );
-    const el = await mount(8);
-    expect(el.querySelector('[role="group"]')).not.toBeNull();
+    // a fixed clock and a fake timer: the expiry is exactly ten seconds away and nothing waits on a real one
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'], now: new Date('2030-01-01T00:00:00Z') });
+    try {
+      seed();
+      const period = 3600;
+      setGlobal({ ...getGlobal(), appConfig: { ...getGlobal().appConfig, noForwardsRequestExpirePeriod: period } });
+      const date = Math.floor(Date.now() / 1000) - period + 10;
+      setGlobal(
+        addMessages(getGlobal(), [
+          {
+            ...pinMessage(8, 5),
+            date,
+            replyInfo: undefined,
+            content: { action: { type: 'noForwardsRequest', isExpired: false, isEnabled: true } },
+          } as unknown as ApiMessage,
+        ]),
+      );
+      const el = await mount(8);
+      expect(el.querySelector('[role="group"]')).not.toBeNull();
 
-    await new Promise((resolve) => setTimeout(resolve, 1400));
-    await frames();
+      // just before the expiry the buttons are still there
+      vi.advanceTimersByTime(9_000);
+      await frames();
+      expect(el.querySelector('[role="group"]')).not.toBeNull();
 
-    expect(el.querySelector('[role="group"]')).toBeNull();
+      // the timer of the component fires at the expiry
+      vi.advanceTimersByTime(2_000);
+      await frames();
+      expect(el.querySelector('[role="group"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

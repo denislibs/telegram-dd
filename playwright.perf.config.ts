@@ -17,6 +17,9 @@ export default defineConfig({
   use: {
     baseURL: PREVIEW_URL,
     serviceWorkers: 'block',
+    // the dates of the mocked scenarios are written in UTC: the same day separators and times on every machine and in CI
+    locale: 'en-US',
+    timezoneId: 'UTC',
     ...devices['Desktop Chrome'],
   },
   webServer: {

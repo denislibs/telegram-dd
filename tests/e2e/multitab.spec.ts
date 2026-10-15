@@ -64,8 +64,19 @@ test('a chat written in tab A reaches tab B, and tab B does not echo it back', a
   expect(tabsB[tabB]).toBe(false);
   await expect.poll(async () => Object.keys(await tabsOf(pageA)).length).toBe(2);
 
-  // quiet down, then count what B has posted so far
-  await pageB.waitForTimeout(800);
+  // quiet down, then count what B has posted so far. "Quiet" is measured: B posts while it boots (its first sync, the folders,
+  // the language pack), which takes longer on a slow machine, and a write of B that races with the diff of A is sent from a
+  // baseline that does not have A's chat yet (it looks like an echo). B has to be silent for 1.5 s.
+  await expect
+    .poll(
+      async () => {
+        const before = await pageB.evaluate(() => (window as unknown as AppWindow).__sent.length);
+        await pageB.waitForTimeout(1500);
+        return (await pageB.evaluate(() => (window as unknown as AppWindow).__sent.length)) === before;
+      },
+      { timeout: 30_000, intervals: [0] },
+    )
+    .toBe(true);
   const sentByBBefore = await pageB.evaluate(() => (window as unknown as AppWindow).__sent.length);
 
   // A: a chat appears (an API update would write exactly this) and A's own tab state changes
