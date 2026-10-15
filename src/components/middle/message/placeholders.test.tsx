@@ -4,12 +4,7 @@ import { render } from 'frameact/dom';
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type {
-  ApiKeyboardButton,
-  ApiMediaTodo,
-  ApiMessage,
-  ApiMessagePoll,
-} from '../../../api/types';
+import type { ApiKeyboardButton, ApiMediaTodo, ApiMessage, ApiMessagePoll } from '../../../api/types';
 
 import { container, useDomHarness } from '../../../lib/kit/testing/dom';
 import {

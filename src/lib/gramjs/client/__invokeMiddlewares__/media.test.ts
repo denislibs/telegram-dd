@@ -58,10 +58,10 @@ function mockClient() {
   return { mockData, getDialogs: () => [], getUser: () => undefined } as unknown as TelegramClient;
 }
 
-async function download(client: TelegramClient, location: Api.TypeInputFileLocation, partSize: number) {
+function download(client: TelegramClient, location: Api.TypeInputFileLocation, partSize: number) {
   const parts: Uint8Array[] = [];
   for (let offset = 0; ; offset += partSize) {
-    const result = (await media(
+    const result = (media(
       client,
       new Api.upload.GetFile({ location, offset: BigInt(offset), limit: partSize }),
     )) as Api.upload.File;
@@ -75,12 +75,12 @@ describe('media middleware: upload.GetFile', () => {
   const photoLocation = new Api.InputPhotoFileLocation({
     id: 301n,
     accessHash: 1n,
-    fileReference: new Uint8Array([0]) as Buffer,
+    fileReference: new Uint8Array([0]),
     thumbSize: 'x',
   });
 
-  it('answers each part with the slice at its offset, so 512 KB parts reassemble a big file', async () => {
-    const parts = await download(mockClient(), photoLocation, 512 * 1024);
+  it('answers each part with the slice at its offset, so 512 KB parts reassemble a big file', () => {
+    const parts = download(mockClient(), photoLocation, 512 * 1024);
 
     expect(parts).toHaveLength(7);
     expect(parts[0].length).toBe(512 * 1024);
@@ -90,42 +90,42 @@ describe('media middleware: upload.GetFile', () => {
     expect(Buffer.from(whole).equals(Buffer.from(bytes))).toBe(true);
   });
 
-  it('answers a request past the end with no bytes', async () => {
-    const result = (await media(
+  it('answers a request past the end with no bytes', () => {
+    const result = (media(
       mockClient(),
       new Api.upload.GetFile({ location: photoLocation, offset: BigInt(SIZE + 10), limit: 4096 }),
     )) as Api.upload.File;
     expect(result.bytes.length).toBe(0);
   });
 
-  it('serves the poster of a video for a document thumb size and the video otherwise', async () => {
+  it('serves the poster of a video for a document thumb size and the video otherwise', () => {
     const client = mockClient();
     const documentLocation = (thumbSize: string) =>
       new Api.InputDocumentFileLocation({
         id: 401n,
         accessHash: 1n,
-        fileReference: new Uint8Array([0]) as Buffer,
+        fileReference: new Uint8Array([0]),
         thumbSize,
       });
 
-    expect((await download(client, documentLocation('m'), 4096))[0].length).toBe(50);
-    expect((await download(client, documentLocation(''), 4096))[0].length).toBe(1000);
+    expect((download(client, documentLocation('m'), 4096))[0].length).toBe(50);
+    expect((download(client, documentLocation(''), 4096))[0].length).toBe(1000);
   });
 
-  it('passes a location it does not know', async () => {
+  it('passes a location it does not know', () => {
     const location = new Api.InputDocumentFileLocation({
       id: 999n,
       accessHash: 1n,
-      fileReference: new Uint8Array([0]) as Buffer,
+      fileReference: new Uint8Array([0]),
       thumbSize: '',
     });
-    expect(await media(mockClient(), new Api.upload.GetFile({ location, offset: 0n, limit: 4096 }))).toBe('pass');
+    expect(media(mockClient(), new Api.upload.GetFile({ location, offset: 0n, limit: 4096 }))).toBe('pass');
   });
 });
 
 describe('media middleware: history', () => {
-  const history = async (extra: Partial<ConstructorParameters<typeof Api.messages.GetHistory>[0]> = {}) => {
-    const result = (await media(
+  const history = (extra: Partial<ConstructorParameters<typeof Api.messages.GetHistory>[0]> = {}) => {
+    const result = (media(
       mockClient(),
       new Api.messages.GetHistory({
         peer: new Api.InputPeerUser({ userId: 21n, accessHash: 1n }),
@@ -142,13 +142,13 @@ describe('media middleware: history', () => {
     return result.messages as Api.Message[];
   };
 
-  it('pages the history newest first', async () => {
-    expect((await history()).map((message) => message.id)).toEqual([4, 3]);
-    expect((await history({ offsetId: 3 })).map((message) => message.id)).toEqual([2, 1]);
+  it('pages the history newest first', () => {
+    expect((history()).map((message) => message.id)).toEqual([4, 3]);
+    expect((history({ offsetId: 3 })).map((message) => message.id)).toEqual([2, 1]);
   });
 
-  it('builds a photo at the declared size with a stripped thumbnail and an album id', async () => {
-    const message = (await history()).find((item) => item.id === 3)!;
+  it('builds a photo at the declared size with a stripped thumbnail and an album id', () => {
+    const message = (history()).find((item) => item.id === 3)!;
     const photo = (message.media as Api.MessageMediaPhoto).photo as Api.Photo;
 
     expect(message.groupedId).toBe(9n);
@@ -159,8 +159,8 @@ describe('media middleware: history', () => {
     expect([small.w, small.h]).toEqual([320, 240]);
   });
 
-  it('builds a GIF document with the video and animated attributes and a poster thumb', async () => {
-    const message = (await history()).find((item) => item.id === 4)!;
+  it('builds a GIF document with the video and animated attributes and a poster thumb', () => {
+    const message = (history()).find((item) => item.id === 4)!;
     const document = (message.media as Api.MessageMediaDocument).document as Api.Document;
 
     expect(document.mimeType).toBe('video/webm');

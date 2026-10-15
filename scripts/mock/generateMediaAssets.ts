@@ -22,7 +22,22 @@ import { resolve } from 'node:path';
 
 import { photoAssetUrl, PHOTOS, posterAssetUrl, videoAssetUrl, VIDEOS } from './mediaSpec.ts';
 
-import { strippedPhotoToJpg } from '../../src/lib/gramjs/Utils.ts';
+// The fixed JPEG header of `strippedPhotoToJpg` (src/lib/gramjs/Utils.ts) is read from its source: importing the module would pull
+// the whole GramJS type graph into the script project's typecheck.
+const JPEG_HEADER = Buffer.from(
+  /JPEG_HEADER = bufferFromHex\('([0-9a-f]+)'\)/.exec(
+    readFileSync(resolve(import.meta.dirname, '../../src/lib/gramjs/Utils.ts'), 'utf8'),
+  )![1],
+  'hex',
+);
+
+/** What the client does with a stripped thumbnail (`strippedPhotoToJpg`): the fixed header, the scan data, the footer. */
+function strippedPhotoToJpg(stripped: Buffer) {
+  const header = Buffer.from(JPEG_HEADER);
+  header[164] = stripped[1];
+  header[166] = stripped[2];
+  return Buffer.concat([header, stripped.subarray(3), Buffer.from([0xff, 0xd9])]);
+}
 
 const OUT = resolve(import.meta.dirname, '../../src/lib/gramjs/client/__data__');
 

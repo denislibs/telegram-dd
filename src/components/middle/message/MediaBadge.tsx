@@ -15,7 +15,9 @@ type OwnProps = {
 
 const MediaBadge = (rawProps: OwnProps) => {
   const props = mergeProps({ position: 'left' }, rawProps) as OwnProps & Required<Pick<OwnProps, 'position'>>;
-  const fullClassName = createMemo(() => buildClassName(styles.badge, props.position === 'right' && styles.right, props.className));
+  const fullClassName = createMemo(() =>
+    buildClassName(styles.badge, props.position === 'right' && styles.right, props.className),
+  );
 
   return (
     <div ref={props.ref} class={fullClassName()}>

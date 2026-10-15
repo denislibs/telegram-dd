@@ -6,9 +6,8 @@
 import type { Page } from '@playwright/test';
 import { statSync } from 'node:fs';
 
-import { calculateAlbumLayout } from '../../src/components/middle/message/helpers/calculateAlbumLayout';
 import { expect, test } from './fixtures';
-import { ITEM, LIST, MOCK_NOISE, openChat, openScenario, scrollListTo, settle, type TestWindow } from './middleHelpers';
+import { LIST, MOCK_NOISE, openChat, openScenario, scrollListTo, settle, type TestWindow } from './middleHelpers';
 
 test.use({ strictOptions: { ignoreConsole: MOCK_NOISE } });
 
@@ -24,6 +23,7 @@ const SPOILER = 7;
 const SQUARE = 21; // photo 120: 640x640, with a caption, outgoing; near the bottom, so it is mounted when the chat opens
 const ALBUM4 = [22, 23, 24, 25];
 
+const ALBUM_LAYOUT_MODULE = '/src/components/middle/message/helpers/calculateAlbumLayout.ts';
 const albumOf = (page: Page, which: 'first' | 'last') => page.locator(`${LIST} .Album`)[which]();
 const message = (page: Page, id: number) => page.locator(`${LIST} .Message[data-message-id="${id}"]`);
 
@@ -61,8 +61,9 @@ test.describe('photos', () => {
             entry.sources?.some(
               (source) => source.node && (source.node as Element).closest?.(`[data-message-id="${id}"] .media-inner`),
             )
-          )
+          ) {
             w.__photo.shifts += entry.value;
+          }
         }
       }).observe({ type: 'layout-shift', buffered: true });
 
@@ -127,8 +128,8 @@ test.describe('photos', () => {
     // no reflow: the box is the same from the first frame to the last (a layout shift of the photo is a missing dimension)
     const widths = new Set(frames.map((event: any) => event.width));
     const heights = new Set(frames.map((event: any) => event.height));
-    expect(widths.size, `widths ${[...widths]}`).toBe(1);
-    expect(heights.size, `heights ${[...heights]}`).toBe(1);
+    expect(widths.size, `widths ${[...widths].join(',')}`).toBe(1);
+    expect(heights.size, `heights ${[...heights].join(',')}`).toBe(1);
     expect(shifts).toBe(0);
   });
 
@@ -224,7 +225,18 @@ test.describe('albums', () => {
       }
       // the album is one message element holding all parts: its id is the main message's
       const { items, ratio } = await albumRects(page, label === '2' ? 'first' : 'last');
-      const layout = calculateAlbumLayout(RATIOS[label]);
+      // the app's own layout function, from the module the dev server serves (importing it here would pull the whole API type graph
+      // into the typecheck of the scripts)
+      const layout = await page.evaluate(
+        async ([module, ratios]) => {
+          const { calculateAlbumLayout } = await import(/* @vite-ignore */ module);
+          return calculateAlbumLayout(ratios) as {
+            aspectRatio: number;
+            items: { rect: { x: number; y: number; width: number; height: number } }[];
+          };
+        },
+        [ALBUM_LAYOUT_MODULE, RATIOS[label]] as const,
+      );
 
       expect(items).toHaveLength(ids.length);
       expect(Number(ratio)).toBeCloseTo(layout.aspectRatio, 3);

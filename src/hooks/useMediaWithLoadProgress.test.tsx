@@ -16,9 +16,9 @@ const api = vi.hoisted(() => ({ callApi: vi.fn(), cancelApiProgress: vi.fn() }))
 vi.mock('../api/gramjs', () => api);
 vi.mock('../util/cacheApi', () => ({
   Type: { Blob: 0, Text: 1 },
-  fetch: vi.fn(async () => undefined),
-  save: vi.fn(async () => true),
-  remove: vi.fn(async () => true),
+  fetch: vi.fn(() => Promise.resolve(undefined)),
+  save: vi.fn(() => Promise.resolve(true)),
+  remove: vi.fn(() => Promise.resolve(true)),
 }));
 vi.mock('./data/useSelector', () => ({ default: () => () => true }));
 
