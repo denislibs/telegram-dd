@@ -7,8 +7,8 @@ import type { MessageList } from '../../../../types';
 import type { ClipboardTextContent, MessageCopyRequest } from '../../../../types/messageCopy';
 
 import { isChatChannel } from '../../../../global/helpers';
-import { getPeerTitle } from '../../../../global/helpers/peers';
 import { generateBrailleSpoiler } from '../../../../global/helpers/messageSummary';
+import { getPeerTitle } from '../../../../global/helpers/peers';
 import { renderMessageSummaryHtml } from '../../../../global/helpers/renderMessageSummaryHtml';
 import {
   selectAllowedMessageActionsSlow,

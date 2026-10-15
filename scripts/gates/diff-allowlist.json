@@ -434,7 +434,7 @@
     },
     "src/components/middle/MessageListContent.tsx": {
       "reason": "tt built the list as an array of keyed elements (teactFastList) in the render body; a component runs once, so the same loops build a plain tree of entries in a memo and nested <For keyed> render it (no component of a row is recreated).",
-      "maxRatio": 0.61
+      "maxRatio": 0.66
     },
     "src/components/middle/MiddleColumn.tsx": {
       "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",

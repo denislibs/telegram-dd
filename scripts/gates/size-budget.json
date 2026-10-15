@@ -15,12 +15,12 @@
     "assets/MenuSeparator.js": {
       "kind": "entry",
       "baseline": {
-        "brotli": 12456,
-        "gzip": 13761
+        "brotli": 12444,
+        "gzip": 13737
       },
       "budget": {
-        "brotli": 13702,
-        "gzip": 15138
+        "brotli": 13689,
+        "gzip": 15111
       }
     },
     "assets/base64.js": {
@@ -92,12 +92,12 @@
     "assets/index.js": {
       "kind": "entry",
       "baseline": {
-        "brotli": 88240,
-        "gzip": 101044
+        "brotli": 88259,
+        "gzip": 101079
       },
       "budget": {
-        "brotli": 97065,
-        "gzip": 111149
+        "brotli": 97085,
+        "gzip": 111187
       }
     },
     "assets/index.css": {
@@ -136,12 +136,12 @@
     "assets/stopEvent.js": {
       "kind": "entry",
       "baseline": {
-        "brotli": 79063,
-        "gzip": 92533
+        "brotli": 79218,
+        "gzip": 92673
       },
       "budget": {
-        "brotli": 86970,
-        "gzip": 101787
+        "brotli": 87140,
+        "gzip": 101941
       }
     },
     "assets/waveWorker.min.js": {
@@ -236,22 +236,22 @@
   "totals": {
     "js": {
       "baseline": {
-        "brotli": 1336031,
-        "gzip": 1583854
+        "brotli": 1295386,
+        "gzip": 1531378
       },
       "budget": {
-        "brotli": 1469635,
-        "gzip": 1742240
+        "brotli": 1424925,
+        "gzip": 1684516
       }
     },
     "css": {
       "baseline": {
-        "brotli": 78566,
-        "gzip": 91602
+        "brotli": 78804,
+        "gzip": 91913
       },
       "budget": {
-        "brotli": 86423,
-        "gzip": 100763
+        "brotli": 86685,
+        "gzip": 101105
       }
     }
   }
