@@ -26,6 +26,22 @@ import { groupMessages, isAlbum, isDocumentGroup } from './helpers/groupMessages
 
 import MessageListContent from './MessageListContent';
 
+// The mapper of `Message` is counted through its selectors: a mounted row must not run it again when the list pages in
+const selectSenderCalls = vi.hoisted(() => [] as number[]);
+vi.mock('../../global/selectors', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../global/selectors')>();
+  return {
+    ...original,
+    selectSender: (
+      global: Parameters<typeof original.selectSender>[0],
+      message: Parameters<typeof original.selectSender>[1],
+    ) => {
+      selectSenderCalls.push(message.id);
+      return original.selectSender(global, message);
+    },
+  };
+});
+
 // The strings of the language pack are not loaded here: a text is `key{params}`, so the parameters can be checked
 vi.mock('../../util/localization', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../util/localization')>();
@@ -525,5 +541,79 @@ describe('MessageListContent', () => {
     await frames();
 
     expect(root.querySelector('.sender-group-container .Avatar[data-peer-id]')).toBe(avatar);
+  });
+
+  describe('a page-in keeps the rows that are mounted (stable entries)', () => {
+    const rowIds = (root: Element) => [...root.querySelectorAll<HTMLElement>('.Message')].map((el) => el.id);
+
+    // MutationObserver records are made even for a write of the same value: a row that was woken shows them
+    function watch(root: Element) {
+      const records: { id: string; type: string; name?: string | null }[] = [];
+      const observer = new MutationObserver((list) => {
+        for (const record of list) {
+          const row =
+            (record.target as Element).closest?.('.Message') ??
+            record.target.parentElement?.closest('.Message') ??
+            null;
+          records.push({ id: row?.id ?? '', type: record.type, name: record.attributeName });
+        }
+      });
+      observer.observe(root, { subtree: true, attributes: true, characterData: true, childList: true });
+      return { records, stop: () => observer.disconnect() };
+    }
+
+    it('does not touch the DOM or the mapper of the mounted rows when older messages are added', async () => {
+      const chatId = GROUP_ID;
+      const newer = Array.from({ length: 6 }, (_, i) =>
+        msg(chatId, { id: 100 + i, sender: i % 2 ? ALICE : BOB, at: 1000 + i * 30 }),
+      );
+      const { root, update } = await mountContent({ chatId, withUsers: true, messages: newer });
+      const mounted = rowIds(root);
+      expect(mounted).toHaveLength(6);
+      selectSenderCalls.length = 0;
+      const watcher = watch(root);
+
+      const older = Array.from({ length: 4 }, (_, i) =>
+        msg(chatId, { id: 90 + i, sender: i % 2 ? ALICE : BOB, at: 500 + i * 30 }),
+      );
+      update([...older, ...newer]);
+      await frames();
+      watcher.stop();
+
+      expect(rowIds(root)).toHaveLength(10);
+      const touched = watcher.records.filter((record) => mounted.includes(record.id) && record.type !== 'childList');
+      expect(touched, JSON.stringify(touched.slice(0, 5))).toEqual([]);
+      // no mapper run of a mounted row (new rows ask for their sender once or twice each)
+      expect(selectSenderCalls.filter((id) => id >= 100)).toEqual([]);
+    });
+
+    it('wakes the row of a message that changed, and only it', async () => {
+      const chatId = GROUP_ID;
+      const list = Array.from({ length: 5 }, (_, i) => msg(chatId, { id: 200 + i, sender: ALICE, at: 2000 + i * 30 }));
+      const { root, update } = await mountContent({ chatId, withUsers: true, messages: list });
+      selectSenderCalls.length = 0;
+
+      update(
+        list.map((message) => (message.id === 202 ? { ...message, content: { text: { text: 'edited' } } } : message)),
+      );
+      await frames();
+
+      expect(root.querySelector('#message-202')!.textContent).toContain('edited');
+      expect(root.querySelector('#message-201')!.textContent).not.toContain('edited');
+      expect(selectSenderCalls.filter((id) => id !== 202)).toEqual([]);
+    });
+
+    it('a message that is no longer the last one of its group is woken (its position changed)', async () => {
+      const chatId = GROUP_ID;
+      const first = msg(chatId, { id: 300, sender: ALICE, at: 3000 });
+      const { root, update } = await mountContent({ chatId, withUsers: true, messages: [first] });
+      expect(root.querySelector('#message-300')!.classList.contains('last-in-group')).toBe(true);
+
+      update([first, msg(chatId, { id: 301, sender: ALICE, at: 3030 })]);
+      await frames();
+
+      expect(root.querySelector('#message-300')!.classList.contains('last-in-group')).toBe(false);
+      expect(root.querySelector('#message-301')!.classList.contains('last-in-group')).toBe(true);
+    });
   });
 });
