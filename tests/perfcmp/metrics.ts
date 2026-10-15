@@ -151,11 +151,35 @@ export const METRICS: MetricDef[] = [
     source: 'scroll steps (fewer = the scroll finished sooner)',
     minDelta: 0,
   },
+  {
+    key: 'inputLatencyP50Ms',
+    label: 'input latency, median',
+    unit: 'ms',
+    digits: 0,
+    source: 'typing scenario: keydown until the frame after the update started',
+    minDelta: 8,
+  },
+  {
+    key: 'inputLatencyP95Ms',
+    label: 'input latency, p95',
+    unit: 'ms',
+    digits: 0,
+    source: 'typing scenario: 95th percentile of the 200 characters',
+    minDelta: 15,
+  },
+  {
+    key: 'inputLatencyMaxMs',
+    label: 'input latency, worst',
+    unit: 'ms',
+    digits: 0,
+    source: 'typing scenario: the slowest character',
+    minDelta: 30,
+  },
 ];
 
 export const METRIC_BY_KEY = new Map(METRICS.map((metric) => [metric.key, metric]));
 
 /** Metrics that describe the setup, not the app: shown in the report but left out of the A/A noise summary. */
-export const INFORMATIONAL = new Set(['windowMs', 'scrollFrames']);
+export const INFORMATIONAL = new Set(['windowMs', 'scrollFrames', 'messagesSent']);
 
 export type MetricValues = Record<string, number>;

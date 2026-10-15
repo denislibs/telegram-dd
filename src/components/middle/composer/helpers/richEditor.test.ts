@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import type { Editor, JSONContent } from '@tiptap/core';
+import { marked } from 'marked';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { __createRichEditor as createRichEditor } from './richEditor';
@@ -45,6 +46,15 @@ describe('createRichEditor', () => {
       type: 'doc',
       content: [{ type: 'paragraph', content: [{ type: 'text', text: 'hello' }] }],
     });
+  });
+
+  it('registers no markdown tokenizer in the shared `marked` instance (it would keep every editor alive)', () => {
+    const count = () =>
+      (marked.defaults.extensions?.block?.length ?? 0) + (marked.defaults.extensions?.inline?.length ?? 0);
+    const before = count();
+    createEditor();
+    createEditor();
+    expect(count()).toBe(before);
   });
 });
 

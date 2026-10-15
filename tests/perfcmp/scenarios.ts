@@ -174,6 +174,34 @@ export const SCENARIOS: Scenario[] = [
       };
     },
   },
+  {
+    id: 'typing',
+    title: '8. Type 200 characters and send 10 messages',
+    description:
+      'The top chat of the list is opened, then 10 messages of 20 characters are typed into the composer (keydown, insertText, keyup per ' +
+      'character) and sent with the main button, 100 ms apart. The input latency of a character is the time from its keydown until the ' +
+      'frame after the one that applied it has started (the update is on screen); the mocked server answers each send in both apps.',
+    needs: ['chatList', 'inject'],
+    async run({ page }) {
+      await sleep(page, 300);
+      const opened = await pc<boolean>(page, 'openFirstChat');
+      await pc<boolean>(page, 'waitForCount', '#editable-message-text[contenteditable="true"]', 1, 20000);
+      await sleep(page, 1500);
+      const result = await pc<{ latencies: number[]; sent: number }>(page, 'typeAndSend', 20, 10, 100);
+      await sleep(page, 500);
+      const sorted = [...result.latencies].sort((a, b) => a - b);
+      const at = (fraction: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))] ?? 0;
+      return {
+        extra: {
+          chatOpened: opened ? 1 : 0,
+          messagesSent: result.sent,
+          inputLatencyP50Ms: at(0.5),
+          inputLatencyP95Ms: at(0.95),
+          inputLatencyMaxMs: sorted[sorted.length - 1] ?? 0,
+        },
+      };
+    },
+  },
 ];
 
 export function scenarioById(id: string) {

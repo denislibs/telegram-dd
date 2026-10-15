@@ -33,6 +33,41 @@ export const patches = [
   }`,
   },
   {
+    // The composer slice: tt's mock answers neither SendMessage, EditMessage, SaveDraft nor SetTyping (a sent message stays
+    // "sending" forever). Our MockClient answers them (src/lib/gramjs/client/mockUtils/composerRequests.ts, added to the copy
+    // below), and the typing comparison (tests/perfcmp, scenario 8) needs the same behaviour in both apps.
+    name: 'MockClient answers the composer requests',
+    file: 'src/lib/gramjs/client/MockClient.ts',
+    find: `  async invoke<A, R>(request: Api.Request<A, R>) {
+    if (this.invokeMiddleware) {
+      const a = await this.invokeMiddleware(this, request);
+      if (a !== 'pass') {
+        return a;
+      }
+    }
+`,
+    replace: `  async invoke<A, R>(request: Api.Request<A, R>) {
+    if (this.invokeMiddleware) {
+      const a = await this.invokeMiddleware(this, request);
+      if (a !== 'pass') {
+        return a;
+      }
+    }
+
+    const composerResult = await handleComposerRequest(this, request);
+    if (composerResult !== PASS) {
+      return composerResult;
+    }
+`,
+  },
+  {
+    name: 'MockClient imports the composer request handler',
+    file: 'src/lib/gramjs/client/MockClient.ts',
+    find: `import getIdFromInputPeer from './mockUtils/getIdFromInputPeer';`,
+    replace: `import getIdFromInputPeer from './mockUtils/getIdFromInputPeer';
+import handleComposerRequest, { PASS } from './mockUtils/composerRequests';`,
+  },
+  {
     // The perf comparison (tests/perfcmp) runs a PRODUCTION build (DEBUG off) and injects `apiUpdate`s through
     // `window.getActions()`, like the visual gate does in dev. tt exposes these handles only when DEBUG is on, which
     // would also turn on tt's debug paths (a copied global per getGlobal(), update counters) and skew the timing.
@@ -71,4 +106,5 @@ export const patches = [
 export const extraFiles = [
   'src/lib/gramjs/client/__mocks__/messages.json',
   'src/lib/gramjs/client/__invokeMiddlewares__/messages.ts',
+  'src/lib/gramjs/client/mockUtils/composerRequests.ts',
 ];

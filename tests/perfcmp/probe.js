@@ -271,6 +271,38 @@
       return { frames: frameCount, messages: all.length, firstId: Math.min(...all) };
     },
 
+    /**
+     * Scenario 8. Types `charsPerMessage` characters into the open composer and sends the message, `messages` times. A
+     * character is a keydown, an `insertText` (the browser fires beforeinput / input, as for a typed key) and a keyup; its
+     * input latency is the time until the frame after the one that applied it has started, i.e. until that update is on screen.
+     * The send is a click on the main button.
+     */
+    async typeAndSend(charsPerMessage, messages, restMs) {
+      const input = document.querySelector('#editable-message-text');
+      const button = () => document.querySelector('.Composer .main-button');
+      if (!input || !button()) return { latencies: [], sent: 0 };
+      input.focus();
+      const latencies = [];
+      let sent = 0;
+      for (let message = 0; message < messages; message++) {
+        for (let char = 0; char < charsPerMessage; char++) {
+          const start = performance.now();
+          input.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'x', code: 'KeyX', bubbles: true, cancelable: true }),
+          );
+          document.execCommand('insertText', false, 'x');
+          input.dispatchEvent(new KeyboardEvent('keyup', { key: 'x', code: 'KeyX', bubbles: true }));
+          await nextFrame();
+          await nextFrame();
+          latencies.push(performance.now() - start);
+        }
+        button().click();
+        sent++;
+        await sleep(restMs);
+      }
+      return { latencies, sent };
+    },
+
     folderTabs: () => document.querySelectorAll('.ChatFolders .TabList > [data-file-hover-open]'),
 
     /** Scenario 5. Clicks the folder tabs in `order`, waiting for each slide animation to end (plus a short rest). */

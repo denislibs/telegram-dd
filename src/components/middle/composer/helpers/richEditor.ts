@@ -32,6 +32,7 @@ import type { DecorationSet, EditorView } from '@tiptap/pm/view';
 import StarterKitExtension from '@tiptap/starter-kit';
 import { requestMutation } from 'frameact';
 import { suppressStrict } from 'frameact/stricterdom';
+import { Marked } from 'marked';
 
 import type { CustomEmojiNodeOptions } from '../../../../util/tiptap/extensions/customEmoji';
 import type { RichEditorDateClickTarget } from '../../../../util/tiptap/extensions/date';
@@ -91,6 +92,8 @@ import {
 import EditableCodeBlock from '../richInput/EditableCodeBlock';
 import EditableListItem from '../richInput/EditableListItem';
 import { buildRichEditorMedia } from '../richInput/EditableMedia';
+
+type MarkedInstance = NonNullable<Parameters<typeof RichEditorMarkdown.configure>[0]>['marked'];
 
 export const RICH_HEADING_LEVELS: [1, 2, 3, 4, 5, 6] = [1, 2, 3, 4, 5, 6];
 export type RichHeadingLevel = (typeof RICH_HEADING_LEVELS)[number];
@@ -323,7 +326,10 @@ function buildRichEditorExtensions(
       onMediaFiles,
       onDateClick,
     ),
-    RichEditorMarkdown,
+    // Deviation: @tiptap/markdown registers the tokenizers of every extension in ONE shared `marked` instance and never takes
+    // them out, and each tokenizer closes over its editor: every composer mount left an editor (the extensions, the
+    // document and the node views) in memory for good. Each editor gets a `marked` instance of its own.
+    RichEditorMarkdown.configure({ marked: new Marked() as unknown as MarkedInstance }),
     RichEditorHistory,
     RichEditorTextReplacements,
     buildRichEditorFormatting(getIsRichInputExpanded),
