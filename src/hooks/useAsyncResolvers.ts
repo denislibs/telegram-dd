@@ -1,3 +1,5 @@
+import { createMemo } from 'frameact';
+
 import type { Scheduler } from '../util/schedulers';
 import type { Signal } from '../util/signals';
 
@@ -5,6 +7,7 @@ import useDebouncedCallback from './useDebouncedCallback';
 import useDerivedSignal from './useDerivedSignal';
 import useThrottledCallback from './useThrottledCallback';
 
+// TODO(codemod): useThrottledResolver: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export function useThrottledResolver<T>(
   resolver: () => T,
   deps: any[],
@@ -22,12 +25,14 @@ export function useThrottledResolver<T>(
   );
 }
 
+// TODO(codemod): useThrottledSignal: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export function useThrottledSignal<T>(getValue: Signal<T>, ms: number, noFirst = false): Signal<T> {
   const throttledResolver = useThrottledResolver(() => getValue(), [getValue], ms, noFirst);
 
-  return useDerivedSignal(throttledResolver, [throttledResolver, getValue], true);
+  return createMemo(throttledResolver);
 }
 
+// TODO(codemod): useDebouncedResolver: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export function useDebouncedResolver<T>(resolver: () => T, deps: any[], ms: number, noFirst = false, noLast = false) {
   return useDebouncedCallback(
     (setValue: (newValue: T) => void) => {
@@ -41,8 +46,9 @@ export function useDebouncedResolver<T>(resolver: () => T, deps: any[], ms: numb
   );
 }
 
+// TODO(codemod): useDebouncedSignal: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export function useDebouncedSignal<T>(getValue: Signal<T>, ms: number, noFirst = false, noLast = false): Signal<T> {
   const debouncedResolver = useDebouncedResolver(() => getValue(), [getValue], ms, noFirst, noLast);
 
-  return useDerivedSignal(debouncedResolver, [debouncedResolver, getValue], true);
+  return createMemo(debouncedResolver);
 }

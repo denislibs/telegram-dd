@@ -1,5 +1,9 @@
-import { memo, useEffect, useMemo, useRef, useUnmountCleanup } from '../../../lib/teact/teact';
+import { createEffect, createMemo, onDestroy } from 'frameact';
+import { Show } from 'frameact/dom';
 import { getActions, withGlobal } from '../../../global';
+import { depsOf } from '../../../util/effectDeps';
+import { createShowTransition } from '../../../lib/kit';
+import type { GlobalState } from '../../../global/types';
 
 import type { ApiMessageAction } from '../../../api/types/messageActions';
 import type { FocusDirection, ScrollTargetPosition, ThreadId } from '../../../types';
@@ -46,8 +50,6 @@ import useEnsureMessage from '../../../hooks/useEnsureMessage';
 import useFlag from '../../../hooks/useFlag';
 import { type ObserveFn, useOnIntersect } from '../../../hooks/useIntersectionObserver';
 import useLang from '../../../hooks/useLang';
-import useLastCallback from '../../../hooks/useLastCallback';
-import useShowTransition from '../../../hooks/useShowTransition';
 import useFluidBackgroundFilter from './hooks/useFluidBackgroundFilter';
 import useFocusMessageListElement from './hooks/useFocusMessageListElement';
 
@@ -132,38 +134,8 @@ const WITH_LINK_BREAKS_ACTIONS = new Set<ApiMessageAction['type']>([
   'pollDeleteAnswer',
 ]);
 
-const ActionMessage = ({
-  message,
-  threadId,
-  sender,
-  currentUserId,
-  appearanceOrder,
-  isJustAdded,
-  isLastInList,
-  memoFirstUnreadIdRef,
-  getIsMessageListReady,
-  isInsideTopic,
-  isFocused,
-  focusDirection,
-  noFocusHighlight,
-  replyMessage,
-  actionMessageBg,
-  isCurrentUserPremium,
-  isInSelectMode,
-  hasUnreadReaction,
-  hasUnreadPollVote,
-  isResizingContainer,
-  scrollTargetPosition,
-  isAccountFrozen,
-  noForwardsRequestExpirePeriod,
-  transferPeerName,
-  isTransferLoading,
-  shouldLoopStickers,
-  observeIntersectionForBottom,
-  observeIntersectionForLoading,
-  observeIntersectionForPlaying,
-  onMessageUnmount,
-}: OwnProps & StateProps) => {
+const ActionMessage = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const {
     requestConfetti,
     openMediaViewer,
@@ -185,45 +157,49 @@ const ActionMessage = ({
     toggleNoForwards,
   } = getActions();
 
-  const ref = useRef<HTMLDivElement>();
+  let ref!: HTMLDivElement;
 
-  const { id, chatId } = message;
-  const action = message.content.action!;
-  const isLocal = isLocalMessageId(id);
+  const source = createMemo(() => props.message);
+  const id = () => source().id;
+  const chatId = () => source().chatId;
+  const action = createMemo(() => props.message.content.action!);
+  const isLocal = createMemo(() => isLocalMessageId(id()));
 
-  const isTextHidden = HIDDEN_TEXT_ACTIONS.has(action.type);
-  const isSingleLine = SINGLE_LINE_ACTIONS.has(action.type);
-  const withLinkBreaks = WITH_LINK_BREAKS_ACTIONS.has(action.type);
-  const isFluidMultiline = IS_FLUID_BACKGROUND_SUPPORTED && !isSingleLine;
-  const isClickableText = action.type === 'suggestedPostSuccess';
-  const isNarrowMessage = action.type === 'starGiftPurchaseOfferDeclined';
+  const isTextHidden = createMemo(() => HIDDEN_TEXT_ACTIONS.has(action().type));
+  const isSingleLine = createMemo(() => SINGLE_LINE_ACTIONS.has(action().type));
+  const withLinkBreaks = createMemo(() => WITH_LINK_BREAKS_ACTIONS.has(action().type));
+  const isFluidMultiline = createMemo(() => IS_FLUID_BACKGROUND_SUPPORTED && !isSingleLine());
+  const isClickableText = createMemo(() => action().type === 'suggestedPostSuccess');
+  const isNarrowMessage = createMemo(() => action().type === 'starGiftPurchaseOfferDeclined');
 
-  const messageReplyInfo = getMessageReplyInfo(message);
-  const { replyToMsgId, replyToPeerId } = messageReplyInfo || {};
+  const messageReplyInfo = createMemo(() => getMessageReplyInfo(props.message));
+  const source2 = createMemo(() => messageReplyInfo() || {});
+  const replyToMsgId = () => source2().replyToMsgId;
+  const replyToPeerId = () => source2().replyToPeerId;
 
-  const withServiceReactions = Boolean(message.areReactionsPossible && message?.reactions?.results?.length);
+  const withServiceReactions = createMemo(() => Boolean(props.message.areReactionsPossible && props.message?.reactions?.results?.length));
 
-  const hasGiftOfferExpired = action.type === 'starGiftPurchaseOffer' && action.expiresAt <= getServerTime();
+  const hasGiftOfferExpired = createMemo(() => action().type === 'starGiftPurchaseOffer' && action().expiresAt <= getServerTime());
   const shouldRenderGiftOfferButtons =
-    action.type === 'starGiftPurchaseOffer' &&
-    !message.isOutgoing &&
-    !action.isAccepted &&
-    !action.isDeclined &&
-    !hasGiftOfferExpired;
+    createMemo(() => action().type === 'starGiftPurchaseOffer' &&
+    !props.message.isOutgoing &&
+    !action().isAccepted &&
+    !action().isDeclined &&
+    !hasGiftOfferExpired());
 
   const hasNoForwardsRequestExpired =
-    action.type === 'noForwardsRequest' && message.date + noForwardsRequestExpirePeriod <= getServerTime();
+    createMemo(() => action().type === 'noForwardsRequest' && props.message.date + props.noForwardsRequestExpirePeriod <= getServerTime());
   const shouldRenderNoForwardsButtons =
-    action.type === 'noForwardsRequest' && !message.isOutgoing && !action.isExpired && !hasNoForwardsRequestExpired;
+    createMemo(() => action().type === 'noForwardsRequest' && !props.message.isOutgoing && !action().isExpired && !hasNoForwardsRequestExpired());
 
-  const shouldRenderInlineButtons = shouldRenderGiftOfferButtons || shouldRenderNoForwardsButtons;
+  const shouldRenderInlineButtons = createMemo(() => shouldRenderGiftOfferButtons() || shouldRenderNoForwardsButtons());
 
-  const shouldSkipRender = isInsideTopic && action.type === 'topicCreate';
+  const shouldSkipRender = createMemo(() => props.isInsideTopic && action().type === 'topicCreate');
 
   const lang = useLang();
   const { isTouchScreen } = useAppLayout();
 
-  const giftOfferInlineButtons: KeyboardButtonGiftOffer[][] = useMemo(
+  const giftOfferInlineButtons: KeyboardButtonGiftOffer[][] = createMemo(
     () => [
       [
         {
@@ -236,10 +212,9 @@ const ActionMessage = ({
         },
       ],
     ],
-    [lang],
   );
 
-  const noForwardsInlineButtons: KeyboardButtonNoForwardsRequest[][] = useMemo(
+  const noForwardsInlineButtons: KeyboardButtonNoForwardsRequest[][] = createMemo(
     () => [
       [
         {
@@ -252,175 +227,175 @@ const ActionMessage = ({
         },
       ],
     ],
-    [lang],
   );
 
   const [isRejectOfferDialogOpen, openRejectOfferDialog, closeRejectOfferDialog] = useFlag(false);
 
-  const handleInlineButtonClick = useLastCallback((button: ApiKeyboardButton) => {
+  const handleInlineButtonClick = (button: ApiKeyboardButton) => {
     if (button.action.type === 'giftOffer') {
       if (button.action.buttonType === 'accept') {
-        if (action.type === 'starGiftPurchaseOffer') {
+        if (action().type === 'starGiftPurchaseOffer') {
           openGiftOfferAcceptModal({
-            peerId: chatId,
-            messageId: id,
-            gift: action.gift,
-            price: action.price,
+            peerId: chatId(),
+            messageId: id(),
+            gift: action().gift,
+            price: action().price,
           });
         }
       } else if (button.action.buttonType === 'reject') {
         openRejectOfferDialog();
       }
     } else if (button.action.type === 'noForwardsRequest') {
-      if (action.type === 'noForwardsRequest') {
+      if (action().type === 'noForwardsRequest') {
         const isAccept = button.action.buttonType === 'accept';
         toggleNoForwards({
-          userId: chatId,
-          isEnabled: isAccept ? action.newValue : action.prevValue,
-          requestMsgId: id,
+          userId: chatId(),
+          isEnabled: isAccept ? action().newValue : action().prevValue,
+          requestMsgId: id(),
         });
       }
     }
-  });
+  };
 
-  const handleRejectOfferConfirm = useLastCallback(() => {
+  const handleRejectOfferConfirm = () => {
     closeRejectOfferDialog();
-    declineStarGiftOffer({ messageId: id });
-  });
+    declineStarGiftOffer({ messageId: id() });
+  };
 
-  const handleRejectOfferClose = useLastCallback(() => {
+  const handleRejectOfferClose = () => {
     closeRejectOfferDialog();
-  });
+  };
 
-  useOnIntersect(ref, !shouldSkipRender ? observeIntersectionForBottom : undefined);
+  useOnIntersect(() => ref, () => !shouldSkipRender() ? props.observeIntersectionForBottom : undefined);
 
-  useEnsureMessage(replyToPeerId || chatId, replyToMsgId, replyMessage, id);
+  useEnsureMessage(() => replyToPeerId() || chatId(), () => replyToMsgId(), () => props.replyMessage, () => id());
   useFocusMessageListElement({
-    elementRef: ref,
-    isFocused,
-    focusDirection,
-    noFocusHighlight,
-    isResizingContainer,
-    isJustAdded,
-    scrollTargetPosition,
+    elementRef: () => ref,
+    isFocused: () => props.isFocused,
+    focusDirection: () => props.focusDirection,
+    noFocusHighlight: () => props.noFocusHighlight,
+    isResizingContainer: () => props.isResizingContainer,
+    isJustAdded: () => props.isJustAdded,
+    scrollTargetPosition: () => props.scrollTargetPosition,
   });
 
-  const {
-    isContextMenuOpen,
-    contextMenuAnchor,
-    isContextMenuAltKeyPressed,
-    handleBeforeContextMenu,
-    handleContextMenu,
-    handleContextMenuClose,
-    handleContextMenuHide,
-  } = useContextMenuHandlers(
-    ref,
-    (isTouchScreen && isInSelectMode) || isAccountFrozen,
+  const contextMenuHandlersResult = createMemo(() => useContextMenuHandlers(
+    () => ref,
+    () => (isTouchScreen && props.isInSelectMode) || props.isAccountFrozen,
     !IS_TAURI,
     IS_ANDROID,
-    getIsMessageListReady,
-  );
-  const isContextMenuShown = contextMenuAnchor !== undefined;
+    () => props.getIsMessageListReady,
+  ));
+  const isContextMenuOpen = () => contextMenuHandlersResult().isContextMenuOpen;
+  const contextMenuAnchor = () => contextMenuHandlersResult().contextMenuAnchor;
+  const isContextMenuAltKeyPressed = () => contextMenuHandlersResult().isContextMenuAltKeyPressed;
+  const handleBeforeContextMenu = () => contextMenuHandlersResult().handleBeforeContextMenu;
+  const handleContextMenu = () => contextMenuHandlersResult().handleContextMenu;
+  const handleContextMenuClose = () => contextMenuHandlersResult().handleContextMenuClose;
+  const handleContextMenuHide = () => contextMenuHandlersResult().handleContextMenuHide;
+  const isContextMenuShown = createMemo(() => contextMenuAnchor() !== undefined);
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
     preventMessageInputBlur(e);
-    handleBeforeContextMenu(e);
+    handleBeforeContextMenu()(e);
   };
 
-  const noAppearanceAnimation = appearanceOrder <= 0;
-  const [isShown, markShown] = useFlag(noAppearanceAnimation);
-  useEffect(() => {
-    if (noAppearanceAnimation) {
+  const noAppearanceAnimation = createMemo(() => props.appearanceOrder <= 0);
+  const [isShown, markShown] = useFlag(noAppearanceAnimation());
+  createEffect(depsOf(() => [props.appearanceOrder, noAppearanceAnimation()] as const), ([appearanceOrder2, noAppearanceAnimation2]) => {
+    if (noAppearanceAnimation2) {
       return;
     }
 
     // Message appearance animation works only if this timeout is not cleared
-    setTimeout(markShown, appearanceOrder * MESSAGE_APPEARANCE_DELAY);
-  }, [appearanceOrder, noAppearanceAnimation]);
+    setTimeout(markShown, appearanceOrder2 * MESSAGE_APPEARANCE_DELAY);
+  });
 
-  const { ref: refWithTransition } = useShowTransition({
-    isOpen: isShown,
-    noOpenTransition: noAppearanceAnimation,
-    noCloseTransition: true,
+  const { ref: refWithTransition } = createShowTransition({
+    isOpen: () => isShown(),
+    noOpenTransition: () => noAppearanceAnimation(),
+    noCloseTransition: () => true,
     className: false,
-    ref,
+    // TODO(codemod): ref option: hand the result `ref` to the element (ref={t.ref}) instead
+    ref: () => ref,
   });
 
-  useUnmountCleanup(() => {
-    onMessageUnmount?.(id);
+  onDestroy(() => {
+    props.onMessageUnmount?.(id());
   });
 
-  useEffect(() => {
-    const bottomMarker = ref.current;
-    if (!bottomMarker || !isElementInViewport(bottomMarker)) return;
-
-    if (hasUnreadReaction) {
-      animateUnreadReaction({ chatId, messageIds: [id] });
-    }
-
-    if (hasUnreadPollVote) {
-      markPollVotesRead({ chatId, messageIds: [id] });
-    }
-
-    if (message.hasUnreadMention) {
-      markMentionsRead({ chatId, messageIds: [id] });
-    }
-  }, [
-    hasUnreadReaction,
-    hasUnreadPollVote,
-    chatId,
-    id,
+  createEffect(depsOf(() => [
+    props.hasUnreadReaction,
+    props.hasUnreadPollVote,
+    chatId(),
+    id(),
     animateUnreadReaction,
     markPollVotesRead,
-    message.hasUnreadMention,
-  ]);
+    props.message.hasUnreadMention,
+  ] as const), ([hasUnreadReaction2, hasUnreadPollVote2, chatId2, id2]) => {
+    const bottomMarker = ref;
+    if (!bottomMarker || !isElementInViewport(bottomMarker)) return;
 
-  useEffect(() => {
-    if (action.type !== 'giftPremium') return;
-    if ((memoFirstUnreadIdRef?.current && id >= memoFirstUnreadIdRef.current) || isLocal) {
+    if (hasUnreadReaction2) {
+      animateUnreadReaction({ chatId: chatId2, messageIds: [id2] });
+    }
+
+    if (hasUnreadPollVote2) {
+      markPollVotesRead({ chatId: chatId2, messageIds: [id2] });
+    }
+
+    if (props.message.hasUnreadMention) {
+      markMentionsRead({ chatId: chatId2, messageIds: [id2] });
+    }
+  });
+
+  // TODO(codemod): dependency on a container (memoFirstUnreadIdRef) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)
+  createEffect(depsOf(() => [action().type, id(), isLocal(), props.memoFirstUnreadIdRef] as const), ([, id2, isLocal2, memoFirstUnreadIdRef2]) => {
+    if (action().type !== 'giftPremium') return;
+    if ((memoFirstUnreadIdRef2?.current && id2 >= memoFirstUnreadIdRef2.current) || isLocal2) {
       requestConfetti({});
     }
-  }, [action.type, id, isLocal, memoFirstUnreadIdRef]);
+  });
 
-  const fluidBackgroundStyle = useFluidBackgroundFilter(isFluidMultiline ? actionMessageBg : undefined);
+  const fluidBackgroundStyle = useFluidBackgroundFilter(() => isFluidMultiline() ? props.actionMessageBg : undefined);
 
-  const handleKeyDown = useLastCallback((e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       handleClick();
     }
-  });
+  };
 
-  const handleClick = useLastCallback(() => {
-    switch (action.type) {
+  const handleClick = () => {
+    switch (action().type) {
       case 'paymentSent':
       case 'paymentRefunded': {
         getReceipt({
-          chatId: message.chatId,
-          messageId: message.id,
+          chatId: props.message.chatId,
+          messageId: props.message.id,
         });
         break;
       }
 
       case 'chatEditPhoto': {
         openMediaViewer({
-          chatId: message.chatId,
-          messageId: message.id,
-          threadId,
+          chatId: props.message.chatId,
+          messageId: props.message.id,
+          threadId: props.threadId,
           origin: MediaViewerOrigin.ChannelAvatar,
         });
         break;
       }
 
       case 'giftCode': {
-        checkGiftCode({ slug: action.slug, message: { chatId: message.chatId, messageId: message.id } });
+        checkGiftCode({ slug: action().slug, message: { chatId: props.message.chatId, messageId: props.message.id } });
         break;
       }
 
       case 'prizeStars': {
         openPrizeStarsTransactionFromGiveaway({
-          chatId: message.chatId,
-          messageId: message.id,
+          chatId: props.message.chatId,
+          messageId: props.message.id,
         });
         break;
       }
@@ -428,9 +403,9 @@ const ActionMessage = ({
       case 'giftPremium': {
         openPremiumModal({
           isGift: true,
-          fromUserId: sender?.id,
-          toUserId: sender && sender.id === currentUserId ? chatId : currentUserId,
-          daysAmount: action.days,
+          fromUserId: props.sender?.id,
+          toUserId: props.sender && props.sender.id === props.currentUserId ? chatId() : props.currentUserId,
+          daysAmount: action().days,
         });
         break;
       }
@@ -438,62 +413,62 @@ const ActionMessage = ({
       case 'giftTon':
       case 'giftStars': {
         openStarsTransactionFromGift({
-          chatId: message.chatId,
-          messageId: message.id,
+          chatId: props.message.chatId,
+          messageId: props.message.id,
         });
         break;
       }
 
       case 'gramTransfer': {
-        if (!action.transactionId) break;
+        if (!action().transactionId) break;
 
-        openWalletTransaction({ transactionId: action.transactionId });
+        openWalletTransaction({ transactionId: action().transactionId });
         break;
       }
 
       case 'starGift': {
         openGiftInfoModalFromMessage({
-          chatId: message.chatId,
-          messageId: message.id,
+          chatId: props.message.chatId,
+          messageId: props.message.id,
         });
         break;
       }
 
       case 'starGiftUnique': {
-        if (action.gift.isBurned) {
+        if (action().gift.isBurned) {
           showNotification({ message: lang('ActionStarGiftUniqueBurnedError') });
           break;
         }
         openGiftInfoModalFromMessage({
-          chatId: message.chatId,
-          messageId: message.id,
+          chatId: props.message.chatId,
+          messageId: props.message.id,
         });
         break;
       }
 
       case 'starGiftPurchaseOffer': {
-        if (shouldRenderGiftOfferButtons) {
+        if (shouldRenderGiftOfferButtons()) {
           openGiftOfferAcceptModal({
-            peerId: chatId,
-            messageId: id,
-            gift: action.gift,
-            price: action.price,
+            peerId: chatId(),
+            messageId: id(),
+            gift: action().gift,
+            price: action().price,
           });
         }
         break;
       }
 
       case 'channelJoined': {
-        toggleChannelRecommendations({ chatId });
+        toggleChannelRecommendations({ chatId: chatId() });
         break;
       }
 
       case 'suggestedPostApproval': {
-        const replyInfo = getMessageReplyInfo(message);
+        const replyInfo = getMessageReplyInfo(props.message);
         if (replyInfo?.type === 'message' && replyInfo.replyToMsgId) {
           focusMessage({
-            chatId: message.chatId,
-            threadId,
+            chatId: props.message.chatId,
+            threadId: props.threadId,
             messageId: replyInfo.replyToMsgId,
           });
         }
@@ -501,42 +476,42 @@ const ActionMessage = ({
       }
 
       case 'suggestedPostSuccess': {
-        const replyInfo = getMessageReplyInfo(message);
+        const replyInfo = getMessageReplyInfo(props.message);
         if (replyInfo?.type === 'message' && replyInfo.replyToMsgId) {
           focusMessage({
-            chatId: message.chatId,
-            threadId,
+            chatId: props.message.chatId,
+            threadId: props.threadId,
             messageId: replyInfo.replyToMsgId,
           });
         }
         break;
       }
     }
-  });
+  };
 
-  const fullContent = useMemo(() => {
-    switch (action.type) {
+  const fullContent = createMemo(() => {
+    switch (action().type) {
       case 'chatEditPhoto': {
-        if (!action.photo) return undefined;
+        if (!action().photo) return undefined;
         return (
-          <ChannelPhoto action={action} observeIntersection={observeIntersectionForLoading} onClick={handleClick} />
+          <ChannelPhoto action={action()} observeIntersection={props.observeIntersectionForLoading} onClick={handleClick} />
         );
       }
 
       case 'suggestProfilePhoto':
-        return <SuggestedPhoto message={message} action={action} observeIntersection={observeIntersectionForLoading} />;
+        return <SuggestedPhoto message={props.message} action={action()} observeIntersection={props.observeIntersectionForLoading} />;
 
       case 'suggestBirthday':
-        return <SuggestedBirthday message={message} action={action} />;
+        return <SuggestedBirthday message={props.message} action={action()} />;
 
       case 'prizeStars':
       case 'giftCode':
         return (
           <GiveawayPrize
-            action={action}
-            sender={sender}
-            observeIntersectionForLoading={observeIntersectionForLoading}
-            observeIntersectionForPlaying={observeIntersectionForPlaying}
+            action={action()}
+            sender={props.sender}
+            observeIntersectionForLoading={props.observeIntersectionForLoading}
+            observeIntersectionForPlaying={props.observeIntersectionForPlaying}
             onClick={handleClick}
           />
         );
@@ -546,21 +521,21 @@ const ActionMessage = ({
       case 'giftStars':
         return (
           <Gift
-            action={action}
-            observeIntersectionForLoading={observeIntersectionForLoading}
-            observeIntersectionForPlaying={observeIntersectionForPlaying}
+            action={action()}
+            observeIntersectionForLoading={props.observeIntersectionForLoading}
+            observeIntersectionForPlaying={props.observeIntersectionForPlaying}
             onClick={handleClick}
           />
         );
 
       case 'walletTonConnectRequest': {
         // The server names a request by the wire id of its message, which an anchored one keeps in `ephemeralId`
-        const ephemeralId = message.isEphemeral ? message.id : message.ephemeralId;
+        const ephemeralId = props.message.isEphemeral ? props.message.id : props.message.ephemeralId;
 
         return (
           <WalletTonConnectRequest
-            action={action}
-            messageId={ephemeralId === undefined ? message.id : getMtpEphemeralMessageId(ephemeralId)}
+            action={action()}
+            messageId={ephemeralId === undefined ? props.message.id : getMtpEphemeralMessageId(ephemeralId)}
           />
         );
       }
@@ -568,13 +543,13 @@ const ActionMessage = ({
       case 'gramTransfer':
         return (
           <GramTransfer
-            action={action}
-            peerName={message.chatId === SERVICE_NOTIFICATIONS_USER_ID ? lang('WalletUnknownUser') : transferPeerName}
-            isOutgoing={message.isOutgoing}
-            isSending={message.sendingState === 'messageSendingStatePending'}
-            isFailed={message.sendingState === 'messageSendingStateFailed'}
-            isLoading={isTransferLoading}
-            shouldLoopStickers={shouldLoopStickers}
+            action={action()}
+            peerName={props.message.chatId === SERVICE_NOTIFICATIONS_USER_ID ? lang('WalletUnknownUser') : props.transferPeerName}
+            isOutgoing={props.message.isOutgoing}
+            isSending={props.message.sendingState === 'messageSendingStatePending'}
+            isFailed={props.message.sendingState === 'messageSendingStateFailed'}
+            isLoading={props.isTransferLoading}
+            shouldLoopStickers={props.shouldLoopStickers}
             onClick={handleClick}
           />
         );
@@ -582,10 +557,10 @@ const ActionMessage = ({
       case 'starGift':
         return (
           <StarGift
-            action={action}
-            message={message}
-            observeIntersectionForLoading={observeIntersectionForLoading}
-            observeIntersectionForPlaying={observeIntersectionForPlaying}
+            action={action()}
+            message={props.message}
+            observeIntersectionForLoading={props.observeIntersectionForLoading}
+            observeIntersectionForPlaying={props.observeIntersectionForPlaying}
             onClick={handleClick}
           />
         );
@@ -593,10 +568,10 @@ const ActionMessage = ({
       case 'starGiftUnique':
         return (
           <StarGiftUnique
-            action={action}
-            message={message}
-            observeIntersectionForLoading={observeIntersectionForLoading}
-            observeIntersectionForPlaying={observeIntersectionForPlaying}
+            action={action()}
+            message={props.message}
+            observeIntersectionForLoading={props.observeIntersectionForLoading}
+            observeIntersectionForPlaying={props.observeIntersectionForPlaying}
             onClick={handleClick}
           />
         );
@@ -604,157 +579,143 @@ const ActionMessage = ({
       case 'starGiftPurchaseOffer':
         return (
           <StarGiftPurchaseOffer
-            action={action}
-            message={message}
-            hasButtons={shouldRenderGiftOfferButtons}
-            observeIntersectionForLoading={observeIntersectionForLoading}
-            observeIntersectionForPlaying={observeIntersectionForPlaying}
-            onClick={shouldRenderGiftOfferButtons ? handleClick : undefined}
+            action={action()}
+            message={props.message}
+            hasButtons={shouldRenderGiftOfferButtons()}
+            observeIntersectionForLoading={props.observeIntersectionForLoading}
+            observeIntersectionForPlaying={props.observeIntersectionForPlaying}
+            onClick={shouldRenderGiftOfferButtons() ? handleClick : undefined}
           />
         );
 
       case 'channelJoined':
-        return <SimilarChannels chatId={message.chatId} />;
+        return <SimilarChannels chatId={props.message.chatId} />;
 
       case 'noForwardsRequest':
-        return <NoForwardsRequest message={message} />;
+        return <NoForwardsRequest message={props.message} />;
 
       case 'suggestedPostApproval':
-        if (action.isBalanceTooLow) {
-          return <SuggestedPostBalanceTooLow message={message} action={action} onClick={handleClick} />;
+        if (action().isBalanceTooLow) {
+          return <SuggestedPostBalanceTooLow message={props.message} action={action()} onClick={handleClick} />;
         }
-        return action.isRejected ? (
-          <SuggestedPostRejected message={message} action={action} onClick={handleClick} />
+        return action().isRejected ? (
+          <SuggestedPostRejected message={props.message} action={action()} onClick={handleClick} />
         ) : (
-          <SuggestedPostApproval message={message} action={action} onClick={handleClick} />
+          <SuggestedPostApproval message={props.message} action={action()} onClick={handleClick} />
         );
 
       default:
         return undefined;
     }
-  }, [
-    action,
-    message,
-    observeIntersectionForLoading,
-    sender,
-    observeIntersectionForPlaying,
-    shouldRenderGiftOfferButtons,
-    transferPeerName,
-    isTransferLoading,
-    shouldLoopStickers,
-    lang,
-  ]);
-
-  if ((isInsideTopic && action.type === 'topicCreate') || action.type === 'phoneCall') {
-    return undefined;
-  }
+  });
 
   return (
+    <Show when={!((props.isInsideTopic && action().type === 'topicCreate') || action().type === 'phoneCall')}>
     <div
       ref={refWithTransition}
-      id={getMessageHtmlId(id)}
-      className={buildClassName(
+      id={getMessageHtmlId(id())}
+      class={buildClassName(
         'ActionMessage',
         'message-list-item',
         styles.root,
-        isSingleLine && styles.singleLine,
-        withLinkBreaks && styles.withLinkBreaks,
-        isFluidMultiline && styles.fluidMultiline,
-        fullContent && styles.hasFullContent,
-        isFocused && !noFocusHighlight && 'focused',
-        isContextMenuShown && 'has-menu-open',
-        isLastInList && 'last-in-list',
+        isSingleLine() && styles.singleLine,
+        withLinkBreaks() && styles.withLinkBreaks,
+        isFluidMultiline() && styles.fluidMultiline,
+        fullContent() && styles.hasFullContent,
+        props.isFocused && !props.noFocusHighlight && 'focused',
+        isContextMenuShown() && 'has-menu-open',
+        props.isLastInList && 'last-in-list',
       )}
-      data-message-id={message.id}
-      data-is-pinned={message.isPinned || undefined}
-      data-has-unread-mention={message.hasUnreadMention || undefined}
-      data-has-unread-poll-vote={hasUnreadPollVote || undefined}
-      data-has-unread-reaction={hasUnreadReaction || undefined}
+      data-message-id={props.message.id}
+      data-is-pinned={props.message.isPinned || undefined}
+      data-has-unread-mention={props.message.hasUnreadMention || undefined}
+      data-has-unread-poll-vote={props.hasUnreadPollVote || undefined}
+      data-has-unread-reaction={props.hasUnreadReaction || undefined}
       onMouseDown={handleMouseDown}
-      onContextMenu={handleContextMenu}
+      onContextMenu={handleContextMenu()}
     >
-      {!isTextHidden && (
+      {!isTextHidden() && (
         <>
-          {isFluidMultiline && (
+          {isFluidMultiline() && (
             <div
-              className={buildClassName(
+              class={buildClassName(
                 styles.inlineWrapper,
-                isClickableText && styles.hoverable,
-                isNarrowMessage && styles.narrowWrapper,
+                isClickableText() && styles.hoverable,
+                isNarrowMessage() && styles.narrowWrapper,
               )}
             >
-              <span className={styles.fluidBackground} style={fluidBackgroundStyle}>
-                <ActionMessageText message={message} isInsideTopic={isInsideTopic} />
+              <span class={styles.fluidBackground} style={fluidBackgroundStyle}>
+                <ActionMessageText message={props.message} isInsideTopic={props.isInsideTopic} />
               </span>
             </div>
           )}
           <div
-            className={buildClassName(
+            class={buildClassName(
               styles.inlineWrapper,
-              isClickableText && styles.hoverable,
-              isNarrowMessage && styles.narrowWrapper,
+              isClickableText() && styles.hoverable,
+              isNarrowMessage() && styles.narrowWrapper,
             )}
           >
             <span
-              className={styles.textContent}
+              class={styles.textContent}
               role="button"
               tabIndex={0}
               onClick={handleClick}
               onKeyDown={handleKeyDown}
             >
-              <ActionMessageText message={message} isInsideTopic={isInsideTopic} />
+              <ActionMessageText message={props.message} isInsideTopic={props.isInsideTopic} />
             </span>
           </div>
         </>
       )}
-      {(fullContent || shouldRenderInlineButtons) && (
-        <div className={styles.contentWrapper}>
-          {fullContent}
-          {shouldRenderGiftOfferButtons && (
+      {(fullContent() || shouldRenderInlineButtons()) && (
+        <div class={styles.contentWrapper}>
+          {fullContent()}
+          {shouldRenderGiftOfferButtons() && (
             <InlineButtons
               className={styles.inlineButtons}
-              inlineButtons={giftOfferInlineButtons}
+              inlineButtons={giftOfferInlineButtons()}
               onClick={handleInlineButtonClick}
             />
           )}
-          {shouldRenderNoForwardsButtons && (
+          {shouldRenderNoForwardsButtons() && (
             <InlineButtons
               className={styles.inlineButtons}
-              inlineButtons={noForwardsInlineButtons}
+              inlineButtons={noForwardsInlineButtons()}
               onClick={handleInlineButtonClick}
             />
           )}
         </div>
       )}
-      {contextMenuAnchor && (
+      {contextMenuAnchor() && (
         <ContextMenuContainer
-          isOpen={isContextMenuOpen}
-          anchor={contextMenuAnchor}
-          isAltKeyPressed={isContextMenuAltKeyPressed}
-          message={message}
+          isOpen={isContextMenuOpen()}
+          anchor={contextMenuAnchor()}
+          isAltKeyPressed={isContextMenuAltKeyPressed()}
+          message={props.message}
           messageListType="thread"
-          threadId={threadId}
+          threadId={props.threadId}
           className={styles.contextContainer}
-          onClose={handleContextMenuClose}
-          onCloseAnimationEnd={handleContextMenuHide}
+          onClose={handleContextMenuClose()}
+          onCloseAnimationEnd={handleContextMenuHide()}
         />
       )}
-      {withServiceReactions && (
+      {withServiceReactions() && (
         <Reactions
           isOutside
-          message={message}
-          threadId={threadId}
-          observeIntersection={observeIntersectionForPlaying}
-          isCurrentUserPremium={isCurrentUserPremium}
-          isAccountFrozen={isAccountFrozen}
+          message={props.message}
+          threadId={props.threadId}
+          observeIntersection={props.observeIntersectionForPlaying}
+          isCurrentUserPremium={props.isCurrentUserPremium}
+          isAccountFrozen={props.isAccountFrozen}
         />
       )}
       <ConfirmDialog
-        isOpen={isRejectOfferDialogOpen}
+        isOpen={isRejectOfferDialogOpen()}
         title={lang('GiftOfferRejectTitle')}
         textParts={lang(
           'GiftOfferRejectText',
-          { user: sender ? getPeerTitle(lang, sender) : lang('ActionFallbackSomeone') },
+          { user: props.sender ? getPeerTitle(lang, props.sender) : lang('ActionFallbackSomeone') },
           { withNodes: true, withMarkdown: true },
         )}
         confirmLabel={lang('GiftOfferReject')}
@@ -763,11 +724,11 @@ const ActionMessage = ({
         onClose={handleRejectOfferClose}
       />
     </div>
+    </Show>
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global, { message, threadId }): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState, { message, threadId }: OwnProps): Complete<StateProps> => {
     const tabState = selectTabState(global);
 
     const chat = selectChat(global, message.chatId);
@@ -830,5 +791,6 @@ export default memo(
       isTransferLoading,
       shouldLoopStickers,
     };
-  })(ActionMessage),
-);
+  };
+
+export default ActionMessage;

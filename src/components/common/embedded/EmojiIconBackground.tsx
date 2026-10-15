@@ -1,6 +1,6 @@
-import { memo, useEffect, useRef, useState } from '../../../lib/teact/teact';
+import { createEffect, createMemo, createSignal, onMount, requestMutation } from 'frameact';
+import { depsOf } from '../../../util/effectDeps';
 
-import { requestMutation } from '../../../lib/fasterdom/fasterdom';
 import { getStickerMediaHash } from '../../../global/helpers';
 import buildClassName from '../../../util/buildClassName';
 import { preloadImage } from '../../../util/files';
@@ -8,7 +8,6 @@ import { REM } from '../helpers/mediaDimensions';
 
 import useDynamicColorListener from '../../../hooks/stickers/useDynamicColorListener';
 import { useThrottleForHeavyAnimation } from '../../../hooks/useHeavyAnimation';
-import useLastCallback from '../../../hooks/useLastCallback';
 import useMedia from '../../../hooks/useMedia';
 import useOldLang from '../../../hooks/useOldLang';
 import useResizeObserver from '../../../hooks/useResizeObserver';
@@ -86,34 +85,36 @@ type OwnProps = {
   withEmojiSpace?: boolean;
 };
 
-const EmojiIconBackground = ({ emojiDocumentId, className, withEmojiSpace }: OwnProps) => {
-  const canvasRef = useRef<HTMLCanvasElement>();
-  const containerRef = useRef<HTMLDivElement>();
+const EmojiIconBackground = (props: OwnProps) => {
+  let canvasRef!: HTMLCanvasElement;
+  let containerRef!: HTMLDivElement;
 
-  const [emojiImage, setEmojiImage] = useState<HTMLImageElement | undefined>();
+  const [emojiImage, setEmojiImage] = createSignal<HTMLImageElement | undefined>(undefined);
 
   const dpr = useDevicePixelRatio();
 
   const lang = useOldLang();
 
-  const { customEmoji } = useCustomEmoji(emojiDocumentId);
-  const previewMediaHash = customEmoji ? getStickerMediaHash(customEmoji, 'preview') : undefined;
-  const previewUrl = useMedia(previewMediaHash);
+  const customEmojiResult = createMemo(() => useCustomEmoji(() => props.emojiDocumentId));
+  const customEmoji = () => customEmojiResult().customEmoji;
+  const previewMediaHash = createMemo(() => customEmoji() ? getStickerMediaHash(customEmoji(), 'preview') : undefined);
+  const previewUrl = useMedia(() => previewMediaHash());
 
-  const customColor = useDynamicColorListener(containerRef);
+  const customColor = useDynamicColorListener(() => containerRef);
 
+  // TODO(codemod): useThrottleForHeavyAnimation: throttle with watchHeavyAnimation / onFullyIdle
   const preloadAfterHeavyAnimation = useThrottleForHeavyAnimation(() => {
     if (!previewUrl) return;
     preloadImage(previewUrl).then(setEmojiImage);
   }, [previewUrl]);
 
-  useEffect(() => {
+  onMount(() => {
     preloadAfterHeavyAnimation();
-  }, [preloadAfterHeavyAnimation]);
+  });
 
-  const updateCanvas = useLastCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !emojiImage || !customColor) return;
+  const updateCanvas = () => {
+    const canvas = canvasRef;
+    if (!canvas || !emojiImage() || !customColor) return;
 
     const context = canvas.getContext('2d')!;
     const { width, height } = canvas;
@@ -121,7 +122,7 @@ const EmojiIconBackground = ({ emojiDocumentId, className, withEmojiSpace }: Own
     context.clearRect(0, 0, width, height);
 
     ICON_POSITIONS.forEach(({ inline, block, opacity, scale }) => {
-      const xShift = withEmojiSpace ? -EMOJI_SPACE : 0;
+      const xShift = props.withEmojiSpace ? -EMOJI_SPACE : 0;
       const x = ((lang.isRtl ? inline : width / dpr - inline) + xShift) * dpr;
       const y = block * dpr;
 
@@ -131,29 +132,31 @@ const EmojiIconBackground = ({ emojiDocumentId, className, withEmojiSpace }: Own
       context.globalAlpha = opacity;
       context.translate(x, y);
       context.scale(scale, scale);
-      context.drawImage(emojiImage, -emojiSize / 2, -emojiSize / 2, emojiSize, emojiSize);
+      context.drawImage(emojiImage(), -emojiSize / 2, -emojiSize / 2, emojiSize, emojiSize);
       context.restore();
     });
 
-    const tintColor = `${customColor}${customEmoji!.isLottie ? LOTTIE_TINT_OPACITY : NON_LOTTIE_TINT_OPACITY}`;
+    const tintColor = `${customColor}${customEmoji()!.isLottie ? LOTTIE_TINT_OPACITY : NON_LOTTIE_TINT_OPACITY}`;
 
     context.save();
     context.fillStyle = tintColor;
     context.globalCompositeOperation = 'source-atop';
     context.fillRect(0, 0, width, height);
     context.restore();
-  });
+  };
 
+  // TODO(codemod): useThrottleForHeavyAnimation: throttle with watchHeavyAnimation / onFullyIdle
   const updateCanvasAfterHeavyAnimation = useThrottleForHeavyAnimation(updateCanvas, [updateCanvas]);
 
-  useEffect(() => {
+  createEffect(depsOf(() => [emojiImage(), lang.isRtl, customColor, updateCanvasAfterHeavyAnimation, props.withEmojiSpace] as const), ([emojiImage2, , , , withEmojiSpace2]) => {
     updateCanvasAfterHeavyAnimation();
-  }, [emojiImage, lang.isRtl, customColor, updateCanvasAfterHeavyAnimation, withEmojiSpace]);
+  });
 
+  // TODO(codemod): useThrottleForHeavyAnimation: throttle with watchHeavyAnimation / onFullyIdle
   const updateCanvasSize = useThrottleForHeavyAnimation(
     (parentWidth: number, parentHeight: number) => {
       requestMutation(() => {
-        const canvas = canvasRef.current;
+        const canvas = canvasRef;
         if (!canvas) return;
 
         canvas.width = parentWidth * dpr;
@@ -168,6 +171,7 @@ const EmojiIconBackground = ({ emojiDocumentId, className, withEmojiSpace }: Own
     [dpr],
   );
 
+  // TODO(codemod): useThrottleForHeavyAnimation: throttle with watchHeavyAnimation / onFullyIdle
   const handleResize = useThrottleForHeavyAnimation(
     (entry: ResizeObserverEntry) => {
       const { width, height } = entry.contentRect;
@@ -177,22 +181,22 @@ const EmojiIconBackground = ({ emojiDocumentId, className, withEmojiSpace }: Own
     [updateCanvasSize],
   );
 
-  useResizeObserver(containerRef, handleResize);
+  useResizeObserver(() => containerRef, handleResize);
 
-  useEffect(() => {
-    const container = containerRef.current;
+  onMount(() => {
+    const container = containerRef;
     if (!container) return;
 
     const { width, height } = container.getBoundingClientRect();
 
     updateCanvasSize(width, height);
-  }, [updateCanvasSize]);
+  });
 
   return (
-    <div className={buildClassName(styles.root, className)} ref={containerRef}>
+    <div class={buildClassName(styles.root, props.className)} ref={containerRef}>
       <canvas ref={canvasRef} />
     </div>
   );
 };
 
-export default memo(EmojiIconBackground);
+export default EmojiIconBackground;

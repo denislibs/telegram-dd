@@ -1,5 +1,8 @@
-import { memo, useEffect, useMemo } from '../../lib/teact/teact';
+import { createEffect, createMemo } from 'frameact';
+import { Show } from 'frameact/dom';
 import { getActions, withGlobal } from '../../global';
+import { depsOf } from '../../util/effectDeps';
+import type { GlobalState } from '../../global/types';
 
 import type { ApiChatMember, ApiTopic, ApiTypingStatus, ApiUser, ApiUserStatus } from '../../api/types';
 import type { CustomPeer, StoryViewerOrigin, ThreadId } from '../../types';
@@ -16,7 +19,6 @@ import renderText from './helpers/renderText';
 
 import useIntervalForceUpdate from '../../hooks/schedulers/useIntervalForceUpdate';
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
 import useOldLang from '../../hooks/useOldLang';
 
 import RippleEffect from '../ui/RippleEffect';
@@ -90,129 +92,86 @@ type StateProps = {
 
 const UPDATE_INTERVAL = 1000 * 60; // 1 min
 
-const PrivateChatInfo = ({
-  userId,
-  customPeer,
-  typingStatusByPeerId,
-  avatarSize = 'medium',
-  status,
-  statusIcon,
-  withDots,
-  withMediaViewer,
-  withUsername,
-  withStory,
-  withFullInfo,
-  withUpdatingStatus,
-  emojiStatusSize,
-  noStatusOrTyping,
-  noUserStatus,
-  noEmojiStatus,
-  noFake,
-  noVerified,
-  noRtl,
-  user,
-  userStatus,
-  self,
-  topic,
-  messagesCount,
-  isSavedMessages,
-  isSavedDialog,
-  areMessagesLoaded,
-  chatMember,
-  chatMemberOriginId,
-  ripple,
-  className,
-  storyViewerOrigin,
-  noAvatar,
-  isSynced,
-  iconElement,
-  rightElement,
-  onClick,
-  onEmojiStatusClick,
-}: OwnProps & StateProps) => {
+const PrivateChatInfo = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const { loadFullUser, openMediaViewer, loadMoreProfilePhotos } = getActions();
 
   const oldLang = useOldLang();
   const lang = useLang();
 
-  const isTopic = Boolean(user?.isBotForum && topic);
-  const hasAvatarMediaViewer = withMediaViewer && !isSavedMessages;
+  const isTopic = createMemo(() => Boolean(props.user?.isBotForum && props.topic));
+  const hasAvatarMediaViewer = createMemo(() => props.withMediaViewer && !props.isSavedMessages);
 
-  useEffect(() => {
-    if (userId) {
-      if (withFullInfo && isSynced) loadFullUser({ userId });
-      if (withMediaViewer) loadMoreProfilePhotos({ peerId: userId, isPreload: true });
+  createEffect(depsOf(() => [props.userId, props.withFullInfo, props.withMediaViewer, props.isSynced] as const), ([userId2, withFullInfo2, withMediaViewer2, isSynced2]) => {
+    if (userId2) {
+      if (withFullInfo2 && isSynced2) loadFullUser({ userId: userId2 });
+      if (withMediaViewer2) loadMoreProfilePhotos({ peerId: userId2, isPreload: true });
     }
-  }, [userId, withFullInfo, withMediaViewer, isSynced]);
+  });
 
   useIntervalForceUpdate(UPDATE_INTERVAL);
 
-  const handleAvatarViewerOpen = useLastCallback(
-    (e: React.MouseEvent<HTMLDivElement, MouseEvent>, hasMedia: boolean) => {
+  const handleAvatarViewerOpen = (e: React.MouseEvent<HTMLDivElement, MouseEvent>, hasMedia: boolean) => {
       if (hasMedia) {
         e.stopPropagation();
         openMediaViewer({
           isAvatarView: true,
-          chatId: userId,
+          chatId: props.userId,
           mediaIndex: 0,
-          origin: avatarSize === 'jumbo' ? MediaViewerOrigin.ProfileAvatar : MediaViewerOrigin.MiddleHeaderAvatar,
+          origin: (props.avatarSize === undefined ? 'medium' : props.avatarSize) === 'jumbo' ? MediaViewerOrigin.ProfileAvatar : MediaViewerOrigin.MiddleHeaderAvatar,
         });
       }
-    },
-  );
+    };
 
-  const mainUsername = useMemo(() => user && withUsername && getMainUsername(user), [user, withUsername]);
-
-  if (!user && !customPeer) {
-    return undefined;
-  }
+  const mainUsername = createMemo(() => props.user && props.withUsername && getMainUsername(props.user));
 
   function renderStatusOrTyping() {
-    if (status) {
-      return withDots ? (
-        <DotAnimation className="status" content={status} />
+    if (props.status) {
+      return props.withDots ? (
+        <DotAnimation className="status" content={props.status} />
       ) : (
-        <span className="status" dir="auto">
-          {statusIcon && <Icon className="status-icon" name={statusIcon} />}
-          {renderText(status)}
+        <span class="status" dir="auto">
+          {props.statusIcon && <Icon className="status-icon" name={props.statusIcon} />}
+          {renderText(props.status)}
         </span>
       );
     }
 
-    if (withUpdatingStatus && !areMessagesLoaded) {
+    if (props.withUpdatingStatus && !props.areMessagesLoaded) {
       return <DotAnimation className="status" content={lang('Updating')} />;
     }
 
-    if (customPeer?.subtitleKey) {
+    if (props.customPeer?.subtitleKey) {
       return (
-        <span className="status" dir="auto">
-          <span className="user-status" dir="auto">
-            {oldLang(customPeer.subtitleKey)}
+        <span class="status" dir="auto">
+          <span class="user-status" dir="auto">
+            {oldLang(props.customPeer.subtitleKey)}
           </span>
         </span>
       );
     }
 
-    if (!user) {
+    if (!props.user) {
       return undefined;
     }
 
-    if (typingStatusByPeerId) {
-      return <TypingStatus typingStatusByPeerId={typingStatusByPeerId} isPrivate />;
+    if (props.typingStatusByPeerId) {
+      return <TypingStatus typingStatusByPeerId={props.typingStatusByPeerId} isPrivate />;
     }
 
-    if (isTopic) {
+    if (isTopic()) {
       return (
-        <span className="status" dir="auto">
+        <span class="status" dir="auto">
+          {/* TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6) */}
           <Transition
             name="fade"
             shouldRestoreHeight
-            activeKey={messagesCount !== undefined ? 1 : 2}
+            activeKey={props.messagesCount !== undefined ? 1 : 2}
             className="message-count-transition"
           >
-            {messagesCount !== undefined
-              ? messagesCount > 0
-                ? lang('Messages', { count: messagesCount }, { pluralValue: messagesCount })
+            {props.messagesCount !== undefined
+              ? props.messagesCount > 0
+                ? lang('Messages', { count: props.messagesCount }, { pluralValue: props.messagesCount })
                 : lang('ChatInfoNoMessages')
               : lang('ChatInfoForumTopic')}
           </Transition>
@@ -220,17 +179,17 @@ const PrivateChatInfo = ({
       );
     }
 
-    if (isSystemBot(user.id)) {
+    if (isSystemBot(props.user.id)) {
       return undefined;
     }
 
-    const translatedStatus = noUserStatus ? undefined : getUserStatus(oldLang, user, userStatus);
+    const translatedStatus = props.noUserStatus ? undefined : getUserStatus(oldLang, props.user, props.userStatus);
     const mainUserNameClassName = buildClassName('handle', translatedStatus && 'withStatus');
     return (
-      <span className={buildClassName('status', !noUserStatus && isUserOnline(user, userStatus, true) && 'online')}>
-        {mainUsername && <span className={mainUserNameClassName}>{mainUsername}</span>}
+      <span class={buildClassName('status', !props.noUserStatus && isUserOnline(props.user, props.userStatus, true) && 'online')}>
+        {mainUsername() && <span class={mainUserNameClassName}>{mainUsername()}</span>}
         {translatedStatus && (
-          <span className="user-status" dir="auto">
+          <span class="user-status" dir="auto">
             {translatedStatus}
           </span>
         )}
@@ -239,34 +198,34 @@ const PrivateChatInfo = ({
   }
 
   function renderNameTitle() {
-    if (isTopic) {
+    if (isTopic()) {
       return (
-        <h3 dir="auto" className="fullName">
-          {renderText(topic!.title)}
+        <h3 dir="auto" class="fullName">
+          {renderText(props.topic!.title)}
         </h3>
       );
     }
 
-    if (chatMember && hasRank(chatMember)) {
+    if (props.chatMember && hasRank(props.chatMember)) {
       return (
-        <div className="info-name-title">
+        <div class="info-name-title">
           <FullNameTitle
-            peer={customPeer || user!}
-            noFake={noFake}
-            noVerified={noVerified}
-            withEmojiStatus={!noEmojiStatus}
-            emojiStatusSize={emojiStatusSize}
-            isSavedMessages={isSavedMessages}
-            isSavedDialog={isSavedDialog}
-            iconElement={iconElement}
-            onEmojiStatusClick={onEmojiStatusClick}
+            peer={props.customPeer || props.user!}
+            noFake={props.noFake}
+            noVerified={props.noVerified}
+            withEmojiStatus={!props.noEmojiStatus}
+            emojiStatusSize={props.emojiStatusSize}
+            isSavedMessages={props.isSavedMessages}
+            isSavedDialog={props.isSavedDialog}
+            iconElement={props.iconElement}
+            onEmojiStatusClick={props.onEmojiStatusClick}
           />
           <RankBadge
-            chatId={chatMemberOriginId!}
-            userId={chatMember.userId}
-            isAdmin={chatMember.isAdmin}
-            isOwner={chatMember.isOwner}
-            rank={chatMember.rank}
+            chatId={props.chatMemberOriginId!}
+            userId={props.chatMember.userId}
+            isAdmin={props.chatMember.isAdmin}
+            isOwner={props.chatMember.isOwner}
+            rank={props.chatMember.rank}
           />
         </div>
       );
@@ -274,55 +233,57 @@ const PrivateChatInfo = ({
 
     return (
       <FullNameTitle
-        peer={customPeer || user!}
-        noFake={noFake}
-        noVerified={noVerified}
-        withEmojiStatus={!noEmojiStatus}
-        emojiStatusSize={emojiStatusSize}
-        isSavedMessages={isSavedMessages}
-        isSavedDialog={isSavedDialog}
-        onEmojiStatusClick={onEmojiStatusClick}
-        iconElement={iconElement}
+        peer={props.customPeer || props.user!}
+        noFake={props.noFake}
+        noVerified={props.noVerified}
+        withEmojiStatus={!props.noEmojiStatus}
+        emojiStatusSize={props.emojiStatusSize}
+        isSavedMessages={props.isSavedMessages}
+        isSavedDialog={props.isSavedDialog}
+        onEmojiStatusClick={props.onEmojiStatusClick}
+        iconElement={props.iconElement}
       />
     );
   }
 
   return (
+    <Show when={!(!props.user && !props.customPeer)}>
     <div
-      className={buildClassName('ChatInfo', className)}
-      dir={!noRtl && lang.isRtl ? 'rtl' : undefined}
-      onClick={onClick}
+      class={buildClassName('ChatInfo', props.className)}
+      dir={!props.noRtl && lang.isRtl ? 'rtl' : undefined}
+      onClick={(e) => props.onClick?.(e)}
     >
-      {isSavedDialog && self && (
-        <Avatar key="saved-messages" size={avatarSize} peer={self} isSavedMessages className="saved-dialog-avatar" />
+      {props.isSavedDialog && props.self && (
+        <Avatar size={(props.avatarSize === undefined ? 'medium' : props.avatarSize)} peer={props.self} isSavedMessages className="saved-dialog-avatar" />
       )}
-      {!noAvatar && !isTopic && (
+      {!props.noAvatar && !isTopic() && (
+        // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show>
         <Avatar
-          key={user?.id}
-          size={avatarSize}
-          peer={customPeer || user}
-          className={buildClassName(isSavedDialog && 'overlay-avatar')}
-          isSavedMessages={isSavedMessages}
-          isSavedDialog={isSavedDialog}
-          withStory={withStory}
-          storyViewerOrigin={storyViewerOrigin}
+          key={props.user?.id}
+          size={(props.avatarSize === undefined ? 'medium' : props.avatarSize)}
+          peer={props.customPeer || props.user}
+          className={buildClassName(props.isSavedDialog && 'overlay-avatar')}
+          isSavedMessages={props.isSavedMessages}
+          isSavedDialog={props.isSavedDialog}
+          withStory={props.withStory}
+          storyViewerOrigin={props.storyViewerOrigin}
           storyViewerMode="single-peer"
-          onClick={hasAvatarMediaViewer ? handleAvatarViewerOpen : undefined}
+          onClick={hasAvatarMediaViewer() ? handleAvatarViewerOpen : undefined}
         />
       )}
-      {isTopic && <TopicIcon topic={topic!} className="topic-header-icon" size={TOPIC_ICON_SIZE} />}
-      <div className="info">
+      {isTopic() && <TopicIcon topic={props.topic!} className="topic-header-icon" size={TOPIC_ICON_SIZE} />}
+      <div class="info">
         {renderNameTitle()}
-        {(status || (!isSavedMessages && !noStatusOrTyping)) && renderStatusOrTyping()}
+        {(props.status || (!props.isSavedMessages && !props.noStatusOrTyping)) && renderStatusOrTyping()}
       </div>
-      {ripple && <RippleEffect />}
-      {rightElement}
+      {props.ripple && <RippleEffect />}
+      {props.rightElement}
     </div>
+    </Show>
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global, { userId, threadId, forceShowSelf, isSavedDialog }): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState, { userId, threadId, forceShowSelf, isSavedDialog }: OwnProps): Complete<StateProps> => {
     const { isSynced } = global;
     const user = userId ? selectUser(global, userId) : undefined;
     const userStatus = userId ? selectUserStatus(global, userId) : undefined;
@@ -345,5 +306,6 @@ export default memo(
       topic,
       messagesCount,
     };
-  })(PrivateChatInfo),
-);
+  };
+
+export default PrivateChatInfo;

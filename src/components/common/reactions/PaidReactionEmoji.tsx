@@ -1,8 +1,10 @@
-import { memo, useMemo, useRef, useState } from '../../../lib/teact/teact';
+import { createEffect, createMemo, createSignal } from 'frameact';
 import { getActions, withGlobal } from '../../../global';
+import { depsOf } from '../../../util/effectDeps';
+import { createShowTransition } from '../../../lib/kit';
+import type { GlobalState } from '../../../global/types';
 
 import type { ApiReaction, ApiReactionPaid } from '../../../api/types';
-import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 
 import { isSameReaction } from '../../../global/helpers';
 import { selectPerformanceSettingsValue, selectTabState } from '../../../global/selectors';
@@ -11,10 +13,7 @@ import buildClassName from '../../../util/buildClassName';
 import { LOCAL_TGS_URLS } from '../helpers/animatedAssets';
 import { REM } from '../helpers/mediaDimensions';
 
-import useEffectWithPrevDeps from '../../../hooks/useEffectWithPrevDeps';
 import { useIsIntersecting } from '../../../hooks/useIntersectionObserver';
-import useLastCallback from '../../../hooks/useLastCallback';
-import useShowTransition from '../../../hooks/useShowTransition';
 
 import AnimatedIcon from '../AnimatedIcon';
 import StarIcon from '../icons/StarIcon';
@@ -41,80 +40,70 @@ const EFFECT_SIZE = 6.5 * REM;
 const MAX_EFFECT_COUNT = IS_IOS || IS_ANDROID ? 2 : 5;
 const QUALITY = IS_IOS || IS_ANDROID ? 2 : 3;
 
-const PaidReactionEmoji = ({
-  containerId,
-  reaction,
-  className,
-  size = ICON_SIZE,
-  effectSize = EFFECT_SIZE,
-  activeReactions,
-  localAmount,
-  withEffects,
-  observeIntersection,
-}: OwnProps & StateProps) => {
+const PaidReactionEmoji = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const { stopActiveReaction } = getActions();
 
-  const ref = useRef<HTMLDivElement>();
-  const effectRef = useRef<HTMLDivElement>();
+  let ref!: HTMLDivElement;
+  let effectRef!: HTMLDivElement;
 
-  const [effectsIds, setEffectsIds] = useState<number[]>([]);
+  const [effectsIds, setEffectsIds] = createSignal<number[]>([]);
 
-  const isIntersecting = useIsIntersecting(ref, observeIntersection);
+  const isIntersecting = useIsIntersecting(() => ref, () => props.observeIntersection);
 
-  const activeReaction = useMemo(
-    () => activeReactions?.find((active) => isSameReaction(active, reaction)),
-    [activeReactions, reaction],
+  const activeReaction = createMemo(
+    () => props.activeReactions?.find((active) => isSameReaction(active, props.reaction)),
   );
 
-  const shouldPlayEffect = Boolean(withEffects && activeReaction);
-  const canAddMoreEffects = effectsIds.length < MAX_EFFECT_COUNT;
+  const shouldPlayEffect = createMemo(() => Boolean(props.withEffects && activeReaction()));
+  const canAddMoreEffects = createMemo(() => effectsIds().length < MAX_EFFECT_COUNT);
 
-  useEffectWithPrevDeps(
-    ([prevLocalAmount]) => {
-      if (!shouldPlayEffect) {
+  createEffect(
+    depsOf(() => [props.localAmount, canAddMoreEffects(), shouldPlayEffect()]), (_deps, prev) => {
+      const [prevLocalAmount] = prev ?? [];
+      if (!shouldPlayEffect()) {
         setEffectsIds([]);
         return;
       }
 
-      if (!localAmount || localAmount <= (prevLocalAmount || 0)) {
+      if (!props.localAmount || props.localAmount <= (prevLocalAmount || 0)) {
         return;
       }
 
-      if (canAddMoreEffects) {
+      if (canAddMoreEffects()) {
         setEffectsIds((prev) => [...prev, Date.now()]);
       }
     },
-    [localAmount, canAddMoreEffects, shouldPlayEffect],
   );
 
-  const { shouldRender: shouldRenderEffect } = useShowTransition({
-    ref: effectRef,
+  const { shouldRender: shouldRenderEffect } = createShowTransition({
+    // TODO(codemod): ref option: hand the result `ref` to the element (ref={t.ref}) instead
+    ref: () => effectRef,
     noMountTransition: true,
-    isOpen: shouldPlayEffect,
+    isOpen: () => shouldPlayEffect(),
     className: 'slow',
-    withShouldRender: true,
   });
 
-  const handleEnded = useLastCallback(() => {
-    const newEffectsIds = effectsIds.slice(1);
+  const handleEnded = () => {
+    const newEffectsIds = effectsIds().slice(1);
     setEffectsIds(newEffectsIds);
     if (!newEffectsIds.length) {
-      stopActiveReaction({ containerId, reaction });
+      stopActiveReaction({ containerId: props.containerId, reaction: props.reaction });
     }
-  });
+  };
 
-  const rootClassName = buildClassName(styles.root, shouldRenderEffect && styles.animating, className);
+  const rootClassName = createMemo(() => buildClassName(styles.root, shouldRenderEffect() && styles.animating, props.className));
 
   return (
-    <div className={rootClassName} ref={ref} teactFastList>
-      <StarIcon key="icon" type="gold" size="adaptive" style={`width: ${size}px; height: ${size}px`} />
-      {shouldRenderEffect &&
-        effectsIds.map((id) => (
+    // TODO(codemod): teactFastList without a single .map() child: use <For> / <ManualFor> for the rows
+    <div class={rootClassName()} ref={ref}>
+      <StarIcon type="gold" size="adaptive" style={`width: ${(props.size === undefined ? ICON_SIZE : props.size)}px; height: ${(props.size === undefined ? ICON_SIZE : props.size)}px`} />
+      {shouldRenderEffect() &&
+        effectsIds().map((id) => (
           <AnimatedIcon
-            key={id}
             ref={effectRef}
             className={styles.effect}
-            size={effectSize}
+            size={(props.effectSize === undefined ? EFFECT_SIZE : props.effectSize)}
             tgsUrl={LOCAL_TGS_URLS.StarReactionEffect}
             play={isIntersecting}
             noLoop
@@ -128,8 +117,7 @@ const PaidReactionEmoji = ({
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global, { containerId }) => {
+const mapStateToProps = (global: GlobalState, { containerId }: OwnProps) => {
     const { activeReactions } = selectTabState(global);
 
     const withEffects = selectPerformanceSettingsValue(global, 'reactionEffects');
@@ -138,5 +126,6 @@ export default memo(
       activeReactions: activeReactions?.[containerId],
       withEffects,
     };
-  })(PaidReactionEmoji),
-);
+  };
+
+export default PaidReactionEmoji;

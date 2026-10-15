@@ -1,5 +1,5 @@
-import { memo } from '../../lib/teact/teact';
 import { withGlobal } from '../../global';
+import type { GlobalState } from '../../global/types';
 
 import { VERIFY_AGE_MIN_DEFAULT } from '../../config';
 
@@ -22,42 +22,36 @@ type StateProps = {
   verifyAgeMin: number;
 };
 
-const SensitiveContentConfirmModal = ({
-  isOpen,
-  onClose,
-  shouldAlwaysShow,
-  onAlwaysShowChanged,
-  confirmHandler,
-  verifyAgeMin,
-}: OwnProps & StateProps) => {
+const SensitiveContentConfirmModal = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const lang = useLang();
 
   return (
     <ConfirmDialog
-      title={lang('TitleSensitiveModal', { years: verifyAgeMin })}
+      title={lang('TitleSensitiveModal', { years: props.verifyAgeMin })}
       confirmLabel={lang('ButtonSensitiveView')}
-      isOpen={isOpen}
-      onClose={onClose}
-      confirmHandler={confirmHandler}
+      isOpen={props.isOpen}
+      onClose={props.onClose}
+      confirmHandler={props.confirmHandler}
     >
       {lang('TextSensitiveModal')}
       <Checkbox
         className={styles.checkBox}
-        label={lang('ButtonSensitiveAlways', { years: verifyAgeMin })}
-        checked={shouldAlwaysShow}
-        onCheck={onAlwaysShowChanged}
+        label={lang('ButtonSensitiveAlways', { years: props.verifyAgeMin })}
+        checked={props.shouldAlwaysShow}
+        onCheck={props.onAlwaysShowChanged}
       />
     </ConfirmDialog>
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
     const appConfig = global.appConfig;
     const verifyAgeMin = appConfig.verifyAgeMin;
 
     return {
       verifyAgeMin: verifyAgeMin || VERIFY_AGE_MIN_DEFAULT,
     };
-  })(SensitiveContentConfirmModal),
-);
+  };
+
+export default SensitiveContentConfirmModal;

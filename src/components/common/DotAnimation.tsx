@@ -1,4 +1,3 @@
-import { memo } from '@teact';
 
 import buildClassName from '../../util/buildClassName';
 import renderText from './helpers/renderText';
@@ -12,14 +11,14 @@ type OwnProps = {
   className?: string;
 };
 
-const DotAnimation = ({ content, className }: OwnProps) => {
+const DotAnimation = (props: OwnProps) => {
   const lang = useLang();
   return (
-    <span className={buildClassName('DotAnimation', className)} dir={lang.isRtl ? 'rtl' : 'auto'}>
-      {renderText(content)}
-      <span className="ellipsis" />
+    <span class={buildClassName('DotAnimation', props.className)} dir={lang.isRtl ? 'rtl' : 'auto'}>
+      {renderText(props.content)}
+      <span class="ellipsis" />
     </span>
   );
 };
 
-export default memo(DotAnimation);
+export default DotAnimation;

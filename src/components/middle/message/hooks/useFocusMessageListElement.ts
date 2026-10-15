@@ -1,11 +1,10 @@
-import type { ElementRef } from '../../../../lib/teact/teact';
-import { useLayoutEffect, useRef } from '../../../../lib/teact/teact';
-import { addExtraClass } from '../../../../lib/teact/teact-dom';
+import { createMutationEffect, requestMeasure, requestMutation } from 'frameact';
+import { addExtraClass } from 'frameact/dom';
+import { depsOf } from '../../../../util/effectDeps';
 
 import type { FocusDirection, ScrollTargetPosition } from '../../../../types';
 
 import { SCROLL_MAX_DISTANCE } from '../../../../config';
-import { requestMeasure, requestMutation } from '../../../../lib/fasterdom/fasterdom';
 import animateScroll from '../../../../util/animateScroll';
 import { REM } from '../../../common/helpers/mediaDimensions';
 import { requestAfterMessageListReflow } from '../../helpers/messageListReflow';
@@ -23,6 +22,7 @@ const BOTTOM_FOCUS_MARGIN = 0.5 * REM;
 const FORCE_MESSAGES_SCROLL_CLASS = 'force-messages-scroll';
 const FEW_MESSAGES_SCROLL_RISE = 4 * REM;
 
+// TODO(codemod): useFocusMessageListElement: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useFocusMessageListElement({
   elementRef,
   isFocused,
@@ -33,7 +33,7 @@ export default function useFocusMessageListElement({
   isQuote,
   scrollTargetPosition,
 }: {
-  elementRef: ElementRef<HTMLDivElement>;
+  elementRef: (el: HTMLDivElement) => void;
   isFocused?: boolean;
   focusDirection?: FocusDirection;
   noFocusHighlight?: boolean;
@@ -42,11 +42,11 @@ export default function useFocusMessageListElement({
   isQuote?: boolean;
   scrollTargetPosition?: ScrollTargetPosition;
 }) {
-  const isRelocatedRef = useRef(!isJustAdded);
+  let isRelocatedRef = !isJustAdded;
 
-  useLayoutEffect(() => {
-    const isRelocated = isRelocatedRef.current;
-    isRelocatedRef.current = false;
+  createMutationEffect(depsOf(() => [elementRef, isFocused, focusDirection, noFocusHighlight, isResizingContainer, isQuote, scrollTargetPosition]), () => {
+    const isRelocated = isRelocatedRef;
+    isRelocatedRef = false;
 
     if (isFocused && elementRef.current) {
       const messagesContainer = elementRef.current.closest<HTMLDivElement>('.MessageList');
@@ -105,5 +105,5 @@ export default function useFocusMessageListElement({
         });
       }
     }
-  }, [elementRef, isFocused, focusDirection, noFocusHighlight, isResizingContainer, isQuote, scrollTargetPosition]);
+  });
 }

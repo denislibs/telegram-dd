@@ -1,9 +1,10 @@
-import { useRef, useUnmountCleanup } from '../lib/teact/teact';
+import { onDestroy } from 'frameact';
 
 import useLastCallback from './useLastCallback';
 
 const DEFAULT_THRESHOLD = 250;
 
+// TODO(codemod): useLongPress: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 function useLongPress({
   onClick,
   onStart,
@@ -15,43 +16,43 @@ function useLongPress({
   onEnd?: NoneToVoidFunction;
   threshold?: number;
 }) {
-  const isLongPressActiveRef = useRef(false);
-  const isPressedRef = useRef(false);
-  const timerIdRef = useRef<number | undefined>(undefined);
+  let isLongPressActiveRef = false;
+  let isPressedRef = false;
+  let timerIdRef: number | undefined;
 
-  const start = useLastCallback((e: React.MouseEvent | React.TouchEvent) => {
+  const start = (e: React.MouseEvent | React.TouchEvent) => {
     const canProcessEvent = ('button' in e && e.button === 0) || ('touches' in e && e.touches.length > 0);
-    if (isPressedRef.current || !canProcessEvent) {
+    if (isPressedRef || !canProcessEvent) {
       return;
     }
 
-    isPressedRef.current = true;
-    timerIdRef.current = window.setTimeout(() => {
+    isPressedRef = true;
+    timerIdRef = window.setTimeout(() => {
       onStart?.();
-      isLongPressActiveRef.current = true;
+      isLongPressActiveRef = true;
     }, threshold);
-  });
+  };
 
-  const end = useLastCallback((e: React.MouseEvent | React.TouchEvent) => {
-    if (!isPressedRef.current) return;
+  const end = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!isPressedRef) return;
 
-    if (isLongPressActiveRef.current) {
+    if (isLongPressActiveRef) {
       onEnd?.();
     } else {
       onClick?.(e);
     }
 
     cancel();
-  });
+  };
 
-  const cancel = useLastCallback(() => {
-    isLongPressActiveRef.current = false;
-    isPressedRef.current = false;
-    window.clearTimeout(timerIdRef.current);
-  });
+  const cancel = () => {
+    isLongPressActiveRef = false;
+    isPressedRef = false;
+    window.clearTimeout(timerIdRef);
+  };
 
-  useUnmountCleanup(() => {
-    window.clearTimeout(timerIdRef.current);
+  onDestroy(() => {
+    window.clearTimeout(timerIdRef);
   });
 
   return {

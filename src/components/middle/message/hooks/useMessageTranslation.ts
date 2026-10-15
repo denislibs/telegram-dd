@@ -1,5 +1,6 @@
-import { useEffect } from '../../../../lib/teact/teact';
+import { createEffect } from 'frameact';
 import { getActions } from '../../../../global';
+import { depsOf } from '../../../../util/effectDeps';
 
 import type { ChatTranslatedMessages, TranslationTone } from '../../../../types';
 
@@ -10,6 +11,7 @@ const MESSAGE_LIMIT_PER_REQUEST = 20;
 const THROTTLE_DELAY = 500;
 const PENDING_TRANSLATIONS = new Map<string, Map<string, number[]>>();
 
+// TODO(codemod): useMessageTranslation: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useMessageTranslation(
   chatTranslations: ChatTranslatedMessages | undefined,
   chatId?: string,
@@ -22,13 +24,13 @@ export default function useMessageTranslation(
 
   const { isPending, text, richMessage } = messageTranslation || {};
 
-  useEffect(() => {
+  createEffect(depsOf(() => [chatId, text, richMessage, isPending, messageId, cacheKey, requestedLanguageCode, tone]), () => {
     if (!chatId || !messageId || !cacheKey || !requestedLanguageCode) return;
 
     if (!text && !richMessage && isPending === undefined) {
       addPendingTranslation(chatId, messageId, requestedLanguageCode, tone);
     }
-  }, [chatId, text, richMessage, isPending, messageId, cacheKey, requestedLanguageCode, tone]);
+  });
 
   if (!chatId || !messageId) {
     return {

@@ -1,9 +1,8 @@
-import type { FC } from '../../../lib/teact/teact';
-import { memo } from '../../../lib/teact/teact';
+import { createMemo } from 'frameact';
 import { withGlobal } from '../../../global';
+import type { GlobalState } from '../../../global/types';
 
 import type { ApiSticker } from '../../../api/types';
-import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 import type { ActiveEmojiInteraction } from '../../../types';
 
 import {
@@ -40,47 +39,40 @@ interface StateProps {
   noPlay?: boolean;
 }
 
-const AnimatedCustomEmoji: FC<OwnProps & StateProps> = ({
-  isOwn,
-  customEmojiId,
-  messageId,
-  chatId,
-  activeEmojiInteractions,
-  sticker,
-  effect,
-  soundId,
-  noPlay,
-  observeIntersection,
-}) => {
-  const { ref, size, style, handleClick } = useAnimatedEmoji(
-    chatId,
-    messageId,
-    soundId,
-    activeEmojiInteractions,
-    isOwn,
-    effect?.emoji,
+const AnimatedCustomEmoji = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
+  const animatedEmojiResult = createMemo(() => useAnimatedEmoji(
+    () => props.chatId,
+    () => props.messageId,
+    () => props.soundId,
+    () => props.activeEmojiInteractions,
+    () => props.isOwn,
+    () => props.effect?.emoji,
     getCustomEmojiSize(1),
-  );
+  ));
+  const ref = () => animatedEmojiResult().ref;
+  const size = () => animatedEmojiResult().size;
+  const style = () => animatedEmojiResult().style;
+  const handleClick = () => animatedEmojiResult().handleClick;
 
   return (
     <CustomEmoji
-      ref={ref}
-      documentId={customEmojiId}
-      className={buildClassName('AnimatedEmoji media-inner', sticker?.id === LIKE_STICKER_ID && 'like-sticker-thumb')}
-      style={style}
-      size={size}
+      ref={ref()}
+      documentId={props.customEmojiId}
+      className={buildClassName('AnimatedEmoji media-inner', props.sticker?.id === LIKE_STICKER_ID && 'like-sticker-thumb')}
+      style={style()}
+      size={size()}
       isBig
-      noPlay={noPlay}
+      noPlay={props.noPlay}
       withSharedAnimation
-      forceOnHeavyAnimation={Boolean(effect && activeEmojiInteractions?.length)}
-      observeIntersectionForLoading={observeIntersection}
-      onClick={handleClick}
+      forceOnHeavyAnimation={Boolean(props.effect && props.activeEmojiInteractions?.length)}
+      observeIntersectionForLoading={props.observeIntersection}
+      onClick={handleClick()}
     />
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global, { customEmojiId, withEffects }) => {
+const mapStateToProps = (global: GlobalState, { customEmojiId, withEffects }: OwnProps) => {
     const sticker = selectCustomEmoji(global, customEmojiId);
 
     return {
@@ -89,5 +81,6 @@ export default memo(
       soundId: sticker?.emoji && selectAnimatedEmojiSound(global, sticker.emoji),
       noPlay: !selectCanPlayAnimatedEmojis(global),
     };
-  })(AnimatedCustomEmoji),
-);
+  };
+
+export default AnimatedCustomEmoji;

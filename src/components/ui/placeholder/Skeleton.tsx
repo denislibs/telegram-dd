@@ -1,5 +1,5 @@
-import type { FC } from '@teact';
-import { memo } from '@teact';
+import { createMemo } from 'frameact';
+import { mergeProps } from 'frameact/dom';
 
 import buildClassName from '../../../util/buildClassName';
 import buildStyle from '../../../util/buildStyle';
@@ -17,29 +17,21 @@ type OwnProps = {
   style?: string;
 };
 
-const Skeleton: FC<OwnProps> = ({
-  variant = 'rectangular',
-  animation = 'none',
-  width,
-  height,
-  forceAspectRatio,
-  inline,
-  className,
-  style,
-}) => {
-  const classNames = buildClassName('Skeleton', variant, animation, className, inline && 'inline');
-  const aspectRatio = width && height ? `aspect-ratio: ${width}/${height}` : undefined;
-  const computedStyle = buildStyle(
-    style,
-    forceAspectRatio && aspectRatio,
-    Boolean(width) && `width: ${width}px`,
-    !forceAspectRatio && Boolean(height) && `height: ${height}px`,
-  );
+const Skeleton = (rawProps: OwnProps) => {
+  const props = mergeProps({ variant: 'rectangular', animation: 'none' }, rawProps) as OwnProps & Required<Pick<OwnProps, 'variant' | 'animation'>>;
+  const classNames = createMemo(() => buildClassName('Skeleton', props.variant, props.animation, props.className, props.inline && 'inline'));
+  const aspectRatio = createMemo(() => props.width && props.height ? `aspect-ratio: ${props.width}/${props.height}` : undefined);
+  const computedStyle = createMemo(() => buildStyle(
+    props.style,
+    props.forceAspectRatio && aspectRatio(),
+    Boolean(props.width) && `width: ${props.width}px`,
+    !props.forceAspectRatio && Boolean(props.height) && `height: ${props.height}px`,
+  ));
   return (
-    <div className={classNames} style={computedStyle}>
-      {inline && '\u00A0'}
+    <div class={classNames()} style={computedStyle()}>
+      {props.inline && '\u00A0'}
     </div>
   );
 };
 
-export default memo(Skeleton);
+export default Skeleton;

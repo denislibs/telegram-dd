@@ -1,5 +1,8 @@
-import { memo, useEffect, useMemo } from '../../../lib/teact/teact';
+import { createEffect, createMemo } from 'frameact';
 import { getActions, withGlobal } from '../../../global';
+import { depsOf } from '../../../util/effectDeps';
+import { createShowTransition } from '../../../lib/kit';
+import type { GlobalState } from '../../../global/types';
 
 import type { ApiChatMember, ApiMessage, ApiPeer } from '../../../api/types';
 
@@ -26,8 +29,6 @@ import buildClassName from '../../../util/buildClassName';
 import useContextMenuHandlers from '../../../hooks/useContextMenuHandlers';
 import useFlag from '../../../hooks/useFlag';
 import useLang from '../../../hooks/useLang';
-import useLastCallback from '../../../hooks/useLastCallback';
-import useShowTransition from '../../../hooks/useShowTransition';
 
 import Avatar from '../../common/Avatar';
 import Menu from '../../ui/Menu';
@@ -57,118 +58,102 @@ type StateProps = {
   chatMembers?: ApiChatMember[];
 };
 
-const SenderGroupContainer = ({
-  message,
-  withAvatar,
-  children,
-  id,
-  appearanceOrder,
-  sender,
-  canShowSender,
-  originSender,
-  isChatWithSelf,
-  isRepliesChat,
-  isAnonymousForwards,
-  isChannel,
-  canPost,
-  canRemoveSender,
-  kickedMembers,
-  chatMembers,
-}: OwnProps & StateProps) => {
+const SenderGroupContainer = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const { openChat, updateInsertingPeerIdMention, openMiddleSearch, openDeleteMemberModal } = getActions();
 
-  const { forwardInfo } = message;
+  const source = createMemo(() => props.message);
+  const forwardInfo = () => source().forwardInfo;
 
-  const messageSender = canShowSender ? sender : undefined;
+  const messageSender = createMemo(() => props.canShowSender ? props.sender : undefined);
   const lang = useLang();
 
-  const canBanSender = useMemo(() => {
-    if (!canRemoveSender || !sender) {
+  const canBanSender = createMemo(() => {
+    if (!props.canRemoveSender || !props.sender) {
       return false;
     }
 
     const isRemoved =
-      kickedMembers?.some((m) => m.userId === sender.id) ||
-      (chatMembers && isApiPeerUser(sender) && !chatMembers.some((m) => m.userId === sender.id));
+      props.kickedMembers?.some((m) => m.userId === props.sender.id) ||
+      (props.chatMembers && isApiPeerUser(props.sender) && !props.chatMembers.some((m) => m.userId === props.sender.id));
 
     return !isRemoved;
-  }, [canRemoveSender, sender, kickedMembers, chatMembers]);
+  });
 
-  const noAppearanceAnimation = appearanceOrder <= 0;
-  const [isShown, markShown] = useFlag(noAppearanceAnimation);
-  useEffect(() => {
-    if (noAppearanceAnimation) {
+  const noAppearanceAnimation = createMemo(() => props.appearanceOrder <= 0);
+  const [isShown, markShown] = useFlag(noAppearanceAnimation());
+  createEffect(depsOf(() => [props.appearanceOrder, noAppearanceAnimation()] as const), ([appearanceOrder2, noAppearanceAnimation2]) => {
+    if (noAppearanceAnimation2) {
       return;
     }
 
     // Message appearance animation works only if this timeout is not cleared
-    setTimeout(markShown, appearanceOrder * MESSAGE_APPEARANCE_DELAY);
-  }, [appearanceOrder, noAppearanceAnimation]);
+    setTimeout(markShown, appearanceOrder2 * MESSAGE_APPEARANCE_DELAY);
+  });
 
   const shouldPreferOriginSender =
-    forwardInfo && (isChatWithSelf || isRepliesChat || isAnonymousForwards || !messageSender);
-  const avatarPeer = shouldPreferOriginSender ? originSender : messageSender;
-  const isAvatarPeerUser = avatarPeer && isApiPeerUser(avatarPeer);
+    createMemo(() => forwardInfo() && (props.isChatWithSelf || props.isRepliesChat || props.isAnonymousForwards || !messageSender()));
+  const avatarPeer = createMemo(() => shouldPreferOriginSender() ? props.originSender : messageSender());
+  const isAvatarPeerUser = createMemo(() => avatarPeer() && isApiPeerUser(avatarPeer()));
 
-  const handleOpenChat = useLastCallback(() => {
-    if (!avatarPeer) {
+  const handleOpenChat = () => {
+    if (!avatarPeer()) {
       return;
     }
 
-    openChat({ id: avatarPeer.id });
-  });
+    openChat({ id: avatarPeer().id });
+  };
 
-  const handleMention = useLastCallback(() => {
-    if (!avatarPeer) {
+  const handleMention = () => {
+    if (!avatarPeer()) {
       return;
     }
 
     const messageInput = document.querySelector<HTMLDivElement>(EDITABLE_INPUT_CSS_SELECTOR);
     if (messageInput) {
-      updateInsertingPeerIdMention({ peerId: avatarPeer.id });
+      updateInsertingPeerIdMention({ peerId: avatarPeer().id });
     }
-  });
+  };
 
-  const handleSearchMessages = useLastCallback(() => {
-    if (!avatarPeer) {
+  const handleSearchMessages = () => {
+    if (!avatarPeer()) {
       return;
     }
 
-    openMiddleSearch({ fromPeerId: avatarPeer.id });
-  });
+    openMiddleSearch({ fromPeerId: avatarPeer().id });
+  };
 
-  const handleBanClick = useLastCallback(() => {
-    if (!sender) {
+  const handleBanClick = () => {
+    if (!props.sender) {
       return;
     }
 
-    openDeleteMemberModal({ chatId: message.chatId, peerId: sender.id });
-  });
+    openDeleteMemberModal({ chatId: props.message.chatId, peerId: props.sender.id });
+  };
 
-  const handleAvatarClick = useLastCallback(() => {
+  const handleAvatarClick = () => {
     handleOpenChat();
-  });
+  };
 
-  const { ref: avatarRef, shouldRender } = useShowTransition({
-    isOpen: withAvatar && isShown,
-    noMountTransition: isShown,
-    withShouldRender: true,
+  const { ref: avatarRef, shouldRender } = createShowTransition({
+    isOpen: () => props.withAvatar && isShown(),
+    noMountTransition: isShown(),
   });
 
   const { isContextMenuOpen, contextMenuAnchor, handleContextMenu, handleContextMenuClose, handleContextMenuHide } =
     useContextMenuHandlers(avatarRef);
 
-  const getTriggerElement = useLastCallback(() => avatarRef.current);
-  const getRootElement = useLastCallback(() => document.querySelector('.Transition_slide-active > .MessageList'));
-  const getMenuElement = useLastCallback(() =>
-    document.querySelector('#portals')?.querySelector(`.${styles.contextMenu} .bubble`),
-  );
-  const getLayout = useLastCallback(() => ({ withPortal: true }));
+  // TODO(codemod): avatarRef is a callback ref now: keep the element in a let assigned from ref={(el) => { avatarRef(el); element = el; }}
+  const getTriggerElement = () => avatarRef.current;
+  const getRootElement = () => document.querySelector('.Transition_slide-active > .MessageList');
+  const getMenuElement = () =>
+    document.querySelector('#portals')?.querySelector(`.${styles.contextMenu} .bubble`);
+  const getLayout = () => ({ withPortal: true });
 
-  const canMention = canPost && avatarPeer && (isAvatarPeerUser || Boolean(getMainUsername(avatarPeer)));
-  const canSearch = !isChannel;
+  const canMention = createMemo(() => props.canPost && avatarPeer() && (isAvatarPeerUser() || Boolean(getMainUsername(avatarPeer()))));
+  const canSearch = createMemo(() => !props.isChannel);
   const shouldRenderContextMenu =
-    Boolean(contextMenuAnchor) && (isAvatarPeerUser || canMention || canSearch || canBanSender);
+    createMemo(() => Boolean(contextMenuAnchor) && (isAvatarPeerUser() || canMention() || canSearch() || canBanSender()));
 
   function renderContextMenu() {
     return (
@@ -186,22 +171,22 @@ const SenderGroupContainer = ({
         autoClose
       >
         <>
-          {isAvatarPeerUser && (
+          {isAvatarPeerUser() && (
             <MenuItem icon="message" onClick={handleOpenChat}>
               {lang('SendMessage')}
             </MenuItem>
           )}
-          {canMention && (
+          {canMention() && (
             <MenuItem icon="mention" onClick={handleMention}>
               {lang('ContextMenuItemMention')}
             </MenuItem>
           )}
-          {canSearch && (
+          {canSearch() && (
             <MenuItem icon="search" onClick={handleSearchMessages}>
               {lang('Search')}
             </MenuItem>
           )}
-          {canBanSender && (
+          {canBanSender() && (
             <MenuItem icon="delete-user" destructive onClick={handleBanClick}>
               {lang('ContextRemoveFromGroup')}
             </MenuItem>
@@ -212,15 +197,15 @@ const SenderGroupContainer = ({
   }
 
   function renderAvatar() {
-    const hiddenName = !avatarPeer && forwardInfo ? forwardInfo.hiddenUserName : undefined;
+    const hiddenName = !avatarPeer() && forwardInfo() ? forwardInfo().hiddenUserName : undefined;
 
     return (
       <Avatar
         size="small"
         className={styles.senderAvatar}
-        peer={avatarPeer}
+        peer={avatarPeer()}
         text={hiddenName}
-        onClick={avatarPeer ? handleAvatarClick : undefined}
+        onClick={avatarPeer() ? handleAvatarClick : undefined}
         onContextMenu={handleContextMenu}
       />
     );
@@ -229,20 +214,19 @@ const SenderGroupContainer = ({
   const className = buildClassName('sender-group-container', styles.root);
 
   return (
-    <div id={id} className={className}>
-      {shouldRender && (
-        <div ref={avatarRef} className={styles.avatarContainer}>
+    <div id={props.id} class={className}>
+      {shouldRender() && (
+        <div ref={avatarRef} class={styles.avatarContainer}>
           {renderAvatar()}
-          {shouldRenderContextMenu && renderContextMenu()}
+          {shouldRenderContextMenu() && renderContextMenu()}
         </div>
       )}
-      {children}
+      {props.children}
     </div>
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global, ownProps): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState, ownProps: OwnProps): Complete<StateProps> => {
     const { message, withAvatar } = ownProps;
     const { chatId } = message;
 
@@ -293,5 +277,6 @@ export default memo(
       kickedMembers: canRemoveSender ? fullInfo?.kickedMembers : undefined,
       chatMembers: canRemoveSender && isMemberListComplete ? members : undefined,
     };
-  })(SenderGroupContainer),
-);
+  };
+
+export default SenderGroupContainer;

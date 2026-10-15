@@ -1,4 +1,4 @@
-import { useMemo } from '../../../lib/teact/teact';
+import { createMemo } from 'frameact';
 
 import type {
   ApiChat,
@@ -8,7 +8,6 @@ import type {
   ApiReplyInfo,
   MediaContainer,
 } from '../../../api/types';
-import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 import type { ChatTranslatedMessages, TranslationTone } from '../../../types';
 import type { IconName } from '../../../types/icons';
 
@@ -72,33 +71,10 @@ type OwnProps = {
 const NBSP = '\u00A0';
 const EMOJI_SIZE = 17;
 
-const EmbeddedMessage = ({
-  className,
-  message,
-  replyInfo,
-  suggestedPostInfo,
-  sender,
-  senderChat,
-  forwardSender,
-  composerForwardSenders,
-  title,
-  customText,
-  isProtected,
-  isInComposer,
-  noUserColors,
-  chatTranslations,
-  requestedChatTranslationLanguage,
-  requestedChatTranslationTone,
-  isMediaNsfw,
-  noCaptions,
-  pictogramActionIcon,
-  observeIntersectionForLoading,
-  observeIntersectionForPlaying,
-  onClick,
-  onPictogramClick,
-}: OwnProps) => {
-  const containedMedia: MediaContainer | undefined = useMemo(() => {
-    const media = (replyInfo?.type === 'message' && replyInfo.replyMedia) || message?.content;
+const EmbeddedMessage = (props: OwnProps) => {
+  // TODO(codemod): dependency on a container (replyInfo) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
+  const containedMedia: MediaContainer | undefined = createMemo(() => {
+    const media = (props.replyInfo?.type === 'message' && props.replyInfo.replyMedia) || props.message?.content;
     if (!media) {
       return undefined;
     }
@@ -106,69 +82,70 @@ const EmbeddedMessage = ({
     return {
       content: media,
     };
-  }, [message, replyInfo]);
-  const hasPictogram = canRenderCompactMediaPreview(containedMedia?.content);
+  });
+  const hasPictogram = createMemo(() => canRenderCompactMediaPreview(containedMedia()?.content));
 
-  const isRoundVideo = Boolean(containedMedia && getMessageRoundVideo(containedMedia));
-  const isSpoiler = Boolean(containedMedia && getMessageIsSpoiler(containedMedia)) || isMediaNsfw;
-  const isQuote = Boolean(replyInfo?.type === 'message' && replyInfo.isQuote);
-  const replyForwardInfo = replyInfo?.type === 'message' ? replyInfo.replyFrom : undefined;
+  const isRoundVideo = createMemo(() => Boolean(containedMedia() && getMessageRoundVideo(containedMedia())));
+  const isSpoiler = createMemo(() => Boolean(containedMedia() && getMessageIsSpoiler(containedMedia())) || props.isMediaNsfw);
+  const isQuote = createMemo(() => Boolean(props.replyInfo?.type === 'message' && props.replyInfo.isQuote));
+  const replyForwardInfo = createMemo(() => props.replyInfo?.type === 'message' ? props.replyInfo.replyFrom : undefined);
 
-  const shouldTranslate = message && isMessageTranslatable(message);
-  const { translatedText, translatedRichMessage } = useMessageTranslation(
-    chatTranslations,
-    message?.chatId,
-    shouldTranslate ? message?.id : undefined,
-    requestedChatTranslationLanguage,
-    requestedChatTranslationTone,
-  );
-  const translatedPreview = useMemo(
-    () => (translatedRichMessage ? { text: getRichMessagePreviewText(translatedRichMessage) } : translatedText),
-    [translatedRichMessage, translatedText],
+  const shouldTranslate = createMemo(() => props.message && isMessageTranslatable(props.message));
+  const messageTranslationResult = createMemo(() => useMessageTranslation(
+    () => props.chatTranslations,
+    () => props.message?.chatId,
+    () => shouldTranslate() ? props.message?.id : undefined,
+    () => props.requestedChatTranslationLanguage,
+    () => props.requestedChatTranslationTone,
+  ));
+  const translatedText = () => messageTranslationResult().translatedText;
+  const translatedRichMessage = () => messageTranslationResult().translatedRichMessage;
+  const translatedPreview = createMemo(
+    () => (translatedRichMessage() ? { text: getRichMessagePreviewText(translatedRichMessage()) } : translatedText()),
   );
 
   const oldLang = useOldLang();
   const lang = useLang();
 
-  const senderTitle = sender
-    ? getPeerTitle(oldLang, sender)
-    : replyForwardInfo?.hiddenUserName || message?.forwardInfo?.hiddenUserName;
+  const senderTitle = createMemo(() => props.sender
+    ? getPeerTitle(oldLang, props.sender)
+    : replyForwardInfo()?.hiddenUserName || props.message?.forwardInfo?.hiddenUserName);
 
-  const forwardSendersTitle = useMemo(() => {
-    if (!composerForwardSenders) return undefined;
+  const forwardSendersTitle = createMemo(() => {
+    if (!props.composerForwardSenders) return undefined;
 
-    const peerTitles = composerForwardSenders.map((peer) => getPeerTitle(lang, peer)).filter(Boolean);
+    const peerTitles = props.composerForwardSenders.map((peer) => getPeerTitle(lang, peer)).filter(Boolean);
     return lang.conjunction(peerTitles);
-  }, [composerForwardSenders, lang]);
+  });
 
-  const senderChatTitle = senderChat ? getPeerTitle(oldLang, senderChat) : undefined;
-  const forwardSenderTitle = forwardSender
-    ? getPeerTitle(oldLang, forwardSender)
-    : message?.forwardInfo?.hiddenUserName;
-  const areSendersSame = sender && sender.id === forwardSender?.id;
+  const senderChatTitle = createMemo(() => props.senderChat ? getPeerTitle(oldLang, props.senderChat) : undefined);
+  const forwardSenderTitle = createMemo(() => props.forwardSender
+    ? getPeerTitle(oldLang, props.forwardSender)
+    : props.message?.forwardInfo?.hiddenUserName);
+  const areSendersSame = createMemo(() => props.sender && props.sender.id === props.forwardSender?.id);
 
   function renderTextContent() {
-    const isFree = !suggestedPostInfo?.price?.amount;
-    if (suggestedPostInfo) {
-      if (isFree && !suggestedPostInfo.scheduleDate) {
+    const isFree = !props.suggestedPostInfo?.price?.amount;
+    if (props.suggestedPostInfo) {
+      if (isFree && !props.suggestedPostInfo.scheduleDate) {
         return lang('ComposerEmbeddedMessageSuggestedPostDescription');
       }
-      const priceText = suggestedPostInfo.price
-        ? suggestedPostInfo.price.currency === TON_CURRENCY_CODE
-          ? formatTonAsIcon(lang, suggestedPostInfo.price.amount, {
+      const priceText = props.suggestedPostInfo.price
+        ? props.suggestedPostInfo.price.currency === TON_CURRENCY_CODE
+          ? formatTonAsIcon(lang, props.suggestedPostInfo.price.amount, {
               className: 'suggested-price-ton-icon',
               shouldConvertFromNanos: true,
             })
-          : formatStarsAsIcon(lang, suggestedPostInfo.price.amount, {
+          : formatStarsAsIcon(lang, props.suggestedPostInfo.price.amount, {
               className: 'suggested-price-star-icon',
             })
         : '';
-      const scheduleText = suggestedPostInfo.scheduleDate
-        ? formatScheduledDateTime(suggestedPostInfo.scheduleDate, lang, oldLang)
+      const scheduleText = props.suggestedPostInfo.scheduleDate
+        ? formatScheduledDateTime(props.suggestedPostInfo.scheduleDate, lang, oldLang)
         : '';
       if (priceText && !scheduleText) {
         return (
-          <span className="suggested-post-price-wrapper">
+          <span class="suggested-post-price-wrapper">
             {lang(
               'TitleSuggestedPostAmountForAnyTime',
               { amount: priceText },
@@ -181,37 +158,37 @@ const EmbeddedMessage = ({
         );
       }
       return (
-        <span className="suggested-post-price-wrapper">
+        <span class="suggested-post-price-wrapper">
           {priceText}
           {scheduleText ? ` • ${scheduleText}` : ''}
         </span>
       );
     }
 
-    if (replyInfo?.type === 'message' && replyInfo.quoteText) {
+    if (props.replyInfo?.type === 'message' && props.replyInfo.quoteText) {
       return renderTextWithEntities({
-        text: replyInfo.quoteText.text,
-        entities: replyInfo.quoteText.entities,
+        text: props.replyInfo.quoteText.text,
+        entities: props.replyInfo.quoteText.entities,
         asPreview: true,
         emojiSize: EMOJI_SIZE,
       });
     }
 
-    if (!message) {
-      return customText || renderMediaContentType(containedMedia) || NBSP;
+    if (!props.message) {
+      return props.customText || renderMediaContentType(containedMedia()) || NBSP;
     }
 
-    if (noCaptions) {
+    if (props.noCaptions) {
       return lang('EmbeddedMessageNoCaption');
     }
 
     return (
       <MessageSummary
-        message={message}
-        noEmoji={hasPictogram}
-        forcedText={translatedPreview}
-        observeIntersectionForLoading={observeIntersectionForLoading}
-        observeIntersectionForPlaying={observeIntersectionForPlaying}
+        message={props.message}
+        noEmoji={hasPictogram()}
+        forcedText={translatedPreview()}
+        observeIntersectionForLoading={props.observeIntersectionForLoading}
+        observeIntersectionForPlaying={props.observeIntersectionForPlaying}
         emojiSize={EMOJI_SIZE}
       />
     );
@@ -225,60 +202,60 @@ const EmbeddedMessage = ({
   }
 
   function checkShouldRenderSenderTitle() {
-    if (!senderChat) return true;
-    if (isUserId(senderChat?.id)) return true;
-    if (senderChat.id === sender?.id) return false;
+    if (!props.senderChat) return true;
+    if (isUserId(props.senderChat?.id)) return true;
+    if (props.senderChat.id === props.sender?.id) return false;
     return true;
   }
   function renderSender() {
-    if (title) {
-      return renderText(title);
+    if (props.title) {
+      return renderText(props.title);
     }
 
-    if (suggestedPostInfo && replyInfo) {
+    if (props.suggestedPostInfo && props.replyInfo) {
       return lang('TitleSuggestedChanges');
     }
 
-    if (suggestedPostInfo) {
+    if (props.suggestedPostInfo) {
       return lang('ComposerEmbeddedMessageSuggestedPostTitle');
     }
 
-    if (!senderTitle && !forwardSendersTitle) {
+    if (!senderTitle() && !forwardSendersTitle()) {
       // Keep the sender subtree structure stable while the peer is still loading — replacing
       // a bare text node with an element subtree later makes WebKit shift `scrollTop`
       return (
-        <span className="embedded-sender-wrapper">
-          <span className="embedded-sender">{NBSP}</span>
+        <span class="embedded-sender-wrapper">
+          <span class="embedded-sender">{NBSP}</span>
         </span>
       );
     }
 
     let icon: IconName | undefined;
-    if (senderChat) {
-      if (isChatChannel(senderChat)) {
+    if (props.senderChat) {
+      if (isChatChannel(props.senderChat)) {
         icon = 'megaphone-filled';
       }
 
-      if (isChatGroup(senderChat)) {
+      if (isChatGroup(props.senderChat)) {
         icon = 'group-filled';
       }
     }
 
-    const isReplyToQuote = isInComposer && Boolean(replyInfo && 'quoteText' in replyInfo && replyInfo?.quoteText);
+    const isReplyToQuote = props.isInComposer && Boolean(props.replyInfo && 'quoteText' in props.replyInfo && props.replyInfo?.quoteText);
 
     return (
-      <span className="embedded-sender-wrapper">
+      <span class="embedded-sender-wrapper">
         {checkShouldRenderSenderTitle() && (
-          <span className="embedded-sender">
-            {!composerForwardSenders &&
-              senderTitle &&
-              renderText(isReplyToQuote ? oldLang('ReplyToQuote', senderTitle) : senderTitle)}
-            {forwardSendersTitle &&
+          <span class="embedded-sender">
+            {!props.composerForwardSenders &&
+              senderTitle() &&
+              renderText(isReplyToQuote ? oldLang('ReplyToQuote', senderTitle()) : senderTitle())}
+            {forwardSendersTitle() &&
               renderText(
                 lang(
                   'ComposerTitleForwardFrom',
                   {
-                    users: forwardSendersTitle,
+                    users: forwardSendersTitle(),
                   },
                   {
                     withNodes: true,
@@ -289,18 +266,18 @@ const EmbeddedMessage = ({
           </span>
         )}
         {icon && <Icon name={icon} className="embedded-chat-icon" />}
-        {icon && senderChatTitle && <span className="embedded-sender-chat">{renderText(senderChatTitle)}</span>}
+        {icon && senderChatTitle() && <span class="embedded-sender-chat">{renderText(senderChatTitle())}</span>}
       </span>
     );
   }
 
   function renderForwardSender() {
     return (
-      forwardSenderTitle &&
-      !areSendersSame && (
-        <span className="embedded-forward-sender-wrapper">
-          <Icon name={forwardSender ? 'share-filled' : 'forward'} className="embedded-origin-icon" />
-          <span className="forward-sender-title">{renderText(forwardSenderTitle)}</span>
+      forwardSenderTitle() &&
+      !areSendersSame() && (
+        <span class="embedded-forward-sender-wrapper">
+          <Icon name={props.forwardSender ? 'share-filled' : 'forward'} className="embedded-origin-icon" />
+          <span class="forward-sender-title">{renderText(forwardSenderTitle())}</span>
         </span>
       )
     );
@@ -308,42 +285,42 @@ const EmbeddedMessage = ({
 
   return (
     <PeerColorWrapper
-      peer={sender}
+      peer={props.sender}
       emojiIconClassName="EmbeddedMessage--background-icons"
       shouldReset
-      isReply={Boolean(replyInfo)}
-      noUserColors={noUserColors}
+      isReply={Boolean(props.replyInfo)}
+      noUserColors={props.noUserColors}
       className={buildClassName(
         'EmbeddedMessage',
-        className,
-        isQuote && 'is-quote',
-        hasPictogram && 'with-thumb',
+        props.className,
+        isQuote() && 'is-quote',
+        hasPictogram() && 'with-thumb',
         'no-selection',
-        composerForwardSenders && 'is-input-forward',
-        suggestedPostInfo && 'is-suggested-post',
+        props.composerForwardSenders && 'is-input-forward',
+        props.suggestedPostInfo && 'is-suggested-post',
       )}
       dir={lang.isRtl ? 'rtl' : undefined}
-      onClick={onClick}
+      onClick={props.onClick}
     >
-      <div className="hover-effect" />
+      <div class="hover-effect" />
       <RippleEffect />
-      {hasPictogram && (
+      {hasPictogram() && (
         <CompactMediaPreview
-          media={containedMedia?.content}
+          media={containedMedia()?.content}
           className="embedded-thumb"
           isPictogram
-          isRound={isRoundVideo}
-          isProtected={isProtected}
-          isSpoiler={isSpoiler}
-          actionIcon={pictogramActionIcon}
-          observeIntersectionForLoading={observeIntersectionForLoading}
-          observeIntersectionForPlaying={observeIntersectionForPlaying}
-          onClick={onPictogramClick}
+          isRound={isRoundVideo()}
+          isProtected={props.isProtected}
+          isSpoiler={isSpoiler()}
+          actionIcon={props.pictogramActionIcon}
+          observeIntersectionForLoading={props.observeIntersectionForLoading}
+          observeIntersectionForPlaying={props.observeIntersectionForPlaying}
+          onClick={props.onPictogramClick}
         />
       )}
-      <div className="message-text">
-        <p className={buildClassName('embedded-text-wrapper', isQuote && 'multiline')}>{renderTextContent()}</p>
-        <div className="message-title">
+      <div class="message-text">
+        <p class={buildClassName('embedded-text-wrapper', isQuote() && 'multiline')}>{renderTextContent()}</p>
+        <div class="message-title">
           {renderSender()}
           {renderForwardSender()}
         </div>

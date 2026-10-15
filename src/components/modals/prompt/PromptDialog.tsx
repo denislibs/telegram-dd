@@ -1,6 +1,6 @@
-import { memo, useState } from '../../../lib/teact/teact';
+import { createSignal } from 'frameact';
+import { mergeProps } from 'frameact/dom';
 
-import useLastCallback from '../../../hooks/useLastCallback';
 import useOldLang from '../../../hooks/useOldLang';
 
 import Button from '../../ui/Button';
@@ -21,44 +21,34 @@ export type OwnProps = {
   onSubmit: (text: string) => void;
 };
 
-const PromptDialog = ({
-  isOpen,
-  title,
-  subtitle,
-  placeholder,
-  submitText,
-  maxLength,
-  initialValue = '',
-  onClose,
-  onSubmit,
-}: OwnProps) => {
+const PromptDialog = (rawProps: OwnProps) => {
+  const props = mergeProps({ initialValue: '' }, rawProps) as OwnProps & Required<Pick<OwnProps, 'initialValue'>>;
   const lang = useOldLang();
 
-  const [text, setText] = useState(initialValue);
+  const [text, setText] = createSignal(props.initialValue);
 
-  const handleTextChange = useLastCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleTextChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setText(e.target.value);
-  });
+  };
 
-  const handleSubmit = useLastCallback(() => {
-    onSubmit(text);
-  });
+  const handleSubmit = () => {
+    props.onSubmit(text());
+  };
 
   return (
-    <Modal className="narrow" title={title} isOpen={isOpen} onClose={onClose} isSlim>
-      {Boolean(subtitle) && <div className={styles.subtitle}>{subtitle}</div>}
+    <Modal className="narrow" title={props.title} isOpen={props.isOpen} onClose={props.onClose} isSlim>
+      {Boolean(props.subtitle) && <div class={styles.subtitle}>{props.subtitle}</div>}
       <InputText
-        placeholder={placeholder}
-        value={text}
+        placeholder={props.placeholder}
+        value={text()}
         onChange={handleTextChange}
-        maxLength={maxLength}
-        teactExperimentControlled
+        maxLength={props.maxLength}
       />
-      <div className="dialog-buttons mt-2">
+      <div class="dialog-buttons mt-2">
         <Button className="confirm-dialog-button" onClick={handleSubmit}>
-          {submitText || lang('Save')}
+          {props.submitText || lang('Save')}
         </Button>
-        <Button className="confirm-dialog-button" isText onClick={onClose}>
+        <Button className="confirm-dialog-button" isText onClick={props.onClose}>
           {lang('Cancel')}
         </Button>
       </div>
@@ -66,4 +56,4 @@ const PromptDialog = ({
   );
 };
 
-export default memo(PromptDialog);
+export default PromptDialog;

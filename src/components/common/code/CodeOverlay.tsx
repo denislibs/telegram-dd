@@ -1,6 +1,6 @@
-import type { FC } from '../../../lib/teact/teact';
-import { memo, useCallback, useEffect, useRef, useState } from '../../../lib/teact/teact';
+import { createEffect, createMemo, createSignal } from 'frameact';
 import { getActions } from '../../../global';
+import { depsOf } from '../../../util/effectDeps';
 
 import buildClassName from '../../../util/buildClassName';
 import { copyTextToClipboard } from '../../../util/clipboard';
@@ -20,51 +20,51 @@ export type OwnProps = {
   onWordWrapToggle?: (wrap: boolean) => void;
 };
 
-const CodeOverlay: FC<OwnProps> = ({ text, className, noCopy, onWordWrapToggle }) => {
+const CodeOverlay = (props: OwnProps) => {
   const { showNotification } = getActions();
-  const ref = useRef<HTMLDivElement>();
+  let ref!: HTMLDivElement;
   const windowSize = useWindowSize();
   const lang = useOldLang();
-  const [isWordWrap, setIsWordWrap] = useState(true);
-  const [withWordWrapButton, setWithWordWrapButton] = useState(false);
+  const [isWordWrap, setIsWordWrap] = createSignal(true);
+  const [withWordWrapButton, setWithWordWrapButton] = createSignal(false);
 
-  const checkWordWrap = useCallback(() => {
-    const isWrap = areLinesWrapping(text, ref.current!.parentElement!);
+  const checkWordWrap = () => {
+    const isWrap = areLinesWrapping(props.text, ref!.parentElement!);
     setWithWordWrapButton(isWrap);
-  }, [text]);
+  };
 
-  useEffect(() => {
-    if (isWordWrap) {
-      checkWordWrap();
+  createEffect(depsOf(() => [checkWordWrap, isWordWrap(), props.text, windowSize] as const), ([checkWordWrap2, isWordWrap2, text2]) => {
+    if (isWordWrap2) {
+      checkWordWrap2();
     }
-  }, [checkWordWrap, isWordWrap, text, windowSize]);
+  });
 
-  const handleCopy = useCallback(() => {
-    copyTextToClipboard(text);
+  const handleCopy = () => {
+    copyTextToClipboard(props.text);
     showNotification({
       message: lang('TextCopied'),
     });
-  }, [lang, showNotification, text]);
+  };
 
-  const handleWordWrapClick = useCallback(() => {
-    setIsWordWrap(!isWordWrap);
-    onWordWrapToggle?.(!isWordWrap);
-  }, [isWordWrap, onWordWrapToggle]);
+  const handleWordWrapClick = () => {
+    setIsWordWrap(!isWordWrap());
+    props.onWordWrapToggle?.(!isWordWrap());
+  };
 
-  const contentClass = buildClassName(styles.content, !withWordWrapButton && noCopy && styles.hidden);
-  const overlayClass = buildClassName(styles.overlay, className);
-  const wrapClass = buildClassName(styles.wrap, isWordWrap && styles.wrapOn);
+  const contentClass = createMemo(() => buildClassName(styles.content, !withWordWrapButton() && props.noCopy && styles.hidden));
+  const overlayClass = createMemo(() => buildClassName(styles.overlay, props.className));
+  const wrapClass = createMemo(() => buildClassName(styles.wrap, isWordWrap() && styles.wrapOn));
 
   return (
-    <div className={overlayClass} ref={ref}>
-      <div className={contentClass}>
-        {withWordWrapButton && (
-          <div className={wrapClass} onClick={handleWordWrapClick} title="Word Wrap">
+    <div class={overlayClass()} ref={ref}>
+      <div class={contentClass()}>
+        {withWordWrapButton() && (
+          <div class={wrapClass()} onClick={handleWordWrapClick} title="Word Wrap">
             <Icon name="word-wrap" />
           </div>
         )}
-        {!noCopy && (
-          <div className={styles.copy} onClick={handleCopy} title={lang('Copy')}>
+        {!props.noCopy && (
+          <div class={styles.copy} onClick={handleCopy} title={lang('Copy')}>
             <Icon name="copy" />
           </div>
         )}
@@ -73,4 +73,4 @@ const CodeOverlay: FC<OwnProps> = ({ text, className, noCopy, onWordWrapToggle }
   );
 };
 
-export default memo(CodeOverlay);
+export default CodeOverlay;

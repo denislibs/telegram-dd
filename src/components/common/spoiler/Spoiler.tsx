@@ -1,5 +1,5 @@
-import type { TeactNode } from '../../../lib/teact/teact';
-import { memo, useEffect, useRef } from '../../../lib/teact/teact';
+import { createEffect } from 'frameact';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import { ApiMessageEntityTypes } from '../../../api/types';
 
@@ -7,12 +7,11 @@ import { createClassNameBuilder } from '../../../util/buildClassName';
 import stopEvent from '../../../util/stopEvent';
 
 import useFlag from '../../../hooks/useFlag';
-import useLastCallback from '../../../hooks/useLastCallback';
 
 import './Spoiler.scss';
 
 type OwnProps = {
-  children?: TeactNode;
+  children?: JSX.Element;
   containerId?: string;
 };
 
@@ -20,48 +19,48 @@ const revealByContainerId = new Map<string, VoidFunction[]>();
 
 const buildClassName = createClassNameBuilder('Spoiler');
 
-const Spoiler = ({ children, containerId }: OwnProps) => {
-  const contentRef = useRef<HTMLDivElement>();
+const Spoiler = (props: OwnProps) => {
+  let contentRef!: HTMLDivElement;
 
   const [isRevealed, revealSpoiler] = useFlag();
 
-  const handleClick = useLastCallback((e: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
-    if (!containerId) return;
+  const handleClick = (e: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
+    if (!props.containerId) return;
 
-    if (!isRevealed) {
+    if (!isRevealed()) {
       stopEvent(e);
     }
 
-    revealByContainerId.get(containerId)?.forEach((reveal) => reveal());
-  });
+    revealByContainerId.get(props.containerId)?.forEach((reveal) => reveal());
+  };
 
-  useEffect(() => {
-    if (!containerId) {
+  createEffect(() => props.containerId, (containerId2) => {
+    if (!containerId2) {
       return undefined;
     }
 
-    if (revealByContainerId.has(containerId)) {
-      revealByContainerId.get(containerId)!.push(revealSpoiler);
+    if (revealByContainerId.has(containerId2)) {
+      revealByContainerId.get(containerId2)!.push(revealSpoiler);
     } else {
-      revealByContainerId.set(containerId, [revealSpoiler]);
+      revealByContainerId.set(containerId2, [revealSpoiler]);
     }
 
     return () => {
-      revealByContainerId.delete(containerId);
+      revealByContainerId.delete(containerId2);
     };
-  }, [containerId]);
+  });
 
   return (
     <span
-      className={buildClassName('&', !isRevealed && 'concealed', !isRevealed && Boolean(containerId) && 'animated')}
-      onClick={containerId && !isRevealed ? handleClick : undefined}
+      class={buildClassName('&', !isRevealed() && 'concealed', !isRevealed() && Boolean(props.containerId) && 'animated')}
+      onClick={props.containerId && !isRevealed() ? handleClick : undefined}
       data-entity-type={ApiMessageEntityTypes.Spoiler}
     >
-      <span className={buildClassName('content')} ref={contentRef}>
-        {children}
+      <span class={buildClassName('content')} ref={contentRef}>
+        {props.children}
       </span>
     </span>
   );
 };
 
-export default memo(Spoiler);
+export default Spoiler;

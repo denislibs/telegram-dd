@@ -1,4 +1,4 @@
-import { memo, useState } from '../../../lib/teact/teact';
+import { createMemo, createSignal } from 'frameact';
 
 import { ApiMessageEntityTypes } from '../../../api/types';
 
@@ -6,7 +6,6 @@ import buildClassName from '../../../util/buildClassName';
 import { getPrettyCodeLanguageName } from '../../../util/codeLanguages';
 
 import useAsync from '../../../hooks/useAsync';
-import useLastCallback from '../../../hooks/useLastCallback';
 
 import PeerColorWrapper from '../PeerColorWrapper';
 import CodeOverlay from './CodeOverlay';
@@ -19,29 +18,30 @@ export type OwnProps = {
   noCopy?: boolean;
 };
 
-const CodeBlock = ({ text, language, noCopy }: OwnProps) => {
-  const [isWordWrap, setIsWordWrap] = useState(true);
+const CodeBlock = (props: OwnProps) => {
+  const [isWordWrap, setIsWordWrap] = createSignal(true);
 
-  const { result: highlighted } = useAsync(() => {
-    if (!language) return Promise.resolve(undefined);
-    return import('../../../util/highlightCode').then((lib) => lib.default(text, language));
-  }, [language, text]);
+  const asyncResult = createMemo(() => useAsync(() => {
+    if (!props.language) return Promise.resolve(undefined);
+    return import('../../../util/highlightCode').then((lib) => lib.default(props.text, props.language));
+  }, () => [props.language, props.text]));
+  const highlighted = () => asyncResult().result;
 
-  const handleWordWrapToggle = useLastCallback((wrap) => {
+  const handleWordWrapToggle = (wrap) => {
     setIsWordWrap(wrap);
-  });
+  };
 
-  const blockClass = buildClassName('code-block', !isWordWrap && 'no-word-wrap custom-scroll-x no-scrollbar');
+  const blockClass = createMemo(() => buildClassName('code-block', !isWordWrap() && 'no-word-wrap custom-scroll-x no-scrollbar'));
 
   return (
     <PeerColorWrapper className="CodeBlock">
-      {language && <p className="code-title">{getPrettyCodeLanguageName(language)}</p>}
-      <pre className={blockClass} data-entity-type={ApiMessageEntityTypes.Pre} data-language={language}>
-        {highlighted ?? text}
-        <CodeOverlay text={text} className="code-overlay" onWordWrapToggle={handleWordWrapToggle} noCopy={noCopy} />
+      {props.language && <p class="code-title">{getPrettyCodeLanguageName(props.language)}</p>}
+      <pre class={blockClass()} data-entity-type={ApiMessageEntityTypes.Pre} data-language={props.language}>
+        {highlighted() ?? props.text}
+        <CodeOverlay text={props.text} className="code-overlay" onWordWrapToggle={handleWordWrapToggle} noCopy={props.noCopy} />
       </pre>
     </PeerColorWrapper>
   );
 };
 
-export default memo(CodeBlock);
+export default CodeBlock;

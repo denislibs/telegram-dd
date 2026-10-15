@@ -1,5 +1,6 @@
-import { useEffect } from '../../../../lib/teact/teact';
+import { createEffect } from 'frameact';
 import { getActions } from '../../../../global';
+import { depsOf } from '../../../../util/effectDeps';
 
 import type { ApiMessage } from '../../../../api/types';
 import type { Signal } from '../../../../util/signals';
@@ -24,13 +25,14 @@ type MessageMetadata = {
 
 const CHAT_STATS = new Map<string, LimitedMap<number, MessageMetadata>>();
 
+// TODO(codemod): useDetectChatLanguage: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useDetectChatLanguage(
   message: ApiMessage,
   detectedLanguage?: string,
   isDisabled?: boolean,
   getIsReady?: Signal<boolean>,
 ) {
-  useEffect(() => {
+  createEffect(depsOf(() => [message, detectedLanguage, isDisabled, getIsReady]), () => {
     if (isDisabled || (getIsReady && !getIsReady())) return;
 
     const isTranslatable = isMessageTranslatable(message, true);
@@ -40,7 +42,7 @@ export default function useDetectChatLanguage(
       isTranslatable,
       detectedLanguage,
     });
-  }, [message, detectedLanguage, isDisabled, getIsReady]);
+  });
 }
 
 const throttledMakeChatDecision = throttle(makeChatDecision, THROTTLE_DELAY);

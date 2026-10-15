@@ -1,22 +1,22 @@
-import type { ElementRef } from '../lib/teact/teact';
-import { useEffect, useLayoutEffect, useState } from '../lib/teact/teact';
+import { createMeasureEffect, createMutationEffect, createSignal, requestMutation } from 'frameact';
+import { depsOf } from '../util/effectDeps';
 
-import { requestMutation } from '../lib/fasterdom/fasterdom';
 import useFlag from './useFlag';
 import useLastCallback from './useLastCallback';
 
+// TODO(codemod): useResize: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export function useResize(
-  elementRef: ElementRef<HTMLElement>,
+  elementRef: (el: HTMLElement) => void,
   onResize: (width: number) => void,
   onReset: NoneToVoidFunction,
   initialWidth?: number,
   cssPropertyName?: string,
 ) {
   const [isActive, markIsActive, unmarkIsActive] = useFlag();
-  const [initialMouseX, setInitialMouseX] = useState<number>(0);
-  const [initialElementWidth, setInitialElementWidth] = useState<number>(0);
+  const [initialMouseX, setInitialMouseX] = createSignal<number>(0);
+  const [initialElementWidth, setInitialElementWidth] = createSignal<number>(0);
 
-  const setElementStyle = useLastCallback((width?: number) => {
+  const setElementStyle = (width?: number) => {
     requestMutation(() => {
       if (!elementRef.current) {
         return;
@@ -28,11 +28,11 @@ export function useResize(
         elementRef.current.style.setProperty(cssPropertyName, widthPx);
       }
     });
-  });
+  };
 
   // Apply directly instead of via `requestMutation` to avoid a one-frame delay
   // (layout effects already run in the mutation phase)
-  useLayoutEffect(() => {
+  createMutationEffect(depsOf(() => [cssPropertyName, elementRef, initialWidth]), () => {
     if (!elementRef.current || !initialWidth) {
       return;
     }
@@ -42,7 +42,7 @@ export function useResize(
     if (cssPropertyName) {
       elementRef.current.style.setProperty(cssPropertyName, widthPx);
     }
-  }, [cssPropertyName, elementRef, initialWidth]);
+  });
 
   function handleMouseUp() {
     requestMutation(() => {
@@ -68,11 +68,11 @@ export function useResize(
     onReset();
   }
 
-  useEffect(() => {
-    if (!isActive) return undefined;
+  createMeasureEffect(depsOf(() => [initialElementWidth(), initialMouseX(), elementRef, onResize, isActive(), unmarkIsActive, setElementStyle] as const), ([initialElementWidth2, initialMouseX2, , , isActive2]) => {
+    if (!isActive2) return undefined;
 
     const handleMouseMove = (e: MouseEvent) => {
-      const newWidth = Math.ceil(initialElementWidth + e.clientX - initialMouseX);
+      const newWidth = Math.ceil(initialElementWidth2 + e.clientX - initialMouseX2);
       setElementStyle(newWidth);
     };
 
@@ -94,7 +94,7 @@ export function useResize(
     document.addEventListener('blur', stopDrag, false);
 
     return cleanup;
-  }, [initialElementWidth, initialMouseX, elementRef, onResize, isActive, unmarkIsActive, setElementStyle]);
+  });
 
   return { initResize, resetResize, handleMouseUp };
 }

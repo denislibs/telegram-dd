@@ -1,41 +1,40 @@
-import { useEffect, useSignal } from '../../../lib/teact/teact';
+import { createEffect, createMemo, createSignal } from 'frameact';
 import { getGlobal } from '../../../global';
+import { depsOf } from '../../../util/effectDeps';
 
 import type { ThreadId } from '../../../types';
 
 import { selectListedIds, selectOutlyingListByMessageId } from '../../../global/selectors';
 import cycleRestrict from '../../../util/cycleRestrict';
 
-import useDerivedSignal from '../../../hooks/useDerivedSignal';
-import useLastCallback from '../../../hooks/useLastCallback';
 
 export type OnIntersectPinnedMessage = (params: { firstViewportId?: number; shouldCancelWaiting?: boolean }) => void;
 
+// TODO(codemod): usePinnedMessage: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function usePinnedMessage(chatId?: string, threadId?: ThreadId, pinnedIds?: number[]) {
-  const [getPinnedIndexByKey, setPinnedIndexByKey] = useSignal<Record<string, number>>({});
-  const [getLoadingPinnedId, setLoadingPinnedId] = useSignal<number | undefined>();
+  const [getPinnedIndexByKey, setPinnedIndexByKey] = createSignal<Record<string, number>>({});
+  const [getLoadingPinnedId, setLoadingPinnedId] = createSignal<number | undefined>(undefined);
   const key = chatId ? `${chatId}_${threadId}` : undefined;
-  const getCurrentPinnedIndex = useDerivedSignal(() => getPinnedIndexByKey()[key!] ?? 0, [getPinnedIndexByKey, key]);
+  const getCurrentPinnedIndex = createMemo(() => getPinnedIndexByKey()()[key!] ?? 0);
 
   // Reset when switching chat
-  useEffect(() => {
+  createEffect(depsOf(() => [chatId, threadId, setPinnedIndexByKey, setLoadingPinnedId]), () => {
     setLoadingPinnedId(undefined);
-  }, [chatId, threadId, setPinnedIndexByKey, setLoadingPinnedId]);
+  });
 
-  useEffect(() => {
+  createEffect(depsOf(() => [getPinnedIndexByKey(), key, pinnedIds?.length, setPinnedIndexByKey] as const), ([getPinnedIndexByKey2]) => {
     if (!key) return;
-    const currentPinnedIndex = getPinnedIndexByKey()[key];
+    const currentPinnedIndex = getPinnedIndexByKey2()[key];
     const pinnedLength = pinnedIds?.length || 0;
     if (currentPinnedIndex >= pinnedLength) {
       setPinnedIndexByKey({
-        ...getPinnedIndexByKey(),
+        ...getPinnedIndexByKey2(),
         [key]: clampIndex(pinnedLength - 1),
       });
     }
-  }, [getPinnedIndexByKey, key, pinnedIds?.length, setPinnedIndexByKey]);
+  });
 
-  const handleIntersectPinnedMessage: OnIntersectPinnedMessage = useLastCallback(
-    ({ firstViewportId, shouldCancelWaiting }) => {
+  const handleIntersectPinnedMessage: OnIntersectPinnedMessage = ({ firstViewportId, shouldCancelWaiting }) => {
       if (!chatId || !threadId || !key || !pinnedIds?.length) return;
 
       if (shouldCancelWaiting) {
@@ -43,11 +42,11 @@ export default function usePinnedMessage(chatId?: string, threadId?: ThreadId, p
         return;
       }
 
-      const loadingPinnedId = getLoadingPinnedId();
+      const loadingPinnedId = getLoadingPinnedId()();
       if (loadingPinnedId) {
         const newPinnedIndex = pinnedIds.indexOf(loadingPinnedId);
         setPinnedIndexByKey({
-          ...getPinnedIndexByKey(),
+          ...getPinnedIndexByKey()(),
           [key]: clampIndex(newPinnedIndex),
         });
         setLoadingPinnedId(undefined);
@@ -64,13 +63,12 @@ export default function usePinnedMessage(chatId?: string, threadId?: ThreadId, p
       }
 
       setPinnedIndexByKey({
-        ...getPinnedIndexByKey(),
+        ...getPinnedIndexByKey()(),
         [key]: clampIndex(newIndex),
       });
-    },
-  );
+    };
 
-  const handleFocusPinnedMessage = useLastCallback((messageId: number) => {
+  const handleFocusPinnedMessage = (messageId: number) => {
     // Focusing on a post in comments
     if (!chatId || !threadId || !pinnedIds?.length) {
       return;
@@ -86,13 +84,13 @@ export default function usePinnedMessage(chatId?: string, threadId?: ThreadId, p
 
     if (isMessageLoaded) {
       setPinnedIndexByKey({
-        ...getPinnedIndexByKey(),
+        ...getPinnedIndexByKey()(),
         [key!]: newIndex,
       });
     } else {
       setLoadingPinnedId(pinnedIds[newIndex]);
     }
-  });
+  };
 
   return {
     handleIntersectPinnedMessage,

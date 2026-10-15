@@ -1,5 +1,6 @@
-import { useEffect, useRef } from '../../../lib/teact/teact';
+import { createMeasureEffect } from 'frameact';
 import { getActions } from '../../../global';
+import { depsOf } from '../../../util/effectDeps';
 
 import type { ActiveEmojiInteraction } from '../../../types';
 
@@ -8,7 +9,6 @@ import buildStyle from '../../../util/buildStyle';
 import safePlay from '../../../util/safePlay';
 import { REM } from '../helpers/mediaDimensions';
 
-import useLastCallback from '../../../hooks/useLastCallback';
 import useMedia from '../../../hooks/useMedia';
 
 const SIZE = 7 * REM;
@@ -16,6 +16,7 @@ const INTERACTION_BUNCH_TIME = 1000;
 const MS_DIVIDER = 1000;
 const TIME_DEFAULT = 0;
 
+// TODO(codemod): useAnimatedEmoji: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useAnimatedEmoji(
   chatId?: string,
   messageId?: number,
@@ -27,19 +28,19 @@ export default function useAnimatedEmoji(
 ) {
   const { interactWithAnimatedEmoji, sendEmojiInteraction, sendWatchingEmojiInteraction } = getActions();
 
-  const ref = useRef<HTMLDivElement>();
+  let ref!: HTMLDivElement;
 
-  const audioRef = useRef<HTMLAudioElement | undefined>();
+  let audioRef!: HTMLAudioElement | undefined;
 
   const soundMediaData = useMedia(soundId ? `document${soundId}` : undefined, !soundId);
 
   const size = preferredSize || SIZE;
   const style = buildStyle(`width: ${size}px`, `height: ${size}px`, emoji && !IS_TAURI && 'cursor: pointer');
 
-  const interactionsRef = useRef<number[] | undefined>(undefined);
-  const startedInteractionsRef = useRef<number | undefined>(undefined);
-  const sendInteractionBunch = useLastCallback(() => {
-    const container = ref.current;
+  let interactionsRef: number[] | undefined;
+  let startedInteractionsRef: number | undefined;
+  const sendInteractionBunch = () => {
+    const container = ref;
 
     if (!container) return;
 
@@ -47,36 +48,36 @@ export default function useAnimatedEmoji(
       chatId: chatId!,
       messageId: messageId!,
       emoji: emoji!,
-      interactions: interactionsRef.current!,
+      interactions: interactionsRef!,
     });
-    startedInteractionsRef.current = undefined;
-    interactionsRef.current = undefined;
-  });
+    startedInteractionsRef = undefined;
+    interactionsRef = undefined;
+  };
 
-  const play = useLastCallback(() => {
-    const audio = audioRef.current;
+  const play = () => {
+    const audio = audioRef;
     if (soundMediaData) {
       if (audio) {
         audio.pause();
         audio.remove();
       }
-      audioRef.current = new Audio();
-      audioRef.current.src = soundMediaData;
-      safePlay(audioRef.current);
-      audioRef.current.addEventListener(
+      audioRef = new Audio();
+      audioRef.src = soundMediaData;
+      safePlay(audioRef);
+      audioRef.addEventListener(
         'ended',
         () => {
-          audioRef.current = undefined;
+          audioRef = undefined;
         },
         { once: true },
       );
     }
-  });
+  };
 
-  const handleClick = useLastCallback(() => {
+  const handleClick = () => {
     play();
 
-    const container = ref.current;
+    const container = ref;
 
     if (!emoji || !container || !messageId || !chatId) {
       return;
@@ -92,20 +93,20 @@ export default function useAnimatedEmoji(
       isReversed: !isOwn,
     });
 
-    if (!interactionsRef.current) {
-      interactionsRef.current = [];
-      startedInteractionsRef.current = performance.now();
+    if (!interactionsRef) {
+      interactionsRef = [];
+      startedInteractionsRef = performance.now();
       setTimeout(sendInteractionBunch, INTERACTION_BUNCH_TIME);
     }
 
-    interactionsRef.current.push(
-      startedInteractionsRef.current ? (performance.now() - startedInteractionsRef.current) / MS_DIVIDER : TIME_DEFAULT,
+    interactionsRef.push(
+      startedInteractionsRef ? (performance.now() - startedInteractionsRef) / MS_DIVIDER : TIME_DEFAULT,
     );
-  });
+  };
 
   // Set an end anchor for remote activated interaction
-  useEffect(() => {
-    const container = ref.current;
+  createMeasureEffect(depsOf(() => [activeEmojiInteractions, chatId, emoji, isOwn, messageId, play, sendWatchingEmojiInteraction, size]), () => {
+    const container = ref;
 
     if (!container || !activeEmojiInteractions) return;
 
@@ -127,9 +128,10 @@ export default function useAnimatedEmoji(
       });
       play();
     });
-  }, [activeEmojiInteractions, chatId, emoji, isOwn, messageId, play, sendWatchingEmojiInteraction, size]);
+  });
 
   return {
+    // TODO(codemod): "ref" was a ref object passed as a value: pass an accessor (() => ref) or a callback ref
     ref,
     size,
     style,

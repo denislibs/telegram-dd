@@ -1,5 +1,5 @@
-import type { TeactNode } from '../../../lib/teact/teact';
-import { memo, useMemo } from '../../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import type { JSX } from 'frameact/jsx-runtime';
 import { getActions } from '../../../global';
 
 import type { ApiAvailableReaction, ApiMessage, ApiMessageOutgoingStatus, ApiThreadInfo } from '../../../api/types';
@@ -39,30 +39,12 @@ type OwnProps = {
   onClick: (e: React.MouseEvent<HTMLDivElement>) => void;
   onTranslationClick: (e: React.MouseEvent<HTMLDivElement>) => void;
   onEffectClick: (e: React.MouseEvent<HTMLDivElement>) => void;
-  renderQuickReactionButton?: () => TeactNode | undefined;
+  renderQuickReactionButton?: () => JSX.Element | undefined;
   onOpenThread: NoneToVoidFunction;
   paidMessageStars?: number;
 };
 
-const MessageMeta = ({
-  message,
-  outgoingStatus,
-  signature,
-  withReactionOffset,
-  repliesThreadInfo,
-  renderQuickReactionButton,
-  noReplies,
-  isTranslated,
-  isPinned,
-  withFullDate,
-  effectEmoji,
-  onClick,
-  onTranslationClick,
-  onEffectClick,
-  onOpenThread,
-  paidMessageStars,
-  isMessagePrimaryEditedDateEnabled,
-}: OwnProps) => {
+const MessageMeta = (props: OwnProps) => {
   const { showNotification } = getActions();
 
   const [isActivated, markActivated] = useFlag();
@@ -82,22 +64,22 @@ const MessageMeta = ({
 
   function handleOpenThread(e: React.MouseEvent) {
     e.stopPropagation();
-    onOpenThread();
+    props.onOpenThread();
   }
 
-  const repeatPeriodText = useMemo(() => {
-    return getRepeatPeriodText(message.scheduleRepeatPeriod, lang);
-  }, [message.scheduleRepeatPeriod, lang]);
+  const repeatPeriodText = createMemo(() => {
+    return getRepeatPeriodText(props.message.scheduleRepeatPeriod, lang);
+  });
 
-  const dateTitle = useMemo(() => {
-    if (!isActivated) return undefined;
-    const createDateTime = formatDateTimeToString(message.date * 1000, oldLang.code, undefined, oldLang.timeFormat);
+  const dateTitle = createMemo(() => {
+    if (!isActivated()) return undefined;
+    const createDateTime = formatDateTimeToString(props.message.date * 1000, oldLang.code, undefined, oldLang.timeFormat);
     const editDateTime =
-      message.isEdited && formatDateTimeToString(message.editDate! * 1000, oldLang.code, undefined, oldLang.timeFormat);
+      props.message.isEdited && formatDateTimeToString(props.message.editDate! * 1000, oldLang.code, undefined, oldLang.timeFormat);
     const forwardedDateTime =
-      message.forwardInfo &&
+      props.message.forwardInfo &&
       formatDateTimeToString(
-        (message.forwardInfo.savedDate || message.forwardInfo.date) * 1000,
+        (props.message.forwardInfo.savedDate || props.message.forwardInfo.date) * 1000,
         oldLang.code,
         undefined,
         oldLang.timeFormat,
@@ -116,123 +98,114 @@ const MessageMeta = ({
     return text;
     // We need to listen to timeformat change
     // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps
-  }, [isActivated, oldLang, message, oldLang.timeFormat]);
+  });
 
-  const viewsTitle = useMemo(() => {
-    if (!message.viewsCount) return undefined;
+  const viewsTitle = createMemo(() => {
+    if (!props.message.viewsCount) return undefined;
     let text = lang(
       'MessageTooltipViews',
       {
-        count: lang.number(message.viewsCount),
+        count: lang.number(props.message.viewsCount),
       },
-      { pluralValue: message.viewsCount },
+      { pluralValue: props.message.viewsCount },
     );
-    if (message.forwardsCount) {
+    if (props.message.forwardsCount) {
       text += '\n';
       text += lang(
         'MessageTooltipForwards',
         {
-          count: lang.number(message.forwardsCount),
+          count: lang.number(props.message.forwardsCount),
         },
-        { pluralValue: message.forwardsCount },
+        { pluralValue: props.message.forwardsCount },
       );
     }
 
     return text;
-  }, [lang, message.forwardsCount, message.viewsCount]);
+  });
 
-  const repliesTitle = useMemo(() => {
-    const count = repliesThreadInfo?.messagesCount;
+  // TODO(codemod): dependency on a container (repliesThreadInfo) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
+  const repliesTitle = createMemo(() => {
+    const count = props.repliesThreadInfo?.messagesCount;
     if (!count) return undefined;
     return lang('MessageTooltipReplies', { count }, { pluralValue: count });
-  }, [lang, repliesThreadInfo]);
+  });
 
-  const shouldShowPrimaryEditedDate = Boolean(message.isEdited && isMessagePrimaryEditedDateEnabled);
+  const shouldShowPrimaryEditedDate = createMemo(() => Boolean(props.message.isEdited && props.isMessagePrimaryEditedDateEnabled));
 
-  const date = useMemo(() => {
-    if (shouldShowPrimaryEditedDate) {
-      return formatEditedDate(lang, message.date, message.editDate!, withFullDate, message.isVideoProcessingPending);
+  const date = createMemo(() => {
+    if (shouldShowPrimaryEditedDate()) {
+      return formatEditedDate(lang, props.message.date, props.message.editDate!, props.withFullDate, props.message.isVideoProcessingPending);
     }
 
-    const time = formatTime(oldLang, message.date * 1000);
-    const baseDate = !withFullDate
+    const time = formatTime(oldLang, props.message.date * 1000);
+    const baseDate = !props.withFullDate
       ? time
-      : formatPastTimeShort(oldLang, (message.forwardInfo?.date || message.date) * 1000, true);
+      : formatPastTimeShort(oldLang, (props.message.forwardInfo?.date || props.message.date) * 1000, true);
 
-    if (repeatPeriodText) {
-      return lang('FormatDateAtTime', { date: repeatPeriodText, time: baseDate });
+    if (repeatPeriodText()) {
+      return lang('FormatDateAtTime', { date: repeatPeriodText(), time: baseDate });
     }
 
     return baseDate;
-  }, [
-    lang,
-    message.date,
-    message.editDate,
-    message.forwardInfo?.date,
-    message.isVideoProcessingPending,
-    oldLang,
-    repeatPeriodText,
-    shouldShowPrimaryEditedDate,
-    withFullDate,
-  ]);
+  });
 
-  const fullClassName = buildClassName(
+  const fullClassName = createMemo(() => buildClassName(
     'MessageMeta',
-    withReactionOffset && 'reactions-offset',
-    message.forwardInfo?.isImported && 'is-imported',
-  );
+    props.withReactionOffset && 'reactions-offset',
+    props.message.forwardInfo?.isImported && 'is-imported',
+  ));
 
   return (
-    <span className={fullClassName} dir={lang.isRtl ? 'rtl' : 'ltr'} onClick={onClick} data-ignore-on-paste>
-      {effectEmoji && (
-        <span className="message-effect-icon" onClick={onEffectClick}>
-          {renderText(effectEmoji)}
+    <span class={fullClassName()} dir={lang.isRtl ? 'rtl' : 'ltr'} onClick={(e) => props.onClick?.(e)} data-ignore-on-paste>
+      {props.effectEmoji && (
+        <span class="message-effect-icon" onClick={(e) => props.onEffectClick?.(e)}>
+          {renderText(props.effectEmoji)}
         </span>
       )}
-      {isTranslated && <Icon name="language" className="message-translated" onClick={onTranslationClick} />}
-      {Boolean(message.viewsCount) && (
+      {props.isTranslated && <Icon name="language" className="message-translated" onClick={props.onTranslationClick} />}
+      {Boolean(props.message.viewsCount) && (
         <>
-          <span className="message-views" title={viewsTitle}>
-            {formatIntegerCompact(lang, message.viewsCount)}
+          <span class="message-views" title={viewsTitle()}>
+            {formatIntegerCompact(lang, props.message.viewsCount)}
           </span>
           <Icon name="eye" />
         </>
       )}
-      {!noReplies && Boolean(repliesThreadInfo?.messagesCount) && (
-        <span onClick={handleOpenThread} className="message-replies-wrapper" title={repliesTitle}>
-          <span className="message-replies">
-            <AnimatedCounter text={formatIntegerCompact(lang, repliesThreadInfo.messagesCount)} />
+      {!props.noReplies && Boolean(props.repliesThreadInfo?.messagesCount) && (
+        <span onClick={handleOpenThread} class="message-replies-wrapper" title={repliesTitle()}>
+          <span class="message-replies">
+            <AnimatedCounter text={formatIntegerCompact(lang, props.repliesThreadInfo.messagesCount)} />
           </span>
           <Icon name="reply-filled" />
         </span>
       )}
-      {isPinned && <Icon name="pin-filled" className="message-pinned" />}
-      {signature && <span className="message-signature">{renderText(signature)}</span>}
-      {Boolean(paidMessageStars) && (
-        <span className="message-price">
-          {formatStarsAsIcon(lang, paidMessageStars, {
+      {props.isPinned && <Icon name="pin-filled" className="message-pinned" />}
+      {props.signature && <span class="message-signature">{renderText(props.signature)}</span>}
+      {Boolean(props.paidMessageStars) && (
+        <span class="message-price">
+          {formatStarsAsIcon(lang, props.paidMessageStars, {
             asFont: true,
           })}
         </span>
       )}
-      <span className="message-time" title={dateTitle} onMouseEnter={markActivated}>
-        {Boolean(message.anchorMsgId) && `${lang('EphemeralUpdated')} `}
-        {message.forwardInfo?.isImported && (
+      <span class="message-time" title={dateTitle()} onMouseEnter={markActivated}>
+        {Boolean(props.message.anchorMsgId) && `${lang('EphemeralUpdated')} `}
+        {props.message.forwardInfo?.isImported && (
           <>
-            <span className="message-imported" onClick={handleImportedClick}>
-              {formatDateTimeToString(message.forwardInfo.date * 1000, lang.code, true)}
+            <span class="message-imported" onClick={handleImportedClick}>
+              {formatDateTimeToString(props.message.forwardInfo.date * 1000, lang.code, true)}
             </span>
-            <span className="message-imported" onClick={handleImportedClick}>
+            <span class="message-imported" onClick={handleImportedClick}>
               {lang('MessageMetaImported')}
             </span>
           </>
         )}
-        {message.isEdited && !shouldShowPrimaryEditedDate && `${lang('MessageMetaEdited')} `}
-        {message.isVideoProcessingPending && !shouldShowPrimaryEditedDate && `${lang('MessageMetaApproximate')} `}
-        {date}
+        {props.message.isEdited && !shouldShowPrimaryEditedDate() && `${lang('MessageMetaEdited')} `}
+        {props.message.isVideoProcessingPending && !shouldShowPrimaryEditedDate() && `${lang('MessageMetaApproximate')} `}
+        {date()}
       </span>
-      {outgoingStatus && <MessageOutgoingStatus status={outgoingStatus} />}
-      {renderQuickReactionButton && renderQuickReactionButton()}
+      {props.outgoingStatus && <MessageOutgoingStatus status={props.outgoingStatus} />}
+      {props.renderQuickReactionButton && props.renderQuickReactionButton()}
     </span>
   );
 };
@@ -263,4 +236,4 @@ function formatEditedDate(
   return lang('MessageMetaEditedOnDateAtTime', { date, time });
 }
 
-export default memo(MessageMeta);
+export default MessageMeta;

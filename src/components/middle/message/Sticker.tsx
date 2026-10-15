@@ -1,9 +1,9 @@
-import type { FC } from '../../../lib/teact/teact';
-import { memo, useEffect, useRef, useState } from '../../../lib/teact/teact';
+import { createEffect, createMemo, createSignal } from 'frameact';
 import { getActions, withGlobal } from '../../../global';
+import { depsOf } from '../../../util/effectDeps';
+import type { GlobalState } from '../../../global/types';
 
 import type { ApiMessage } from '../../../api/types';
-import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 import { ApiMediaFormat } from '../../../api/types';
 
 import { getMediaThumbUri, getStickerMediaHash } from '../../../global/helpers';
@@ -14,7 +14,6 @@ import { getStickerDimensions } from '../../common/helpers/mediaDimensions';
 import useAppLayout from '../../../hooks/useAppLayout';
 import useFlag from '../../../hooks/useFlag';
 import { useIsIntersecting } from '../../../hooks/useIntersectionObserver';
-import useLastCallback from '../../../hooks/useLastCallback';
 import useMedia from '../../../hooks/useMedia';
 import useOldLang from '../../../hooks/useOldLang';
 import useOverlayPosition from './hooks/useOverlayPosition';
@@ -45,92 +44,86 @@ type StateProps = {
   needsAgeVerification?: boolean;
 };
 
-const Sticker: FC<OwnProps & StateProps> = ({
-  message,
-  shouldLoop,
-  shouldPlayEffect,
-  withEffect,
-  isMediaNsfw,
-  onStopEffect,
-  observeIntersection,
-  observeIntersectionForPlaying,
-  needsAgeVerification,
-}) => {
+const Sticker = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const { showNotification, openStickerSet, updateContentSettings, openAgeVerificationModal } = getActions();
 
   const lang = useOldLang();
   const { isMobile } = useAppLayout();
 
-  const ref = useRef<HTMLDivElement>();
+  let ref!: HTMLDivElement;
 
-  const effectRef = useRef<HTMLDivElement>();
+  let effectRef!: HTMLDivElement;
 
-  const sticker = message.content.sticker!;
-  const { stickerSetInfo, isVideo, hasEffect } = sticker;
-  const isMirrored = !message.isOutgoing;
+  const sticker = createMemo(() => props.message.content.sticker!);
+  const source = createMemo(() => sticker());
+  const stickerSetInfo = () => source().stickerSetInfo;
+  const isVideo = () => source().isVideo;
+  const hasEffect = () => source().hasEffect;
+  const isMirrored = createMemo(() => !props.message.isOutgoing);
 
   const [isNsfwModalOpen, openNsfwModal, closeNsfwModal] = useFlag();
-  const [shouldAlwaysShowNsfw, setShouldAlwaysShowNsfw] = useState(false);
+  const [shouldAlwaysShowNsfw, setShouldAlwaysShowNsfw] = createSignal(false);
 
-  const shouldShowSpoiler = isMediaNsfw;
-  const [isSpoilerShown, showSpoiler, hideSpoiler] = useFlag(shouldShowSpoiler);
+  const shouldShowSpoiler = createMemo(() => props.isMediaNsfw);
+  const [isSpoilerShown, showSpoiler, hideSpoiler] = useFlag(shouldShowSpoiler());
 
-  useEffect(() => {
-    if (shouldShowSpoiler) {
+  createEffect(() => shouldShowSpoiler(), (shouldShowSpoiler2) => {
+    if (shouldShowSpoiler2) {
       showSpoiler();
     } else {
       hideSpoiler();
     }
-  }, [shouldShowSpoiler]);
+  });
 
-  const handleNsfwConfirm = useLastCallback(() => {
+  const handleNsfwConfirm = () => {
     closeNsfwModal();
     hideSpoiler();
 
-    if (shouldAlwaysShowNsfw) {
+    if (shouldAlwaysShowNsfw()) {
       updateContentSettings({ isSensitiveEnabled: true });
     }
-  });
+  };
 
-  const mediaHash = getStickerMediaHash(sticker, isVideo && !IS_WEBM_SUPPORTED ? 'pictogram' : 'inline');
+  const mediaHash = createMemo(() => getStickerMediaHash(sticker(), isVideo() && !IS_WEBM_SUPPORTED ? 'pictogram' : 'inline'));
 
-  const canLoad = useIsIntersecting(ref, observeIntersection);
-  const canPlay = useIsIntersecting(ref, observeIntersectionForPlaying);
-  const mediaHashEffect = `sticker${sticker.id}?size=f`;
-  const effectBlobUrl = useMedia(mediaHashEffect, !canLoad || !hasEffect || !withEffect, ApiMediaFormat.BlobUrl);
+  const canLoad = useIsIntersecting(() => ref, () => props.observeIntersection);
+  const canPlay = useIsIntersecting(() => ref, () => props.observeIntersectionForPlaying);
+  const mediaHashEffect = createMemo(() => `sticker${sticker().id}?size=f`);
+  const effectBlobUrl = useMedia(() => mediaHashEffect(), () => !canLoad || !hasEffect() || !props.withEffect, ApiMediaFormat.BlobUrl);
   const [isPlayingEffect, startPlayingEffect, stopPlayingEffect] = useFlag();
 
-  const thumbDataUri = getMediaThumbUri(sticker);
+  const thumbDataUri = createMemo(() => getMediaThumbUri(sticker()));
 
-  const handleEffectEnded = useLastCallback(() => {
+  const handleEffectEnded = () => {
     stopPlayingEffect();
-    onStopEffect?.();
-  });
+    props.onStopEffect?.();
+  };
 
-  useEffect(() => {
-    if (hasEffect && withEffect && canPlay && shouldPlayEffect) {
+  createEffect(depsOf(() => [hasEffect(), canPlay, props.shouldPlayEffect, startPlayingEffect, props.withEffect] as const), ([hasEffect2, , shouldPlayEffect2, , withEffect2]) => {
+    if (hasEffect2 && withEffect2 && canPlay && shouldPlayEffect2) {
       startPlayingEffect();
     }
-  }, [hasEffect, canPlay, shouldPlayEffect, startPlayingEffect, withEffect]);
+  });
 
-  const shouldRenderEffect = hasEffect && withEffect && effectBlobUrl && isPlayingEffect;
+  const shouldRenderEffect = createMemo(() => hasEffect() && props.withEffect && effectBlobUrl && isPlayingEffect());
   useOverlayPosition({
-    anchorRef: ref,
-    overlayRef: effectRef,
-    isMirrored,
-    isDisabled: !shouldRenderEffect,
+    anchorRef: () => ref,
+    overlayRef: () => effectRef,
+    isMirrored: () => isMirrored(),
+    isDisabled: () => !shouldRenderEffect(),
   });
 
-  const openModal = useLastCallback(() => {
+  const openModal = () => {
     openStickerSet({
-      stickerSetInfo: sticker.stickerSetInfo,
+      stickerSetInfo: sticker().stickerSetInfo,
     });
-  });
+  };
 
-  const handleClick = useLastCallback(() => {
-    if (isSpoilerShown) {
-      if (isMediaNsfw) {
-        if (needsAgeVerification) {
+  const handleClick = () => {
+    if (isSpoilerShown()) {
+      if (props.isMediaNsfw) {
+        if (props.needsAgeVerification) {
           openAgeVerificationModal();
           return;
         }
@@ -141,71 +134,74 @@ const Sticker: FC<OwnProps & StateProps> = ({
       return;
     }
 
-    if (hasEffect) {
-      if (isPlayingEffect || !withEffect) {
+    if (hasEffect()) {
+      if (isPlayingEffect() || !props.withEffect) {
         showNotification({
           message: lang('PremiumStickerTooltip'),
           action: {
             action: 'openStickerSet',
             payload: {
-              stickerSetInfo: sticker.stickerSetInfo,
+              stickerSetInfo: sticker().stickerSetInfo,
             },
           },
           actionText: lang('ViewAction'),
         });
         return;
-      } else if (withEffect) {
+      } else if (props.withEffect) {
         startPlayingEffect();
         return;
       }
     }
     openModal();
-  });
+  };
 
-  const isMemojiSticker = 'isMissing' in stickerSetInfo;
-  const { width, height } = getStickerDimensions(sticker, isMobile);
-  const className = buildClassName(
+  const isMemojiSticker = createMemo(() => 'isMissing' in stickerSetInfo());
+  const getStickerDimensionsResult = createMemo(() => getStickerDimensions(sticker(), isMobile));
+  const width = () => getStickerDimensionsResult().width;
+  const height = () => getStickerDimensionsResult().height;
+  const className = createMemo(() => buildClassName(
     'media-inner',
     styles.root,
-    isMemojiSticker && styles.inactive,
-    hasEffect && isMirrored && styles.mirrored,
-  );
+    isMemojiSticker() && styles.inactive,
+    hasEffect() && isMirrored() && styles.mirrored,
+  ));
 
   return (
     <div
       ref={ref}
-      className={className}
-      style={`width: ${width}px; height: ${height}px;`}
-      onClick={!isMemojiSticker ? handleClick : undefined}
+      class={className()}
+      style={`width: ${width()}px; height: ${height()}px;`}
+      onClick={!isMemojiSticker() ? handleClick : undefined}
     >
       <StickerView
-        containerRef={ref}
-        sticker={sticker}
-        fullMediaHash={mediaHash}
+        containerRef={(el) => { ref = el; }}
+        sticker={sticker()}
+        fullMediaHash={mediaHash()}
         fullMediaClassName="full-media"
-        size={width}
-        shouldLoop={shouldLoop}
+        size={width()}
+        shouldLoop={props.shouldLoop}
         noLoad={!canLoad}
         noPlay={!canPlay}
         withSharedAnimation
       />
       <MediaSpoiler
-        isVisible={isSpoilerShown}
+        isVisible={isSpoilerShown()}
         withAnimation
-        thumbDataUri={thumbDataUri}
-        width={width}
-        height={height}
+        thumbDataUri={thumbDataUri()}
+        width={width()}
+        height={height()}
         className="media-spoiler"
-        isNsfw={isMediaNsfw}
+        isNsfw={props.isMediaNsfw}
       />
-      {shouldRenderEffect && (
+      {shouldRenderEffect() && (
         <Portal>
+          {/* TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show> */}
           <AnimatedSticker
             ref={effectRef}
-            key={mediaHashEffect}
-            className={buildClassName(styles.effect, isMirrored && styles.mirrored)}
+            key={mediaHashEffect()}
+            className={buildClassName(styles.effect, isMirrored() && styles.mirrored)}
             tgsUrl={effectBlobUrl}
-            size={width * EFFECT_SIZE_MULTIPLIER}
+            size={width() * EFFECT_SIZE_MULTIPLIER}
             play
             isLowPriority
             noLoop
@@ -214,9 +210,9 @@ const Sticker: FC<OwnProps & StateProps> = ({
         </Portal>
       )}
       <SensitiveContentConfirmModal
-        isOpen={isNsfwModalOpen}
+        isOpen={isNsfwModalOpen()}
         onClose={closeNsfwModal}
-        shouldAlwaysShow={shouldAlwaysShowNsfw}
+        shouldAlwaysShow={shouldAlwaysShowNsfw()}
         onAlwaysShowChanged={setShouldAlwaysShowNsfw}
         confirmHandler={handleNsfwConfirm}
       />
@@ -224,13 +220,13 @@ const Sticker: FC<OwnProps & StateProps> = ({
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
     const appConfig = global.appConfig;
     const needsAgeVerification = appConfig.needAgeVideoVerification;
 
     return {
       needsAgeVerification,
     };
-  })(Sticker),
-);
+  };
+
+export default Sticker;

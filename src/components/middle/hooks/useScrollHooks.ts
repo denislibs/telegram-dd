@@ -1,21 +1,18 @@
-import type { ElementRef } from '../../../lib/teact/teact';
-import { useEffect, useMemo, useRef } from '../../../lib/teact/teact';
+import { createEffect, createMemo, requestMeasure } from 'frameact';
 import { getActions } from '../../../global';
+import { depsOf } from '../../../util/effectDeps';
 
 import type { MessageListType } from '../../../types';
 import type { Signal } from '../../../util/signals';
 import { LoadMoreDirection } from '../../../types';
 
-import { requestMeasure } from '../../../lib/fasterdom/fasterdom';
 import { MESSAGE_LIST_SENSITIVE_AREA } from '../../../util/browser/windowEnvironment';
 import { debounce } from '../../../util/schedulers';
 
 import { useDebouncedSignal } from '../../../hooks/useAsyncResolvers';
 import useDebouncedCallback from '../../../hooks/useDebouncedCallback';
 import { useIntersectionObserver, useOnIntersect } from '../../../hooks/useIntersectionObserver';
-import useLastCallback from '../../../hooks/useLastCallback';
 import { useSignalEffect } from '../../../hooks/useSignalEffect';
-import useSyncEffect from '../../../hooks/useSyncEffect';
 
 const FAB_THRESHOLD = 50;
 const NOTCH_THRESHOLD = 1; // Notch has zero height so we at least need a 1px margin to intersect
@@ -23,6 +20,7 @@ const CONTAINER_HEIGHT_DEBOUNCE = 200;
 const SCROLL_TOOLS_DEBOUNCE = 100;
 const TOOLS_FREEZE_TIMEOUT = 350; // Approximate message sending animation duration
 
+// TODO(codemod): useScrollHooks: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useScrollHooks({
   type,
   containerRef,
@@ -35,7 +33,7 @@ export default function useScrollHooks({
   onScrollDownToggle,
 }: {
   type: MessageListType;
-  containerRef: ElementRef<HTMLDivElement>;
+  containerRef: (el: HTMLDivElement) => void;
   messageIds: number[];
   getContainerHeight: Signal<number | undefined>;
   isViewportNewest: boolean;
@@ -46,7 +44,7 @@ export default function useScrollHooks({
 }) {
   const { loadViewportMessages } = getActions();
 
-  const [loadMoreBackwards, loadMoreForwards] = useMemo(
+  const [loadMoreBackwards, loadMoreForwards] = createMemo(
     () =>
       type === 'thread'
         ? [
@@ -54,17 +52,15 @@ export default function useScrollHooks({
             debounce(() => loadViewportMessages({ direction: LoadMoreDirection.Forwards }), 1000, true, false),
           ]
         : [],
-    // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps
-    [loadViewportMessages, messageIds],
   );
 
-  const backwardsTriggerRef = useRef<HTMLDivElement>();
-  const forwardsTriggerRef = useRef<HTMLDivElement>();
-  const fabTriggerRef = useRef<HTMLDivElement>();
+  let backwardsTriggerRef!: HTMLDivElement;
+  let forwardsTriggerRef!: HTMLDivElement;
+  let fabTriggerRef!: HTMLDivElement;
 
-  const toggleScrollTools = useLastCallback((scrollDown: boolean) => {
+  const toggleScrollTools = (scrollDown: boolean) => {
     onScrollDownToggle?.(scrollDown);
-  });
+  };
 
   const toggleScrollToolsDebounced = useDebouncedCallback(
     toggleScrollTools,
@@ -74,7 +70,7 @@ export default function useScrollHooks({
     false,
   );
 
-  const updateScrollTools = useLastCallback(() => {
+  const updateScrollTools = () => {
     if (!isReady) return;
 
     if (!messageIds?.length) {
@@ -90,7 +86,7 @@ export default function useScrollHooks({
     }
 
     const container = containerRef.current;
-    const fabTrigger = fabTriggerRef.current;
+    const fabTrigger = fabTriggerRef;
     if (!container || !fabTrigger) return;
 
     const { offsetHeight, scrollHeight, scrollTop } = container;
@@ -102,7 +98,7 @@ export default function useScrollHooks({
     if (scrollHeight === 0) return;
 
     toggleScrollToolsDebounced(isUnread ? !isAtBottom : !isNearBottom);
-  });
+  };
 
   const { observe: observeIntersectionForHistory } = useIntersectionObserver(
     {
@@ -134,8 +130,8 @@ export default function useScrollHooks({
 
   const withHistoryTriggers = messageIds && messageIds.length > 1;
 
-  useOnIntersect(backwardsTriggerRef, withHistoryTriggers ? observeIntersectionForHistory : undefined);
-  useOnIntersect(forwardsTriggerRef, withHistoryTriggers ? observeIntersectionForHistory : undefined);
+  useOnIntersect(() => backwardsTriggerRef, withHistoryTriggers ? observeIntersectionForHistory : undefined);
+  useOnIntersect(() => forwardsTriggerRef, withHistoryTriggers ? observeIntersectionForHistory : undefined);
 
   const {
     observe: observeIntersectionForFab,
@@ -150,7 +146,7 @@ export default function useScrollHooks({
     updateScrollTools,
   );
 
-  useOnIntersect(fabTriggerRef, observeIntersectionForFab);
+  useOnIntersect(() => fabTriggerRef, observeIntersectionForFab);
 
   const {
     observe: observeIntersectionForNotch,
@@ -165,15 +161,15 @@ export default function useScrollHooks({
     updateScrollTools,
   );
 
-  useOnIntersect(fabTriggerRef, observeIntersectionForNotch);
+  useOnIntersect(() => fabTriggerRef, observeIntersectionForNotch);
 
-  useEffect(() => {
+  createEffect(() => isReady, () => {
     if (isReady) {
       updateScrollTools();
     }
-  }, [isReady]);
+  });
 
-  useEffect(() => {
+  createEffect(() => containerRef, () => {
     const container = containerRef.current;
     if (!container) return;
 
@@ -184,9 +180,9 @@ export default function useScrollHooks({
       container.removeEventListener('scroll', updateScrollTools);
       container.removeEventListener('scrollend', updateScrollTools);
     };
-  }, [containerRef]);
+  });
 
-  const freezeShortly = useLastCallback(() => {
+  const freezeShortly = () => {
     freezeForFab();
     freezeForNotch();
 
@@ -194,19 +190,24 @@ export default function useScrollHooks({
       unfreezeForNotch();
       unfreezeForFab();
     }, TOOLS_FREEZE_TIMEOUT);
-  });
+  };
 
   // Workaround for FAB and notch flickering with tall incoming message
-  useSyncEffect(freezeShortly, [freezeShortly, messageIds]);
+  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
+  createEffect(depsOf(() => [freezeShortly, messageIds]), freezeShortly);
 
   // Workaround for notch flickering when opening Composer Embedded Message
   const getContainerHeightDebounced = useDebouncedSignal(getContainerHeight, CONTAINER_HEIGHT_DEBOUNCE);
+  // TODO(codemod): useSignalEffect: createEffect(compute, apply) with the signal reads in compute
   useSignalEffect(freezeShortly, [freezeShortly, getContainerHeightDebounced]);
 
   return {
     withHistoryTriggers,
+    // TODO(codemod): "backwardsTriggerRef" was a ref object passed as a value: pass an accessor (() => backwardsTriggerRef) or a callback ref
     backwardsTriggerRef,
+    // TODO(codemod): "forwardsTriggerRef" was a ref object passed as a value: pass an accessor (() => forwardsTriggerRef) or a callback ref
     forwardsTriggerRef,
+    // TODO(codemod): "fabTriggerRef" was a ref object passed as a value: pass an accessor (() => fabTriggerRef) or a callback ref
     fabTriggerRef,
   };
 }

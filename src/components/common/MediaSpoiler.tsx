@@ -1,13 +1,11 @@
-import type { FC } from '../../lib/teact/teact';
-import { memo, useRef } from '../../lib/teact/teact';
+import { requestMutation } from 'frameact';
+import { Show } from 'frameact/dom';
+import { createShowTransition } from '../../lib/kit';
 
-import { requestMutation } from '../../lib/fasterdom/fasterdom';
 import buildClassName from '../../util/buildClassName';
 
 import useCanvasBlur from '../../hooks/useCanvasBlur';
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
-import useShowTransitionDeprecated from '../../hooks/useShowTransitionDeprecated';
 
 import Icon from './icons/Icon';
 
@@ -26,24 +24,18 @@ type OwnProps = {
 const BLUR_RADIUS = 25;
 const ANIMATION_DURATION = 500;
 
-const MediaSpoiler: FC<OwnProps> = ({ isVisible, withAnimation, thumbDataUri, isNsfw, className, width, height }) => {
-  const ref = useRef<HTMLDivElement>();
+const MediaSpoiler = (props: OwnProps) => {
+  let ref!: HTMLDivElement;
 
   const lang = useLang();
 
-  const { shouldRender, transitionClassNames } = useShowTransitionDeprecated(
-    isVisible,
-    undefined,
-    true,
-    withAnimation ? false : undefined,
-    undefined,
-    ANIMATION_DURATION,
-  );
-  const canvasRef = useCanvasBlur(thumbDataUri, !shouldRender, undefined, BLUR_RADIUS, width, height);
+  // TODO(codemod): useShowTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element (transitionClassNames/hasOpenClass are gone)
+  const { shouldRender, transitionClassNames } = createShowTransition({ isOpen: () => props.isVisible, noMountTransition: true, className: props.withAnimation ? false : undefined, closeDuration: ANIMATION_DURATION });
+  const canvasRef = useCanvasBlur(() => props.thumbDataUri, !shouldRender(), undefined, BLUR_RADIUS, () => props.width, () => props.height);
 
-  const handleClick = useLastCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (!ref.current) return;
-    const el = ref.current;
+  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!ref) return;
+    const el = ref;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -52,28 +44,26 @@ const MediaSpoiler: FC<OwnProps> = ({ isVisible, withAnimation, thumbDataUri, is
     requestMutation(() => {
       el.setAttribute('style', `--click-shift-x: ${shiftX}px; --click-shift-y: ${shiftY}px`);
     });
-  });
-
-  if (!shouldRender) {
-    return undefined;
-  }
+  };
 
   return (
+    <Show when={shouldRender()}>
     <div
-      className={buildClassName(styles.root, transitionClassNames, className, withAnimation && styles.maskAnimation)}
+      class={buildClassName(styles.root, transitionClassNames, props.className, props.withAnimation && styles.maskAnimation)}
       ref={ref}
-      onClick={withAnimation ? handleClick : undefined}
+      onClick={props.withAnimation ? handleClick : undefined}
     >
-      <canvas ref={canvasRef} className={styles.canvas} width={width} height={height} />
-      <div className={styles.dots} />
-      {isNsfw && (
-        <span className={styles.nsfw}>
+      <canvas ref={canvasRef} class={styles.canvas} width={props.width} height={props.height} />
+      <div class={styles.dots} />
+      {props.isNsfw && (
+        <span class={styles.nsfw}>
           <Icon name="eye-crossed-outline" className={styles.nsfwIcon} />
           {lang('MediaSpoilerSensitive')}
         </span>
       )}
     </div>
+    </Show>
   );
 };
 
-export default memo(MediaSpoiler);
+export default MediaSpoiler;

@@ -1,9 +1,10 @@
-import { memo, useEffect, useRef } from '../../../../lib/teact/teact';
+import { createEffect, createMeasureEffect, createMemo, previous } from 'frameact';
 import { getActions } from '../../../../global';
+import { depsOf } from '../../../../util/effectDeps';
+import { createShowTransition } from '../../../../lib/kit';
 
 import type { ApiPeer, ApiReaction, ApiReactionCount } from '../../../../api/types';
 import type { GlobalState } from '../../../../global/types';
-import type { ObserveFn } from '../../../../hooks/useIntersectionObserver';
 
 import { isReactionChosen } from '../../../../global/helpers';
 import buildClassName from '../../../../util/buildClassName';
@@ -12,11 +13,7 @@ import { REM } from '../../../common/helpers/mediaDimensions';
 
 import useSelector from '../../../../hooks/data/useSelector';
 import useContextMenuHandlers from '../../../../hooks/useContextMenuHandlers';
-import useEffectWithPrevDeps from '../../../../hooks/useEffectWithPrevDeps';
 import useLang from '../../../../hooks/useLang';
-import useLastCallback from '../../../../hooks/useLastCallback';
-import usePrevious from '../../../../hooks/usePrevious';
-import useShowTransition from '../../../../hooks/useShowTransition';
 
 import AnimatedCounter from '../../../common/AnimatedCounter';
 import AvatarList from '../../../common/AvatarList';
@@ -49,89 +46,76 @@ function selectStarsState(global: GlobalState) {
   return global.stars;
 }
 
-const ReactionButton = ({
-  reaction,
-  containerId,
-  isOwnMessage,
-  recentReactors,
-  className,
-  chosenClassName,
-  chatId,
-  messageId,
-  isOutside,
-  observeIntersection,
-  onClick,
-  onPaidClick,
-}: OwnProps) => {
+const ReactionButton = (props: OwnProps) => {
   const { openStarsBalanceModal, resetLocalPaidReactions, openPaidReactionModal, requestWave } = getActions();
-  const ref = useRef<HTMLButtonElement>();
-  const counterRef = useRef<HTMLSpanElement>();
-  const animationRef = useRef<Animation>();
+  let ref!: HTMLButtonElement;
+  let counterRef!: HTMLSpanElement;
+  let animationRef: Animation | undefined;
 
   const lang = useLang();
 
-  const isPaid = reaction.reaction.type === 'paid';
+  const isPaid = createMemo(() => props.reaction.reaction.type === 'paid');
 
   const starsState = useSelector(selectStarsState);
-  const areStarsLoaded = Boolean(starsState);
+  const areStarsLoaded = createMemo(() => Boolean(starsState()));
 
-  const handlePaidClick = useLastCallback((count = 1) => {
-    onPaidClick?.(count);
-  });
+  const handlePaidClick = (count = 1) => {
+    props.onPaidClick?.(count);
+  };
 
-  const handleClick = useLastCallback((e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
-    if (reaction.reaction.type === 'paid') {
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
+    if (props.reaction.reaction.type === 'paid') {
       e.stopPropagation(); // Prevent default message double click behavior
       handlePaidClick();
 
       return;
     }
 
-    onClick?.(reaction.reaction);
-  });
+    props.onClick?.(props.reaction.reaction);
+  };
 
-  const {
-    isContextMenuOpen,
-    handleBeforeContextMenu,
-    handleContextMenu,
-    handleContextMenuClose,
-    handleContextMenuHide,
-  } = useContextMenuHandlers(ref, reaction.reaction.type !== 'paid', undefined, undefined, undefined, true);
+  const contextMenuHandlersResult = createMemo(() => useContextMenuHandlers(() => ref, () => props.reaction.reaction.type !== 'paid', undefined, undefined, undefined, true));
+  const isContextMenuOpen = () => contextMenuHandlersResult().isContextMenuOpen;
+  const handleBeforeContextMenu = () => contextMenuHandlersResult().handleBeforeContextMenu;
+  const handleContextMenu = () => contextMenuHandlersResult().handleContextMenu;
+  const handleContextMenuClose = () => contextMenuHandlersResult().handleContextMenuClose;
+  const handleContextMenuHide = () => contextMenuHandlersResult().handleContextMenuHide;
 
-  useEffect(() => {
-    if (isContextMenuOpen) {
+  createEffect(depsOf(() => [handleContextMenuClose(), handleContextMenuHide(), isContextMenuOpen(), props.chatId, props.messageId] as const), ([handleContextMenuClose2, handleContextMenuHide2, isContextMenuOpen2, chatId2, messageId2]) => {
+    if (isContextMenuOpen2) {
       openPaidReactionModal({
-        chatId,
-        messageId,
+        chatId: chatId2,
+        messageId: messageId2,
       });
 
-      handleContextMenuClose();
-      handleContextMenuHide();
+      handleContextMenuClose2();
+      handleContextMenuHide2();
     }
-  }, [handleContextMenuClose, handleContextMenuHide, isContextMenuOpen, chatId, messageId]);
+  });
 
-  useEffectWithPrevDeps(
-    ([prevReaction]) => {
-      const amount = reaction.localAmount;
-      const button = ref.current;
+  createMeasureEffect(
+    depsOf(() => [props.reaction, starsState()?.balance, areStarsLoaded(), props.chatId, props.messageId]), (_deps, prev) => {
+      const [prevReaction] = prev ?? [];
+      const amount = props.reaction.localAmount;
+      const button = ref;
       if (!amount || !button || amount === prevReaction?.localAmount) return;
 
-      if (areStarsLoaded && amount > starsState.balance.amount) {
+      if (areStarsLoaded() && amount > starsState().balance.amount) {
         openStarsBalanceModal({
           originReaction: {
-            chatId,
-            messageId,
+            chatId: props.chatId,
+            messageId: props.messageId,
             amount,
           },
         });
         resetLocalPaidReactions({
-          chatId,
-          messageId,
+          chatId: props.chatId,
+          messageId: props.messageId,
         });
         return;
       }
 
-      if (reaction.localAmount) {
+      if (props.reaction.localAmount) {
         const { left, top } = button.getBoundingClientRect();
         const startX = left + button.offsetWidth / 2;
         const startY = top + button.offsetHeight / 2;
@@ -139,9 +123,9 @@ const ReactionButton = ({
       }
 
       const currentScale = Number(getComputedStyle(button).scale) || 1;
-      animationRef.current?.cancel();
+      animationRef?.cancel();
       // Animate scaling by 20%, and then returning to 1
-      animationRef.current = button.animate(
+      animationRef = button.animate(
         [{ scale: currentScale }, { scale: Math.min(currentScale * 1.2, MAX_SCALE), offset: 0.2 }, { scale: 1 }],
         {
           duration: 500 * currentScale,
@@ -149,50 +133,49 @@ const ReactionButton = ({
         },
       );
     },
-    [reaction, starsState?.balance, areStarsLoaded, chatId, messageId],
   );
 
-  const prevAmount = usePrevious(reaction.localAmount);
+  const prevAmount = previous(() => props.reaction.localAmount);
 
-  const { shouldRender: shouldRenderPaidCounter } = useShowTransition({
-    isOpen: Boolean(reaction.localAmount),
-    ref: counterRef,
+  const { shouldRender: shouldRenderPaidCounter } = createShowTransition({
+    isOpen: () => Boolean(props.reaction.localAmount),
+    // TODO(codemod): ref option: hand the result `ref` to the element (ref={t.ref}) instead
+    ref: () => counterRef,
     className: 'slow',
-    withShouldRender: true,
   });
 
   return (
     <Button
       className={buildClassName(
         styles.root,
-        isOwnMessage && styles.own,
-        isPaid && styles.paid,
-        isOutside && styles.outside,
-        isReactionChosen(reaction) && styles.chosen,
-        isReactionChosen(reaction) && chosenClassName,
-        className,
+        props.isOwnMessage && styles.own,
+        isPaid() && styles.paid,
+        props.isOutside && styles.outside,
+        isReactionChosen(props.reaction) && styles.chosen,
+        isReactionChosen(props.reaction) && props.chosenClassName,
+        props.className,
       )}
       size="tiny"
       ref={ref}
-      onMouseDown={handleBeforeContextMenu}
-      onContextMenu={handleContextMenu}
+      onMouseDown={handleBeforeContextMenu()}
+      onContextMenu={handleContextMenu()}
       onClick={handleClick}
     >
-      {reaction.reaction.type === 'paid' ? (
+      {props.reaction.reaction.type === 'paid' ? (
         <>
           <Sparkles preset="button" />
           <PaidReactionEmoji
             className={styles.animatedEmoji}
-            containerId={containerId}
-            reaction={reaction.reaction}
+            containerId={props.containerId}
+            reaction={props.reaction.reaction}
             size={REACTION_SIZE}
-            localAmount={reaction.localAmount}
-            observeIntersection={observeIntersection}
+            localAmount={props.reaction.localAmount}
+            observeIntersection={props.observeIntersection}
           />
-          {shouldRenderPaidCounter && (
+          {shouldRenderPaidCounter() && (
             <AnimatedCounter
               ref={counterRef}
-              text={`+${formatIntegerCompact(lang, reaction.localAmount || prevAmount!)}`}
+              text={`+${formatIntegerCompact(lang, props.reaction.localAmount || prevAmount()!)}`}
               className={styles.paidCounter}
             />
           )}
@@ -200,17 +183,17 @@ const ReactionButton = ({
       ) : (
         <ReactionAnimatedEmoji
           className={styles.animatedEmoji}
-          containerId={containerId}
-          reaction={reaction.reaction}
+          containerId={props.containerId}
+          reaction={props.reaction.reaction}
           size={REACTION_SIZE}
-          observeIntersection={observeIntersection}
+          observeIntersection={props.observeIntersection}
         />
       )}
-      {recentReactors?.length ? (
-        <AvatarList size="mini" peers={recentReactors} />
+      {props.recentReactors?.length ? (
+        <AvatarList size="mini" peers={props.recentReactors} />
       ) : (
         <AnimatedCounter
-          text={formatIntegerCompact(lang, reaction.count + (reaction.localAmount || 0))}
+          text={formatIntegerCompact(lang, props.reaction.count + (props.reaction.localAmount || 0))}
           className={styles.counter}
         />
       )}
@@ -218,4 +201,4 @@ const ReactionButton = ({
   );
 };
 
-export default memo(ReactionButton);
+export default ReactionButton;

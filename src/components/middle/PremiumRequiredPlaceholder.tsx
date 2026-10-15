@@ -1,10 +1,9 @@
-import { memo } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
+import type { GlobalState } from '../../global/types';
 
 import { getUserFirstOrLastName } from '../../global/helpers';
 import { selectUser } from '../../global/selectors';
 
-import useLastCallback from '../../hooks/useLastCallback';
 import useOldLang from '../../hooks/useOldLang';
 
 import Link from '../ui/Link';
@@ -17,15 +16,16 @@ type StateProps = {
   userName?: string;
 };
 
-function PremiumRequiredPlaceholder({ userName }: StateProps) {
+function PremiumRequiredPlaceholder(ownProps: OwnProps) {
+  const props = withGlobal(ownProps, mapStateToProps);
   const lang = useOldLang();
   const { openPremiumModal } = getActions();
 
-  const handleOpenPremiumModal = useLastCallback(() => openPremiumModal());
+  const handleOpenPremiumModal = () => openPremiumModal();
 
   return (
     <div>
-      <div>{lang('Chat.MessagingRestrictedPlaceholder', userName)}</div>
+      <div>{lang('Chat.MessagingRestrictedPlaceholder', props.userName)}</div>
       <Link isPrimary onClick={handleOpenPremiumModal}>
         {lang('Chat.MessagingRestrictedPlaceholderAction')}
       </Link>
@@ -33,12 +33,12 @@ function PremiumRequiredPlaceholder({ userName }: StateProps) {
   );
 }
 
-export default memo(
-  withGlobal<OwnProps>((global, { userId }): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState, { userId }: OwnProps): Complete<StateProps> => {
     const user = selectUser(global, userId);
 
     return {
       userName: getUserFirstOrLastName(user),
     };
-  })(PremiumRequiredPlaceholder),
-);
+  };
+
+export default PremiumRequiredPlaceholder;

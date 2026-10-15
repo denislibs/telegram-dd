@@ -1,4 +1,3 @@
-import { memo, useRef } from '@teact';
 
 import buildClassName from '../../util/buildClassName';
 
@@ -9,17 +8,17 @@ type OwnProps = {
   className?: string;
 };
 
-const MessageListBottomMarker = ({ isFocused, className }: OwnProps) => {
-  const ref = useRef<HTMLDivElement>();
+const MessageListBottomMarker = (props: OwnProps) => {
+  let ref!: HTMLDivElement;
 
   useFocusMessageListElement({
-    elementRef: ref,
+    elementRef: () => ref,
     isJustAdded: true,
-    isFocused,
+    isFocused: () => props.isFocused,
     noFocusHighlight: true,
   });
 
-  return <div ref={ref} className={buildClassName('list-bottom-marker', className)} />;
+  return <div ref={ref} class={buildClassName('list-bottom-marker', props.className)} />;
 };
 
-export default memo(MessageListBottomMarker);
+export default MessageListBottomMarker;

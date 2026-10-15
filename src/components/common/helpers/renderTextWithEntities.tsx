@@ -1,8 +1,6 @@
-import type { ElementRef } from '../../../lib/teact/teact';
 import { getActions } from '../../../global';
 
 import type { ApiMessageEntity } from '../../../api/types';
-import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 import type { TextPart, ThreadId } from '../../../types';
 import type { TextFilter } from './renderText';
 import { ApiMessageEntityTypes } from '../../../api/types';
@@ -67,8 +65,8 @@ export function renderTextWithEntities({
   observeIntersectionForLoading?: ObserveFn;
   observeIntersectionForPlaying?: ObserveFn;
   withTranslucentThumbs?: boolean;
-  sharedCanvasRef?: ElementRef<HTMLCanvasElement>;
-  sharedCanvasHqRef?: ElementRef<HTMLCanvasElement>;
+  sharedCanvasRef?: (el: HTMLCanvasElement) => void;
+  sharedCanvasHqRef?: (el: HTMLCanvasElement) => void;
   cacheBuster?: string;
   forcePlayback?: boolean;
   noCustomEmojiPlayback?: boolean;
@@ -443,8 +441,8 @@ function processEntity({
   observeIntersectionForPlaying?: ObserveFn;
   withTranslucentThumbs?: boolean;
   emojiSize?: number;
-  sharedCanvasRef?: ElementRef<HTMLCanvasElement>;
-  sharedCanvasHqRef?: ElementRef<HTMLCanvasElement>;
+  sharedCanvasRef?: (el: HTMLCanvasElement) => void;
+  sharedCanvasHqRef?: (el: HTMLCanvasElement) => void;
   cacheBuster?: string;
   forcePlayback?: boolean;
   noCustomEmojiPlayback?: boolean;
@@ -479,7 +477,6 @@ function processEntity({
     if (entity.type === ApiMessageEntityTypes.CustomEmoji) {
       return (
         <CustomEmoji
-          key={cacheBuster ? `${cacheBuster}-${entity.offset}` : undefined}
           documentId={entity.documentId}
           size={emojiSize}
           isSelectable
@@ -518,7 +515,7 @@ function processEntity({
       );
     case ApiMessageEntityTypes.BotCommand:
       return (
-        <a onClick={handleBotCommandClick} className="text-entity-link" dir="auto" data-entity-type={entity.type}>
+        <a onClick={handleBotCommandClick} class="text-entity-link" dir="auto" data-entity-type={entity.type}>
           {renderNestedMessagePart()}
         </a>
       );
@@ -527,7 +524,7 @@ function processEntity({
       return (
         <a
           onClick={() => handleHashtagClick(tag, username)}
-          className="text-entity-link"
+          class="text-entity-link"
           dir="auto"
           data-entity-type={entity.type}
         >
@@ -540,7 +537,7 @@ function processEntity({
       return (
         <a
           onClick={() => handleHashtagClick(tag, username)}
-          className="text-entity-link"
+          class="text-entity-link"
           dir="auto"
           data-entity-type={entity.type}
         >
@@ -551,7 +548,7 @@ function processEntity({
     case ApiMessageEntityTypes.Code:
       return (
         <code
-          className={buildClassName('text-entity-code', 'clickable')}
+          class={buildClassName('text-entity-code', 'clickable')}
           onClick={handleCodeClick}
           role="textbox"
           tabIndex={0}
@@ -566,7 +563,7 @@ function processEntity({
           href={`mailto:${entityText}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-entity-link"
+          class="text-entity-link"
           dir="auto"
           data-entity-type={entity.type}
         >
@@ -581,7 +578,7 @@ function processEntity({
       return <MentionLink username={entityText}>{renderNestedMessagePart()}</MentionLink>;
     case ApiMessageEntityTypes.Phone:
       return (
-        <a href={`tel:${entityText}`} className="text-entity-link" dir="auto" data-entity-type={entity.type}>
+        <a href={`tel:${entityText}`} class="text-entity-link" dir="auto" data-entity-type={entity.type}>
           {renderNestedMessagePart()}
         </a>
       );
@@ -619,7 +616,7 @@ function processEntity({
       return (
         <a
           onClick={() => handleTimecodeClick(chatId, messageId, threadId, entity.timestamp)}
-          className="text-entity-link"
+          class="text-entity-link"
           dir="auto"
           data-entity-type={entity.type}
         >
@@ -631,7 +628,6 @@ function processEntity({
     case ApiMessageEntityTypes.CustomEmoji:
       return (
         <CustomEmoji
-          key={cacheBuster ? `${cacheBuster}-${entity.offset}` : undefined}
           documentId={entity.documentId}
           size={emojiSize}
           isSelectable
@@ -646,7 +642,7 @@ function processEntity({
         />
       );
     case ApiMessageEntityTypes.QuoteFocus:
-      return <span className="matching-text-highlight is-quote">{renderNestedMessagePart()}</span>;
+      return <span class="matching-text-highlight is-quote">{renderNestedMessagePart()}</span>;
     case ApiMessageEntityTypes.FormattedDate:
       return (
         <FormattedDate entity={entity} chatId={chatId} messageId={messageId}>
@@ -655,20 +651,20 @@ function processEntity({
       );
     case ApiMessageEntityTypes.DiffInsert:
       return (
-        <span className="text-entity-diff-insert" data-entity-type={entity.type}>
+        <span class="text-entity-diff-insert" data-entity-type={entity.type}>
           {renderNestedMessagePart()}
         </span>
       );
     case ApiMessageEntityTypes.DiffReplace:
       return (
-        <span className="text-entity-diff-replace" data-entity-type={entity.type}>
-          <span className="text-entity-diff-replace-old">{entity.oldText}</span>
-          <span className="text-entity-diff-replace-new">{renderNestedMessagePart()}</span>
+        <span class="text-entity-diff-replace" data-entity-type={entity.type}>
+          <span class="text-entity-diff-replace-old">{entity.oldText}</span>
+          <span class="text-entity-diff-replace-new">{renderNestedMessagePart()}</span>
         </span>
       );
     case ApiMessageEntityTypes.DiffDelete:
       return (
-        <span className="text-entity-diff-delete" data-entity-type={entity.type}>
+        <span class="text-entity-diff-delete" data-entity-type={entity.type}>
           {renderNestedMessagePart()}
         </span>
       );

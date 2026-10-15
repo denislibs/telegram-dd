@@ -1,13 +1,11 @@
-import type { ElementRef } from '../../../../lib/teact/teact';
-import { useEffect } from '../../../../lib/teact/teact';
+import { createEffect, requestMutation } from 'frameact';
+import { depsOf } from '../../../../util/effectDeps';
 
-import { requestMutation } from '../../../../lib/fasterdom/fasterdom';
 import { REM } from '../../../common/helpers/mediaDimensions';
-
-import useLastCallback from '../../../../hooks/useLastCallback';
 
 const OFFSET_X = REM;
 
+// TODO(codemod): useOverlayPosition: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useOverlayPosition({
   anchorRef,
   overlayRef,
@@ -16,14 +14,14 @@ export default function useOverlayPosition({
   isDisabled,
   id,
 }: {
-  anchorRef: ElementRef<HTMLDivElement>;
-  overlayRef: ElementRef<HTMLDivElement>;
+  anchorRef: (el: HTMLDivElement) => void;
+  overlayRef: (el: HTMLDivElement) => void;
   isMirrored?: boolean;
   isForMessageEffect?: boolean;
   isDisabled?: boolean;
   id?: string;
 }) {
-  const updatePosition = useLastCallback(() => {
+  const updatePosition = () => {
     const element = overlayRef.current;
     const anchor = anchorRef.current;
     if (!element || !anchor) {
@@ -46,14 +44,14 @@ export default function useOverlayPosition({
         element.style.right = `${windowWidth - anchorRect.right - OFFSET_X}px`;
       }
     });
-  });
+  };
 
-  useEffect(() => {
+  createEffect(depsOf(() => [isDisabled, id]), () => {
     if (isDisabled) return;
     updatePosition();
-  }, [isDisabled, id]);
+  });
 
-  useEffect(() => {
+  createEffect(depsOf(() => [isDisabled, anchorRef]), () => {
     if (isDisabled) return undefined;
 
     const messagesContainer = anchorRef.current!.closest<HTMLDivElement>('.MessageList')!;
@@ -64,7 +62,7 @@ export default function useOverlayPosition({
     return () => {
       messagesContainer.removeEventListener('scroll', updatePosition);
     };
-  }, [isDisabled, anchorRef]);
+  });
 
   return updatePosition;
 }

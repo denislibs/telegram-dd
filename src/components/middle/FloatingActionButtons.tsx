@@ -1,5 +1,8 @@
-import { memo, useEffect, useRef } from '../../lib/teact/teact';
+import { createEffect, createMemo } from 'frameact';
+import { For } from 'frameact/dom';
 import { getActions, withGlobal } from '../../global';
+import { depsOf } from '../../util/effectDeps';
+import type { GlobalState } from '../../global/types';
 
 import type { MessageListType, ThreadId, ThreadReadState } from '../../types';
 import type { IconName } from '../../types/icons';
@@ -7,8 +10,6 @@ import type { IconName } from '../../types/icons';
 import { selectChat, selectCurrentMessageList, selectCurrentMiddleSearch } from '../../global/selectors';
 import { selectThreadReadState } from '../../global/selectors/threads';
 import buildClassName from '../../util/buildClassName';
-
-import useLastCallback from '../../hooks/useLastCallback';
 
 import ScrollDownButton from './ScrollDownButton';
 
@@ -37,15 +38,8 @@ type UnreadCountButton = {
   onReadAll: VoidFunction;
 };
 
-const FloatingActionButtons = ({
-  withScrollDown,
-  isHidden,
-  messageListType,
-  chatId,
-  threadId,
-  threadReadState,
-  shouldShowCount,
-}: OwnProps & StateProps) => {
+const FloatingActionButtons = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const {
     focusNextPollVote,
     focusNextReply,
@@ -60,111 +54,110 @@ const FloatingActionButtons = ({
     scrollMessageListToBottom,
   } = getActions();
 
-  const elementRef = useRef<HTMLDivElement>();
+  let elementRef!: HTMLDivElement;
 
-  const {
-    unreadPollVotesCount,
-    unreadReactionsCount,
-    unreadMentionsCount,
-    unreadCount,
-    unreadPollVotes,
-    unreadReactions,
-    unreadMentions,
-  } = (shouldShowCount && threadReadState) || {};
+  const source = createMemo(() => (props.shouldShowCount && props.threadReadState) || {});
+  const unreadPollVotesCount = () => source().unreadPollVotesCount;
+  const unreadReactionsCount = () => source().unreadReactionsCount;
+  const unreadMentionsCount = () => source().unreadMentionsCount;
+  const unreadCount = () => source().unreadCount;
+  const unreadPollVotes = () => source().unreadPollVotes;
+  const unreadReactions = () => source().unreadReactions;
+  const unreadMentions = () => source().unreadMentions;
 
-  const hasUnreadPollVotes = Boolean(unreadPollVotesCount);
-  const hasUnreadReactions = Boolean(unreadReactionsCount);
-  const hasUnreadMentions = Boolean(unreadMentionsCount);
+  const hasUnreadPollVotes = createMemo(() => Boolean(unreadPollVotesCount()));
+  const hasUnreadReactions = createMemo(() => Boolean(unreadReactionsCount()));
+  const hasUnreadMentions = createMemo(() => Boolean(unreadMentionsCount()));
 
-  const handleReadAllPollVotes = useLastCallback(() => {
-    if (!chatId) return;
-    readAllPollVotes({ chatId, threadId });
+  const handleReadAllPollVotes = () => {
+    if (!props.chatId) return;
+    readAllPollVotes({ chatId: props.chatId, threadId: props.threadId });
+  };
+
+  const handleReadAllReactions = () => {
+    if (!props.chatId) return;
+    readAllReactions({ chatId: props.chatId, threadId: props.threadId });
+  };
+
+  const handleReadAllMentions = () => {
+    if (!props.chatId) return;
+    readAllMentions({ chatId: props.chatId, threadId: props.threadId });
+  };
+
+  createEffect(depsOf(() => [props.chatId, props.threadId, hasUnreadPollVotes(), unreadPollVotes()?.length] as const), ([chatId2, threadId2, hasUnreadPollVotes2]) => {
+    if (hasUnreadPollVotes2 && chatId2 && !unreadPollVotes()?.length) {
+      loadUnreadPollVotes({ chatId: chatId2, threadId: threadId2 });
+    }
   });
 
-  const handleReadAllReactions = useLastCallback(() => {
-    if (!chatId) return;
-    readAllReactions({ chatId, threadId });
+  createEffect(depsOf(() => [props.chatId, props.threadId, hasUnreadReactions(), unreadReactions()?.length] as const), ([chatId2, threadId2, hasUnreadReactions2]) => {
+    if (hasUnreadReactions2 && chatId2 && !unreadReactions()?.length) {
+      loadUnreadReactions({ chatId: chatId2, threadId: threadId2 });
+    }
   });
 
-  const handleReadAllMentions = useLastCallback(() => {
-    if (!chatId) return;
-    readAllMentions({ chatId, threadId });
+  createEffect(depsOf(() => [props.chatId, props.threadId, hasUnreadMentions(), unreadMentions()?.length] as const), ([chatId2, threadId2, hasUnreadMentions2]) => {
+    if (hasUnreadMentions2 && chatId2 && !unreadMentions()?.length) {
+      loadUnreadMentions({ chatId: chatId2, threadId: threadId2 });
+    }
   });
 
-  useEffect(() => {
-    if (hasUnreadPollVotes && chatId && !unreadPollVotes?.length) {
-      loadUnreadPollVotes({ chatId, threadId });
-    }
-  }, [chatId, threadId, hasUnreadPollVotes, unreadPollVotes?.length]);
-
-  useEffect(() => {
-    if (hasUnreadReactions && chatId && !unreadReactions?.length) {
-      loadUnreadReactions({ chatId, threadId });
-    }
-  }, [chatId, threadId, hasUnreadReactions, unreadReactions?.length]);
-
-  useEffect(() => {
-    if (hasUnreadMentions && chatId && !unreadMentions?.length) {
-      loadUnreadMentions({ chatId, threadId });
-    }
-  }, [chatId, threadId, hasUnreadMentions, unreadMentions?.length]);
-
-  const handleScrollDownClick = useLastCallback(() => {
-    if (!withScrollDown) {
+  const handleScrollDownClick = () => {
+    if (!props.withScrollDown) {
       return;
     }
 
-    if (messageListType === 'thread') {
+    if (props.messageListType === 'thread') {
       focusNextReply();
     } else {
       scrollMessageListToBottom();
     }
-  });
+  };
 
-  const handleFocusNextReaction = useLastCallback(() => {
-    if (!chatId) return;
-    focusNextReaction({ chatId, threadId });
-  });
+  const handleFocusNextReaction = () => {
+    if (!props.chatId) return;
+    focusNextReaction({ chatId: props.chatId, threadId: props.threadId });
+  };
 
-  const handleFocusNextPollVote = useLastCallback(() => {
-    if (!chatId) return;
-    focusNextPollVote({ chatId, threadId });
-  });
+  const handleFocusNextPollVote = () => {
+    if (!props.chatId) return;
+    focusNextPollVote({ chatId: props.chatId, threadId: props.threadId });
+  };
 
-  const handleFocusNextMention = useLastCallback(() => {
-    if (!chatId) return;
-    focusNextMention({ chatId, threadId });
-  });
+  const handleFocusNextMention = () => {
+    if (!props.chatId) return;
+    focusNextMention({ chatId: props.chatId, threadId: props.threadId });
+  };
 
-  const unreadCountButtonsConfig = [
+  const unreadCountButtonsConfig = createMemo(() => [
     {
       icon: 'poll',
       ariaLabelLang: 'AccDescrPollVoteDown',
-      unreadCount: unreadPollVotesCount,
-      isHidden: !hasUnreadPollVotes,
+      unreadCount: unreadPollVotesCount(),
+      isHidden: !hasUnreadPollVotes(),
       onClick: handleFocusNextPollVote,
       onReadAll: handleReadAllPollVotes,
     },
     {
       icon: 'heart-outline',
       ariaLabelLang: 'AccDescrReactionMentionDown',
-      unreadCount: unreadReactionsCount,
-      isHidden: !hasUnreadReactions,
+      unreadCount: unreadReactionsCount(),
+      isHidden: !hasUnreadReactions(),
       onClick: handleFocusNextReaction,
       onReadAll: handleReadAllReactions,
     },
     {
       icon: 'mention',
       ariaLabelLang: 'AccDescrMentionDown',
-      unreadCount: unreadMentionsCount,
-      isHidden: !hasUnreadMentions,
+      unreadCount: unreadMentionsCount(),
+      isHidden: !hasUnreadMentions(),
       onClick: handleFocusNextMention,
       onReadAll: handleReadAllMentions,
     },
-  ] satisfies Omit<UnreadCountButton, 'hiddenUnreadCountButtonsBelow'>[];
+  ] satisfies Omit<UnreadCountButton, 'hiddenUnreadCountButtonsBelow'>[]);
 
   let hiddenUnreadCountButtonsBelow = 0;
-  const unreadCountButtons = unreadCountButtonsConfig.reduceRight<UnreadCountButton[]>((result, button) => {
+  const unreadCountButtons = createMemo(() => unreadCountButtonsConfig().reduceRight<UnreadCountButton[]>((result, button) => {
     result.unshift({
       ...button,
       hiddenUnreadCountButtonsBelow,
@@ -175,9 +168,9 @@ const FloatingActionButtons = ({
     }
 
     return result;
-  }, []);
+  }, []));
 
-  const hasUnreadCountButtons = unreadCountButtons.some((button) => !button.isHidden);
+  const hasUnreadCountButtons = createMemo(() => unreadCountButtons().some((button) => !button.isHidden));
 
   const buildUnreadCountButtonClassName = (button: UnreadCountButton) =>
     buildClassName(
@@ -187,39 +180,37 @@ const FloatingActionButtons = ({
       button.hiddenUnreadCountButtonsBelow === 2 && styles.transformDownDouble,
     );
 
-  const fabClassName = buildClassName(
+  const fabClassName = createMemo(() => buildClassName(
     styles.root,
-    !isHidden && (withScrollDown || hasUnreadCountButtons) && styles.revealed,
-    !isHidden && hasUnreadCountButtons && !withScrollDown && styles.hideScrollDown,
-  );
+    !props.isHidden && (props.withScrollDown || hasUnreadCountButtons()) && styles.revealed,
+    !props.isHidden && hasUnreadCountButtons() && !props.withScrollDown && styles.hideScrollDown,
+  ));
 
   return (
-    <div ref={elementRef} className={fabClassName} inert={isHidden}>
-      {unreadCountButtons.map((button) => (
+    <div ref={elementRef} class={fabClassName()} inert={props.isHidden}>
+      <For each={unreadCountButtons()} keyed={(button) => button.icon}>{(button) => (
         <ScrollDownButton
-          key={button.icon}
-          icon={button.icon}
-          ariaLabelLang={button.ariaLabelLang}
-          onClick={button.onClick}
-          onReadAll={button.onReadAll}
-          unreadCount={button.unreadCount}
-          className={buildUnreadCountButtonClassName(button)}
+          icon={button().icon}
+          ariaLabelLang={button().ariaLabelLang}
+          onClick={button().onClick}
+          onReadAll={button().onReadAll}
+          unreadCount={button().unreadCount}
+          className={buildUnreadCountButtonClassName(button())}
         />
-      ))}
+      )}</For>
 
       <ScrollDownButton
         icon="arrow-down"
         ariaLabelLang="AccDescrPageDown"
         onClick={handleScrollDownClick}
-        unreadCount={unreadCount}
+        unreadCount={unreadCount()}
         className={styles.unread}
       />
     </div>
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
     const currentMessageList = selectCurrentMessageList(global);
     if (!currentMessageList) {
       return {
@@ -244,5 +235,6 @@ export default memo(
       threadReadState: selectThreadReadState(global, chatId, threadId),
       shouldShowCount,
     };
-  })(FloatingActionButtons),
-);
+  };
+
+export default FloatingActionButtons;

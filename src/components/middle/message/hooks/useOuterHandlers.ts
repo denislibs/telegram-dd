@@ -1,10 +1,9 @@
-import type { ElementRef } from '../../../../lib/teact/teact';
-import { useEffect, useRef } from '../../../../lib/teact/teact';
+import { createEffect, requestMeasure } from 'frameact';
 import { getActions } from '../../../../global';
+import { depsOf } from '../../../../util/effectDeps';
 
 import type { Signal } from '../../../../util/signals';
 
-import { requestMeasure } from '../../../../lib/fasterdom/fasterdom';
 import { IS_ANDROID, IS_TOUCH_ENV } from '../../../../util/browser/windowEnvironment';
 import { captureEvents, SwipeDirection } from '../../../../util/captureEvents';
 import stopEvent from '../../../../util/stopEvent';
@@ -22,9 +21,10 @@ const QUICK_REACTION_AREA_WIDTH = 3 * REM;
 const QUICK_REACTION_AREA_HEIGHT = Number(REM);
 const GROUP_MESSAGE_HOVER_ATTRIBUTE = 'data-is-document-group-hover';
 
+// TODO(codemod): useOuterHandlers: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useOuterHandlers(
   selectMessage: (e?: React.MouseEvent<HTMLDivElement, MouseEvent>, groupedId?: string) => void,
-  containerRef: ElementRef<HTMLDivElement>,
+  containerRef: (el: HTMLDivElement) => void,
   messageId: number,
   isInSelectMode: boolean,
   canReply: boolean,
@@ -33,7 +33,7 @@ export default function useOuterHandlers(
   handleBeforeContextMenu: (e: React.MouseEvent) => void,
   chatId: string,
   isContextMenuShown: boolean,
-  quickReactionRef: ElementRef<HTMLDivElement>,
+  quickReactionRef: (el: HTMLDivElement) => void,
   shouldHandleMouseLeave: boolean,
   getIsMessageListReady?: Signal<boolean>,
   isEphemeral?: boolean,
@@ -42,7 +42,7 @@ export default function useOuterHandlers(
 
   const [isQuickReactionVisible, markQuickReactionVisible, unmarkQuickReactionVisible] = useFlag();
   const [isSwiped, markSwiped, unmarkSwiped] = useFlag();
-  const doubleTapTimeoutRef = useRef<number>();
+  let doubleTapTimeoutRef: number | undefined;
 
   function handleMouseDown(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
     preventMessageInputBlur(e);
@@ -118,15 +118,15 @@ export default function useOuterHandlers(
 
     if (!IS_TOUCH_ENV) return;
 
-    if (doubleTapTimeoutRef.current) {
-      clearTimeout(doubleTapTimeoutRef.current);
-      doubleTapTimeoutRef.current = undefined;
+    if (doubleTapTimeoutRef) {
+      clearTimeout(doubleTapTimeoutRef);
+      doubleTapTimeoutRef = undefined;
       handleDoubleTap();
       return;
     }
 
-    doubleTapTimeoutRef.current = setTimeout(() => {
-      doubleTapTimeoutRef.current = undefined;
+    doubleTapTimeoutRef = setTimeout(() => {
+      doubleTapTimeoutRef = undefined;
       handleTap(e);
     }, QUICK_REACTION_DOUBLE_TAP_DELAY);
   }
@@ -167,7 +167,17 @@ export default function useOuterHandlers(
     e.stopPropagation();
   }
 
-  useEffect(() => {
+  createEffect(depsOf(() => [
+    containerRef,
+    isInSelectMode,
+    messageId,
+    markSwiped,
+    unmarkSwiped,
+    canReply,
+    isContextMenuShown,
+    getIsMessageListReady,
+    isEphemeral,
+  ]), () => {
     if (!IS_TOUCH_ENV || isInSelectMode || !canReply || isContextMenuShown || !getIsMessageListReady?.()) {
       return undefined;
     }
@@ -207,17 +217,7 @@ export default function useOuterHandlers(
         startedAt = undefined;
       },
     });
-  }, [
-    containerRef,
-    isInSelectMode,
-    messageId,
-    markSwiped,
-    unmarkSwiped,
-    canReply,
-    isContextMenuShown,
-    getIsMessageListReady,
-    isEphemeral,
-  ]);
+  });
 
   function handleMouseLeave(e: React.MouseEvent<HTMLDivElement>) {
     // Because `mousemove` event is throttled, we need to also throttle `mouseleave` event,

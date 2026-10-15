@@ -1,14 +1,8 @@
-import {
-  type ElementRef,
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useUnmountCleanup,
-} from '../../../lib/teact/teact';
+import { createEffect, createMemo, createSignal, onDestroy, previous } from 'frameact';
 import { getActions, withGlobal } from '../../../global';
+import { depsOf } from '../../../util/effectDeps';
+import { createShowTransition } from '../../../lib/kit';
+import type { GlobalState } from '../../../global/types';
 
 import type {
   ApiAvailableEffect,
@@ -29,7 +23,6 @@ import type {
   ApiUser,
   ApiWebPage,
 } from '../../../api/types';
-import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 import type {
   ActiveEmojiInteraction,
   ChatTranslatedMessages,
@@ -149,17 +142,13 @@ import getSingularPaidMedia from './helpers/getSingularPaidMedia';
 
 import useAppLayout from '../../../hooks/useAppLayout';
 import useContextMenuHandlers from '../../../hooks/useContextMenuHandlers';
-import useEffectWithPrevDeps from '../../../hooks/useEffectWithPrevDeps';
 import useEnsureMessage from '../../../hooks/useEnsureMessage';
 import useEnsureStory from '../../../hooks/useEnsureStory';
 import useFlag from '../../../hooks/useFlag';
 import { useOnIntersect } from '../../../hooks/useIntersectionObserver';
 import useLang from '../../../hooks/useLang';
-import useLastCallback from '../../../hooks/useLastCallback';
 import useOldLang from '../../../hooks/useOldLang';
 import usePeerColor from '../../../hooks/usePeerColor';
-import usePreviousDeprecated from '../../../hooks/usePreviousDeprecated';
-import useShowTransition from '../../../hooks/useShowTransition';
 import useTextLanguage from '../../../hooks/useTextLanguage';
 import useDetectChatLanguage from './hooks/useDetectChatLanguage';
 import useFocusMessageListElement from './hooks/useFocusMessageListElement';
@@ -247,7 +236,7 @@ type OwnProps = {
   isQuickPreview?: boolean;
   memoFirstUnreadIdRef?: { current: number | undefined };
   getIsMessageListReady?: Signal<boolean>;
-  containerRef?: ElementRef<HTMLDivElement>;
+  containerRef?: (el: HTMLDivElement) => void;
   isMessageListActive?: boolean;
   observeIntersectionForBottom?: ObserveFn;
   observeIntersectionForLoading?: ObserveFn;
@@ -361,127 +350,8 @@ const QUICK_REACTION_SIZE = 1.75 * REM;
 const MAX_REASON_LENGTH = 200;
 const MIN_MESSAGE_LENGTH_FOR_WIDE_MEDIA = 40;
 
-const Message = ({
-  message,
-  album,
-  noAvatars,
-  withAvatar,
-  withSenderName,
-  noComments,
-  noReplies,
-  appearanceOrder,
-  isJustAdded,
-  isFirstInGroup,
-  isPremium,
-  isLastInGroup,
-  isFirstInDocumentGroup,
-  isLastInDocumentGroup,
-  isTranscribing,
-  transcribedText,
-  isLastInList,
-  theme,
-  forceSenderName,
-  sender,
-  canShowSender,
-  originSender,
-  botSender,
-  ephemeralBot,
-  isThreadTop,
-  shouldHideReply,
-  replyMessage,
-  replyMessageSender,
-  replyMessageForwardSender,
-  replyMessageChat,
-  replyStory,
-  isReplyPrivate,
-  storySender,
-  outgoingStatus,
-  uploadProgress,
-  isInDocumentGroup,
-  isLoadingComments,
-  isProtected,
-  canForward,
-  isFocused,
-  focusDirection,
-  focusedQuote,
-  focusedQuoteOffset,
-  noFocusHighlight,
-  scrollTargetPosition,
-  isResizingContainer,
-  isForwarding,
-  isChatWithSelf,
-  isBotForum,
-  isRepliesChat,
-  isAnonymousForwards,
-  isChannel,
-  isGroup,
-  canReply,
-  highlight,
-  animatedEmoji,
-  animatedCustomEmoji,
-  hasActiveReactions,
-  hasLinkedChat,
-  isInSelectMode,
-  isSelected,
-  isGroupSelected,
-  threadId,
-  reactionMessage,
-  availableReactions,
-  defaultReaction,
-  activeEmojiInteractions,
-  messageListType,
-  isPinnedList,
-  isPinned,
-  isMessagePrimaryEditedDateEnabled,
-  isDownloading,
-  canAutoLoadMedia,
-  canAutoPlayMedia,
-  shouldLoopStickers,
-  autoLoadFileMaxSizeMb,
-  repliesThreadInfo,
-  hasUnreadReaction,
-  hasUnreadPollVote,
-  memoFirstUnreadIdRef,
-  senderChatMember,
-  messageTopic,
-  chatTranslations,
-  areTranslationsEnabled,
-  shouldDetectChatLanguage,
-  requestedTranslationLanguage,
-  requestedChatTranslationLanguage,
-  requestedTranslationTone,
-  withAnimatedEffects,
-  canAnimateTextStreaming,
-  webPageStory,
-  isConnected,
-  getIsMessageListReady,
-  containerRef,
-  shouldWarnAboutFiles,
-  senderBoosts,
-  tags,
-  canTranscribeVoice,
-  viaBusinessBot,
-  guestFromSender,
-  effect,
-  poll,
-  maxTimestamp,
-  lastPlaybackTimestamp,
-  isMediaNsfw,
-  isReplyMediaNsfw,
-  paidMessageStars,
-  isChatWithUser,
-  isAccountFrozen,
-  minFutureTime,
-  webPage,
-  summary,
-  canSendStickers,
-  observeIntersectionForBottom,
-  observeIntersectionForLoading,
-  observeIntersectionForPlaying,
-  isMessageListActive,
-  isQuickPreview,
-  onMessageUnmount,
-}: OwnProps & StateProps) => {
+const Message = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const {
     toggleMessageSelection,
     clickBotInlineButton,
@@ -499,318 +369,317 @@ const Message = ({
     summarizeMessage,
   } = getActions();
 
-  const ref = useRef<HTMLDivElement>();
-  const bottomMarkerRef = useRef<HTMLDivElement>();
-  const quickReactionRef = useRef<HTMLDivElement>();
+  let ref!: HTMLDivElement;
+  let bottomMarkerRef!: HTMLDivElement;
+  let quickReactionRef!: HTMLDivElement;
 
   const oldLang = useOldLang();
   const lang = useLang();
-  const {
-    id: messageId,
-    chatId,
-    forwardInfo,
-    viaBotId,
-    guestChatViaId,
-    isTranscriptionError,
-    factCheck,
-    isTypingDraft,
-    previousLocalId,
-    fromRank,
-  } = message;
+  const source = createMemo(() => props.message);
+  const messageId = () => source().id;
+  const chatId = () => source().chatId;
+  const forwardInfo = () => source().forwardInfo;
+  const viaBotId = () => source().viaBotId;
+  const guestChatViaId = () => source().guestChatViaId;
+  const isTranscriptionError = () => source().isTranscriptionError;
+  const factCheck = () => source().factCheck;
+  const isTypingDraft = () => source().isTypingDraft;
+  const previousLocalId = () => source().previousLocalId;
+  const fromRank = () => source().fromRank;
 
-  const isLocalOnly = isMessageLocalOnly(message);
+  const isLocalOnly = createMemo(() => isMessageLocalOnly(props.message));
 
-  const [isTranscriptionHidden, setIsTranscriptionHidden] = useState(false);
-  const [isPlayingSnapAnimation, setIsPlayingSnapAnimation] = useState(false);
-  const [isPlayingDeleteAnimation, setIsPlayingDeleteAnimation] = useState(false);
+  const [isTranscriptionHidden, setIsTranscriptionHidden] = createSignal(false);
+  const [isPlayingSnapAnimation, setIsPlayingSnapAnimation] = createSignal(false);
+  const [isPlayingDeleteAnimation, setIsPlayingDeleteAnimation] = createSignal(false);
   const [shouldPlayEffect, requestEffect, hideEffect] = useFlag();
   const [shouldPlayDiceEffect, requestDiceEffect, hideDiceEffect] = useFlag();
   const [isDeclineDialogOpen, openDeclineDialog, closeDeclineDialog] = useFlag();
   const [isShowingSummary, showSummary, hideSummary] = useFlag();
-  const [declineReason, setDeclineReason] = useState('');
+  const [declineReason, setDeclineReason] = createSignal('');
   const { isMobile, isTouchScreen } = useAppLayout();
 
-  useOnIntersect(bottomMarkerRef, isTypingDraft || isLocalOnly ? undefined : observeIntersectionForBottom);
+  useOnIntersect(() => bottomMarkerRef, () => isTypingDraft() || isLocalOnly() ? undefined : props.observeIntersectionForBottom);
 
-  const {
-    isContextMenuOpen,
-    contextMenuAnchor,
-    contextMenuTarget,
-    isContextMenuAltKeyPressed,
-    handleBeforeContextMenu,
-    handleContextMenu: onContextMenu,
-    handleContextMenuClose,
-    handleContextMenuHide,
-  } = useContextMenuHandlers(
-    ref,
-    (isTouchScreen && isInSelectMode) || isAccountFrozen,
+  const contextMenuHandlersResult = createMemo(() => useContextMenuHandlers(
+    () => ref,
+    () => (isTouchScreen && props.isInSelectMode) || props.isAccountFrozen,
     !IS_TAURI,
     IS_ANDROID,
-    getIsMessageListReady,
-  );
+    () => props.getIsMessageListReady,
+  ));
+  const isContextMenuOpen = () => contextMenuHandlersResult().isContextMenuOpen;
+  const contextMenuAnchor = () => contextMenuHandlersResult().contextMenuAnchor;
+  const contextMenuTarget = () => contextMenuHandlersResult().contextMenuTarget;
+  const isContextMenuAltKeyPressed = () => contextMenuHandlersResult().isContextMenuAltKeyPressed;
+  const handleBeforeContextMenu = () => contextMenuHandlersResult().handleBeforeContextMenu;
+  const onContextMenu = () => contextMenuHandlersResult().handleContextMenu;
+  const handleContextMenuClose = () => contextMenuHandlersResult().handleContextMenuClose;
+  const handleContextMenuHide = () => contextMenuHandlersResult().handleContextMenuHide;
 
-  useEffect(() => {
-    if (isContextMenuOpen) {
+  createEffect(depsOf(() => [isContextMenuOpen(), disableContextMenuHint] as const), ([isContextMenuOpen2]) => {
+    if (isContextMenuOpen2) {
       disableContextMenuHint();
     }
-  }, [isContextMenuOpen, disableContextMenuHint]);
+  });
 
-  const noAppearanceAnimation = appearanceOrder <= 0 || message.shouldSkipTypingAnimation;
-  const [isShown, markShown] = useFlag(noAppearanceAnimation);
-  useEffect(() => {
-    if (noAppearanceAnimation) {
+  const noAppearanceAnimation = createMemo(() => props.appearanceOrder <= 0 || props.message.shouldSkipTypingAnimation);
+  const [isShown, markShown] = useFlag(noAppearanceAnimation());
+  createEffect(depsOf(() => [props.appearanceOrder, noAppearanceAnimation()] as const), ([appearanceOrder2, noAppearanceAnimation2]) => {
+    if (noAppearanceAnimation2) {
       return;
     }
 
     // Message appearance animation works only if this timeout is not cleared. Migrate to `sibling-index()` when baseline widely available.
-    setTimeout(markShown, appearanceOrder * MESSAGE_APPEARANCE_DELAY);
-  }, [appearanceOrder, noAppearanceAnimation]);
+    setTimeout(markShown, appearanceOrder2 * MESSAGE_APPEARANCE_DELAY);
+  });
 
-  useShowTransition({
-    ref,
-    isOpen: isShown || isJustAdded,
-    noMountTransition: message.shouldSkipTypingAnimation || (noAppearanceAnimation && !isJustAdded),
+  createShowTransition({
+    // TODO(codemod): ref option: hand the result `ref` to the element (ref={t.ref}) instead
+    ref: () => ref,
+    isOpen: () => isShown() || props.isJustAdded,
+    noMountTransition: props.message.shouldSkipTypingAnimation || (noAppearanceAnimation() && !props.isJustAdded),
     className: false,
   });
 
-  useUnmountCleanup(() => {
-    onMessageUnmount?.(messageId);
+  onDestroy(() => {
+    props.onMessageUnmount?.(messageId());
   });
 
-  const hasSummary = Boolean(message.summaryLanguageCode);
+  const hasSummary = createMemo(() => Boolean(props.message.summaryLanguageCode));
 
-  const isLocal = isMessageLocal(message);
-  const isOwn = isOwnMessage(message);
-  const isScheduled = messageListType === 'scheduled' || message.isScheduled;
-  const messageReplyInfo = getMessageReplyInfo(message) || getEphemeralReplyInfo(message);
-  const isEphemeralReply = messageReplyInfo?.type === 'ephemeral';
-  const storyReplyInfo = getStoryReplyInfo(message);
-  const readMetricsMessage = album?.mainMessage || message;
+  const isLocal = createMemo(() => isMessageLocal(props.message));
+  const isOwn = createMemo(() => isOwnMessage(props.message));
+  const isScheduled = createMemo(() => props.messageListType === 'scheduled' || props.message.isScheduled);
+  const messageReplyInfo = createMemo(() => getMessageReplyInfo(props.message) || getEphemeralReplyInfo(props.message));
+  const isEphemeralReply = createMemo(() => messageReplyInfo()?.type === 'ephemeral');
+  const storyReplyInfo = createMemo(() => getStoryReplyInfo(props.message));
+  const readMetricsMessage = createMemo(() => props.album?.mainMessage || props.message);
   const canReportReadMetrics =
-    messageListType === 'thread' &&
-    threadId === MAIN_THREAD_ID &&
-    !isQuickPreview &&
-    !isLocal &&
-    !isLocalOnly &&
-    readMetricsMessage.viewsCount !== undefined;
-  const hasMessageReply = isReplyToMessage(message) && !shouldHideReply && (!isEphemeralReply || Boolean(replyMessage));
+    createMemo(() => props.messageListType === 'thread' &&
+    props.threadId === MAIN_THREAD_ID &&
+    !props.isQuickPreview &&
+    !isLocal() &&
+    !isLocalOnly() &&
+    readMetricsMessage().viewsCount !== undefined);
+  const hasMessageReply = createMemo(() => isReplyToMessage(props.message) && !props.shouldHideReply && (!isEphemeralReply() || Boolean(props.replyMessage)));
 
   useMessageReadMetrics({
-    messageRef: ref,
-    containerRef,
-    chatId,
-    messageId: readMetricsMessage.id,
-    isEnabled: canReportReadMetrics,
-    isMessageListActive,
+    messageRef: () => ref,
+    containerRef: props.containerRef,
+    chatId: () => chatId(),
+    messageId: () => readMetricsMessage().id,
+    isEnabled: () => canReportReadMetrics(),
+    isMessageListActive: () => props.isMessageListActive,
   });
 
-  const { paidMedia } = getMessageContent(message);
-  const { photo: paidMediaPhoto, video: paidMediaVideo } = getSingularPaidMedia(paidMedia);
+  const getMessageContentResult = createMemo(() => getMessageContent(props.message));
+  const paidMedia = () => getMessageContentResult().paidMedia;
+  const getSingularPaidMediaResult = createMemo(() => getSingularPaidMedia(paidMedia()));
+  const paidMediaPhoto = () => getSingularPaidMediaResult().photo;
+  const paidMediaVideo = () => getSingularPaidMediaResult().video;
 
-  const {
-    photo = paidMediaPhoto,
-    video = paidMediaVideo,
-    audio,
-    voice,
-    document,
-    sticker,
-    contact,
-    invoice,
-    location,
-    action,
-    game,
-    storyData,
-    giveaway,
-    giveawayResults,
-    todo,
-    dice,
-  } = getMessageContent(message);
+  const getMessageContentResult2 = createMemo(() => getMessageContent(props.message));
+  const photo = () => (getMessageContentResult2().photo === undefined ? paidMediaPhoto : getMessageContentResult2().photo);
+  const video = () => (getMessageContentResult2().video === undefined ? paidMediaVideo : getMessageContentResult2().video);
+  const audio = () => getMessageContentResult2().audio;
+  const voice = () => getMessageContentResult2().voice;
+  const document = () => getMessageContentResult2().document;
+  const sticker = () => getMessageContentResult2().sticker;
+  const contact = () => getMessageContentResult2().contact;
+  const invoice = () => getMessageContentResult2().invoice;
+  const location = () => getMessageContentResult2().location;
+  const action = () => getMessageContentResult2().action;
+  const game = () => getMessageContentResult2().game;
+  const storyData = () => getMessageContentResult2().storyData;
+  const giveaway = () => getMessageContentResult2().giveaway;
+  const giveawayResults = () => getMessageContentResult2().giveawayResults;
+  const todo = () => getMessageContentResult2().todo;
+  const dice = () => getMessageContentResult2().dice;
 
-  const withVoiceTranscription = Boolean(!isTranscriptionHidden && (isTranscriptionError || transcribedText));
+  const withVoiceTranscription = createMemo(() => Boolean(!isTranscriptionHidden() && (isTranscriptionError() || props.transcribedText)));
 
-  const hasStoryReply = Boolean(storyReplyInfo);
-  const hasThread = Boolean(repliesThreadInfo) && messageListType === 'thread';
-  const isCustomShape = !withVoiceTranscription && getMessageCustomShape(message);
-  const hasAnimatedEmoji = isCustomShape && (animatedEmoji || animatedCustomEmoji);
-  const hasReactions = reactionMessage?.reactions && !areReactionsEmpty(reactionMessage.reactions);
-  const hasViaSender = Boolean(viaBotId || guestChatViaId);
+  const hasStoryReply = createMemo(() => Boolean(storyReplyInfo()));
+  const hasThread = createMemo(() => Boolean(props.repliesThreadInfo) && props.messageListType === 'thread');
+  const isCustomShape = createMemo(() => !withVoiceTranscription() && getMessageCustomShape(props.message));
+  const hasAnimatedEmoji = createMemo(() => isCustomShape() && (props.animatedEmoji || props.animatedCustomEmoji));
+  const hasReactions = createMemo(() => props.reactionMessage?.reactions && !areReactionsEmpty(props.reactionMessage.reactions));
+  const hasViaSender = createMemo(() => Boolean(viaBotId() || guestChatViaId()));
 
   const asForwarded =
-    (forwardInfo &&
-      (!isChatWithSelf || isScheduled) &&
-      !isRepliesChat &&
-      !forwardInfo.isLinkedChannelPost &&
-      !isAnonymousForwards &&
-      !hasViaSender) ||
-    Boolean(storyData && !storyData.isMention);
-  const canShowSenderBoosts = Boolean(senderBoosts) && !asForwarded && isFirstInGroup;
-  const isStoryMention = storyData?.isMention;
-  const isRoundVideo = video?.mediaType === 'video' && video.isRound;
+    createMemo(() => (forwardInfo() &&
+      (!props.isChatWithSelf || isScheduled()) &&
+      !props.isRepliesChat &&
+      !forwardInfo().isLinkedChannelPost &&
+      !props.isAnonymousForwards &&
+      !hasViaSender()) ||
+    Boolean(storyData() && !storyData().isMention));
+  const canShowSenderBoosts = createMemo(() => Boolean(props.senderBoosts) && !asForwarded() && props.isFirstInGroup);
+  const isStoryMention = createMemo(() => storyData()?.isMention);
+  const isRoundVideo = createMemo(() => video()?.mediaType === 'video' && video().isRound);
   const isAlbum =
-    Boolean(album) &&
-    ((album.isPaidMedia && paidMedia!.extendedMedia.length > 1) || album.messages.length > 1) &&
-    !album.messages.some((msg) => Object.keys(msg.content).length === 0);
-  const isInDocumentGroupNotFirst = isInDocumentGroup && !isFirstInDocumentGroup;
-  const isInDocumentGroupNotLast = isInDocumentGroup && !isLastInDocumentGroup;
-  const isContextMenuShown = contextMenuAnchor !== undefined;
+    createMemo(() => Boolean(props.album) &&
+    ((props.album.isPaidMedia && paidMedia()!.extendedMedia.length > 1) || props.album.messages.length > 1) &&
+    !props.album.messages.some((msg) => Object.keys(msg.content).length === 0));
+  const isInDocumentGroupNotFirst = createMemo(() => props.isInDocumentGroup && !props.isFirstInDocumentGroup);
+  const isInDocumentGroupNotLast = createMemo(() => props.isInDocumentGroup && !props.isLastInDocumentGroup);
+  const isContextMenuShown = createMemo(() => contextMenuAnchor() !== undefined);
   const canShowActionButton =
-    !(isContextMenuShown || isInSelectMode || isForwarding) && !isInDocumentGroupNotLast && !isStoryMention;
-  const canFocus = Boolean(
-    isPinnedList ||
-    (forwardInfo &&
-      (forwardInfo.isChannelPost || isChatWithSelf || isRepliesChat || isAnonymousForwards) &&
-      forwardInfo.fromMessageId),
-  );
+    createMemo(() => !(isContextMenuShown() || props.isInSelectMode || props.isForwarding) && !isInDocumentGroupNotLast() && !isStoryMention());
+  const canFocus = createMemo(() => Boolean(
+    props.isPinnedList ||
+    (forwardInfo() &&
+      (forwardInfo().isChannelPost || props.isChatWithSelf || props.isRepliesChat || props.isAnonymousForwards) &&
+      forwardInfo().fromMessageId),
+  ));
 
-  const hasFactCheck = Boolean(factCheck?.text);
+  const hasFactCheck = createMemo(() => Boolean(factCheck()?.text));
 
-  const hasForwardedCustomShape = asForwarded && isCustomShape;
+  const hasForwardedCustomShape = createMemo(() => asForwarded() && isCustomShape());
   const hasSubheader =
-    message.isEphemeral ||
-    hasMessageReply ||
-    hasStoryReply ||
-    hasForwardedCustomShape ||
-    Boolean(isShowingSummary && summary?.text);
+    createMemo(() => props.message.isEphemeral ||
+    hasMessageReply() ||
+    hasStoryReply() ||
+    hasForwardedCustomShape() ||
+    Boolean(isShowingSummary() && props.summary?.text));
 
-  const selectMessage = useLastCallback((e?: React.MouseEvent<HTMLDivElement, MouseEvent>, groupedId?: string) => {
-    if (isAccountFrozen || message.isEphemeral) return;
+  const selectMessage = (e?: React.MouseEvent<HTMLDivElement, MouseEvent>, groupedId?: string) => {
+    if (props.isAccountFrozen || props.message.isEphemeral) return;
     toggleMessageSelection({
-      messageId,
+      messageId: messageId(),
       groupedId,
       ...(e?.shiftKey && { withShift: true }),
-      ...(isAlbum && { childMessageIds: album.messages.map(({ id }) => id) }),
+      ...(isAlbum() && { childMessageIds: props.album.messages.map(({ id }) => id) }),
     });
-  });
+  };
 
-  const messageSender = canShowSender ? sender : undefined;
+  const messageSender = createMemo(() => props.canShowSender ? props.sender : undefined);
 
   const shouldPreferOriginSender =
-    forwardInfo && (isChatWithSelf || isRepliesChat || isAnonymousForwards || !messageSender);
-  const avatarPeer = shouldPreferOriginSender ? originSender : messageSender;
+    createMemo(() => forwardInfo() && (props.isChatWithSelf || props.isRepliesChat || props.isAnonymousForwards || !messageSender()));
+  const avatarPeer = createMemo(() => shouldPreferOriginSender() ? props.originSender : messageSender());
 
-  const messageColorPeer = asForwarded ? originSender : sender;
-  const noUserColors = isOwn && !isCustomShape;
+  const messageColorPeer = createMemo(() => asForwarded() ? props.originSender : props.sender);
+  const noUserColors = createMemo(() => isOwn() && !isCustomShape());
 
-  const senderPeer = forwardInfo || storyData ? originSender : messageSender;
-  const hasTtl = hasMessageTtl(message);
+  const senderPeer = createMemo(() => forwardInfo() || storyData() ? props.originSender : messageSender());
+  const hasTtl = createMemo(() => hasMessageTtl(props.message));
 
-  const {
-    handleMouseDown,
-    handleClick,
-    handleContextMenu,
-    handleDoubleClick,
-    handleContentDoubleClick,
-    handleMouseMove,
-    handleSendQuickReaction,
-    handleMouseLeave,
-    isSwiped,
-    isQuickReactionVisible,
-    handleDocumentGroupMouseEnter,
-  } = useOuterHandlers(
+  const outerHandlersResult = createMemo(() => useOuterHandlers(
     selectMessage,
-    ref,
-    messageId,
-    Boolean(isInSelectMode),
-    Boolean(canReply),
-    Boolean(isProtected),
-    onContextMenu,
-    handleBeforeContextMenu,
-    chatId,
-    isContextMenuShown,
-    quickReactionRef,
-    isInDocumentGroupNotLast,
-    getIsMessageListReady,
-    message.isEphemeral,
-  );
+    () => ref,
+    () => messageId(),
+    () => Boolean(props.isInSelectMode),
+    () => Boolean(props.canReply),
+    () => Boolean(props.isProtected),
+    () => onContextMenu(),
+    () => handleBeforeContextMenu(),
+    () => chatId(),
+    () => isContextMenuShown(),
+    () => quickReactionRef,
+    () => isInDocumentGroupNotLast(),
+    () => props.getIsMessageListReady,
+    () => props.message.isEphemeral,
+  ));
+  const handleMouseDown = () => outerHandlersResult().handleMouseDown;
+  const handleClick = () => outerHandlersResult().handleClick;
+  const handleContextMenu = () => outerHandlersResult().handleContextMenu;
+  const handleDoubleClick = () => outerHandlersResult().handleDoubleClick;
+  const handleContentDoubleClick = () => outerHandlersResult().handleContentDoubleClick;
+  const handleMouseMove = () => outerHandlersResult().handleMouseMove;
+  const handleSendQuickReaction = () => outerHandlersResult().handleSendQuickReaction;
+  const handleMouseLeave = () => outerHandlersResult().handleMouseLeave;
+  const isSwiped = () => outerHandlersResult().isSwiped;
+  const isQuickReactionVisible = () => outerHandlersResult().isQuickReactionVisible;
+  const handleDocumentGroupMouseEnter = () => outerHandlersResult().handleDocumentGroupMouseEnter;
 
-  const {
-    handleSenderClick,
-    handleViaBotClick,
-    handleGuestForClick,
-    handleReplyClick,
-    handleMediaClick,
-    handleDocumentClick,
-    handleAudioPlay,
-    handleAlbumMediaClick,
-    handlePhotoMediaClick,
-    handleVideoMediaClick,
-    handleMetaClick,
-    handleTranslationClick,
-    handleOpenThread,
-    handleReadMedia,
-    handleCancelUpload,
-    handleGroupForward,
-    handleForward,
-    handleFocus,
-    handleFocusForwarded,
-    handleDocumentGroupSelectAll,
-    handleStoryClick,
-  } = useInnerHandlers({
+  const innerHandlersResult = createMemo(() => useInnerHandlers({
     lang: oldLang,
     selectMessage,
-    message,
-    webPage,
-    chatId,
-    threadId,
-    isInDocumentGroup,
-    asForwarded,
-    isScheduled,
-    album,
-    avatarPeer,
-    senderPeer,
-    botSender,
-    guestFromSender,
-    isTranslatingChat: Boolean(requestedChatTranslationLanguage),
-    story: replyStory && 'content' in replyStory ? replyStory : undefined,
-    isReplyPrivate,
-    isRepliesChat,
-    isSavedMessages: isChatWithSelf,
-    lastPlaybackTimestamp,
-  });
+    message: () => props.message,
+    webPage: () => props.webPage,
+    chatId: () => chatId(),
+    threadId: () => props.threadId,
+    isInDocumentGroup: () => props.isInDocumentGroup,
+    asForwarded: () => asForwarded(),
+    isScheduled: () => isScheduled(),
+    album: () => props.album,
+    avatarPeer: () => avatarPeer(),
+    senderPeer: () => senderPeer(),
+    botSender: () => props.botSender,
+    guestFromSender: () => props.guestFromSender,
+    isTranslatingChat: () => Boolean(props.requestedChatTranslationLanguage),
+    story: () => props.replyStory && 'content' in props.replyStory ? props.replyStory : undefined,
+    isReplyPrivate: () => props.isReplyPrivate,
+    isRepliesChat: () => props.isRepliesChat,
+    isSavedMessages: () => props.isChatWithSelf,
+    lastPlaybackTimestamp: () => props.lastPlaybackTimestamp,
+  }));
+  const handleSenderClick = () => innerHandlersResult().handleSenderClick;
+  const handleViaBotClick = () => innerHandlersResult().handleViaBotClick;
+  const handleGuestForClick = () => innerHandlersResult().handleGuestForClick;
+  const handleReplyClick = () => innerHandlersResult().handleReplyClick;
+  const handleMediaClick = () => innerHandlersResult().handleMediaClick;
+  const handleDocumentClick = () => innerHandlersResult().handleDocumentClick;
+  const handleAudioPlay = () => innerHandlersResult().handleAudioPlay;
+  const handleAlbumMediaClick = () => innerHandlersResult().handleAlbumMediaClick;
+  const handlePhotoMediaClick = () => innerHandlersResult().handlePhotoMediaClick;
+  const handleVideoMediaClick = () => innerHandlersResult().handleVideoMediaClick;
+  const handleMetaClick = () => innerHandlersResult().handleMetaClick;
+  const handleTranslationClick = () => innerHandlersResult().handleTranslationClick;
+  const handleOpenThread = () => innerHandlersResult().handleOpenThread;
+  const handleReadMedia = () => innerHandlersResult().handleReadMedia;
+  const handleCancelUpload = () => innerHandlersResult().handleCancelUpload;
+  const handleGroupForward = () => innerHandlersResult().handleGroupForward;
+  const handleForward = () => innerHandlersResult().handleForward;
+  const handleFocus = () => innerHandlersResult().handleFocus;
+  const handleFocusForwarded = () => innerHandlersResult().handleFocusForwarded;
+  const handleDocumentGroupSelectAll = () => innerHandlersResult().handleDocumentGroupSelectAll;
+  const handleStoryClick = () => innerHandlersResult().handleStoryClick;
 
-  useEffect(() => {
-    if (hasSummary && isShowingSummary && !summary) {
+  createEffect(depsOf(() => [hasSummary(), chatId(), messageId(), props.requestedTranslationLanguage, isShowingSummary(), props.summary, hideSummary] as const), ([hasSummary2, chatId2, messageId2, requestedTranslationLanguage2, isShowingSummary2, summary2]) => {
+    if (hasSummary2 && isShowingSummary2 && !summary2) {
       summarizeMessage({
-        chatId,
-        id: messageId,
-        toLanguageCode: requestedTranslationLanguage,
+        chatId: chatId2,
+        id: messageId2,
+        toLanguageCode: requestedTranslationLanguage2,
         onError: hideSummary,
       });
     }
-  }, [hasSummary, chatId, messageId, requestedTranslationLanguage, isShowingSummary, summary, hideSummary]);
+  });
 
-  const handleEffectClick = useLastCallback((e: React.MouseEvent<HTMLDivElement>) => {
+  const handleEffectClick = (e: React.MouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
 
     requestEffect();
-  });
+  };
 
-  const handleFocusSelf = useLastCallback(() => {
+  const handleFocusSelf = () => {
     focusMessage({
-      chatId,
-      threadId,
-      messageId,
+      chatId: chatId(),
+      threadId: props.threadId,
+      messageId: messageId(),
       scrollTargetPosition: 'start',
       noHighlight: true,
     });
-  });
+  };
 
-  useEffect(() => {
-    if (!isLastInList) {
+  createEffect(depsOf(() => [props.isLastInList, props.transcribedText, withVoiceTranscription()] as const), ([isLastInList2, transcribedText2, withVoiceTranscription2]) => {
+    if (!isLastInList2) {
       return;
     }
 
-    if (withVoiceTranscription && transcribedText) {
+    if (withVoiceTranscription2 && transcribedText2) {
       handleFocusSelf();
     }
-  }, [isLastInList, transcribedText, withVoiceTranscription]);
+  });
 
-  useEffect(() => {
-    const element = ref.current;
-    const isPartialAlbumDelete = message.isInAlbum && album?.messages.some((msg) => !msg.isDeleting);
+  createEffect(() => props.message.isDeleting, () => {
+    const element = ref;
+    const isPartialAlbumDelete = props.message.isInAlbum && props.album?.messages.some((msg) => !msg.isDeleting);
     if (!element || isPartialAlbumDelete) return;
 
-    if (!message.isDeleting) {
+    if (!props.message.isDeleting) {
       setIsPlayingSnapAnimation(false);
       setIsPlayingDeleteAnimation(false);
       return;
@@ -822,206 +691,213 @@ const Message = ({
       setIsPlayingDeleteAnimation(true);
     }
     // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps -- Synchronize animation on `isDeleting` changes
-  }, [message.isDeleting]);
+  });
 
-  const textMessage = album?.hasMultipleCaptions ? undefined : album?.captionMessage || message;
-  const hasTextContent = textMessage && hasMessageText(textMessage);
-  const hasText = hasTextContent || hasFactCheck;
+  const textMessage = createMemo(() => props.album?.hasMultipleCaptions ? undefined : props.album?.captionMessage || props.message);
+  const hasTextContent = createMemo(() => textMessage() && hasMessageText(textMessage()));
+  const hasText = createMemo(() => hasTextContent() || hasFactCheck());
 
-  const containerClassName = buildClassName(
+  const containerClassName = createMemo(() => buildClassName(
     'Message message-list-item',
-    isFirstInGroup && 'first-in-group',
-    isProtected && 'hide-on-print',
-    isProtected ? 'is-protected' : 'allow-selection',
-    isLastInGroup && 'last-in-group',
-    isFirstInDocumentGroup && 'first-in-document-group',
-    isLastInDocumentGroup && 'last-in-document-group',
-    isLastInList && 'last-in-list',
-    isOwn && 'own',
-    Boolean(message.viewsCount) && 'has-views',
-    message.isEdited && 'was-edited',
-    hasMessageReply && 'has-reply',
-    isContextMenuOpen && 'has-menu-open',
-    isFocused && !noFocusHighlight && 'focused',
-    isForwarding && 'is-forwarding',
-    isPlayingDeleteAnimation && 'is-deleting',
-    isPlayingSnapAnimation && 'is-dissolving',
-    isInDocumentGroup && 'is-in-document-group',
-    isAlbum && 'is-album',
-    message.hasUnreadMention && 'has-unread-mention',
-    isSelected && 'is-selected',
-    isInSelectMode && 'is-in-selection-mode',
-    isThreadTop && !withAvatar && 'is-thread-top',
-    Boolean(message.inlineButtons) && 'has-inline-buttons',
-    isSwiped && 'is-swiped',
-    isJustAdded && 'is-just-added',
-    (hasActiveReactions || shouldPlayEffect) && 'has-active-effect',
-    isStoryMention && 'is-story-mention',
-    guestChatViaId && 'has-guest-avatar',
-  );
+    props.isFirstInGroup && 'first-in-group',
+    props.isProtected && 'hide-on-print',
+    props.isProtected ? 'is-protected' : 'allow-selection',
+    props.isLastInGroup && 'last-in-group',
+    props.isFirstInDocumentGroup && 'first-in-document-group',
+    props.isLastInDocumentGroup && 'last-in-document-group',
+    props.isLastInList && 'last-in-list',
+    isOwn() && 'own',
+    Boolean(props.message.viewsCount) && 'has-views',
+    props.message.isEdited && 'was-edited',
+    hasMessageReply() && 'has-reply',
+    isContextMenuOpen() && 'has-menu-open',
+    props.isFocused && !props.noFocusHighlight && 'focused',
+    props.isForwarding && 'is-forwarding',
+    isPlayingDeleteAnimation() && 'is-deleting',
+    isPlayingSnapAnimation() && 'is-dissolving',
+    props.isInDocumentGroup && 'is-in-document-group',
+    isAlbum() && 'is-album',
+    props.message.hasUnreadMention && 'has-unread-mention',
+    props.isSelected && 'is-selected',
+    props.isInSelectMode && 'is-in-selection-mode',
+    props.isThreadTop && !props.withAvatar && 'is-thread-top',
+    Boolean(props.message.inlineButtons) && 'has-inline-buttons',
+    isSwiped() && 'is-swiped',
+    props.isJustAdded && 'is-just-added',
+    (props.hasActiveReactions || shouldPlayEffect()) && 'has-active-effect',
+    isStoryMention() && 'is-story-mention',
+    guestChatViaId() && 'has-guest-avatar',
+  ));
 
-  const text = textMessage && getMessageContent(textMessage).text;
-  const isInvertedMedia = Boolean(message.isInvertedMedia);
+  const text = createMemo(() => textMessage() && getMessageContent(textMessage()).text);
+  const isInvertedMedia = createMemo(() => Boolean(props.message.isInvertedMedia));
 
-  const replyToMsgId = messageReplyInfo?.replyToMsgId;
-  const replyToPeerId = messageReplyInfo?.type === 'message' ? messageReplyInfo.replyToPeerId : undefined;
-  const { peerId: storyReplyPeerId, storyId: storyReplyId } = storyReplyInfo || {};
+  const replyToMsgId = createMemo(() => messageReplyInfo()?.replyToMsgId);
+  const replyToPeerId = createMemo(() => messageReplyInfo()?.type === 'message' ? messageReplyInfo().replyToPeerId : undefined);
+  const source2 = createMemo(() => storyReplyInfo() || {});
+  const storyReplyPeerId = () => source2().peerId;
+  const storyReplyId = () => source2().storyId;
 
-  useEffect(() => {
+  // TODO(codemod): dependency on a container (memoFirstUnreadIdRef) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)
+  createEffect(depsOf(() => [props.effect, isLocal(), props.memoFirstUnreadIdRef, messageId(), sticker()?.hasEffect] as const), ([effect2, isLocal2, memoFirstUnreadIdRef2, messageId2]) => {
     if (
-      (sticker?.hasEffect || effect) &&
-      ((memoFirstUnreadIdRef?.current && messageId >= memoFirstUnreadIdRef.current) || isLocal)
+      (sticker()?.hasEffect || effect2) &&
+      ((memoFirstUnreadIdRef2?.current && messageId2 >= memoFirstUnreadIdRef2.current) || isLocal2)
     ) {
       requestEffect();
     }
-  }, [effect, isLocal, memoFirstUnreadIdRef, messageId, sticker?.hasEffect]);
+  });
 
-  useEffect(() => {
-    if (dice && ((memoFirstUnreadIdRef?.current && messageId >= memoFirstUnreadIdRef.current) || isLocal)) {
+  // TODO(codemod): dependency on a container (memoFirstUnreadIdRef) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)
+  createEffect(depsOf(() => [dice(), props.memoFirstUnreadIdRef, messageId(), isLocal()] as const), ([dice2, memoFirstUnreadIdRef2, messageId2, isLocal2]) => {
+    if (dice2 && ((memoFirstUnreadIdRef2?.current && messageId2 >= memoFirstUnreadIdRef2.current) || isLocal2)) {
       requestDiceEffect();
     }
-  }, [dice, memoFirstUnreadIdRef, messageId, isLocal]);
+  });
 
-  const textForLanguageDetection = useMemo(() => textMessage && extractMessageText(textMessage)?.text, [textMessage]);
+  const textForLanguageDetection = createMemo(() => textMessage() && extractMessageText(textMessage())?.text);
   const detectedLanguage = useTextLanguage(
-    textForLanguageDetection,
-    !(areTranslationsEnabled && shouldDetectChatLanguage) || isTypingDraft,
-    getIsMessageListReady,
+    () => textForLanguageDetection(),
+    () => !(props.areTranslationsEnabled && props.shouldDetectChatLanguage) || isTypingDraft(),
+    () => props.getIsMessageListReady,
   );
-  useDetectChatLanguage(message, detectedLanguage, !shouldDetectChatLanguage, getIsMessageListReady);
+  useDetectChatLanguage(() => props.message, detectedLanguage, () => !props.shouldDetectChatLanguage, () => props.getIsMessageListReady);
 
-  const shouldTranslate = isMessageTranslatable(message, !requestedChatTranslationLanguage);
+  const shouldTranslate = createMemo(() => isMessageTranslatable(props.message, !props.requestedChatTranslationLanguage));
 
-  const isManualMessageTranslation = !requestedChatTranslationLanguage && requestedTranslationLanguage;
-  const parsedManualTranslation = isManualMessageTranslation
-    ? parseTranslationCacheKey(requestedTranslationLanguage)
-    : undefined;
-  const translationLanguageForHook = parsedManualTranslation?.languageCode || requestedChatTranslationLanguage;
-  const translationToneForHook = parsedManualTranslation?.tone || requestedTranslationTone;
+  const isManualMessageTranslation = createMemo(() => !props.requestedChatTranslationLanguage && props.requestedTranslationLanguage);
+  const parsedManualTranslation = createMemo(() => isManualMessageTranslation()
+    ? parseTranslationCacheKey(props.requestedTranslationLanguage)
+    : undefined);
+  const translationLanguageForHook = createMemo(() => parsedManualTranslation()?.languageCode || props.requestedChatTranslationLanguage);
+  const translationToneForHook = createMemo(() => parsedManualTranslation()?.tone || props.requestedTranslationTone);
 
-  const {
-    isPending: isTranslationPending,
-    translatedText,
-    translatedRichMessage,
-  } = useMessageTranslation(
-    chatTranslations,
-    chatId,
-    shouldTranslate ? messageId : undefined,
-    translationLanguageForHook,
-    translationToneForHook,
-  );
-  const isSummaryPending = Boolean(summary?.isPending);
-  const isNewTextPending = isTranslationPending || isSummaryPending;
-  const previousTranslatedText = usePreviousDeprecated(translatedText, Boolean(shouldTranslate));
-  const previousTranslatedRichMessage = usePreviousDeprecated(translatedRichMessage, Boolean(shouldTranslate));
+  const messageTranslationResult = createMemo(() => useMessageTranslation(
+    () => props.chatTranslations,
+    () => chatId(),
+    () => shouldTranslate() ? messageId() : undefined,
+    () => translationLanguageForHook(),
+    () => translationToneForHook(),
+  ));
+  const isTranslationPending = () => messageTranslationResult().isPending;
+  const translatedText = () => messageTranslationResult().translatedText;
+  const translatedRichMessage = () => messageTranslationResult().translatedRichMessage;
+  const isSummaryPending = createMemo(() => Boolean(props.summary?.isPending));
+  const isNewTextPending = createMemo(() => isTranslationPending() || isSummaryPending());
+  const previousTranslatedText = previous(() => translatedText(), { skipUndefined: Boolean(shouldTranslate()) });
+  const previousTranslatedRichMessage = previous(() => translatedRichMessage(), { skipUndefined: Boolean(shouldTranslate()) });
 
-  useEffectWithPrevDeps(
-    ([prevIsShowingSummary]) => {
-      if (summary?.text || (prevIsShowingSummary && !isShowingSummary)) {
+  createEffect(
+    depsOf(() => [isShowingSummary(), props.summary?.text]), (_deps, prev) => {
+      const [prevIsShowingSummary] = prev ?? [];
+      if (props.summary?.text || (prevIsShowingSummary && !isShowingSummary())) {
         handleFocusSelf();
       }
     },
-    [isShowingSummary, summary?.text],
   );
 
-  const currentTranslatedText = shouldTranslate ? translatedText || previousTranslatedText : undefined;
-  const currentTranslatedRichMessage = shouldTranslate
-    ? translatedRichMessage || (isTranslationPending !== false ? previousTranslatedRichMessage : undefined)
-    : undefined;
+  const currentTranslatedText = createMemo(() => shouldTranslate() ? translatedText() || previousTranslatedText() : undefined);
+  const currentTranslatedRichMessage = createMemo(() => shouldTranslate()
+    ? translatedRichMessage() || (isTranslationPending() !== false ? previousTranslatedRichMessage() : undefined)
+    : undefined);
 
-  const phoneCall = action?.type === 'phoneCall' ? action : undefined;
+  const phoneCall = createMemo(() => action()?.type === 'phoneCall' ? action() : undefined);
 
-  const commentsThreadInfo = repliesThreadInfo?.isCommentsInfo ? repliesThreadInfo : undefined;
-  const isLocalWithCommentButton = hasLinkedChat && isChannel && isLocal;
+  const commentsThreadInfo = createMemo(() => props.repliesThreadInfo?.isCommentsInfo ? props.repliesThreadInfo : undefined);
+  const isLocalWithCommentButton = createMemo(() => props.hasLinkedChat && props.isChannel && isLocal());
 
   const isMediaWithCommentButton =
-    (commentsThreadInfo || isLocalWithCommentButton) &&
-    !isInDocumentGroupNotLast &&
-    messageListType === 'thread' &&
-    !noComments;
+    createMemo(() => (commentsThreadInfo() || isLocalWithCommentButton()) &&
+    !isInDocumentGroupNotLast() &&
+    props.messageListType === 'thread' &&
+    !props.noComments);
   const withCommentButton =
-    (commentsThreadInfo || isLocalWithCommentButton) &&
-    !isInDocumentGroupNotLast &&
-    messageListType === 'thread' &&
-    !noComments;
+    createMemo(() => (commentsThreadInfo() || isLocalWithCommentButton()) &&
+    !isInDocumentGroupNotLast() &&
+    props.messageListType === 'thread' &&
+    !props.noComments);
   const withQuickReactionButton =
-    !message.isEphemeral &&
+    createMemo(() => !props.message.isEphemeral &&
     !isTouchScreen &&
-    !phoneCall &&
-    !isInSelectMode &&
-    defaultReaction &&
-    !isInDocumentGroupNotLast &&
-    !isStoryMention &&
-    !hasTtl &&
-    !isAccountFrozen;
+    !phoneCall() &&
+    !props.isInSelectMode &&
+    props.defaultReaction &&
+    !isInDocumentGroupNotLast() &&
+    !isStoryMention() &&
+    !hasTtl() &&
+    !props.isAccountFrozen);
 
   const hasOutsideReactions =
-    !withVoiceTranscription &&
-    hasReactions &&
-    (isCustomShape ||
-      ((photo || video || storyData || location?.mediaType === 'geo') && (!hasText || isInvertedMedia)));
+    createMemo(() => !withVoiceTranscription() &&
+    hasReactions() &&
+    (isCustomShape() ||
+      ((photo() || video() || storyData() || location()?.mediaType === 'geo') && (!hasText() || isInvertedMedia()))));
 
-  const { className: peerColorClass, style: peerColorStyle } = usePeerColor({
-    peer: messageColorPeer,
-    noUserColors,
+  const peerColorResult = createMemo(() => usePeerColor({
+    peer: () => messageColorPeer(),
+    noUserColors: () => noUserColors(),
     shouldReset: true,
-    theme,
-  });
+    theme: () => props.theme,
+  }));
+  const peerColorClass = () => peerColorResult().className;
+  const peerColorStyle = () => peerColorResult().style;
 
-  const hasWideMedia = Boolean(
-    (photo || video || isAlbum || invoice?.extendedMedia || invoice?.photo) &&
-    ((text?.text.length || 0) > MIN_MESSAGE_LENGTH_FOR_WIDE_MEDIA || isMediaWithCommentButton),
-  );
-  const contentClassName = buildClassName(
-    buildContentClassName(message, album, {
-      poll,
-      webPage,
-      hasSubheader,
-      isCustomShape,
-      isLastInGroup,
-      asForwarded,
-      hasThread: hasThread && !noComments,
-      forceSenderName,
+  const hasWideMedia = createMemo(() => Boolean(
+    (photo() || video() || isAlbum() || invoice()?.extendedMedia || invoice()?.photo) &&
+    ((text()?.text.length || 0) > MIN_MESSAGE_LENGTH_FOR_WIDE_MEDIA || isMediaWithCommentButton()),
+  ));
+  const contentClassName = createMemo(() => buildClassName(
+    buildContentClassName(props.message, props.album, {
+      poll: props.poll,
+      webPage: props.webPage,
+      hasSubheader: hasSubheader(),
+      isCustomShape: isCustomShape(),
+      isLastInGroup: props.isLastInGroup,
+      asForwarded: asForwarded(),
+      hasThread: hasThread() && !props.noComments,
+      forceSenderName: props.forceSenderName,
       hasCommentCounter:
-        hasThread && repliesThreadInfo.messagesCount !== undefined && repliesThreadInfo.messagesCount > 0,
-      hasBottomCommentButton: withCommentButton && !isCustomShape,
-      hasActionButton: canForward || canFocus || (withCommentButton && isCustomShape),
-      hasReactions,
-      isGeoLiveActive: location?.mediaType === 'geoLive' && !isGeoLiveExpired(message),
-      withVoiceTranscription,
-      peerColorClass,
-      hasOutsideReactions,
+        hasThread() && props.repliesThreadInfo.messagesCount !== undefined && props.repliesThreadInfo.messagesCount > 0,
+      hasBottomCommentButton: withCommentButton() && !isCustomShape(),
+      hasActionButton: props.canForward || canFocus() || (withCommentButton() && isCustomShape()),
+      hasReactions: hasReactions(),
+      isGeoLiveActive: location()?.mediaType === 'geoLive' && !isGeoLiveExpired(props.message),
+      withVoiceTranscription: withVoiceTranscription(),
+      peerColorClass: peerColorClass(),
+      hasOutsideReactions: hasOutsideReactions(),
     }),
-    hasWideMedia && 'with-wide-media',
-  );
+    hasWideMedia() && 'with-wide-media',
+  ));
 
-  const withAppendix = contentClassName.includes('has-appendix');
-  const emojiSize = getCustomEmojiSize(text?.emojiOnlyCount);
+  const withAppendix = createMemo(() => contentClassName().includes('has-appendix'));
+  const emojiSize = createMemo(() => getCustomEmojiSize(text()?.emojiOnlyCount));
 
-  const paidMessageStarsInMeta = !isChatWithUser
-    ? isAlbum && paidMessageStars
-      ? album.messages.length * paidMessageStars
-      : paidMessageStars
-    : undefined;
+  const paidMessageStarsInMeta = createMemo(() => !props.isChatWithUser
+    ? isAlbum() && props.paidMessageStars
+      ? props.album.messages.length * props.paidMessageStars
+      : props.paidMessageStars
+    : undefined);
 
   let metaPosition!: MetaPosition;
-  if (phoneCall) {
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (phoneCall()) {
     metaPosition = 'none';
-  } else if (isInDocumentGroupNotLast) {
+  } else if (isInDocumentGroupNotLast()) {
     metaPosition = 'none';
-  } else if (hasText && !webPage && !emojiSize && !isInvertedMedia) {
+  } else if (hasText() && !props.webPage && !emojiSize() && !isInvertedMedia()) {
     metaPosition = 'in-text';
-  } else if (isInvertedMedia && !emojiSize && (hasFactCheck || webPage)) {
+  } else if (isInvertedMedia() && !emojiSize() && (hasFactCheck() || props.webPage)) {
     metaPosition = 'in-text';
   } else {
     metaPosition = 'standalone';
   }
 
   let reactionsPosition!: ReactionsPosition;
-  if (hasReactions) {
-    if (hasOutsideReactions) {
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (hasReactions()) {
+    if (hasOutsideReactions()) {
       reactionsPosition = 'outside';
-    } else if (asForwarded) {
+    } else if (asForwarded()) {
       metaPosition = 'standalone';
       reactionsPosition = 'inside';
     } else {
@@ -1031,230 +907,224 @@ const Message = ({
     reactionsPosition = 'none';
   }
 
-  const quickReactionPosition: QuickReactionPosition = isCustomShape ? 'in-meta' : 'in-content';
+  const quickReactionPosition = createMemo<QuickReactionPosition>(() => isCustomShape() ? 'in-meta' : 'in-content');
 
   useEnsureMessage(
-    replyToPeerId || chatId,
-    replyToMsgId,
-    replyMessage,
-    message.id,
-    shouldHideReply || isReplyPrivate || isEphemeralReply,
+    () => replyToPeerId() || chatId(),
+    () => replyToMsgId(),
+    () => props.replyMessage,
+    () => props.message.id,
+    () => props.shouldHideReply || props.isReplyPrivate || isEphemeralReply(),
   );
 
-  useEnsureStory(storyReplyPeerId || chatId, storyReplyId, replyStory);
+  useEnsureStory(() => storyReplyPeerId() || chatId(), () => storyReplyId(), () => props.replyStory);
 
   useFocusMessageListElement({
-    elementRef: ref,
-    isFocused,
-    focusDirection,
-    noFocusHighlight,
-    isResizingContainer,
-    isJustAdded,
-    isQuote: Boolean(focusedQuote),
-    scrollTargetPosition,
+    elementRef: () => ref,
+    isFocused: () => props.isFocused,
+    focusDirection: () => props.focusDirection,
+    noFocusHighlight: () => props.noFocusHighlight,
+    isResizingContainer: () => props.isResizingContainer,
+    isJustAdded: () => props.isJustAdded,
+    isQuote: () => Boolean(props.focusedQuote),
+    scrollTargetPosition: () => props.scrollTargetPosition,
   });
 
-  const viaBusinessBotTitle = viaBusinessBot ? getPeerFullTitle(oldLang, viaBusinessBot) : undefined;
+  const viaBusinessBotTitle = createMemo(() => props.viaBusinessBot ? getPeerFullTitle(oldLang, props.viaBusinessBot) : undefined);
 
-  const canShowPostAuthor = !message.senderId;
+  const canShowPostAuthor = createMemo(() => !props.message.senderId);
   const signature =
-    viaBusinessBotTitle ||
-    (canShowPostAuthor && message.postAuthorTitle) ||
-    ((asForwarded || isChatWithSelf) && forwardInfo?.postAuthorTitle) ||
-    undefined;
+    createMemo(() => viaBusinessBotTitle() ||
+    (canShowPostAuthor() && props.message.postAuthorTitle) ||
+    ((asForwarded() || props.isChatWithSelf) && forwardInfo()?.postAuthorTitle) ||
+    undefined);
 
-  useEffect(() => {
-    if (isTypingDraft || isLocalOnly) {
+  // TODO(codemod): dependency on a container (memoFirstUnreadIdRef) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)
+  createEffect(depsOf(() => [
+    props.hasUnreadReaction,
+    props.hasUnreadPollVote,
+    props.album,
+    chatId(),
+    props.isQuickPreview,
+    isOwn(),
+    isTypingDraft(),
+    isLocalOnly(),
+    markMessageListRead,
+    messageId(),
+    props.memoFirstUnreadIdRef,
+    animateUnreadReaction,
+    markPollVotesRead,
+    props.message.hasUnreadMention,
+    props.message.wasTypingDraft,
+  ] as const), ([hasUnreadReaction2, hasUnreadPollVote2, album2, chatId2, isQuickPreview2, isOwn2, isTypingDraft2, isLocalOnly2, , messageId2, memoFirstUnreadIdRef2]) => {
+    if (isTypingDraft2 || isLocalOnly2) {
       return;
     }
 
-    const bottomMarker = bottomMarkerRef.current;
+    const bottomMarker = bottomMarkerRef;
     if (!bottomMarker || !isElementInViewport(bottomMarker)) return;
 
     if (
-      message.wasTypingDraft &&
-      !isQuickPreview &&
-      !isOwn &&
-      memoFirstUnreadIdRef?.current &&
-      messageId >= memoFirstUnreadIdRef.current
+      props.message.wasTypingDraft &&
+      !isQuickPreview2 &&
+      !isOwn2 &&
+      memoFirstUnreadIdRef2?.current &&
+      messageId2 >= memoFirstUnreadIdRef2.current
     ) {
-      markMessageListRead({ maxId: messageId });
+      markMessageListRead({ maxId: messageId2 });
     }
 
-    if (hasUnreadReaction) {
-      animateUnreadReaction({ chatId, messageIds: [messageId] });
+    if (hasUnreadReaction2) {
+      animateUnreadReaction({ chatId: chatId2, messageIds: [messageId2] });
     }
 
-    if (hasUnreadPollVote) {
-      markPollVotesRead({ chatId, messageIds: [messageId] });
+    if (hasUnreadPollVote2) {
+      markPollVotesRead({ chatId: chatId2, messageIds: [messageId2] });
     }
 
     let unreadMentionIds: number[] = [];
-    if (message.hasUnreadMention) {
-      unreadMentionIds = [messageId];
+    if (props.message.hasUnreadMention) {
+      unreadMentionIds = [messageId2];
     }
 
-    if (album) {
-      unreadMentionIds = album.messages.filter((msg) => msg.hasUnreadMention).map((msg) => msg.id);
+    if (album2) {
+      unreadMentionIds = album2.messages.filter((msg) => msg.hasUnreadMention).map((msg) => msg.id);
     }
 
     if (unreadMentionIds.length) {
-      markMentionsRead({ chatId, messageIds: unreadMentionIds });
+      markMentionsRead({ chatId: chatId2, messageIds: unreadMentionIds });
     }
-  }, [
-    hasUnreadReaction,
-    hasUnreadPollVote,
-    album,
-    chatId,
-    isQuickPreview,
-    isOwn,
-    isTypingDraft,
-    isLocalOnly,
-    markMessageListRead,
-    messageId,
-    memoFirstUnreadIdRef,
-    animateUnreadReaction,
-    markPollVotesRead,
-    message.hasUnreadMention,
-    message.wasTypingDraft,
-  ]);
+  });
 
-  const extraPadding = asForwarded && !isCustomShape ? 28 : 0;
+  const extraPadding = createMemo(() => asForwarded() && !isCustomShape() ? 28 : 0);
 
-  const sizeCalculations = useMemo(() => {
+  const sizeCalculations = createMemo(() => {
     let style = '';
 
-    if (sticker && !hasSubheader) {
-      const { width } = getStickerDimensions(sticker, isMobile);
-      style = `width: ${width + extraPadding}px`;
+    if (sticker() && !hasSubheader()) {
+      const { width } = getStickerDimensions(sticker(), isMobile);
+      style = `width: ${width + extraPadding()}px`;
     }
 
     return style;
-  }, [extraPadding, hasSubheader, isMobile, sticker]);
+  });
 
-  const contentStyle = buildStyle(peerColorStyle, sizeCalculations);
+  const contentStyle = createMemo(() => buildStyle(peerColorStyle(), sizeCalculations()));
 
-  const handleTypingAnimationEnd = useLastCallback(() => {
-    if (!isTypingDraft || !previousLocalId) {
+  const handleTypingAnimationEnd = () => {
+    if (!isTypingDraft() || !previousLocalId()) {
       return;
     }
 
-    markTypingDraftDone({ chatId, messageId });
-  });
+    markTypingDraftDone({ chatId: chatId(), messageId: messageId() });
+  };
 
   function renderMessageText(isForAnimation?: boolean) {
-    if (!textMessage) return undefined;
+    if (!textMessage()) return undefined;
 
-    if (textMessage.content.richMessage) {
+    if (textMessage().content.richMessage) {
       return (
         <MessageRichText
-          message={textMessage}
-          forcedRichMessage={requestedTranslationLanguage ? currentTranslatedRichMessage : undefined}
-          isOwn={isOwn}
-          noAvatars={noAvatars}
-          canAutoLoadMedia={canAutoLoadMedia}
-          isProtected={isProtected}
-          noPlaylist={isScheduled}
-          theme={theme}
-          observeIntersectionForLoading={observeIntersectionForLoading}
-          observeIntersectionForPlaying={observeIntersectionForPlaying}
-          threadId={threadId}
+          message={textMessage()}
+          forcedRichMessage={props.requestedTranslationLanguage ? currentTranslatedRichMessage() : undefined}
+          isOwn={isOwn()}
+          noAvatars={props.noAvatars}
+          canAutoLoadMedia={props.canAutoLoadMedia}
+          isProtected={props.isProtected}
+          noPlaylist={isScheduled()}
+          theme={props.theme}
+          observeIntersectionForLoading={props.observeIntersectionForLoading}
+          observeIntersectionForPlaying={props.observeIntersectionForPlaying}
+          threadId={props.threadId}
         />
       );
     }
 
     const forcedText =
-      (isShowingSummary && summary?.text) || (requestedTranslationLanguage ? currentTranslatedText : undefined);
+      (isShowingSummary() && props.summary?.text) || (props.requestedTranslationLanguage ? currentTranslatedText() : undefined);
     return (
       <MessageText
-        messageOrStory={textMessage}
+        messageOrStory={textMessage()}
         forcedText={forcedText}
         isForAnimation={isForAnimation}
-        focusedQuote={focusedQuote}
-        focusedQuoteOffset={focusedQuoteOffset}
-        emojiSize={emojiSize}
-        highlight={highlight}
-        isProtected={isProtected}
-        observeIntersectionForLoading={observeIntersectionForLoading}
-        observeIntersectionForPlaying={observeIntersectionForPlaying}
-        withTranslucentThumbs={isCustomShape}
-        isInSelectMode={isInSelectMode}
-        canBeEmpty={hasFactCheck || isTypingDraft}
-        maxTimestamp={maxTimestamp}
-        threadId={threadId}
-        shouldAnimateTyping={isTypingDraft}
-        noInitialTypingAnimation={message.shouldSkipTypingAnimation}
-        canAnimateTextStreaming={canAnimateTextStreaming}
+        focusedQuote={props.focusedQuote}
+        focusedQuoteOffset={props.focusedQuoteOffset}
+        emojiSize={emojiSize()}
+        highlight={props.highlight}
+        isProtected={props.isProtected}
+        observeIntersectionForLoading={props.observeIntersectionForLoading}
+        observeIntersectionForPlaying={props.observeIntersectionForPlaying}
+        withTranslucentThumbs={isCustomShape()}
+        isInSelectMode={props.isInSelectMode}
+        canBeEmpty={hasFactCheck() || isTypingDraft()}
+        maxTimestamp={props.maxTimestamp}
+        threadId={props.threadId}
+        shouldAnimateTyping={isTypingDraft()}
+        noInitialTypingAnimation={props.message.shouldSkipTypingAnimation}
+        canAnimateTextStreaming={props.canAnimateTextStreaming}
         onTypingAnimationEnd={handleTypingAnimationEnd}
       />
     );
   }
 
   function renderMessageTextAnimation() {
-    if (textMessage?.content.richMessage) {
+    if (textMessage()?.content.richMessage) {
       return undefined;
     }
 
     return (
-      <div className="translation-animation">
-        <div className="text-loading">{renderMessageText(true)}</div>
+      <div class="translation-animation">
+        <div class="text-loading">{renderMessageText(true)}</div>
       </div>
     );
   }
 
-  const renderQuickReactionButton = useCallback(() => {
-    if (!defaultReaction) return undefined;
+  const renderQuickReactionButton = () => {
+    if (!props.defaultReaction) return undefined;
 
     return (
       <div
-        className={buildClassName(
+        class={buildClassName(
           'quick-reaction',
           'no-selection',
-          isQuickReactionVisible && !hasActiveReactions && 'visible',
+          isQuickReactionVisible() && !props.hasActiveReactions && 'visible',
         )}
-        onClick={handleSendQuickReaction}
+        onClick={handleSendQuickReaction()}
         ref={quickReactionRef}
       >
         <ReactionStaticEmoji
-          reaction={defaultReaction}
+          reaction={props.defaultReaction}
           size={QUICK_REACTION_SIZE}
-          availableReactions={availableReactions}
-          observeIntersection={observeIntersectionForPlaying}
+          availableReactions={props.availableReactions}
+          observeIntersection={props.observeIntersectionForPlaying}
         />
       </div>
     );
-  }, [
-    hasActiveReactions,
-    availableReactions,
-    defaultReaction,
-    handleSendQuickReaction,
-    isQuickReactionVisible,
-    observeIntersectionForPlaying,
-  ]);
+  };
 
   function renderReactionsAndMeta() {
     const meta = (
       <MessageMeta
-        message={message}
-        isPinned={isPinned}
-        withFullDate={isChatWithSelf && !isOwn}
-        isMessagePrimaryEditedDateEnabled={isMessagePrimaryEditedDateEnabled}
-        noReplies={noReplies}
-        repliesThreadInfo={repliesThreadInfo}
-        outgoingStatus={outgoingStatus}
-        signature={signature}
+        message={props.message}
+        isPinned={props.isPinned}
+        withFullDate={props.isChatWithSelf && !isOwn()}
+        isMessagePrimaryEditedDateEnabled={props.isMessagePrimaryEditedDateEnabled}
+        noReplies={props.noReplies}
+        repliesThreadInfo={props.repliesThreadInfo}
+        outgoingStatus={props.outgoingStatus}
+        signature={signature()}
         withReactionOffset={reactionsPosition === 'inside'}
         renderQuickReactionButton={
-          withQuickReactionButton && quickReactionPosition === 'in-meta' ? renderQuickReactionButton : undefined
+          withQuickReactionButton() && quickReactionPosition() === 'in-meta' ? renderQuickReactionButton : undefined
         }
-        availableReactions={availableReactions}
-        isTranslated={Boolean(requestedTranslationLanguage && (currentTranslatedText || currentTranslatedRichMessage))}
-        effectEmoji={effect?.emoticon}
-        onClick={handleMetaClick}
+        availableReactions={props.availableReactions}
+        isTranslated={Boolean(props.requestedTranslationLanguage && (currentTranslatedText() || currentTranslatedRichMessage()))}
+        effectEmoji={props.effect?.emoticon}
+        onClick={handleMetaClick()}
         onEffectClick={handleEffectClick}
-        onTranslationClick={handleTranslationClick}
-        onOpenThread={handleOpenThread}
-        paidMessageStars={paidMessageStarsInMeta}
+        onTranslationClick={handleTranslationClick()}
+        onOpenThread={handleOpenThread()}
+        paidMessageStars={paidMessageStarsInMeta()}
       />
     );
 
@@ -1264,14 +1134,14 @@ const Message = ({
 
     return (
       <Reactions
-        message={reactionMessage!}
-        threadId={threadId}
+        message={props.reactionMessage!}
+        threadId={props.threadId}
         metaChildren={meta}
-        observeIntersection={observeIntersectionForPlaying}
-        noRecentReactors={isChannel}
-        tags={tags}
-        isCurrentUserPremium={isPremium}
-        isAccountFrozen={isAccountFrozen}
+        observeIntersection={props.observeIntersectionForPlaying}
+        noRecentReactors={props.isChannel}
+        tags={props.tags}
+        isCurrentUserPremium={props.isPremium}
+        isAccountFrozen={props.isAccountFrozen}
       />
     );
   }
@@ -1279,253 +1149,254 @@ const Message = ({
   function renderContent() {
     const className = buildClassName(
       'content-inner',
-      asForwarded && 'forwarded-message',
-      hasForwardedCustomShape && 'forwarded-custom-shape',
-      hasSubheader && 'with-subheader',
+      asForwarded() && 'forwarded-message',
+      hasForwardedCustomShape() && 'forwarded-custom-shape',
+      hasSubheader() && 'with-subheader',
     );
     const hasCustomAppendix =
-      isLastInGroup &&
-      (!hasText || (isInvertedMedia && !hasFactCheck && reactionsPosition !== 'inside')) &&
-      !withCommentButton;
+      props.isLastInGroup &&
+      (!hasText() || (isInvertedMedia() && !hasFactCheck() && reactionsPosition !== 'inside')) &&
+      !withCommentButton();
     const textContentClass = buildClassName(
       'text-content',
       'clearfix',
       metaPosition === 'in-text' && 'with-meta',
-      outgoingStatus && 'with-outgoing-icon',
+      props.outgoingStatus && 'with-outgoing-icon',
     );
-    const shouldReadMedia = !hasTtl || !isOwn || isChatWithSelf;
+    const shouldReadMedia = !hasTtl() || !isOwn() || props.isChatWithSelf;
     let ephemeralBotName: string | undefined;
-    if (isLocalOnly && message.isOutgoing) {
-      if (!ephemeralBot) {
+    if (isLocalOnly() && props.message.isOutgoing) {
+      if (!props.ephemeralBot) {
         ephemeralBotName = lang('Bot');
-      } else if (ephemeralBot.hasUsername) {
-        ephemeralBotName = `@${getMainUsername(ephemeralBot)}`;
+      } else if (props.ephemeralBot.hasUsername) {
+        ephemeralBotName = `@${getMainUsername(props.ephemeralBot)}`;
       } else {
-        ephemeralBotName = getPeerFullTitle(oldLang, ephemeralBot);
+        ephemeralBotName = getPeerFullTitle(oldLang, props.ephemeralBot);
       }
     }
 
     return (
-      <div className={className} onDoubleClick={handleContentDoubleClick} dir="auto">
-        {!asForwarded && shouldRenderSenderName() && renderSenderName()}
-        {hasSubheader && (
-          <div className="message-subheader">
-            {message.isEphemeral && (
+      <div class={className} onDoubleClick={handleContentDoubleClick()} dir="auto">
+        {!asForwarded() && shouldRenderSenderName() && renderSenderName()}
+        {hasSubheader() && (
+          <div class="message-subheader">
+            {props.message.isEphemeral && (
               <BadgeButton className="ephemeral-header">
                 <Icon name="eye-outline" />
                 <span dir="auto">
-                  {message.isOutgoing && isLocalOnly
+                  {props.message.isOutgoing && isLocalOnly()
                     ? lang('EphemeralOnlyVisibleToBot', { bot: ephemeralBotName! })
                     : lang('EphemeralOnlyVisible')}
                 </span>
               </BadgeButton>
             )}
-            {hasForwardedCustomShape && (
-              <div className="forward-custom-shape-subheader">
-                <div className="message-title">{renderForwardTitle()}</div>
+            {hasForwardedCustomShape() && (
+              <div class="forward-custom-shape-subheader">
+                <div class="message-title">{renderForwardTitle()}</div>
                 {renderSenderName(true, true)}
               </div>
             )}
-            {hasMessageReply && (
+            {hasMessageReply() && (
               <EmbeddedMessage
-                message={replyMessage}
-                replyInfo={messageReplyInfo}
-                noUserColors={noUserColors}
-                isProtected={isProtected}
-                sender={replyMessageSender}
-                senderChat={replyMessageChat}
-                forwardSender={replyMessageForwardSender}
-                chatTranslations={chatTranslations}
-                isMediaNsfw={isReplyMediaNsfw}
-                requestedChatTranslationLanguage={requestedChatTranslationLanguage}
-                requestedChatTranslationTone={requestedTranslationTone}
-                observeIntersectionForLoading={observeIntersectionForLoading}
-                observeIntersectionForPlaying={observeIntersectionForPlaying}
-                onClick={message.isEphemeral ? undefined : handleReplyClick}
+                message={props.replyMessage}
+                replyInfo={messageReplyInfo()}
+                noUserColors={noUserColors()}
+                isProtected={props.isProtected}
+                sender={props.replyMessageSender}
+                senderChat={props.replyMessageChat}
+                forwardSender={props.replyMessageForwardSender}
+                chatTranslations={props.chatTranslations}
+                isMediaNsfw={props.isReplyMediaNsfw}
+                requestedChatTranslationLanguage={props.requestedChatTranslationLanguage}
+                requestedChatTranslationTone={props.requestedTranslationTone}
+                observeIntersectionForLoading={props.observeIntersectionForLoading}
+                observeIntersectionForPlaying={props.observeIntersectionForPlaying}
+                onClick={props.message.isEphemeral ? undefined : handleReplyClick()}
               />
             )}
-            {hasStoryReply && (
+            {hasStoryReply() && (
               <EmbeddedStory
-                story={replyStory}
-                sender={storySender}
-                noUserColors={noUserColors}
-                isProtected={isProtected}
-                observeIntersectionForLoading={observeIntersectionForLoading}
-                observeIntersectionForPlaying={observeIntersectionForPlaying}
-                onClick={handleStoryClick}
+                story={props.replyStory}
+                sender={props.storySender}
+                noUserColors={noUserColors()}
+                isProtected={props.isProtected}
+                observeIntersectionForLoading={props.observeIntersectionForLoading}
+                observeIntersectionForPlaying={props.observeIntersectionForPlaying}
+                onClick={handleStoryClick()}
               />
             )}
-            {hasSummary && isShowingSummary && !summary?.isPending && (
+            {hasSummary() && isShowingSummary() && !props.summary?.isPending && (
               <PeerColorWrapper className="message-summary" onClick={hideSummary}>
                 <Sparkles preset="button" className="message-summary-sparkles" />
-                <span className="message-summary-title">{lang('MessageSummaryTitle')}</span>
-                <span className="message-summary-description">{lang('MessageSummaryDescription')}</span>
+                <span class="message-summary-title">{lang('MessageSummaryTitle')}</span>
+                <span class="message-summary-description">{lang('MessageSummaryDescription')}</span>
               </PeerColorWrapper>
             )}
           </div>
         )}
-        {sticker && observeIntersectionForLoading && observeIntersectionForPlaying && (
+        {sticker() && props.observeIntersectionForLoading && props.observeIntersectionForPlaying && (
           <Sticker
-            message={message}
-            observeIntersection={observeIntersectionForLoading}
-            observeIntersectionForPlaying={observeIntersectionForPlaying}
-            shouldLoop={shouldLoopStickers}
-            shouldPlayEffect={shouldPlayEffect}
-            withEffect={withAnimatedEffects}
-            isMediaNsfw={isMediaNsfw}
+            message={props.message}
+            observeIntersection={props.observeIntersectionForLoading}
+            observeIntersectionForPlaying={props.observeIntersectionForPlaying}
+            shouldLoop={props.shouldLoopStickers}
+            shouldPlayEffect={shouldPlayEffect()}
+            withEffect={props.withAnimatedEffects}
+            isMediaNsfw={props.isMediaNsfw}
             onStopEffect={hideEffect}
           />
         )}
-        {hasAnimatedEmoji && animatedCustomEmoji && (
+        {hasAnimatedEmoji() && props.animatedCustomEmoji && (
           <AnimatedCustomEmoji
-            customEmojiId={animatedCustomEmoji}
-            withEffects={withAnimatedEffects && isChatWithUser && !effect}
-            isOwn={isOwn}
-            observeIntersection={observeIntersectionForLoading}
-            forceLoadPreview={isLocal}
-            messageId={messageId}
-            chatId={chatId}
-            activeEmojiInteractions={activeEmojiInteractions}
+            customEmojiId={props.animatedCustomEmoji}
+            withEffects={props.withAnimatedEffects && props.isChatWithUser && !props.effect}
+            isOwn={isOwn()}
+            observeIntersection={props.observeIntersectionForLoading}
+            forceLoadPreview={isLocal()}
+            messageId={messageId()}
+            chatId={chatId()}
+            activeEmojiInteractions={props.activeEmojiInteractions}
           />
         )}
-        {hasAnimatedEmoji && animatedEmoji && (
+        {hasAnimatedEmoji() && props.animatedEmoji && (
           <AnimatedEmoji
-            emoji={animatedEmoji}
-            withEffects={withAnimatedEffects && isChatWithUser && !effect}
-            isOwn={isOwn}
-            observeIntersection={observeIntersectionForLoading}
-            forceLoadPreview={isLocal}
-            messageId={messageId}
-            chatId={chatId}
-            activeEmojiInteractions={activeEmojiInteractions}
+            emoji={props.animatedEmoji}
+            withEffects={props.withAnimatedEffects && props.isChatWithUser && !props.effect}
+            isOwn={isOwn()}
+            observeIntersection={props.observeIntersectionForLoading}
+            forceLoadPreview={isLocal()}
+            messageId={messageId()}
+            chatId={chatId()}
+            activeEmojiInteractions={props.activeEmojiInteractions}
           />
         )}
-        {withAnimatedEffects && effect && !isLocal && (
+        {props.withAnimatedEffects && props.effect && !isLocal() && (
           <MessageEffect
-            shouldPlay={shouldPlayEffect}
-            messageId={message.id}
-            isMirrored={!message.isOutgoing}
-            effect={effect}
-            observeIntersectionForLoading={observeIntersectionForLoading}
-            observeIntersectionForPlaying={observeIntersectionForPlaying}
+            shouldPlay={shouldPlayEffect()}
+            messageId={props.message.id}
+            isMirrored={!props.message.isOutgoing}
+            effect={props.effect}
+            observeIntersectionForLoading={props.observeIntersectionForLoading}
+            observeIntersectionForPlaying={props.observeIntersectionForPlaying}
             onStop={hideEffect}
           />
         )}
-        {phoneCall && <MessagePhoneCall message={message} phoneCall={phoneCall} chatId={chatId} />}
-        {!isAlbum && isRoundVideo && !withVoiceTranscription && (
+        {phoneCall() && <MessagePhoneCall message={props.message} phoneCall={phoneCall()} chatId={chatId()} />}
+        {!isAlbum() && isRoundVideo() && !withVoiceTranscription() && (
           <RoundVideo
-            message={message}
-            observeIntersection={observeIntersectionForLoading}
-            canAutoLoad={canAutoLoadMedia}
-            isDownloading={isDownloading}
-            onReadMedia={shouldReadMedia ? handleReadMedia : undefined}
+            message={props.message}
+            observeIntersection={props.observeIntersectionForLoading}
+            canAutoLoad={props.canAutoLoadMedia}
+            isDownloading={props.isDownloading}
+            onReadMedia={shouldReadMedia ? handleReadMedia() : undefined}
             onHideTranscription={setIsTranscriptionHidden}
-            isTranscriptionError={isTranscriptionError}
-            isTranscribed={Boolean(transcribedText)}
-            canTranscribe={canTranscribeVoice && !hasTtl}
-            isTranscriptionHidden={isTranscriptionHidden}
-            isTranscribing={isTranscribing}
+            isTranscriptionError={isTranscriptionError()}
+            isTranscribed={Boolean(props.transcribedText)}
+            canTranscribe={props.canTranscribeVoice && !hasTtl()}
+            isTranscriptionHidden={isTranscriptionHidden()}
+            isTranscribing={props.isTranscribing}
           />
         )}
-        {(audio || voice || withVoiceTranscription) && (
+        {(audio() || voice() || withVoiceTranscription()) && (
           <Audio
-            theme={theme}
-            message={message}
+            theme={props.theme}
+            message={props.message}
             variant="inline"
-            threadId={threadId}
-            noPlaylist={isScheduled}
-            uploadProgress={uploadProgress}
-            isSelectable={isInDocumentGroup}
-            isSelected={isSelected}
-            noAvatars={noAvatars}
-            onPlay={handleAudioPlay}
-            onReadMedia={voice && shouldReadMedia ? handleReadMedia : undefined}
-            onCancelUpload={handleCancelUpload}
-            isDownloading={isDownloading}
-            isTranscribing={isTranscribing}
-            isTranscriptionHidden={isTranscriptionHidden}
-            isTranscribed={Boolean(transcribedText)}
-            isTranscriptionError={isTranscriptionError}
-            canDownload={!isProtected}
+            threadId={props.threadId}
+            noPlaylist={isScheduled()}
+            uploadProgress={props.uploadProgress}
+            isSelectable={props.isInDocumentGroup}
+            isSelected={props.isSelected}
+            noAvatars={props.noAvatars}
+            onPlay={handleAudioPlay()}
+            onReadMedia={voice() && shouldReadMedia ? handleReadMedia() : undefined}
+            onCancelUpload={handleCancelUpload()}
+            isDownloading={props.isDownloading}
+            isTranscribing={props.isTranscribing}
+            isTranscriptionHidden={isTranscriptionHidden()}
+            isTranscribed={Boolean(props.transcribedText)}
+            isTranscriptionError={isTranscriptionError()}
+            canDownload={!props.isProtected}
             onHideTranscription={setIsTranscriptionHidden}
-            canTranscribe={canTranscribeVoice && !hasTtl}
+            canTranscribe={props.canTranscribeVoice && !hasTtl()}
           />
         )}
-        {document && (
+        {document() && (
           <Document
-            document={document}
-            message={message}
-            observeIntersection={observeIntersectionForLoading}
-            canAutoLoad={canAutoLoadMedia}
-            autoLoadFileMaxSizeMb={autoLoadFileMaxSizeMb}
-            uploadProgress={uploadProgress}
-            isSelectable={isInDocumentGroup}
-            isSelected={isSelected}
-            onMediaClick={handleDocumentClick}
-            onCancelUpload={handleCancelUpload}
-            isDownloading={isDownloading}
-            shouldWarnAboutFiles={shouldWarnAboutFiles}
+            document={document()}
+            message={props.message}
+            observeIntersection={props.observeIntersectionForLoading}
+            canAutoLoad={props.canAutoLoadMedia}
+            autoLoadFileMaxSizeMb={props.autoLoadFileMaxSizeMb}
+            uploadProgress={props.uploadProgress}
+            isSelectable={props.isInDocumentGroup}
+            isSelected={props.isSelected}
+            onMediaClick={handleDocumentClick()}
+            onCancelUpload={handleCancelUpload()}
+            isDownloading={props.isDownloading}
+            shouldWarnAboutFiles={props.shouldWarnAboutFiles}
           />
         )}
-        {storyData && !isStoryMention && <Story message={message} isProtected={isProtected} />}
-        {isStoryMention && <StoryMention message={message} />}
-        {contact && <Contact contact={contact} noUserColors={isOwn} />}
-        {poll && (
+        {storyData() && !isStoryMention() && <Story message={props.message} isProtected={props.isProtected} />}
+        {isStoryMention() && <StoryMention message={props.message} />}
+        {contact() && <Contact contact={contact()} noUserColors={isOwn()} />}
+        {props.poll && (
+          // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show>
           <Poll
-            key={poll.summary.id}
-            chatId={chatId}
-            messageId={messageId}
-            poll={poll}
-            messageText={text}
-            theme={theme}
-            isInScheduled={isScheduled}
-            observeIntersectionForLoading={observeIntersectionForLoading}
-            observeIntersectionForPlaying={observeIntersectionForPlaying}
+            key={props.poll.summary.id}
+            chatId={chatId()}
+            messageId={messageId()}
+            poll={props.poll}
+            messageText={text()}
+            theme={props.theme}
+            isInScheduled={isScheduled()}
+            observeIntersectionForLoading={props.observeIntersectionForLoading}
+            observeIntersectionForPlaying={props.observeIntersectionForPlaying}
           />
         )}
-        {todo && <TodoList message={message} todoList={todo} />}
-        {(giveaway || giveawayResults) && <Giveaway message={message} />}
-        {game && <Game message={message} threadId={threadId} canAutoLoadMedia={canAutoLoadMedia} />}
-        {dice && (
+        {todo() && <TodoList message={props.message} todoList={todo()} />}
+        {(giveaway() || giveawayResults()) && <Giveaway message={props.message} />}
+        {game() && <Game message={props.message} threadId={props.threadId} canAutoLoadMedia={props.canAutoLoadMedia} />}
+        {dice() && (
           <DiceWrapper
-            canSendDice={canSendStickers}
-            isLocal={isLocal}
-            dice={dice}
-            isOutgoing={isOwn}
-            canPlayWinEffect={shouldPlayDiceEffect}
+            canSendDice={props.canSendStickers}
+            isLocal={isLocal()}
+            dice={dice()}
+            isOutgoing={isOwn()}
+            canPlayWinEffect={shouldPlayDiceEffect()}
             onEffectPlayed={hideDiceEffect}
           />
         )}
-        {invoice?.extendedMedia && <InvoiceMediaPreview message={message} isConnected={isConnected} />}
+        {invoice()?.extendedMedia && <InvoiceMediaPreview message={props.message} isConnected={props.isConnected} />}
 
-        {withVoiceTranscription && (
+        {withVoiceTranscription() && (
           <p
-            className={buildClassName(
+            class={buildClassName(
               'transcription',
-              !isTranscriptionHidden && isTranscriptionError && 'transcription-error',
+              !isTranscriptionHidden() && isTranscriptionError() && 'transcription-error',
             )}
             dir="auto"
           >
-            {isTranscriptionError ? (
+            {isTranscriptionError() ? (
               oldLang('NoWordsRecognized')
-            ) : isTranscribing && transcribedText ? (
-              <DotAnimation content={transcribedText} />
+            ) : props.isTranscribing && props.transcribedText ? (
+              <DotAnimation content={props.transcribedText} />
             ) : (
-              transcribedText
+              props.transcribedText
             )}
           </p>
         )}
 
-        {isInvertedMedia && renderInvertedMediaContent(hasCustomAppendix)}
+        {isInvertedMedia() && renderInvertedMediaContent(hasCustomAppendix)}
 
-        {!isInvertedMedia && (
+        {!isInvertedMedia() && (
           <>
             {renderInvertibleMediaContent(hasCustomAppendix)}
-            {hasText && !hasAnimatedEmoji && (
-              <div className={textContentClass} dir="auto">
+            {hasText() && !hasAnimatedEmoji() && (
+              <div class={textContentClass} dir="auto">
                 {renderMessageText()}
-                {isNewTextPending && renderMessageTextAnimation()}
-                {hasFactCheck && <FactCheck factCheck={factCheck} isToggleDisabled={isInSelectMode} />}
+                {isNewTextPending() && renderMessageTextAnimation()}
+                {hasFactCheck() && <FactCheck factCheck={factCheck()} isToggleDisabled={props.isInSelectMode} />}
                 {metaPosition === 'in-text' && renderReactionsAndMeta()}
               </div>
             )}
@@ -1533,22 +1404,22 @@ const Message = ({
           </>
         )}
 
-        {invoice && !invoice.extendedMedia && (
+        {invoice() && !invoice().extendedMedia && (
           <Invoice
-            message={message}
-            shouldAffectAppendix={hasCustomAppendix && !hasReactions}
-            isInSelectMode={isInSelectMode}
-            isSelected={isSelected}
-            theme={theme}
+            message={props.message}
+            shouldAffectAppendix={hasCustomAppendix && !hasReactions()}
+            isInSelectMode={props.isInSelectMode}
+            isSelected={props.isSelected}
+            theme={props.theme}
           />
         )}
-        {location && (
+        {location() && (
           <Location
-            message={message}
-            isInSelectMode={isInSelectMode}
-            isSelected={isSelected}
-            theme={theme}
-            peer={sender}
+            message={props.message}
+            isInSelectMode={props.isInSelectMode}
+            isSelected={props.isSelected}
+            theme={props.theme}
+            peer={props.sender}
           />
         )}
       </div>
@@ -1561,20 +1432,20 @@ const Message = ({
       'text-content',
       'clearfix',
       metaPosition === 'in-text' && 'with-meta',
-      outgoingStatus && 'with-outgoing-icon',
+      props.outgoingStatus && 'with-outgoing-icon',
     );
 
-    const hasMediaAfterText = isAlbum || (!isAlbum && photo) || (!isAlbum && video && !isRoundVideo);
-    const hasContentAfterText = hasMediaAfterText || (!hasAnimatedEmoji && hasFactCheck);
+    const hasMediaAfterText = isAlbum() || (!isAlbum() && photo()) || (!isAlbum() && video() && !isRoundVideo());
+    const hasContentAfterText = hasMediaAfterText || (!hasAnimatedEmoji() && hasFactCheck());
     const isMetaInText = metaPosition === 'in-text';
 
     return (
       <>
         {renderWebPage()}
-        {hasText && !hasAnimatedEmoji && (
-          <div className={textContentClass} dir="auto">
+        {hasText() && !hasAnimatedEmoji() && (
+          <div class={textContentClass} dir="auto">
             {renderMessageText()}
-            {isNewTextPending && renderMessageTextAnimation()}
+            {isNewTextPending() && renderMessageTextAnimation()}
             {!hasContentAfterText && isMetaInText && renderReactionsAndMeta()}
           </div>
         )}
@@ -1582,9 +1453,9 @@ const Message = ({
         {hasContentAfterText && (
           <>
             {renderInvertibleMediaContent(hasCustomAppendix)}
-            {!hasAnimatedEmoji && (
-              <div className={footerClass} dir="auto">
-                {hasFactCheck && <FactCheck factCheck={factCheck} isToggleDisabled={isInSelectMode} />}
+            {!hasAnimatedEmoji() && (
+              <div class={footerClass} dir="auto">
+                {hasFactCheck() && <FactCheck factCheck={factCheck()} isToggleDisabled={props.isInSelectMode} />}
                 {isMetaInText && renderReactionsAndMeta()}
               </div>
             )}
@@ -1595,31 +1466,31 @@ const Message = ({
   }
 
   function renderWebPage() {
-    const messageWebPage = getMessageWebPage(message);
-    if (!messageWebPage || !webPage) return undefined;
+    const messageWebPage = getMessageWebPage(props.message);
+    if (!messageWebPage || !props.webPage) return undefined;
     return (
       <WebPage
         messageWebPage={messageWebPage}
-        webPage={webPage}
-        message={message}
-        observeIntersectionForLoading={observeIntersectionForLoading}
-        observeIntersectionForPlaying={observeIntersectionForPlaying}
-        noAvatars={noAvatars}
-        canAutoLoad={canAutoLoadMedia}
-        canAutoPlay={canAutoPlayMedia}
-        isDownloading={isDownloading}
-        isProtected={isProtected}
-        theme={theme}
-        story={webPageStory}
-        isConnected={isConnected}
-        lastPlaybackTimestamp={lastPlaybackTimestamp}
-        backgroundEmojiId={messageColorPeer?.color?.backgroundEmojiId}
-        shouldWarnAboutFiles={shouldWarnAboutFiles}
-        autoLoadFileMaxSizeMb={autoLoadFileMaxSizeMb}
-        onAudioPlay={handleAudioPlay}
-        onMediaClick={handleMediaClick}
-        onDocumentClick={handleDocumentClick}
-        onCancelMediaTransfer={handleCancelUpload}
+        webPage={props.webPage}
+        message={props.message}
+        observeIntersectionForLoading={props.observeIntersectionForLoading}
+        observeIntersectionForPlaying={props.observeIntersectionForPlaying}
+        noAvatars={props.noAvatars}
+        canAutoLoad={props.canAutoLoadMedia}
+        canAutoPlay={props.canAutoPlayMedia}
+        isDownloading={props.isDownloading}
+        isProtected={props.isProtected}
+        theme={props.theme}
+        story={props.webPageStory}
+        isConnected={props.isConnected}
+        lastPlaybackTimestamp={props.lastPlaybackTimestamp}
+        backgroundEmojiId={messageColorPeer()?.color?.backgroundEmojiId}
+        shouldWarnAboutFiles={props.shouldWarnAboutFiles}
+        autoLoadFileMaxSizeMb={props.autoLoadFileMaxSizeMb}
+        onAudioPlay={handleAudioPlay()}
+        onMediaClick={handleMediaClick()}
+        onDocumentClick={handleDocumentClick()}
+        onCancelMediaTransfer={handleCancelUpload()}
       />
     );
   }
@@ -1627,54 +1498,54 @@ const Message = ({
   function renderInvertibleMediaContent(hasCustomAppendix: boolean) {
     const content = (
       <>
-        {isAlbum && observeIntersectionForLoading && (
+        {isAlbum() && props.observeIntersectionForLoading && (
           <Album
-            album={album}
-            observeIntersection={observeIntersectionForLoading}
-            isOwn={isOwn}
-            isProtected={isProtected}
+            album={props.album}
+            observeIntersection={props.observeIntersectionForLoading}
+            isOwn={isOwn()}
+            isProtected={props.isProtected}
             hasCustomAppendix={hasCustomAppendix}
-            onMediaClick={handleAlbumMediaClick}
+            onMediaClick={handleAlbumMediaClick()}
           />
         )}
-        {!isAlbum && photo && (
+        {!isAlbum() && photo() && (
           <Photo
-            photo={photo}
-            isOwn={isOwn}
-            observeIntersection={observeIntersectionForLoading}
-            canAutoLoad={canAutoLoadMedia}
-            uploadProgress={uploadProgress}
+            photo={photo()}
+            isOwn={isOwn()}
+            observeIntersection={props.observeIntersectionForLoading}
+            canAutoLoad={props.canAutoLoadMedia}
+            uploadProgress={props.uploadProgress}
             shouldAffectAppendix={hasCustomAppendix}
-            isDownloading={isDownloading}
-            isProtected={isProtected}
-            theme={theme}
-            isMediaNsfw={isMediaNsfw}
-            onClick={handlePhotoMediaClick}
-            onCancelUpload={handleCancelUpload}
+            isDownloading={props.isDownloading}
+            isProtected={props.isProtected}
+            theme={props.theme}
+            isMediaNsfw={props.isMediaNsfw}
+            onClick={handlePhotoMediaClick()}
+            onCancelUpload={handleCancelUpload()}
           />
         )}
-        {!isAlbum && video && !isRoundVideo && (
+        {!isAlbum() && video() && !isRoundVideo() && (
           <Video
-            video={video}
-            observeIntersectionForLoading={observeIntersectionForLoading}
-            observeIntersectionForPlaying={observeIntersectionForPlaying}
-            canAutoLoad={canAutoLoadMedia}
-            canAutoPlay={canAutoPlayMedia}
-            uploadProgress={uploadProgress}
-            isDownloading={isDownloading}
-            isProtected={isProtected}
-            isMediaNsfw={isMediaNsfw}
-            lastPlaybackTimestamp={lastPlaybackTimestamp}
-            onClick={handleVideoMediaClick}
-            onCancelUpload={handleCancelUpload}
+            video={video()}
+            observeIntersectionForLoading={props.observeIntersectionForLoading}
+            observeIntersectionForPlaying={props.observeIntersectionForPlaying}
+            canAutoLoad={props.canAutoLoadMedia}
+            canAutoPlay={props.canAutoPlayMedia}
+            uploadProgress={props.uploadProgress}
+            isDownloading={props.isDownloading}
+            isProtected={props.isProtected}
+            isMediaNsfw={props.isMediaNsfw}
+            lastPlaybackTimestamp={props.lastPlaybackTimestamp}
+            onClick={handleVideoMediaClick()}
+            onCancelUpload={handleCancelUpload()}
           />
         )}
       </>
     );
 
-    if (paidMedia) {
+    if (paidMedia()) {
       return (
-        <PaidMediaOverlay chatId={chatId} messageId={messageId} paidMedia={paidMedia} isOutgoing={isOwn}>
+        <PaidMediaOverlay chatId={chatId()} messageId={messageId()} paidMedia={paidMedia()} isOutgoing={isOwn()}>
           {content}
         </PaidMediaOverlay>
       );
@@ -1684,42 +1555,42 @@ const Message = ({
   }
 
   function shouldRenderSenderName() {
-    const media = photo || video || location || paidMedia;
+    const media = photo() || video() || location() || paidMedia();
     return (
-      !(isCustomShape && !hasViaSender) &&
-      ((withSenderName && !media) ||
-        asForwarded ||
-        viaBotId ||
-        (guestChatViaId && isFirstInGroup) ||
-        forceSenderName) &&
-      !isInDocumentGroupNotFirst &&
-      !(hasMessageReply && isCustomShape)
+      !(isCustomShape() && !hasViaSender()) &&
+      ((props.withSenderName && !media) ||
+        asForwarded() ||
+        viaBotId() ||
+        (guestChatViaId() && props.isFirstInGroup) ||
+        props.forceSenderName) &&
+      !isInDocumentGroupNotFirst() &&
+      !(hasMessageReply() && isCustomShape())
     );
   }
 
   function renderForwardTitle() {
     return (
-      <span className="forward-title-container">
-        {asForwarded && <Icon name={forwardInfo?.hiddenUserName ? 'forward' : 'share-filled'} />}
-        {asForwarded && <span className="forward-title">{oldLang('ForwardedFrom')}</span>}
+      <span class="forward-title-container">
+        {asForwarded() && <Icon name={forwardInfo()?.hiddenUserName ? 'forward' : 'share-filled'} />}
+        {asForwarded() && <span class="forward-title">{oldLang('ForwardedFrom')}</span>}
       </span>
     );
   }
 
-  const handleInlineButtonClick = useLastCallback((button: ApiKeyboardButton) => {
+  const handleInlineButtonClick = (button: ApiKeyboardButton) => {
     clickBotInlineButton({
-      chatId,
-      messageId: message.id,
-      threadId,
+      chatId: chatId(),
+      messageId: props.message.id,
+      threadId: props.threadId,
       button,
     });
-  });
+  };
 
-  const handleLocalInlineButtonClick = useLastCallback((button: ApiKeyboardButton) => {
+  const handleLocalInlineButtonClick = (button: ApiKeyboardButton) => {
     if (button.action.type === 'openThread') {
       openThread({
-        chatId,
-        threadId: messageTopic!.id,
+        chatId: chatId(),
+        threadId: props.messageTopic!.id,
       });
       return;
     }
@@ -1727,8 +1598,8 @@ const Message = ({
     if (button.action.type === 'suggestedMessage') {
       if (button.action.buttonType === 'approve') {
         openSuggestedPostApprovalModal({
-          chatId,
-          messageId: message.id,
+          chatId: chatId(),
+          messageId: props.message.id,
         });
         return;
       }
@@ -1739,62 +1610,62 @@ const Message = ({
       }
 
       clickSuggestedMessageButton({
-        chatId,
-        messageId: message.id,
+        chatId: chatId(),
+        messageId: props.message.id,
         button: { ...button, action: button.action },
       });
       return;
     }
-  });
+  };
 
-  const handleDeclineReasonChange = useLastCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleDeclineReasonChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setDeclineReason(e.target.value);
-  });
+  };
 
-  const handleDeclineConfirm = useLastCallback(() => {
+  const handleDeclineConfirm = () => {
     rejectSuggestedPost({
-      chatId,
-      messageId: message.id,
-      rejectComment: declineReason.trim() || undefined,
+      chatId: chatId(),
+      messageId: props.message.id,
+      rejectComment: declineReason().trim() || undefined,
     });
     closeDeclineDialog();
     setDeclineReason('');
-  });
+  };
 
   function renderSenderName(
     shouldSkipRenderForwardTitle: boolean = false,
     shouldSkipRenderAdminTitle: boolean = false,
   ) {
     let senderTitle;
-    if (senderPeer && !(isCustomShape && hasViaSender)) {
-      senderTitle = getPeerFullTitle(oldLang, senderPeer);
-    } else if (forwardInfo?.hiddenUserName) {
-      senderTitle = forwardInfo.hiddenUserName;
-    } else if (storyData && originSender) {
-      senderTitle = getPeerFullTitle(oldLang, originSender);
+    if (senderPeer() && !(isCustomShape() && hasViaSender())) {
+      senderTitle = getPeerFullTitle(oldLang, senderPeer());
+    } else if (forwardInfo()?.hiddenUserName) {
+      senderTitle = forwardInfo().hiddenUserName;
+    } else if (storyData() && props.originSender) {
+      senderTitle = getPeerFullTitle(oldLang, props.originSender);
     }
-    const senderEmojiStatus = senderPeer && 'emojiStatus' in senderPeer && senderPeer.emojiStatus;
-    const senderIsPremium = senderPeer && 'isPremium' in senderPeer && senderPeer.isPremium;
-    const guestFromSenderTitle = guestFromSender ? getPeerTitle(oldLang, guestFromSender) : undefined;
+    const senderEmojiStatus = senderPeer() && 'emojiStatus' in senderPeer() && senderPeer().emojiStatus;
+    const senderIsPremium = senderPeer() && 'isPremium' in senderPeer() && senderPeer().isPremium;
+    const guestFromSenderTitle = props.guestFromSender ? getPeerTitle(oldLang, props.guestFromSender) : undefined;
 
-    const shouldRenderForwardAvatar = asForwarded && senderPeer;
+    const shouldRenderForwardAvatar = asForwarded() && senderPeer();
     const adminTitle =
-      !shouldSkipRenderAdminTitle && !signature ? (
-        forwardInfo?.isLinkedChannelPost ? (
-          <span className="admin-title" dir="auto">
+      !shouldSkipRenderAdminTitle && !signature() ? (
+        forwardInfo()?.isLinkedChannelPost ? (
+          <span class="admin-title" dir="auto">
             {oldLang('DiscussChannel')}
           </span>
-        ) : message.postAuthorTitle && isGroup && !asForwarded ? (
-          <span className="admin-title" dir="auto">
-            {message.postAuthorTitle}
+        ) : props.message.postAuthorTitle && props.isGroup && !asForwarded() ? (
+          <span class="admin-title" dir="auto">
+            {props.message.postAuthorTitle}
           </span>
-        ) : (senderChatMember || fromRank) && !asForwarded ? (
+        ) : (props.senderChatMember || fromRank()) && !asForwarded() ? (
           <RankBadge
-            chatId={chatId}
-            userId={(senderChatMember?.userId || sender?.id)!}
-            isAdmin={senderChatMember?.isAdmin}
-            isOwner={senderChatMember?.isOwner}
-            rank={senderChatMember?.rank || fromRank}
+            chatId={chatId()}
+            userId={(props.senderChatMember?.userId || props.sender?.id)!}
+            isAdmin={props.senderChatMember?.isAdmin}
+            isOwner={props.senderChatMember?.isOwner}
+            rank={props.senderChatMember?.rank || fromRank()}
             className="admin-title-badge"
             isClickable
           />
@@ -1802,62 +1673,62 @@ const Message = ({
       ) : undefined;
 
     return (
-      <div className="message-title" dir="ltr">
-        {senderTitle || asForwarded ? (
+      <div class="message-title" dir="ltr">
+        {senderTitle || asForwarded() ? (
           <span
-            className={buildClassName(
+            class={buildClassName(
               'message-title-name-container',
-              forwardInfo?.hiddenUserName ? 'sender-hidden' : 'interactive',
+              forwardInfo()?.hiddenUserName ? 'sender-hidden' : 'interactive',
             )}
             dir="ltr"
           >
             {!shouldSkipRenderForwardTitle && renderForwardTitle()}
-            <span className="message-title-name">
-              {storyData && <Icon name="play-story" />}
-              {shouldRenderForwardAvatar && <Avatar className="forward-avatar" peer={senderPeer} size="micro" />}
-              <span className="sender-title" onClick={handleSenderClick}>
-                {senderTitle ? renderText(senderTitle) : asForwarded ? NBSP : undefined}
+            <span class="message-title-name">
+              {storyData() && <Icon name="play-story" />}
+              {shouldRenderForwardAvatar && <Avatar className="forward-avatar" peer={senderPeer()} size="micro" />}
+              <span class="sender-title" onClick={handleSenderClick()}>
+                {senderTitle ? renderText(senderTitle) : asForwarded() ? NBSP : undefined}
               </span>
-              {!asForwarded && senderEmojiStatus && (
+              {!asForwarded() && senderEmojiStatus && (
                 <CustomEmoji
                   documentId={senderEmojiStatus.documentId}
                   className="no-selection"
                   loopLimit={EMOJI_STATUS_LOOP_LIMIT}
-                  observeIntersectionForLoading={observeIntersectionForLoading}
-                  observeIntersectionForPlaying={observeIntersectionForPlaying}
+                  observeIntersectionForLoading={props.observeIntersectionForLoading}
+                  observeIntersectionForPlaying={props.observeIntersectionForPlaying}
                 />
               )}
-              {!asForwarded && !senderEmojiStatus && senderIsPremium && <StarIcon />}
-              {senderPeer?.fakeType && <FakeIcon fakeType={senderPeer.fakeType} />}
+              {!asForwarded() && !senderEmojiStatus && senderIsPremium && <StarIcon />}
+              {senderPeer()?.fakeType && <FakeIcon fakeType={senderPeer().fakeType} />}
             </span>
           </span>
-        ) : !botSender && !guestFromSender ? (
+        ) : !props.botSender && !props.guestFromSender ? (
           NBSP
         ) : undefined}
-        {botSender?.hasUsername && (
-          <span className="interactive via-sender">
-            <span className="via">{lang('ViaBot')}</span>
-            <span className="sender-title" onClick={handleViaBotClick}>
-              {renderText(`@${getMainUsername(botSender)}`)}
+        {props.botSender?.hasUsername && (
+          <span class="interactive via-sender">
+            <span class="via">{lang('ViaBot')}</span>
+            <span class="sender-title" onClick={handleViaBotClick()}>
+              {renderText(`@${getMainUsername(props.botSender)}`)}
             </span>
           </span>
         )}
         {guestFromSenderTitle && (
-          <span className="interactive via-sender">
-            <span className="via">{lang('ForBot')}</span>
-            <span className="sender-title" onClick={handleGuestForClick}>
+          <span class="interactive via-sender">
+            <span class="via">{lang('ForBot')}</span>
+            <span class="sender-title" onClick={handleGuestForClick()}>
               {renderText(guestFromSenderTitle)}
             </span>
           </span>
         )}
-        <div className="title-spacer" />
-        {(adminTitle || canShowSenderBoosts) && (
-          <span className="message-title-meta">
+        <div class="title-spacer" />
+        {(adminTitle || canShowSenderBoosts()) && (
+          <span class="message-title-meta">
             {adminTitle}
-            {canShowSenderBoosts && (
-              <span className="sender-boosts" aria-hidden>
-                <Icon name={senderBoosts > 1 ? 'boosts' : 'boost'} />
-                {senderBoosts > 1 ? senderBoosts : undefined}
+            {canShowSenderBoosts() && (
+              <span class="sender-boosts" aria-hidden>
+                <Icon name={props.senderBoosts > 1 ? 'boosts' : 'boost'} />
+                {props.senderBoosts > 1 ? props.senderBoosts : undefined}
               </span>
             )}
           </span>
@@ -1866,21 +1737,21 @@ const Message = ({
     );
   }
 
-  const forwardAuthor = isGroup && asForwarded ? message.postAuthorTitle : undefined;
+  const forwardAuthor = createMemo(() => props.isGroup && asForwarded() ? props.message.postAuthorTitle : undefined);
   const shouldRenderSuggestedPostButtons =
-    message.suggestedPostInfo &&
-    !message.isOutgoing &&
-    !message.suggestedPostInfo.isAccepted &&
-    !message.suggestedPostInfo.isRejected;
+    createMemo(() => props.message.suggestedPostInfo &&
+    !props.message.isOutgoing &&
+    !props.message.suggestedPostInfo.isAccepted &&
+    !props.message.suggestedPostInfo.isRejected);
 
-  const isSuggestedPostExpired = (() => {
-    if (!message.suggestedPostInfo?.scheduleDate || !minFutureTime) return false;
+  const isSuggestedPostExpired = createMemo(() => (() => {
+    if (!props.message.suggestedPostInfo?.scheduleDate || !props.minFutureTime) return false;
     const now = getServerTime();
-    return message.suggestedPostInfo.scheduleDate <= now + minFutureTime;
-  })();
+    return props.message.suggestedPostInfo.scheduleDate <= now + props.minFutureTime;
+  })());
 
-  const suggestedPostButtons: ApiKeyboardButton[][] | undefined = useMemo(() => {
-    if (!shouldRenderSuggestedPostButtons) return undefined;
+  const suggestedPostButtons: ApiKeyboardButton[][] | undefined = createMemo(() => {
+    if (!shouldRenderSuggestedPostButtons()) return undefined;
     return [
       [
         {
@@ -1888,7 +1759,7 @@ const Message = ({
           text: lang('SuggestedPostDecline'),
         },
         {
-          action: { type: 'suggestedMessage', buttonType: 'approve', disabled: isSuggestedPostExpired },
+          action: { type: 'suggestedMessage', buttonType: 'approve', disabled: isSuggestedPostExpired() },
           text: lang('SuggestedPostApprove'),
         },
       ],
@@ -1899,10 +1770,10 @@ const Message = ({
         },
       ],
     ];
-  }, [isSuggestedPostExpired, lang, shouldRenderSuggestedPostButtons]);
+  });
 
-  const openThreadButtons: ApiKeyboardButton[][] | undefined = useMemo(() => {
-    if (!isBotForum || message.inlineButtons || !messageTopic || !isLastInList || threadId !== MAIN_THREAD_ID)
+  const openThreadButtons: ApiKeyboardButton[][] | undefined = createMemo(() => {
+    if (!props.isBotForum || props.message.inlineButtons || !props.messageTopic || !props.isLastInList || props.threadId !== MAIN_THREAD_ID)
       return undefined;
 
     return [
@@ -1913,197 +1784,197 @@ const Message = ({
         },
       ],
     ];
-  }, [isBotForum, lang, message.inlineButtons, messageTopic, isLastInList, threadId]);
+  });
 
-  const additionalInlineButtons = suggestedPostButtons || openThreadButtons;
+  const additionalInlineButtons = createMemo(() => suggestedPostButtons() || openThreadButtons());
 
   return (
     <div
       ref={ref}
-      id={getMessageHtmlId(message.id)}
-      className={containerClassName}
-      data-message-id={messageId}
-      onCopy={isProtected ? stopEvent : undefined}
-      onMouseDown={handleMouseDown}
-      onClick={handleClick}
-      onContextMenu={handleContextMenu}
-      onDoubleClick={handleDoubleClick}
-      onMouseEnter={isInDocumentGroupNotLast ? handleDocumentGroupMouseEnter : undefined}
-      onMouseMove={withQuickReactionButton ? handleMouseMove : undefined}
-      onMouseLeave={withQuickReactionButton || isInDocumentGroupNotLast ? handleMouseLeave : undefined}
+      id={getMessageHtmlId(props.message.id)}
+      class={containerClassName()}
+      data-message-id={messageId()}
+      onCopy={props.isProtected ? stopEvent : undefined}
+      onMouseDown={handleMouseDown()}
+      onClick={handleClick()}
+      onContextMenu={handleContextMenu()}
+      onDoubleClick={handleDoubleClick()}
+      onMouseEnter={isInDocumentGroupNotLast() ? handleDocumentGroupMouseEnter() : undefined}
+      onMouseMove={withQuickReactionButton() ? handleMouseMove() : undefined}
+      onMouseLeave={withQuickReactionButton() || isInDocumentGroupNotLast() ? handleMouseLeave() : undefined}
     >
       <div
         ref={bottomMarkerRef}
-        className="bottom-marker"
-        data-message-id={messageId}
-        data-last-message-id={album ? album.messages[album.messages.length - 1].id : undefined}
-        data-album-main-id={album ? album.mainMessage.id : undefined}
-        data-has-unread-mention={message.hasUnreadMention || undefined}
-        data-has-unread-poll-vote={hasUnreadPollVote || undefined}
-        data-has-unread-reaction={hasUnreadReaction || undefined}
-        data-is-pinned={isPinned || undefined}
-        data-should-update-views={message.viewsCount !== undefined}
+        class="bottom-marker"
+        data-message-id={messageId()}
+        data-last-message-id={props.album ? props.album.messages[props.album.messages.length - 1].id : undefined}
+        data-album-main-id={props.album ? props.album.mainMessage.id : undefined}
+        data-has-unread-mention={props.message.hasUnreadMention || undefined}
+        data-has-unread-poll-vote={props.hasUnreadPollVote || undefined}
+        data-has-unread-reaction={props.hasUnreadReaction || undefined}
+        data-is-pinned={props.isPinned || undefined}
+        data-should-update-views={props.message.viewsCount !== undefined}
       />
-      {!isInDocumentGroup && (
-        <div className="message-select-control no-selection">
-          {isSelected && <Icon name="check" className="message-select-control-icon" />}
+      {!props.isInDocumentGroup && (
+        <div class="message-select-control no-selection">
+          {props.isSelected && <Icon name="check" className="message-select-control-icon" />}
         </div>
       )}
-      {isLastInDocumentGroup && (
+      {props.isLastInDocumentGroup && (
         <div
-          className={buildClassName(
+          class={buildClassName(
             'message-select-control group-select no-selection',
-            isGroupSelected && 'is-selected',
+            props.isGroupSelected && 'is-selected',
           )}
-          onClick={handleDocumentGroupSelectAll}
+          onClick={handleDocumentGroupSelectAll()}
         >
-          {isGroupSelected && <Icon name="check" className="message-select-control-icon" />}
+          {props.isGroupSelected && <Icon name="check" className="message-select-control-icon" />}
         </div>
       )}
       <div
-        className={buildClassName(
+        class={buildClassName(
           'message-content-wrapper',
-          contentClassName.includes('text') && 'can-select-text',
-          contentClassName.includes('giveaway') && 'giveaway-result-content',
+          contentClassName().includes('text') && 'can-select-text',
+          contentClassName().includes('giveaway') && 'giveaway-result-content',
         )}
       >
-        <div className={contentClassName} style={contentStyle} dir="auto">
-          {asForwarded && !isInDocumentGroupNotFirst && (
+        <div class={contentClassName()} style={contentStyle()} dir="auto">
+          {asForwarded() && !isInDocumentGroupNotFirst() && (
             <>
               {shouldRenderSenderName() && renderSenderName()}
-              {forwardAuthor && (
-                <span className="admin-title" dir="auto">
-                  {forwardAuthor}
+              {forwardAuthor() && (
+                <span class="admin-title" dir="auto">
+                  {forwardAuthor()}
                 </span>
               )}
             </>
           )}
           {renderContent()}
-          {!isInDocumentGroupNotLast && metaPosition === 'standalone' && !isStoryMention && renderReactionsAndMeta()}
-          {canShowActionButton && (
-            <div className="message-action-buttons-container">
-              <div className="message-action-buttons-sticky-zone">
-                <div className="message-action-buttons message-action-button-sticky">
-                  {hasSummary && (
+          {!isInDocumentGroupNotLast() && metaPosition === 'standalone' && !isStoryMention() && renderReactionsAndMeta()}
+          {canShowActionButton() && (
+            <div class="message-action-buttons-container">
+              <div class="message-action-buttons-sticky-zone">
+                <div class="message-action-buttons message-action-button-sticky">
+                  {hasSummary() && (
                     <Button
                       className="message-action-button action-summary"
                       color="translucent-white"
                       round
                       withSparkleEffect
-                      ariaLabel={isShowingSummary ? lang('AriaHideSummary') : lang('AriaShowSummary')}
-                      onClick={isShowingSummary ? hideSummary : showSummary}
-                      iconName={isShowingSummary ? 'expand' : 'collapse'}
+                      ariaLabel={isShowingSummary() ? lang('AriaHideSummary') : lang('AriaShowSummary')}
+                      onClick={isShowingSummary() ? hideSummary : showSummary}
+                      iconName={isShowingSummary() ? 'expand' : 'collapse'}
                     />
                   )}
                 </div>
               </div>
               <div
-                className={buildClassName(
+                class={buildClassName(
                   'message-action-buttons',
-                  isLoadingComments && 'message-action-buttons-shown',
+                  props.isLoadingComments && 'message-action-buttons-shown',
                 )}
               >
-                {withCommentButton && isCustomShape && (
+                {withCommentButton() && isCustomShape() && (
                   <CommentButton
-                    threadInfo={commentsThreadInfo}
-                    disabled={noComments || !commentsThreadInfo}
-                    isLoading={isLoadingComments}
+                    threadInfo={commentsThreadInfo()}
+                    disabled={props.noComments || !commentsThreadInfo()}
+                    isLoading={props.isLoadingComments}
                     isCustomShape
                   />
                 )}
-                {canForward && (
+                {props.canForward && (
                   <Button
                     className="message-action-button"
                     color="translucent-white"
                     round
                     ariaLabel={oldLang('lng_context_forward_msg')}
-                    onClick={isLastInDocumentGroup ? handleGroupForward : handleForward}
+                    onClick={props.isLastInDocumentGroup ? handleGroupForward() : handleForward()}
                     iconName="share-filled"
                   />
                 )}
-                {canFocus && (
+                {canFocus() && (
                   <Button
                     className="message-action-button"
                     color="translucent-white"
                     round
                     ariaLabel={lang('FocusMessage')}
-                    onClick={isPinnedList ? handleFocus : handleFocusForwarded}
+                    onClick={props.isPinnedList ? handleFocus() : handleFocusForwarded()}
                     iconName="arrow-right"
                   />
                 )}
               </div>
             </div>
           )}
-          {withCommentButton && !isCustomShape && (
+          {withCommentButton() && !isCustomShape() && (
             <CommentButton
-              threadInfo={commentsThreadInfo}
-              disabled={noComments || !commentsThreadInfo}
-              isLoading={isLoadingComments}
+              threadInfo={commentsThreadInfo()}
+              disabled={props.noComments || !commentsThreadInfo()}
+              isLoading={props.isLoadingComments}
             />
           )}
-          {withAppendix && <MessageAppendix isOwn={isOwn} />}
-          {withQuickReactionButton && quickReactionPosition === 'in-content' && renderQuickReactionButton()}
+          {withAppendix() && <MessageAppendix isOwn={isOwn()} />}
+          {withQuickReactionButton() && quickReactionPosition() === 'in-content' && renderQuickReactionButton()}
         </div>
-        {message.inlineButtons && (
+        {props.message.inlineButtons && (
           <InlineButtons
-            inlineButtons={message.inlineButtons}
-            isReceipt={Boolean(invoice?.receiptMessageId)}
-            isEphemeral={message.isEphemeral}
+            inlineButtons={props.message.inlineButtons}
+            isReceipt={Boolean(invoice()?.receiptMessageId)}
+            isEphemeral={props.message.isEphemeral}
             onClick={handleInlineButtonClick}
           />
         )}
-        {additionalInlineButtons && (
+        {additionalInlineButtons() && (
           <InlineButtons
-            inlineButtons={additionalInlineButtons}
-            isEphemeral={message.isEphemeral}
+            inlineButtons={additionalInlineButtons()}
+            isEphemeral={props.message.isEphemeral}
             onClick={handleLocalInlineButtonClick}
           />
         )}
-        {reactionsPosition === 'outside' && !isStoryMention && (
+        {reactionsPosition === 'outside' && !isStoryMention() && (
           <Reactions
-            message={reactionMessage!}
-            threadId={threadId}
+            message={props.reactionMessage!}
+            threadId={props.threadId}
             isOutside
-            isCurrentUserPremium={isPremium}
-            observeIntersection={observeIntersectionForPlaying}
-            noRecentReactors={isChannel}
-            tags={tags}
-            isAccountFrozen={isAccountFrozen}
+            isCurrentUserPremium={props.isPremium}
+            observeIntersection={props.observeIntersectionForPlaying}
+            noRecentReactors={props.isChannel}
+            tags={props.tags}
+            isAccountFrozen={props.isAccountFrozen}
           />
         )}
       </div>
-      {contextMenuAnchor && (
+      {contextMenuAnchor() && (
         <ContextMenuContainer
-          isOpen={isContextMenuOpen}
-          anchor={contextMenuAnchor}
-          targetHref={contextMenuTarget?.matches('a[href]') ? (contextMenuTarget as HTMLAnchorElement).href : undefined}
-          isAltKeyPressed={isContextMenuAltKeyPressed}
-          message={message}
-          album={album}
-          messageListType={messageListType}
-          threadId={threadId}
-          onClose={handleContextMenuClose}
-          onCloseAnimationEnd={handleContextMenuHide}
-          repliesThreadInfo={repliesThreadInfo}
-          noReplies={noReplies}
+          isOpen={isContextMenuOpen()}
+          anchor={contextMenuAnchor()}
+          targetHref={contextMenuTarget()?.matches('a[href]') ? (contextMenuTarget() as HTMLAnchorElement).href : undefined}
+          isAltKeyPressed={isContextMenuAltKeyPressed()}
+          message={props.message}
+          album={props.album}
+          messageListType={props.messageListType}
+          threadId={props.threadId}
+          onClose={handleContextMenuClose()}
+          onCloseAnimationEnd={handleContextMenuHide()}
+          repliesThreadInfo={props.repliesThreadInfo}
+          noReplies={props.noReplies}
           detectedLanguage={detectedLanguage}
         />
       )}
-      {isDeclineDialogOpen && (
+      {isDeclineDialogOpen() && (
         <ConfirmDialog
-          isOpen={isDeclineDialogOpen}
+          isOpen={isDeclineDialogOpen()}
           onClose={closeDeclineDialog}
           title={lang('SuggestedPostDecline')}
           confirmLabel={lang('SuggestedPostDecline')}
           confirmHandler={handleDeclineConfirm}
           confirmIsDestructive
         >
-          <div className="decline-dialog-question">
+          <div class="decline-dialog-question">
             {renderText(
               lang(
                 'DeclinePostDialogQuestion',
                 {
-                  sender: sender ? getPeerFullTitle(oldLang, sender) : '',
+                  sender: props.sender ? getPeerFullTitle(oldLang, props.sender) : '',
                 },
                 { withNodes: true, withMarkdown: true },
               ),
@@ -2111,7 +1982,7 @@ const Message = ({
           </div>
           <InputText
             placeholder={lang('DeclineReasonPlaceholder')}
-            value={declineReason}
+            value={declineReason()}
             onChange={handleDeclineReasonChange}
             maxLength={MAX_REASON_LENGTH}
           />
@@ -2121,8 +1992,7 @@ const Message = ({
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global, ownProps): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState, ownProps: OwnProps): Complete<StateProps> => {
     const { focusedMessage, forwardMessages, activeReactions, activeEmojiInteractions, loadingThread } =
       selectTabState(global);
     const {
@@ -2423,5 +2293,6 @@ export default memo(
       summary,
       canSendStickers: allowedAttachmentOptions.canSendStickers,
     };
-  })(Message),
-);
+  };
+
+export default Message;

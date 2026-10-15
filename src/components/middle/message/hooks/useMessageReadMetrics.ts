@@ -1,12 +1,11 @@
-import { type ElementRef, useEffect, useRef } from '../../../../lib/teact/teact';
+import { createEffect, requestMeasure } from 'frameact';
 import { getActions } from '../../../../global';
+import { depsOf } from '../../../../util/effectDeps';
 
 import type { ApiMessageReadMetric } from '../../../../api/types';
 
-import { requestMeasure } from '../../../../lib/fasterdom/fasterdom';
 import { clamp } from '../../../../util/math';
 
-import useLastCallback from '../../../../hooks/useLastCallback';
 import { isBackgroundModeActive } from '../../../../hooks/window/useBackgroundMode';
 
 const INITIAL_GRACE_MS = 300;
@@ -56,6 +55,7 @@ type MessageReadMetricsTracker = ReturnType<typeof createMessageReadMetricsTrack
 
 const trackers = new WeakMap<HTMLElement, MessageReadMetricsTracker>();
 
+// TODO(codemod): useMessageReadMetrics: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useMessageReadMetrics({
   messageRef,
   containerRef,
@@ -64,22 +64,22 @@ export default function useMessageReadMetrics({
   isEnabled,
   isMessageListActive,
 }: {
-  messageRef: ElementRef<HTMLDivElement>;
-  containerRef?: ElementRef<HTMLDivElement>;
+  messageRef: (el: HTMLDivElement) => void;
+  containerRef?: (el: HTMLDivElement) => void;
   chatId: string;
   messageId: number;
   isEnabled?: boolean;
   isMessageListActive?: boolean;
 }) {
   const { scheduleMessageReadMetricsReport } = getActions();
-  const trackedMessageRef = useRef<TrackedMessage>();
-  const trackerRef = useRef<MessageReadMetricsTracker>();
+  let trackedMessageRef: TrackedMessage | undefined;
+  let trackerRef: MessageReadMetricsTracker | undefined;
 
-  const handleReport = useLastCallback((trackedMessage: TrackedMessage, metric: ApiMessageReadMetric) => {
+  const handleReport = (trackedMessage: TrackedMessage, metric: ApiMessageReadMetric) => {
     scheduleMessageReadMetricsReport({ chatId: trackedMessage.chatId, metrics: [metric] });
-  });
+  };
 
-  useEffect(() => {
+  createEffect(depsOf(() => [chatId, containerRef, handleReport, isEnabled, messageId, messageRef]), () => {
     const container = containerRef?.current;
     const element = messageRef.current;
     if (!container || !element || !isEnabled) {
@@ -87,7 +87,7 @@ export default function useMessageReadMetrics({
     }
 
     const tracker = getMessageReadMetricsTracker(container);
-    trackerRef.current = tracker;
+    trackerRef = tracker;
     const trackedMessage = tracker.addMessage(element, {
       chatId,
       messageId,
@@ -95,26 +95,26 @@ export default function useMessageReadMetrics({
       isMessageListActive: undefined,
       onReport: handleReport,
     });
-    trackedMessageRef.current = trackedMessage;
+    trackedMessageRef = trackedMessage;
 
     return () => {
       tracker.removeMessage(trackedMessage);
-      trackedMessageRef.current = undefined;
-      trackerRef.current = undefined;
+      trackedMessageRef = undefined;
+      trackerRef = undefined;
     };
-  }, [chatId, containerRef, handleReport, isEnabled, messageId, messageRef]);
+  });
 
-  useEffect(() => {
-    if (!trackedMessageRef.current || !trackerRef.current) return;
+  createEffect(depsOf(() => [chatId, containerRef, handleReport, isEnabled, isMessageListActive, messageId]), () => {
+    if (!trackedMessageRef || !trackerRef) return;
 
-    trackerRef.current.updateMessage(trackedMessageRef.current, {
+    trackerRef.updateMessage(trackedMessageRef, {
       chatId,
       messageId,
       isEnabled,
       isMessageListActive,
       onReport: handleReport,
     });
-  }, [chatId, containerRef, handleReport, isEnabled, isMessageListActive, messageId]);
+  });
 }
 
 function getMessageReadMetricsTracker(container: HTMLElement) {

@@ -1,7 +1,6 @@
-import { requestMutation } from '../../../lib/fasterdom/fasterdom';
+import { requestMutation } from 'frameact';
 
 import useFlag from '../../../hooks/useFlag';
-import useLastCallback from '../../../hooks/useLastCallback';
 import useRunDebounced from '../../../hooks/useRunDebounced';
 
 const DEBOUNCE = 1000;
@@ -14,7 +13,7 @@ export default function useStickyDates() {
 
   const runDebounced = useRunDebounced(DEBOUNCE, true);
 
-  const updateStickyDates = useLastCallback((container: HTMLDivElement) => {
+  const updateStickyDates = (container: HTMLDivElement) => {
     markIsScrolled();
 
     if (!document.body.classList.contains('is-scrolling-messages')) {
@@ -41,7 +40,7 @@ export default function useStickyDates() {
         document.body.classList.remove('is-scrolling-messages');
       });
     });
-  });
+  };
 
   return {
     isScrolled,

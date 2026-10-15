@@ -1,15 +1,13 @@
-import type { FC } from '../../../lib/teact/teact';
+import { createMemo } from 'frameact';
 import { getActions } from '../../../global';
 
 import type { ApiPeer, ApiTypeStory } from '../../../api/types';
-import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 
 import { getPeerTitle } from '../../../global/helpers/peers';
 import buildClassName from '../../../util/buildClassName';
 import renderText from '../helpers/renderText';
 
 import { useFastClick } from '../../../hooks/useFastClick';
-import useLastCallback from '../../../hooks/useLastCallback';
 import useOldLang from '../../../hooks/useOldLang';
 
 import CompactMediaPreview, { canRenderCompactMediaPreview } from '../CompactMediaPreview';
@@ -30,63 +28,55 @@ type OwnProps = {
 
 const NBSP = '\u00A0';
 
-const EmbeddedStory: FC<OwnProps> = ({
-  story,
-  sender,
-  noUserColors,
-  isProtected,
-  observeIntersectionForLoading,
-  observeIntersectionForPlaying,
-  onClick,
-}) => {
+const EmbeddedStory = (props: OwnProps) => {
   const { showNotification } = getActions();
 
   const lang = useOldLang();
-  const isFullStory = story && 'content' in story;
-  const isExpiredStory = story && 'isDeleted' in story;
-  const title = isFullStory ? 'Story' : isExpiredStory ? 'ExpiredStory' : 'Loading';
+  const isFullStory = createMemo(() => props.story && 'content' in props.story);
+  const isExpiredStory = createMemo(() => props.story && 'isDeleted' in props.story);
+  const title = createMemo(() => isFullStory() ? 'Story' : isExpiredStory() ? 'ExpiredStory' : 'Loading');
 
-  const hasPictogram = isFullStory && canRenderCompactMediaPreview(story.content);
+  const hasPictogram = createMemo(() => isFullStory() && canRenderCompactMediaPreview(props.story.content));
 
-  const senderTitle = sender ? getPeerTitle(lang, sender) : undefined;
-  const handleFastClick = useLastCallback(() => {
-    if (story && !isExpiredStory) {
-      onClick();
+  const senderTitle = createMemo(() => props.sender ? getPeerTitle(lang, props.sender) : undefined);
+  const handleFastClick = () => {
+    if (props.story && !isExpiredStory()) {
+      props.onClick();
     } else {
       showNotification({
         message: lang('StoryNotFound'),
       });
     }
-  });
+  };
 
   const { handleClick, handleMouseDown } = useFastClick(handleFastClick);
 
   return (
     <PeerColorWrapper
-      peerColor={sender?.color}
-      noUserColors={noUserColors}
+      peerColor={props.sender?.color}
+      noUserColors={props.noUserColors}
       shouldReset
-      className={buildClassName('EmbeddedMessage', hasPictogram && 'with-thumb')}
+      className={buildClassName('EmbeddedMessage', hasPictogram() && 'with-thumb')}
       onClick={handleClick}
       onMouseDown={handleMouseDown}
     >
-      {isFullStory && hasPictogram && (
+      {isFullStory() && hasPictogram() && (
         <CompactMediaPreview
-          media={story.content}
+          media={props.story.content}
           className="embedded-thumb"
           isPictogram
-          isProtected={isProtected}
-          observeIntersectionForLoading={observeIntersectionForLoading}
-          observeIntersectionForPlaying={observeIntersectionForPlaying}
+          isProtected={props.isProtected}
+          observeIntersectionForLoading={props.observeIntersectionForLoading}
+          observeIntersectionForPlaying={props.observeIntersectionForPlaying}
         />
       )}
-      <div className="message-text with-message-color">
-        <p className="embedded-text-wrapper">
-          {isExpiredStory && <Icon name="story-expired" className="embedded-origin-icon" />}
-          {isFullStory && <Icon name="story-reply" className="embedded-origin-icon" />}
-          {lang(title)}
+      <div class="message-text with-message-color">
+        <p class="embedded-text-wrapper">
+          {isExpiredStory() && <Icon name="story-expired" className="embedded-origin-icon" />}
+          {isFullStory() && <Icon name="story-reply" className="embedded-origin-icon" />}
+          {lang(title())}
         </p>
-        <div className="message-title">{renderText(senderTitle || NBSP)}</div>
+        <div class="message-title">{renderText(senderTitle() || NBSP)}</div>
       </div>
     </PeerColorWrapper>
   );

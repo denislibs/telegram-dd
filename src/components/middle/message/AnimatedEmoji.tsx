@@ -1,9 +1,8 @@
-import type { FC } from '../../../lib/teact/teact';
-import { memo } from '../../../lib/teact/teact';
+import { createMemo } from 'frameact';
 import { withGlobal } from '../../../global';
+import type { GlobalState } from '../../../global/types';
 
 import type { ApiSticker } from '../../../api/types';
-import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 import type { ActiveEmojiInteraction } from '../../../types';
 
 import { selectAnimatedEmoji, selectAnimatedEmojiEffect, selectAnimatedEmojiSound } from '../../../global/selectors';
@@ -37,54 +36,49 @@ interface StateProps {
 
 const QUALITY = 1;
 
-const AnimatedEmoji: FC<OwnProps & StateProps> = ({
-  emoji,
-  isOwn,
-  observeIntersection,
-  forceLoadPreview,
-  messageId,
-  chatId,
-  activeEmojiInteractions,
-  sticker,
-  effect,
-  soundId,
-}) => {
-  const { ref, size, style, handleClick } = useAnimatedEmoji(
-    chatId,
-    messageId,
-    soundId,
-    activeEmojiInteractions,
-    isOwn,
-    effect ? emoji : undefined,
-  );
-  const isIntersecting = useIsIntersecting(ref, observeIntersection);
-  const fitzModifier = getEmojiFitzModifier(emoji);
+const AnimatedEmoji = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
+  const animatedEmojiResult = createMemo(() => useAnimatedEmoji(
+    () => props.chatId,
+    () => props.messageId,
+    () => props.soundId,
+    () => props.activeEmojiInteractions,
+    () => props.isOwn,
+    () => props.effect ? props.emoji : undefined,
+  ));
+  const ref = () => animatedEmojiResult().ref;
+  const size = () => animatedEmojiResult().size;
+  const style = () => animatedEmojiResult().style;
+  const handleClick = () => animatedEmojiResult().handleClick;
+  const isIntersecting = useIsIntersecting(() => ref(), () => props.observeIntersection);
+  const fitzModifier = createMemo(() => getEmojiFitzModifier(props.emoji));
 
   return (
+    // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show>
     <AnimatedIconFromSticker
-      key={`${sticker?.id}_${fitzModifier}`}
-      sticker={sticker}
-      fitzModifier={fitzModifier}
-      size={size}
+      key={`${props.sticker?.id}_${fitzModifier()}`}
+      sticker={props.sticker}
+      fitzModifier={fitzModifier()}
+      size={size()}
       quality={QUALITY}
       noLoad={!isIntersecting}
-      forcePreview={forceLoadPreview}
+      forcePreview={props.forceLoadPreview}
       play={isIntersecting}
       forceAlways
-      ref={ref}
-      className={buildClassName('AnimatedEmoji media-inner', sticker?.id === LIKE_STICKER_ID && 'like-sticker-thumb')}
-      style={style}
-      onClick={handleClick}
+      ref={ref()}
+      className={buildClassName('AnimatedEmoji media-inner', props.sticker?.id === LIKE_STICKER_ID && 'like-sticker-thumb')}
+      style={style()}
+      onClick={handleClick()}
     />
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global, { emoji, withEffects }) => {
+const mapStateToProps = (global: GlobalState, { emoji, withEffects }: OwnProps) => {
     return {
       sticker: selectAnimatedEmoji(global, emoji),
       effect: withEffects ? selectAnimatedEmojiEffect(global, emoji) : undefined,
       soundId: selectAnimatedEmojiSound(global, emoji),
     };
-  })(AnimatedEmoji),
-);
+  };
+
+export default AnimatedEmoji;

@@ -1,5 +1,5 @@
-import type { FC } from '../../lib/teact/teact';
-import { memo, useMemo } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import { For, mergeProps } from 'frameact/dom';
 
 import type { ApiPeer } from '../../api/types';
 import type { AvatarSize } from './Avatar';
@@ -22,29 +22,30 @@ type OwnProps = {
   badgeText?: string;
 };
 
-const AvatarList: FC<OwnProps> = ({ peers, size, className, limit = DEFAULT_LIMIT, badgeText }) => {
+const AvatarList = (rawProps: OwnProps) => {
+  const props = mergeProps({ limit: DEFAULT_LIMIT }, rawProps) as OwnProps & Required<Pick<OwnProps, 'limit'>>;
   const lang = useLang();
 
-  const pxSize = typeof size === 'number' ? size : AVATAR_SIZES[size];
+  const pxSize = createMemo(() => typeof props.size === 'number' ? props.size : AVATAR_SIZES[props.size]);
 
-  const renderingBadgeText = useMemo(() => {
-    if (badgeText) return badgeText;
-    if (!peers?.length || peers.length <= limit) return undefined;
-    return `+${peers.length - limit}`;
-  }, [badgeText, peers, limit]);
+  const renderingBadgeText = createMemo(() => {
+    if (props.badgeText) return props.badgeText;
+    if (!props.peers?.length || props.peers.length <= props.limit) return undefined;
+    return `+${props.peers.length - props.limit}`;
+  });
 
   return (
     <div
-      className={buildClassName(className, styles.root)}
-      style={`--_size: ${pxSize}px;`}
+      class={buildClassName(props.className, styles.root)}
+      style={`--_size: ${pxSize()}px;`}
       dir={lang.isRtl ? 'rtl' : 'ltr'}
     >
-      {peers?.slice(0, limit).map((peer) => (
-        <Avatar size={size} peer={peer} className={styles.avatar} />
-      ))}
-      {renderingBadgeText && <div className={styles.badge}>{renderingBadgeText}</div>}
+      <For each={props.peers?.slice(0, props.limit)}>{(peer) => (
+        <Avatar size={props.size} peer={peer} className={styles.avatar} />
+      )}</For>
+      {renderingBadgeText() && <div class={styles.badge}>{renderingBadgeText()}</div>}
     </div>
   );
 };
 
-export default memo(AvatarList);
+export default AvatarList;

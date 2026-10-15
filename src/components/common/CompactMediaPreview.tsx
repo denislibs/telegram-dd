@@ -1,7 +1,7 @@
-import { memo, useRef } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import { createMediaTransition } from '../../lib/kit';
 
 import type { ApiAttachment, ApiDocument, ApiPhoto, ApiVideo, MediaContent } from '../../api/types';
-import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 import type { IconName } from '../../types/icons';
 
 import { getDocumentMediaHash, getMediaThumbUri, getPhotoMediaHash, getVideoMediaHash } from '../../global/helpers';
@@ -13,7 +13,6 @@ import useAppLayout from '../../hooks/useAppLayout';
 import useCanvasBlur from '../../hooks/useCanvasBlur';
 import { useIsIntersecting } from '../../hooks/useIntersectionObserver';
 import useMedia from '../../hooks/useMedia';
-import useMediaTransition from '../../hooks/useMediaTransition';
 
 import OptimizedVideo from '../ui/OptimizedVideo';
 import Icon from './icons/Icon';
@@ -55,107 +54,94 @@ export function canRenderCompactMediaPreview(media?: MediaContent, attachment?: 
   );
 }
 
-const CompactMediaPreview = ({
-  id,
-  className,
-  media,
-  attachment,
-  size,
-  isPictogram,
-  isRound,
-  isProtected,
-  isSpoiler,
-  actionIcon,
-  observeIntersectionForLoading,
-  observeIntersectionForPlaying,
-  onClick,
-}: OwnProps) => {
-  const ref = useRef<HTMLDivElement>();
+const CompactMediaPreview = (props: OwnProps) => {
+  let ref!: HTMLDivElement;
   const { isMobile } = useAppLayout();
 
-  const previewSize = size || (isPictogram ? PICTOGRAM_SIZE : undefined);
-  const photo = media?.photo;
-  const document = media?.document;
-  const video = media?.video || attachment?.gif;
-  const previewUrl = getPreviewUrl(photo, document, media?.video, attachment);
-  const shouldRenderPreviewAsVideo = shouldUseVideoPreview(video, previewUrl);
+  const previewSize = createMemo(() => props.size || (props.isPictogram ? PICTOGRAM_SIZE : undefined));
+  const photo = createMemo(() => props.media?.photo);
+  const document = createMemo(() => props.media?.document);
+  const video = createMemo(() => props.media?.video || props.attachment?.gif);
+  const previewUrl = createMemo(() => getPreviewUrl(photo(), document(), props.media?.video, props.attachment));
+  const shouldRenderPreviewAsVideo = createMemo(() => shouldUseVideoPreview(video(), previewUrl()));
 
-  const isIntersectingForLoading = useIsIntersecting(ref, observeIntersectionForLoading);
-  const isIntersectingForPlaying = useIsIntersecting(ref, observeIntersectionForPlaying) && isIntersectingForLoading;
+  const isIntersectingForLoading = useIsIntersecting(() => ref, () => props.observeIntersectionForLoading);
+  const isIntersectingForPlaying = createMemo(() => useIsIntersecting(() => ref, () => props.observeIntersectionForPlaying) && isIntersectingForLoading);
 
-  const previewHash = getPreviewHash(photo, document, video, shouldRenderPreviewAsVideo);
+  const previewHash = createMemo(() => getPreviewHash(photo(), document(), video(), shouldRenderPreviewAsVideo()));
 
-  const previewVideoUrl = !previewUrl
-    ? video?.blobUrl || (shouldRenderPreviewAsVideo ? attachment?.blobUrl : undefined)
-    : undefined;
-  const thumbDataUri = getThumbDataUri(photo, document, media?.video, attachment);
+  const previewVideoUrl = createMemo(() => !previewUrl()
+    ? video()?.blobUrl || (shouldRenderPreviewAsVideo() ? props.attachment?.blobUrl : undefined)
+    : undefined);
+  const thumbDataUri = createMemo(() => getThumbDataUri(photo(), document(), props.media?.video, props.attachment));
 
   const fetchedPreviewUrl = useMedia(
-    previewHash,
-    Boolean(!previewHash || previewUrl || previewVideoUrl || !isIntersectingForLoading),
+    () => previewHash(),
+    () => Boolean(!previewHash() || previewUrl() || previewVideoUrl() || !isIntersectingForLoading),
   );
 
-  const resolvedPreviewUrl = previewUrl || (!shouldRenderPreviewAsVideo ? fetchedPreviewUrl : undefined);
-  const resolvedPreviewVideoUrl = previewVideoUrl || (shouldRenderPreviewAsVideo ? fetchedPreviewUrl : undefined);
-  const shouldShowSpoiler = isSpoiler ?? photo?.isSpoiler ?? media?.video?.isSpoiler ?? attachment?.shouldSendAsSpoiler;
+  const resolvedPreviewUrl = createMemo(() => previewUrl() || (!shouldRenderPreviewAsVideo() ? fetchedPreviewUrl : undefined));
+  const resolvedPreviewVideoUrl = createMemo(() => previewVideoUrl() || (shouldRenderPreviewAsVideo() ? fetchedPreviewUrl : undefined));
+  const shouldShowSpoiler = createMemo(() => props.isSpoiler ?? photo()?.isSpoiler ?? props.media?.video?.isSpoiler ?? props.attachment?.shouldSendAsSpoiler);
 
-  const hasResolvedMedia = Boolean(resolvedPreviewUrl || resolvedPreviewVideoUrl);
-  const shouldShowCanvasThumb = Boolean(thumbDataUri && (shouldShowSpoiler || !hasResolvedMedia));
+  const hasResolvedMedia = createMemo(() => Boolean(resolvedPreviewUrl() || resolvedPreviewVideoUrl()));
+  const shouldShowCanvasThumb = createMemo(() => Boolean(thumbDataUri() && (shouldShowSpoiler() || !hasResolvedMedia())));
   const canvasRef = useCanvasBlur(
-    thumbDataUri,
-    !thumbDataUri || !shouldShowCanvasThumb,
+    () => thumbDataUri(),
+    () => !thumbDataUri() || !shouldShowCanvasThumb(),
     isMobile && !IS_CANVAS_FILTER_SUPPORTED,
     undefined,
-    previewSize,
-    previewSize,
+    () => previewSize(),
+    () => previewSize(),
   );
-  useMediaTransition({
+  createMediaTransition({
+    // TODO(codemod): ref option: hand the result `ref` to the element (ref={t.ref}) instead
     ref: canvasRef,
-    hasMediaData: shouldShowCanvasThumb,
+    hasMediaData: () => shouldShowCanvasThumb(),
   });
 
-  const { ref: imageRef } = useMediaTransition<HTMLImageElement>({
-    hasMediaData: Boolean(resolvedPreviewUrl && !shouldShowSpoiler),
+  const { ref: imageRef } = createMediaTransition({
+    hasMediaData: () => Boolean(resolvedPreviewUrl() && !shouldShowSpoiler()),
   });
-  const { ref: videoRef } = useMediaTransition<HTMLVideoElement>({
-    hasMediaData: Boolean(resolvedPreviewVideoUrl && !shouldShowSpoiler),
+  const { ref: videoRef } = createMediaTransition({
+    hasMediaData: () => Boolean(resolvedPreviewVideoUrl() && !shouldShowSpoiler()),
   });
 
-  const spoilerThumbDataUri = thumbDataUri || resolvedPreviewUrl;
-  const style = previewSize ? `width: ${previewSize}px; height: ${previewSize}px` : undefined;
+  const spoilerThumbDataUri = createMemo(() => thumbDataUri() || resolvedPreviewUrl());
+  const style = createMemo(() => previewSize() ? `width: ${previewSize()}px; height: ${previewSize()}px` : undefined);
 
   return (
     <div
       ref={ref}
-      id={id}
-      className={buildClassName(
+      id={props.id}
+      class={buildClassName(
         styles.root,
-        className,
-        isPictogram && styles.pictogram,
-        isRound && styles.round,
-        actionIcon && styles.withActionIcon,
-        onClick && styles.interactive,
+        props.className,
+        props.isPictogram && styles.pictogram,
+        props.isRound && styles.round,
+        props.actionIcon && styles.withActionIcon,
+        props.onClick && styles.interactive,
       )}
-      style={style}
-      onClick={onClick}
+      style={style()}
+      onClick={(e) => props.onClick?.(e)}
     >
-      {thumbDataUri && <canvas ref={canvasRef} className={buildClassName('thumbnail', styles.thumb)} />}
-      {!shouldShowSpoiler && resolvedPreviewUrl && (
+      {thumbDataUri() && <canvas ref={canvasRef} class={buildClassName('thumbnail', styles.thumb)} />}
+      {!shouldShowSpoiler() && resolvedPreviewUrl() && (
         <img
           ref={imageRef}
-          src={resolvedPreviewUrl}
+          src={resolvedPreviewUrl()}
           alt=""
-          className={buildClassName('full-media', styles.media)}
+          class={buildClassName('full-media', styles.media)}
           draggable={false}
         />
       )}
-      {!shouldShowSpoiler && resolvedPreviewVideoUrl && (
+      {!shouldShowSpoiler() && resolvedPreviewVideoUrl() && (
         <OptimizedVideo
           ref={videoRef}
           className={buildClassName('full-media', styles.media)}
-          src={resolvedPreviewVideoUrl}
-          canPlay={isIntersectingForPlaying}
-          poster={thumbDataUri}
+          src={resolvedPreviewVideoUrl()}
+          canPlay={isIntersectingForPlaying()}
+          poster={thumbDataUri()}
           loop
           playsInline
           muted
@@ -163,13 +149,13 @@ const CompactMediaPreview = ({
         />
       )}
       <MediaSpoiler
-        thumbDataUri={spoilerThumbDataUri}
-        isVisible={Boolean(shouldShowSpoiler)}
-        width={previewSize}
-        height={previewSize}
+        thumbDataUri={spoilerThumbDataUri()}
+        isVisible={Boolean(shouldShowSpoiler())}
+        width={previewSize()}
+        height={previewSize()}
       />
-      {isProtected && <span className={buildClassName('protector', styles.protector)} />}
-      {actionIcon && <Icon name={actionIcon} className={styles.actionIcon} />}
+      {props.isProtected && <span class={buildClassName('protector', styles.protector)} />}
+      {props.actionIcon && <Icon name={props.actionIcon} className={styles.actionIcon} />}
     </div>
   );
 };
@@ -219,4 +205,4 @@ function getPreviewHash(
   return undefined;
 }
 
-export default memo(CompactMediaPreview);
+export default CompactMediaPreview;

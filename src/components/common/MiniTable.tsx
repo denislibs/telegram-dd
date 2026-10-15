@@ -1,10 +1,11 @@
-import { memo, type TeactNode } from '../../lib/teact/teact';
+import { For } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import buildClassName from '../../util/buildClassName';
 
 import styles from './MiniTable.module.scss';
 
-export type TableEntry = [TeactNode, TeactNode];
+export type TableEntry = [JSX.Element, JSX.Element];
 
 type OwnProps = {
   data: TableEntry[];
@@ -14,17 +15,17 @@ type OwnProps = {
   keyClassName?: string;
 };
 
-const MiniTable = ({ data, style, className, valueClassName, keyClassName }: OwnProps) => {
+const MiniTable = (props: OwnProps) => {
   return (
-    <div className={buildClassName(styles.root, className)} style={style}>
-      {data.map(([key, value]) => (
+    <div class={buildClassName(styles.root, props.className)} style={props.style}>
+      <For each={props.data}>{([key, value]) => (
         <>
-          <div className={buildClassName(styles.key, keyClassName)}>{key}</div>
-          <div className={buildClassName(styles.value, valueClassName)}>{value}</div>
+          <div class={buildClassName(styles.key, props.keyClassName)}>{key}</div>
+          <div class={buildClassName(styles.value, props.valueClassName)}>{value}</div>
         </>
-      ))}
+      )}</For>
     </div>
   );
 };
 
-export default memo(MiniTable);
+export default MiniTable;

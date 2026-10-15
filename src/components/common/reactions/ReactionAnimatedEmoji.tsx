@@ -1,8 +1,9 @@
-import { memo, useMemo, useRef } from '../../../lib/teact/teact';
+import { createMemo } from 'frameact';
 import { getActions, withGlobal } from '../../../global';
+import { createShowTransition } from '../../../lib/kit';
+import type { GlobalState } from '../../../global/types';
 
 import type { ApiAvailableReaction, ApiReaction, ApiStickerSet } from '../../../api/types';
-import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 
 import { getStickerHashById, isSameReaction } from '../../../global/helpers';
 import { selectPerformanceSettingsValue, selectTabState } from '../../../global/selectors';
@@ -12,9 +13,7 @@ import { REM } from '../helpers/mediaDimensions';
 
 import useFlag from '../../../hooks/useFlag';
 import { useIsIntersecting } from '../../../hooks/useIntersectionObserver';
-import useLastCallback from '../../../hooks/useLastCallback';
 import useMedia from '../../../hooks/useMedia';
-import useShowTransitionDeprecated from '../../../hooks/useShowTransitionDeprecated';
 import useCustomEmoji from '../hooks/useCustomEmoji';
 
 import AnimatedSticker from '../AnimatedSticker';
@@ -50,158 +49,139 @@ const EFFECT_SIZE = 6.5 * REM;
 const CUSTOM_EMOJI_EFFECT_MULTIPLIER = 0.5;
 const MIN_PARTICLE_SIZE = REM;
 
-const ReactionAnimatedEmoji = ({
-  containerId,
-  reaction,
-  className,
-  size = ICON_SIZE,
-  effectSize = EFFECT_SIZE,
-  activeReactions,
-  availableReactions,
-  genericEffects,
-  withEffects,
-  withEffectOnly,
-  shouldPause,
-  shouldLoop,
-  loopLimit,
-  observeIntersection,
-}: OwnProps & StateProps) => {
+const ReactionAnimatedEmoji = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const { stopActiveReaction } = getActions();
 
-  const ref = useRef<HTMLDivElement>();
+  let ref!: HTMLDivElement;
 
-  const isCustom = reaction.type === 'custom';
+  const isCustom = createMemo(() => props.reaction.type === 'custom');
 
-  const availableReaction = useMemo(
-    () => availableReactions?.find((r) => isSameReaction(r.reaction, reaction)),
-    [availableReactions, reaction],
+  const availableReaction = createMemo(
+    () => props.availableReactions?.find((r) => isSameReaction(r.reaction, props.reaction)),
   );
-  const centerIconId = availableReaction?.centerIcon?.id;
+  const centerIconId = createMemo(() => availableReaction()?.centerIcon?.id);
 
-  const { customEmoji } = useCustomEmoji(isCustom ? reaction.documentId : undefined);
+  const customEmojiResult = createMemo(() => useCustomEmoji(() => isCustom() ? props.reaction.documentId : undefined));
+  const customEmoji = () => customEmojiResult().customEmoji;
 
-  const assignedEffectId = useMemo(() => {
-    if (!isCustom) return availableReaction?.aroundAnimation?.id;
+  const assignedEffectId = createMemo(() => {
+    if (!isCustom()) return availableReaction()?.aroundAnimation?.id;
 
-    if (!customEmoji) return undefined;
-    const assignedId = availableReactions?.find((available) => available.reaction.emoticon === customEmoji.emoji)
+    if (!customEmoji()) return undefined;
+    const assignedId = props.availableReactions?.find((available) => available.reaction.emoticon === customEmoji().emoji)
       ?.aroundAnimation?.id;
     return assignedId;
-  }, [availableReaction, availableReactions, customEmoji, isCustom]);
+  });
 
-  const effectId = useMemo(() => {
-    if (assignedEffectId) {
-      return assignedEffectId;
+  const effectId = createMemo(() => {
+    if (assignedEffectId()) {
+      return assignedEffectId();
     }
 
-    if (!genericEffects?.stickers) {
+    if (!props.genericEffects?.stickers) {
       return undefined;
     }
 
-    const { stickers } = genericEffects;
+    const { stickers } = props.genericEffects;
     const randomIndex = Math.floor(Math.random() * stickers.length);
 
     return stickers[randomIndex].id;
-  }, [assignedEffectId, genericEffects]);
-
-  const isIntersecting = useIsIntersecting(ref, observeIntersection);
-
-  const mediaHashCenterIcon = centerIconId && getStickerHashById(centerIconId);
-  const mediaHashEffect = effectId && getStickerHashById(effectId);
-
-  const mediaDataCenterIcon = useMedia(mediaHashCenterIcon);
-  const mediaDataEffect = useMedia(mediaHashEffect);
-
-  const activeReaction = useMemo(
-    () => activeReactions?.find((active) => isSameReaction(active, reaction)),
-    [activeReactions, reaction],
-  );
-
-  const shouldPlayEffect = Boolean(
-    withEffects && activeReaction && (isCustom || mediaDataCenterIcon) && mediaDataEffect,
-  );
-  const shouldPlayCenter = isIntersecting && ((shouldPlayEffect && !withEffectOnly) || shouldLoop);
-  const { shouldRender: shouldRenderEffect, transitionClassNames: animationClassNames } = useShowTransitionDeprecated(
-    shouldPlayEffect,
-    undefined,
-    true,
-    'slow',
-  );
-  const { shouldRender: shouldRenderCenter, transitionClassNames: centerAnimationClassNames } =
-    useShowTransitionDeprecated(shouldPlayCenter, undefined, true, 'slow');
-
-  const handleEnded = useLastCallback(() => {
-    stopActiveReaction({ containerId, reaction });
   });
 
-  const [isAnimationLoaded, markAnimationLoaded, unmarkAnimationLoaded] = useFlag();
-  const shouldShowStatic = !isCustom && (!shouldPlayCenter || !isAnimationLoaded);
-  const { shouldRender: shouldRenderStatic, transitionClassNames: staticClassNames } = useShowTransitionDeprecated(
-    shouldShowStatic,
-    undefined,
-    true,
+  const isIntersecting = useIsIntersecting(() => ref, () => props.observeIntersection);
+
+  const mediaHashCenterIcon = createMemo(() => centerIconId() && getStickerHashById(centerIconId()));
+  const mediaHashEffect = createMemo(() => effectId() && getStickerHashById(effectId()));
+
+  const mediaDataCenterIcon = useMedia(mediaHashCenterIcon());
+  const mediaDataEffect = useMedia(mediaHashEffect());
+
+  const activeReaction = createMemo(
+    () => props.activeReactions?.find((active) => isSameReaction(active, props.reaction)),
   );
 
-  const rootClassName = buildClassName(
+  const shouldPlayEffect = createMemo(() => Boolean(
+    props.withEffects && activeReaction() && (isCustom() || mediaDataCenterIcon) && mediaDataEffect,
+  ));
+  const shouldPlayCenter = createMemo(() => isIntersecting && ((shouldPlayEffect() && !props.withEffectOnly) || props.shouldLoop));
+  // TODO(codemod): useShowTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element (transitionClassNames/hasOpenClass are gone)
+  const { shouldRender: shouldRenderEffect, transitionClassNames: animationClassNames } = createShowTransition({ isOpen: () => shouldPlayEffect(), noMountTransition: true, className: 'slow' });
+  const { shouldRender: shouldRenderCenter, transitionClassNames: centerAnimationClassNames } =
+    // TODO(codemod): useShowTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element (transitionClassNames/hasOpenClass are gone)
+    createShowTransition({ isOpen: () => shouldPlayCenter(), noMountTransition: true, className: 'slow' });
+
+  const handleEnded = () => {
+    stopActiveReaction({ containerId: props.containerId, reaction: props.reaction });
+  };
+
+  const [isAnimationLoaded, markAnimationLoaded, unmarkAnimationLoaded] = useFlag();
+  const shouldShowStatic = createMemo(() => !isCustom() && (!shouldPlayCenter() || !isAnimationLoaded()));
+  // TODO(codemod): useShowTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element (transitionClassNames/hasOpenClass are gone)
+  const { shouldRender: shouldRenderStatic, transitionClassNames: staticClassNames } = createShowTransition({ isOpen: () => shouldShowStatic(), noMountTransition: true });
+
+  const rootClassName = createMemo(() => buildClassName(
     styles.root,
-    shouldRenderEffect && styles.animating,
-    withEffectOnly && styles.withEffectOnly,
-    className,
-  );
+    shouldRenderEffect() && styles.animating,
+    props.withEffectOnly && styles.withEffectOnly,
+    props.className,
+  ));
 
   return (
-    <div className={rootClassName} ref={ref}>
-      {!withEffectOnly && shouldRenderStatic && (
+    <div class={rootClassName()} ref={ref}>
+      {!props.withEffectOnly && shouldRenderStatic() && (
         <ReactionStaticEmoji
           className={staticClassNames}
-          reaction={reaction}
-          availableReactions={availableReactions}
-          size={size}
-          observeIntersection={observeIntersection}
+          reaction={props.reaction}
+          availableReactions={props.availableReactions}
+          size={(props.size === undefined ? ICON_SIZE : props.size)}
+          observeIntersection={props.observeIntersection}
         />
       )}
-      {!withEffectOnly && isCustom && (
+      {!props.withEffectOnly && isCustom() && (
         <CustomEmoji
-          documentId={reaction.documentId}
+          documentId={props.reaction.documentId}
           className={styles.customEmoji}
-          size={size}
-          noPlay={shouldPause}
+          size={(props.size === undefined ? ICON_SIZE : props.size)}
+          noPlay={props.shouldPause}
           noVideoOnMobile
-          loopLimit={loopLimit}
-          observeIntersectionForPlaying={observeIntersection}
+          loopLimit={props.loopLimit}
+          observeIntersectionForPlaying={props.observeIntersection}
           forceAlways
         />
       )}
-      {shouldRenderCenter && !isCustom && (
+      {shouldRenderCenter() && !isCustom() && (
+        // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show>
         <AnimatedSticker
-          key={`${centerIconId}-${size}`}
+          key={`${centerIconId()}-${(props.size === undefined ? ICON_SIZE : props.size)}`}
           className={buildClassName(styles.animatedIcon, centerAnimationClassNames)}
-          size={roundToNearestEven(size * CENTER_ICON_MULTIPLIER)}
+          size={roundToNearestEven((props.size === undefined ? ICON_SIZE : props.size) * CENTER_ICON_MULTIPLIER)}
           tgsUrl={mediaDataCenterIcon}
-          play={isIntersecting && !shouldPause}
-          noLoop={!shouldLoop}
+          play={isIntersecting && !props.shouldPause}
+          noLoop={!props.shouldLoop}
           onLoad={markAnimationLoaded}
           onEnded={unmarkAnimationLoaded}
           forceAlways
         />
       )}
-      {shouldRenderEffect && (
+      {shouldRenderEffect() && (
         <>
+          {/* TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show> */}
           <AnimatedSticker
-            key={`${effectId}-${effectSize}`}
+            key={`${effectId()}-${(props.effectSize === undefined ? EFFECT_SIZE : props.effectSize)}`}
             className={buildClassName(styles.effect, animationClassNames)}
-            size={effectSize}
+            size={(props.effectSize === undefined ? EFFECT_SIZE : props.effectSize)}
             tgsUrl={mediaDataEffect}
             play={isIntersecting}
             noLoop
             onEnded={handleEnded}
             forceAlways
           />
-          {isCustom && !assignedEffectId && isIntersecting && (
+          {isCustom() && !assignedEffectId() && isIntersecting && (
             <CustomEmojiEffect
-              reaction={reaction}
+              reaction={props.reaction}
               className={animationClassNames}
-              particleSize={Math.max(size * CUSTOM_EMOJI_EFFECT_MULTIPLIER, MIN_PARTICLE_SIZE)}
+              particleSize={Math.max((props.size === undefined ? ICON_SIZE : props.size) * CUSTOM_EMOJI_EFFECT_MULTIPLIER, MIN_PARTICLE_SIZE)}
               onEnded={handleEnded}
             />
           )}
@@ -211,8 +191,7 @@ const ReactionAnimatedEmoji = ({
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global, { containerId }) => {
+const mapStateToProps = (global: GlobalState, { containerId }: OwnProps) => {
     const { genericEmojiEffects, reactions } = global;
     const { activeReactions } = selectTabState(global);
 
@@ -224,5 +203,6 @@ export default memo(
       genericEffects: genericEmojiEffects,
       withEffects,
     };
-  })(ReactionAnimatedEmoji),
-);
+  };
+
+export default ReactionAnimatedEmoji;

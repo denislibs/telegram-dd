@@ -1,5 +1,6 @@
-import { type ElementRef, useEffect, useRef } from '../../../lib/teact/teact';
+import { createEffect } from 'frameact';
 import { getActions } from '../../../global';
+import { depsOf } from '../../../util/effectDeps';
 
 import type { MessageListType, ThreadId } from '../../../types';
 import type { OnIntersectPinnedMessage } from './usePinnedMessage';
@@ -9,12 +10,12 @@ import { unique } from '../../../util/iteratees';
 
 import useAppLayout from '../../../hooks/useAppLayout';
 import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
-import useLastCallback from '../../../hooks/useLastCallback';
 import useBackgroundMode, { isBackgroundModeActive } from '../../../hooks/window/useBackgroundMode';
 
 const INTERSECTION_THROTTLE_FOR_READING = 150;
 const INTERSECTION_THROTTLE_FOR_MEDIA = IS_ANDROID ? 1000 : 350;
 
+// TODO(codemod): useMessageObservers: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useMessageObservers({
   type,
   containerRef,
@@ -24,7 +25,7 @@ export default function useMessageObservers({
   isQuickPreview,
   onIntersectPinnedMessage,
 }: {
-  containerRef: ElementRef<HTMLDivElement>;
+  containerRef: (el: HTMLDivElement) => void;
   memoFirstUnreadIdRef: { current: number | undefined };
   chatId: string;
   threadId: ThreadId;
@@ -38,10 +39,10 @@ export default function useMessageObservers({
   const { isMobile } = useAppLayout();
   const INTERSECTION_MARGIN_FOR_LOADING = isMobile ? 300 : 500;
 
-  const visibleViewportIdsRef = useRef<number[]>([]);
-  useEffect(() => {
-    visibleViewportIdsRef.current = [];
-  }, [threadId, chatId, type]);
+  let visibleViewportIdsRef: number[] = [];
+  createEffect(depsOf(() => [threadId, chatId, type]), () => {
+    visibleViewportIdsRef = [];
+  });
 
   // Note: Targets bottom marker, not the message itself
   const {
@@ -67,7 +68,7 @@ export default function useMessageObservers({
       const reactionIds: number[] = [];
       const scheduledToUpdateViews: number[] = [];
 
-      const currentVisibleViewportIds = visibleViewportIdsRef.current;
+      const currentVisibleViewportIds = visibleViewportIdsRef;
       const hiddenViewportIds = new Set<number>();
       const newVisibleViewportIds: number[] = [];
 
@@ -111,7 +112,7 @@ export default function useMessageObservers({
         }
       });
 
-      visibleViewportIdsRef.current = unique(currentVisibleViewportIds.concat(newVisibleViewportIds))
+      visibleViewportIdsRef = unique(currentVisibleViewportIds.concat(newVisibleViewportIds))
         .filter((id) => !hiddenViewportIds.has(id))
         .sort((a, b) => a - b);
 
@@ -137,8 +138,8 @@ export default function useMessageObservers({
         animateUnreadReaction({ chatId, messageIds: reactionIds });
       }
 
-      if (visibleViewportIdsRef.current.length) {
-        onIntersectPinnedMessage?.({ firstViewportId: visibleViewportIdsRef.current[0] });
+      if (visibleViewportIdsRef.length) {
+        onIntersectPinnedMessage?.({ firstViewportId: visibleViewportIdsRef[0] });
       }
     },
   );
@@ -156,9 +157,9 @@ export default function useMessageObservers({
     throttleMs: INTERSECTION_THROTTLE_FOR_MEDIA,
   });
 
-  const onMessageUnmount = useLastCallback((messageId: number) => {
-    visibleViewportIdsRef.current = visibleViewportIdsRef.current.filter((id) => id !== messageId);
-  });
+  const onMessageUnmount = (messageId: number) => {
+    visibleViewportIdsRef = visibleViewportIdsRef.filter((id) => id !== messageId);
+  };
 
   return {
     observeIntersectionForReading,

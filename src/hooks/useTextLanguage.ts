@@ -1,21 +1,23 @@
-import { useEffect, useRef, useState } from '../lib/teact/teact';
+import { createEffect, createSignal } from 'frameact';
+import { depsOf } from '../util/effectDeps';
 
 import type { Signal } from '../util/signals';
 
 import { detectLanguage } from '../util/languageDetection';
 
+// TODO(codemod): useTextLanguage: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useTextLanguage(text?: string, isDisabled?: boolean, getIsReady?: Signal<boolean>) {
-  const [language, setLanguage] = useState<string>();
-  const lastTextRef = useRef<string>();
+  const [language, setLanguage] = createSignal<string | undefined>(undefined);
+  let lastTextRef: string | undefined;
 
-  useEffect(() => {
-    if (isDisabled || (getIsReady && !getIsReady()) || lastTextRef.current === text) return;
+  createEffect(depsOf(() => [isDisabled, text, getIsReady]), () => {
+    if (isDisabled || (getIsReady && !getIsReady()) || lastTextRef === text) return;
 
     let isCancelled = false;
 
     if (!text) {
       setLanguage(undefined);
-      lastTextRef.current = undefined;
+      lastTextRef = undefined;
       return;
     }
 
@@ -32,13 +34,13 @@ export default function useTextLanguage(text?: string, isDisabled?: boolean, get
           return;
         }
 
-        lastTextRef.current = text;
+        lastTextRef = text;
       });
 
     return () => {
       isCancelled = true;
     };
-  }, [isDisabled, text, getIsReady]);
+  });
 
   return language;
 }

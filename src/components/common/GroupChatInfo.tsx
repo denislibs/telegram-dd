@@ -1,5 +1,8 @@
-import { memo, useEffect, useMemo } from '../../lib/teact/teact';
-import { getActions, getGlobal, withGlobal } from '../../global';
+import { createEffect, createMemo } from 'frameact';
+import { Show } from 'frameact/dom';
+import { getActions, getGlobal, trackGlobal, withGlobal } from '../../global';
+import { depsOf } from '../../util/effectDeps';
+import type { GlobalState } from '../../global/types';
 
 import type { ApiChat, ApiTopic, ApiTypingStatus, ApiUser } from '../../api/types';
 import type { IconName } from '../../types/icons';
@@ -21,7 +24,6 @@ import { REM } from './helpers/mediaDimensions';
 import renderText from './helpers/renderText';
 
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
 
 import Transition from '../ui/Transition';
 import Avatar from './Avatar';
@@ -70,145 +72,113 @@ type StateProps = {
   monoforumChannel?: ApiChat;
 };
 
-const GroupChatInfo = ({
-  typingStatusByPeerId,
-  className,
-  statusIcon,
-  avatarSize = 'medium',
-  noAvatar,
-  status,
-  withDots,
-  withMediaViewer,
-  withUsername,
-  withFullInfo,
-  withUpdatingStatus,
-  withChatType,
-  noRtl,
-  chat: realChat,
-  onlineCount,
-  areMessagesLoaded,
-  topic,
-  messagesCount,
-  noStatusOrTyping,
-  withStory,
-  storyViewerOrigin,
-  noEmojiStatus,
-  emojiStatusSize,
-  isSavedDialog,
-  self,
-  withMonoforumStatus,
-  monoforumChannel,
-  onClick,
-  onEmojiStatusClick,
-}: OwnProps & StateProps) => {
+const GroupChatInfo = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const { loadFullChat, openMediaViewer, loadMoreProfilePhotos } = getActions();
 
-  const chat = !withMonoforumStatus && monoforumChannel ? monoforumChannel : realChat;
+  const chat = createMemo(() => !props.withMonoforumStatus && props.monoforumChannel ? props.monoforumChannel : props.chat);
 
   const lang = useLang();
 
-  const isSuperGroup = chat && isChatSuperGroup(chat);
-  const isTopic = Boolean(chat?.isForum && topic);
-  const { id: chatId, isMin } = chat || {};
-  const isRestricted = selectIsChatRestricted(getGlobal(), chatId!);
+  const isSuperGroup = createMemo(() => chat() && isChatSuperGroup(chat()));
+  const isTopic = createMemo(() => Boolean(chat()?.isForum && props.topic));
+  const source = createMemo(() => chat() || {});
+  const chatId = () => source().id;
+  const isMin = () => source().isMin;
+  const isRestricted = createMemo(() => selectIsChatRestricted(getGlobal(), chatId()!));
 
-  useEffect(() => {
-    if (chatId && !isMin) {
-      if (withFullInfo) loadFullChat({ chatId });
-      if (withMediaViewer) loadMoreProfilePhotos({ peerId: chatId, isPreload: true });
+  createEffect(depsOf(() => [chatId(), isMin(), props.withFullInfo, isSuperGroup(), props.withMediaViewer] as const), ([chatId2, isMin2, withFullInfo2, isSuperGroup2, withMediaViewer2]) => {
+    if (chatId2 && !isMin2) {
+      if (withFullInfo2) loadFullChat({ chatId: chatId2 });
+      if (withMediaViewer2) loadMoreProfilePhotos({ peerId: chatId2, isPreload: true });
     }
-  }, [chatId, isMin, withFullInfo, isSuperGroup, withMediaViewer]);
+  });
 
-  const handleAvatarViewerOpen = useLastCallback(
-    (e: React.MouseEvent<HTMLDivElement, MouseEvent>, hasMedia: boolean) => {
-      if (chat && hasMedia) {
+  const handleAvatarViewerOpen = (e: React.MouseEvent<HTMLDivElement, MouseEvent>, hasMedia: boolean) => {
+      if (chat() && hasMedia) {
         e.stopPropagation();
         openMediaViewer({
           isAvatarView: true,
-          chatId: chat.id,
+          chatId: chat().id,
           mediaIndex: 0,
-          origin: avatarSize === 'jumbo' ? MediaViewerOrigin.ProfileAvatar : MediaViewerOrigin.MiddleHeaderAvatar,
+          origin: (props.avatarSize === undefined ? 'medium' : props.avatarSize) === 'jumbo' ? MediaViewerOrigin.ProfileAvatar : MediaViewerOrigin.MiddleHeaderAvatar,
         });
       }
-    },
-  );
+    };
 
-  const mainUsername = useMemo(() => chat && withUsername && getMainUsername(chat), [chat, withUsername]);
-
-  if (!chat) {
-    return undefined;
-  }
+  const mainUsername = createMemo(() => chat() && props.withUsername && getMainUsername(chat()));
 
   function renderStatusOrTyping() {
-    if (withUpdatingStatus && !areMessagesLoaded && !isRestricted) {
+    if (props.withUpdatingStatus && !props.areMessagesLoaded && !isRestricted()) {
       return <DotAnimation className="status" content={lang('Updating')} />;
     }
 
-    if (withMonoforumStatus) {
+    if (props.withMonoforumStatus) {
       return (
-        <span className="status" dir="auto">
+        <span class="status" dir="auto">
           {lang('MonoforumStatus')}
         </span>
       );
     }
 
-    if (realChat?.isMonoforum) {
+    if (props.chat?.isMonoforum) {
       return undefined;
     }
 
-    if (status) {
-      return withDots ? (
-        <DotAnimation className="status" content={status} />
+    if (props.status) {
+      return props.withDots ? (
+        <DotAnimation className="status" content={props.status} />
       ) : (
-        <span className="status" dir="auto">
-          {statusIcon && <Icon className="status-icon" name={statusIcon} />}
-          {renderText(status)}
+        <span class="status" dir="auto">
+          {props.statusIcon && <Icon className="status-icon" name={props.statusIcon} />}
+          {renderText(props.status)}
         </span>
       );
     }
 
-    if (!chat) {
+    if (!chat()) {
       return undefined;
     }
 
-    if (typingStatusByPeerId) {
-      return <TypingStatus typingStatusByPeerId={typingStatusByPeerId} />;
+    if (props.typingStatusByPeerId) {
+      return <TypingStatus typingStatusByPeerId={props.typingStatusByPeerId} />;
     }
 
-    if (isTopic) {
+    if (isTopic()) {
       return (
-        <span className="status" dir="auto">
+        <span class="status" dir="auto">
+          {/* TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6) */}
           <Transition
             name="fade"
             shouldRestoreHeight
-            activeKey={messagesCount !== undefined ? 1 : 2}
+            activeKey={props.messagesCount !== undefined ? 1 : 2}
             className="message-count-transition"
           >
-            {messagesCount !== undefined
-              ? lang('Messages', { count: messagesCount }, { pluralValue: messagesCount })
+            {props.messagesCount !== undefined
+              ? lang('Messages', { count: props.messagesCount }, { pluralValue: props.messagesCount })
               : lang('ChatInfoNoMessages')}
           </Transition>
         </span>
       );
     }
 
-    if (withChatType) {
+    if (props.withChatType) {
       return (
-        <span className="status" dir="auto">
-          {lang(getChatTypeLangKey(chat))}
+        <span class="status" dir="auto">
+          {lang(getChatTypeLangKey(chat()))}
         </span>
       );
     }
 
-    const groupStatusElement = <span className="group-status">{getGroupStatus(lang, chat)}</span>;
-    const onlineStatus = onlineCount
-      ? lang('OnlineCount', { count: onlineCount }, { pluralValue: onlineCount })
+    const groupStatusElement = <span class="group-status">{trackGlobal(() => getGroupStatus(lang, chat()))}</span>;
+    const onlineStatus = props.onlineCount
+      ? lang('OnlineCount', { count: props.onlineCount }, { pluralValue: props.onlineCount })
       : undefined;
-    const onlineStatusElement = onlineStatus ? <span className="online-status">{onlineStatus}</span> : undefined;
+    const onlineStatusElement = onlineStatus ? <span class="online-status">{onlineStatus}</span> : undefined;
 
     return (
-      <span className="status">
-        {mainUsername && <span className="handle withStatus">{mainUsername}</span>}
+      <span class="status">
+        {mainUsername() && <span class="handle withStatus">{mainUsername()}</span>}
         {!onlineStatusElement
           ? groupStatusElement
           : lang(
@@ -224,60 +194,61 @@ const GroupChatInfo = ({
   }
 
   return (
+    <Show when={chat()}>
     <div
-      className={buildClassName('ChatInfo', className)}
-      dir={!noRtl && lang.isRtl ? 'rtl' : undefined}
-      onClick={onClick}
+      class={buildClassName('ChatInfo', props.className)}
+      dir={!props.noRtl && lang.isRtl ? 'rtl' : undefined}
+      onClick={(e) => props.onClick?.(e)}
     >
-      {!noAvatar && !isTopic && (
+      {!props.noAvatar && !isTopic() && (
         <>
-          {isSavedDialog && self && (
+          {props.isSavedDialog && props.self && (
             <Avatar
-              key="saved-messages"
-              size={avatarSize}
-              peer={self}
+              size={(props.avatarSize === undefined ? 'medium' : props.avatarSize)}
+              peer={props.self}
               isSavedMessages
               className="saved-dialog-avatar"
             />
           )}
+          {/* TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show> */}
           <Avatar
-            key={chat.id}
-            className={buildClassName(isSavedDialog && 'overlay-avatar')}
-            size={avatarSize}
-            peer={chat}
-            withStory={withStory}
-            asMessageBubble={Boolean(monoforumChannel)}
-            storyViewerOrigin={storyViewerOrigin}
+            key={chat().id}
+            className={buildClassName(props.isSavedDialog && 'overlay-avatar')}
+            size={(props.avatarSize === undefined ? 'medium' : props.avatarSize)}
+            peer={chat()}
+            withStory={props.withStory}
+            asMessageBubble={Boolean(props.monoforumChannel)}
+            storyViewerOrigin={props.storyViewerOrigin}
             storyViewerMode="single-peer"
-            isSavedDialog={isSavedDialog}
-            onClick={withMediaViewer ? handleAvatarViewerOpen : undefined}
+            isSavedDialog={props.isSavedDialog}
+            onClick={props.withMediaViewer ? handleAvatarViewerOpen : undefined}
           />
         </>
       )}
-      {isTopic && <TopicIcon topic={topic!} className="topic-header-icon" size={TOPIC_ICON_SIZE} />}
-      <div className="info">
-        {topic ? (
-          <h3 dir="auto" className="fullName">
-            {renderText(topic.title)}
+      {isTopic() && <TopicIcon topic={props.topic!} className="topic-header-icon" size={TOPIC_ICON_SIZE} />}
+      <div class="info">
+        {props.topic ? (
+          <h3 dir="auto" class="fullName">
+            {renderText(props.topic.title)}
           </h3>
         ) : (
           <FullNameTitle
-            peer={chat}
-            isMonoforum={!withMonoforumStatus && Boolean(monoforumChannel)}
-            emojiStatusSize={emojiStatusSize}
-            withEmojiStatus={!noEmojiStatus}
-            isSavedDialog={isSavedDialog}
-            onEmojiStatusClick={onEmojiStatusClick}
+            peer={chat()}
+            isMonoforum={!props.withMonoforumStatus && Boolean(props.monoforumChannel)}
+            emojiStatusSize={props.emojiStatusSize}
+            withEmojiStatus={!props.noEmojiStatus}
+            isSavedDialog={props.isSavedDialog}
+            onEmojiStatusClick={props.onEmojiStatusClick}
           />
         )}
-        {!noStatusOrTyping && renderStatusOrTyping()}
+        {!props.noStatusOrTyping && renderStatusOrTyping()}
       </div>
     </div>
+    </Show>
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global, { chatId, threadId, isSavedDialog }): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState, { chatId, threadId, isSavedDialog }: OwnProps): Complete<StateProps> => {
     const chat = selectChat(global, chatId);
     const onlineCount = chat ? selectChatOnlineCount(global, chat) : undefined;
     const areMessagesLoaded = Boolean(
@@ -297,5 +268,6 @@ export default memo(
       self,
       monoforumChannel,
     };
-  })(GroupChatInfo),
-);
+  };
+
+export default GroupChatInfo;

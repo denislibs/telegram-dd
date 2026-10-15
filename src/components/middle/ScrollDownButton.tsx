@@ -1,5 +1,4 @@
-import type { FC } from '../../lib/teact/teact';
-import { memo, useRef } from '../../lib/teact/teact';
+import { createMemo } from 'frameact';
 
 import type { IconName } from '../../types/icons';
 
@@ -25,37 +24,40 @@ type OwnProps = {
   className?: string;
 };
 
-const ScrollDownButton: FC<OwnProps> = ({ icon, ariaLabelLang, unreadCount, onClick, onReadAll, className }) => {
+const ScrollDownButton = (props: OwnProps) => {
   const oldLang = useOldLang();
   const lang = useLang();
 
-  const ref = useRef<HTMLDivElement>();
-  const { isContextMenuOpen, handleContextMenu, handleContextMenuClose, handleContextMenuHide } =
-    useContextMenuHandlers(ref, !onReadAll);
+  let ref!: HTMLDivElement;
+  const contextMenuHandlersResult = createMemo(() => useContextMenuHandlers(() => ref, !props.onReadAll));
+  const isContextMenuOpen = () => contextMenuHandlersResult().isContextMenuOpen;
+  const handleContextMenu = () => contextMenuHandlersResult().handleContextMenu;
+  const handleContextMenuClose = () => contextMenuHandlersResult().handleContextMenuClose;
+  const handleContextMenuHide = () => contextMenuHandlersResult().handleContextMenuHide;
 
   return (
-    <div className={buildClassName(styles.root, className)} ref={ref}>
+    <div class={buildClassName(styles.root, props.className)} ref={ref}>
       <Button
         color="secondary"
         round
         className={styles.button}
-        onClick={onClick}
-        onContextMenu={handleContextMenu}
-        ariaLabel={oldLang(ariaLabelLang)}
-        iconName={icon}
+        onClick={props.onClick}
+        onContextMenu={handleContextMenu()}
+        ariaLabel={oldLang(props.ariaLabelLang)}
+        iconName={props.icon}
         iconClassName={styles.icon}
       />
-      {Boolean(unreadCount) && <div className={styles.unreadCount}>{formatIntegerCompact(lang, unreadCount)}</div>}
-      {onReadAll && (
+      {Boolean(props.unreadCount) && <div class={styles.unreadCount}>{formatIntegerCompact(lang, props.unreadCount)}</div>}
+      {props.onReadAll && (
         <Menu
-          isOpen={isContextMenuOpen}
-          onClose={handleContextMenuClose}
-          onCloseAnimationEnd={handleContextMenuHide}
+          isOpen={isContextMenuOpen()}
+          onClose={handleContextMenuClose()}
+          onCloseAnimationEnd={handleContextMenuHide()}
           autoClose
           positionX="right"
           positionY="bottom"
         >
-          <MenuItem icon="readchats" onClick={onReadAll}>
+          <MenuItem icon="readchats" onClick={props.onReadAll}>
             {oldLang('MarkAllAsRead')}
           </MenuItem>
         </Menu>
@@ -64,4 +66,4 @@ const ScrollDownButton: FC<OwnProps> = ({ icon, ariaLabelLang, unreadCount, onCl
   );
 };
 
-export default memo(ScrollDownButton);
+export default ScrollDownButton;

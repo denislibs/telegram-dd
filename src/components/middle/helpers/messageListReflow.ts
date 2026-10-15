@@ -1,4 +1,4 @@
-import { requestForcedReflow } from '../../../lib/fasterdom/fasterdom';
+import { requestForcedReflow } from 'frameact';
 
 type ReflowCallback = () => NoneToVoidFunction | void;
 

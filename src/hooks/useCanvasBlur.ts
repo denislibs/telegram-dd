@@ -1,13 +1,14 @@
-import { useEffect, useRef } from '../lib/teact/teact';
+import { createEffect, requestMeasure, requestMutation } from 'frameact';
+import { depsOf } from '../util/effectDeps';
 
 import fastBlur from '../lib/fastBlur';
-import { requestMeasure, requestMutation } from '../lib/fasterdom/fasterdom';
 import { IS_CANVAS_FILTER_SUPPORTED } from '../util/browser/windowEnvironment';
 import useSyncEffect from './useSyncEffect';
 
 const RADIUS = 2;
 const ITERATIONS = 2;
 
+// TODO(codemod): useCanvasBlur: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useCanvasBlur(
   dataUri?: string,
   isDisabled = false,
@@ -16,23 +17,24 @@ export default function useCanvasBlur(
   preferredWidth?: number,
   preferredHeight?: number,
 ) {
-  const canvasRef = useRef<HTMLCanvasElement>();
-  const isStartedRef = useRef();
+  let canvasRef!: HTMLCanvasElement;
+  let isStartedRef;
 
-  useSyncEffect(() => {
+  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
+  createEffect(depsOf(() => [dataUri, isDisabled]), () => {
     if (!isDisabled) {
-      isStartedRef.current = false;
+      isStartedRef = false;
     }
-  }, [dataUri, isDisabled]);
+  });
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
+  createEffect(depsOf(() => [dataUri, isDisabled, preferredHeight, preferredWidth, radius, withRaf]), () => {
+    const canvas = canvasRef;
 
-    if (!dataUri || !canvas || isDisabled || isStartedRef.current) {
+    if (!dataUri || !canvas || isDisabled || isStartedRef) {
       return;
     }
 
-    isStartedRef.current = true;
+    isStartedRef = true;
 
     const img = new Image();
 
@@ -66,7 +68,8 @@ export default function useCanvasBlur(
     };
 
     img.src = dataUri;
-  }, [dataUri, isDisabled, preferredHeight, preferredWidth, radius, withRaf]);
+  });
 
+  // TODO(codemod): "canvasRef" was a ref object passed as a value: pass an accessor (() => canvasRef) or a callback ref
   return canvasRef;
 }

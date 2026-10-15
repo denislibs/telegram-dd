@@ -1,8 +1,9 @@
-import { memo, useEffect, useMemo } from '../../../../lib/teact/teact';
+import { createEffect, createMemo, onMount } from 'frameact';
+import { For } from 'frameact/dom';
 import { getActions, getGlobal } from '../../../../global';
+import { depsOf } from '../../../../util/effectDeps';
 
 import type { ApiMessage, ApiPeer, ApiReaction, ApiReactionKey, ApiSavedReactionTag } from '../../../../api/types';
-import type { ObserveFn } from '../../../../hooks/useIntersectionObserver';
 import type { ThreadId } from '../../../../types';
 
 import { getReactionKey, isReactionChosen } from '../../../../global/helpers';
@@ -10,8 +11,6 @@ import { selectPeer } from '../../../../global/selectors';
 import buildClassName from '../../../../util/buildClassName';
 import { getMessageKey } from '../../../../util/keys/messageKey';
 
-import useEffectOnce from '../../../../hooks/useEffectOnce';
-import useLastCallback from '../../../../hooks/useLastCallback';
 import useOldLang from '../../../../hooks/useOldLang';
 
 import ReactionButton from './ReactionButton';
@@ -34,17 +33,7 @@ type OwnProps = {
 const MAX_RECENT_AVATARS = 3;
 const PAID_SEND_DELAY = 5000;
 
-const Reactions = ({
-  message,
-  threadId,
-  isOutside,
-  metaChildren,
-  observeIntersection,
-  noRecentReactors,
-  isCurrentUserPremium,
-  tags,
-  isAccountFrozen,
-}: OwnProps) => {
+const Reactions = (p: OwnProps) => {
   const {
     toggleReaction,
     addLocalPaidReaction,
@@ -57,15 +46,19 @@ const Reactions = ({
   } = getActions();
   const lang = useOldLang();
 
-  const { results, areTags, recentReactions } = message.reactions!;
-  const withServiceReactions = Boolean(message.areReactionsPossible && message.reactions);
+  const source = createMemo(() => p.message.reactions!);
+  const results = () => source().results;
+  const areTags = () => source().areTags;
+  const recentReactions = () => source().recentReactions;
+  const withServiceReactions = createMemo(() => Boolean(p.message.areReactionsPossible && p.message.reactions));
 
-  const totalCount = useMemo(() => results.reduce((acc, reaction) => acc + reaction.count, 0), [results]);
+  const totalCount = createMemo(() => results().reduce((acc, reaction) => acc + reaction.count, 0));
 
-  const recentReactorsByReactionKey = useMemo(() => {
+  const recentReactorsByReactionKey = createMemo(() => {
+    // TODO(codemod): getGlobal() in a memo / JSX is a one-time read: use useGlobal() (store contract §12.4)
     const global = getGlobal();
 
-    return recentReactions?.reduce(
+    return recentReactions()?.reduce(
       (acc, recentReaction) => {
         const { reaction, peerId } = recentReaction;
         const key = getReactionKey(reaction);
@@ -80,15 +73,16 @@ const Reactions = ({
       },
       {} as Record<ApiReactionKey, ApiPeer[]>,
     );
-  }, [recentReactions]);
+  });
 
-  const props = useMemo(() => {
-    const messageKey = getMessageKey(message);
-    return results.map((reaction) => {
+  // TODO(codemod): dependency on a container (tags) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
+  const props = createMemo(() => {
+    const messageKey = getMessageKey(p.message);
+    return results().map((reaction) => {
       const reactionKey = getReactionKey(reaction.reaction);
-      const recentReactors = recentReactorsByReactionKey?.[reactionKey];
-      const shouldHideRecentReactors = totalCount > MAX_RECENT_AVATARS || noRecentReactors;
-      const tag = areTags ? tags?.[reactionKey] : undefined;
+      const recentReactors = recentReactorsByReactionKey()?.[reactionKey];
+      const shouldHideRecentReactors = totalCount() > MAX_RECENT_AVATARS || p.noRecentReactors;
+      const tag = areTags() ? p.tags?.[reactionKey] : undefined;
 
       return {
         reaction,
@@ -99,135 +93,132 @@ const Reactions = ({
         tag,
       };
     });
-  }, [message, noRecentReactors, recentReactorsByReactionKey, results, areTags, tags, totalCount]);
+  });
 
-  const handleClick = useLastCallback((reaction: ApiReaction) => {
-    if (isAccountFrozen) {
+  const handleClick = (reaction: ApiReaction) => {
+    if (p.isAccountFrozen) {
       openFrozenAccountModal();
       return;
     }
-    if (areTags) {
-      if (!isCurrentUserPremium) {
+    if (areTags()) {
+      if (!p.isCurrentUserPremium) {
         openPremiumModal({
           initialSection: 'saved_tags',
         });
         return;
       }
 
-      updateMiddleSearch({ chatId: message.chatId, threadId, update: { savedTag: reaction } });
-      performMiddleSearch({ chatId: message.chatId, threadId });
+      updateMiddleSearch({ chatId: p.message.chatId, threadId: p.threadId, update: { savedTag: reaction } });
+      performMiddleSearch({ chatId: p.message.chatId, threadId: p.threadId });
       return;
     }
 
     toggleReaction({
-      chatId: message.chatId,
-      messageId: message.id,
+      chatId: p.message.chatId,
+      messageId: p.message.id,
       reaction,
     });
-  });
+  };
 
-  const paidLocalCount = useMemo(() => results.find((r) => r.reaction.type === 'paid')?.localAmount || 0, [results]);
+  const paidLocalCount = createMemo(() => results().find((r) => r.reaction.type === 'paid')?.localAmount || 0);
 
-  const handlePaidClick = useLastCallback((count: number) => {
-    if (isAccountFrozen) {
+  const handlePaidClick = (count: number) => {
+    if (p.isAccountFrozen) {
       openFrozenAccountModal();
       return;
     }
 
     addLocalPaidReaction({
-      chatId: message.chatId,
-      messageId: message.id,
+      chatId: p.message.chatId,
+      messageId: p.message.id,
       count,
     });
-  });
+  };
 
-  useEffect(() => {
-    if (!paidLocalCount) return;
+  createEffect(depsOf(() => [lang, p.message, paidLocalCount()] as const), ([, , paidLocalCount2]) => {
+    if (!paidLocalCount2) return;
 
     showNotification({
-      localId: getMessageKey(message),
+      localId: getMessageKey(p.message),
       title: lang('StarsSentTitle'),
-      message: lang('StarsSentText', paidLocalCount),
+      message: lang('StarsSentText', paidLocalCount2),
       actionText: lang('StarsSentUndo'),
-      cacheBreaker: paidLocalCount.toString(),
+      cacheBreaker: paidLocalCount2.toString(),
       action: {
         action: 'resetLocalPaidReactions',
-        payload: { chatId: message.chatId, messageId: message.id },
+        payload: { chatId: p.message.chatId, messageId: p.message.id },
       },
       dismissAction: {
         action: 'sendPaidReaction',
-        payload: { chatId: message.chatId, messageId: message.id },
+        payload: { chatId: p.message.chatId, messageId: p.message.id },
       },
       duration: PAID_SEND_DELAY,
       shouldShowTimer: true,
       disableClickDismiss: true,
       icon: 'star',
     });
-  }, [lang, message, paidLocalCount]);
+  });
 
-  const handleRemoveReaction = useLastCallback((reaction: ApiReaction) => {
-    if (isAccountFrozen) {
+  const handleRemoveReaction = (reaction: ApiReaction) => {
+    if (p.isAccountFrozen) {
       openFrozenAccountModal();
       return;
     }
 
     toggleReaction({
-      chatId: message.chatId,
-      messageId: message.id,
+      chatId: p.message.chatId,
+      messageId: p.message.id,
       reaction,
     });
-  });
+  };
 
   // Reset paid reactions on unmount
-  useEffectOnce(() => () => {
+  onMount(() => () => {
     resetLocalPaidReactions({
-      chatId: message.chatId,
-      messageId: message.id,
+      chatId: p.message.chatId,
+      messageId: p.message.id,
     });
   });
 
   return (
     <div
-      className={buildClassName('Reactions', isOutside && 'is-outside', withServiceReactions && 'is-service')}
+      class={buildClassName('Reactions', p.isOutside && 'is-outside', withServiceReactions() && 'is-service')}
       dir={lang.isRtl ? 'rtl' : 'ltr'}
     >
-      {props.map(({ reaction, recentReactors, messageKey, reactionKey, isChosen, tag }) =>
-        areTags ? (
+      <For each={props()}>{({ reaction, recentReactors, messageKey, reactionKey, isChosen, tag }) =>
+        areTags() ? (
           <SavedTagButton
-            key={reactionKey}
             className="message-reaction"
             chosenClassName="chosen"
             containerId={messageKey}
-            isOwnMessage={message.isOutgoing}
+            isOwnMessage={p.message.isOutgoing}
             isChosen={isChosen}
             reaction={reaction.reaction as ApiReaction}
             tag={tag}
-            withContextMenu={isCurrentUserPremium}
+            withContextMenu={p.isCurrentUserPremium}
             onClick={handleClick}
             onRemove={handleRemoveReaction}
-            observeIntersection={observeIntersection}
+            observeIntersection={p.observeIntersection}
           />
         ) : (
           <ReactionButton
-            key={reactionKey}
-            chatId={message.chatId}
-            messageId={message.id}
+            chatId={p.message.chatId}
+            messageId={p.message.id}
             className="message-reaction"
             chosenClassName="chosen"
             containerId={messageKey}
-            isOwnMessage={message.isOutgoing}
+            isOwnMessage={p.message.isOutgoing}
             recentReactors={recentReactors}
-            isOutside={isOutside}
+            isOutside={p.isOutside}
             reaction={reaction}
             onClick={handleClick}
             onPaidClick={handlePaidClick}
-            observeIntersection={observeIntersection}
+            observeIntersection={p.observeIntersection}
           />
-        ),
-      )}
-      {metaChildren}
+        )}</For>
+      {p.metaChildren}
     </div>
   );
 };
 
-export default memo(Reactions);
+export default Reactions;

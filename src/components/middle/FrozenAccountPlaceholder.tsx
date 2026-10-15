@@ -1,8 +1,6 @@
-import { memo } from '../../lib/teact/teact';
 import { getActions } from '../../global';
 
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
 
 import styles from './FrozenAccountPlaceholder.module.scss';
 
@@ -11,16 +9,16 @@ function FrozenAccountPlaceholder() {
 
   const { openFrozenAccountModal } = getActions();
 
-  const handleClick = useLastCallback(() => {
+  const handleClick = () => {
     openFrozenAccountModal();
-  });
+  };
 
   return (
-    <div className={styles.root} onClick={handleClick}>
-      <div className={styles.title}>{lang('ComposerTitleFrozenAccount')}</div>
-      <div className={styles.subtitle}>{lang('ComposerSubtitleFrozenAccount')}</div>
+    <div class={styles.root} onClick={handleClick}>
+      <div class={styles.title}>{lang('ComposerTitleFrozenAccount')}</div>
+      <div class={styles.subtitle}>{lang('ComposerSubtitleFrozenAccount')}</div>
     </div>
   );
 }
 
-export default memo(FrozenAccountPlaceholder);
+export default FrozenAccountPlaceholder;

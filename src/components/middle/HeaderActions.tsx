@@ -1,12 +1,12 @@
-import { memo, useCallback, useMemo, useRef, useState } from '../../lib/teact/teact';
+import { createMemo, createSignal, requestMeasure, requestNextMutation } from 'frameact';
 import { getActions, withGlobal } from '../../global';
+import type { GlobalState } from '../../global/types';
 
 import type { IAnchorPosition, MessageListType, ThreadId, TranslationTone } from '../../types';
 import { MAIN_THREAD_ID } from '../../api/types';
 import { ManagementScreens } from '../../types';
 
 import { COCOON_EMOJI_ID } from '../../config';
-import { requestMeasure, requestNextMutation } from '../../lib/fasterdom/fasterdom';
 import {
   getHasAdminRight,
   getIsSavedDialog,
@@ -37,7 +37,6 @@ import focusNoScroll from '../../util/focusNoScroll';
 
 import { useHotkeys } from '../../hooks/useHotkeys';
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
 import useOldLang from '../../hooks/useOldLang';
 
 import CustomEmoji from '../common/CustomEmoji';
@@ -87,38 +86,8 @@ interface StateProps {
   currentTone?: TranslationTone;
 }
 
-const HeaderActions = ({
-  chatId,
-  threadId,
-  noMenu,
-  isMobile,
-  isChannel,
-  canSubscribe,
-  canSearch,
-  canCall,
-  canMute,
-  canViewStatistics,
-  canViewMonetization,
-  canViewBoosts,
-  canShowBoostModal,
-  canLeave,
-  canEnterVoiceChat,
-  canCreateVoiceChat,
-  channelMonoforumId,
-  pendingJoinRequests,
-  isRightColumnShown,
-  isForForum,
-  noAnimation,
-  canTranslate,
-  isTranslating,
-  translationLanguage,
-  language,
-  detectedChatLanguage,
-  doNotTranslate,
-  isAccountFrozen,
-  currentTone,
-  onTopicSearch,
-}: OwnProps & StateProps) => {
+const HeaderActions = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const {
     openMiddleSearch,
     requestMasterAndRequestCall,
@@ -134,49 +103,49 @@ const HeaderActions = ({
     openFrozenAccountModal,
     openCocoonModal,
   } = getActions();
-  const menuButtonRef = useRef<HTMLButtonElement>();
+  let menuButtonRef!: HTMLButtonElement;
   const oldLang = useOldLang();
   const lang = useLang();
 
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [menuAnchor, setMenuAnchor] = useState<IAnchorPosition | undefined>(undefined);
+  const [isMenuOpen, setIsMenuOpen] = createSignal(false);
+  const [menuAnchor, setMenuAnchor] = createSignal<IAnchorPosition | undefined>(undefined);
 
-  const handleHeaderMenuOpen = useLastCallback(() => {
+  const handleHeaderMenuOpen = () => {
     setIsMenuOpen(true);
-    const rect = menuButtonRef.current!.getBoundingClientRect();
+    const rect = menuButtonRef!.getBoundingClientRect();
     setMenuAnchor({ x: rect.right, y: rect.bottom });
-  });
+  };
 
-  const handleHeaderMenuClose = useLastCallback(() => {
+  const handleHeaderMenuClose = () => {
     setIsMenuOpen(false);
-  });
+  };
 
-  const handleHeaderMenuHide = useLastCallback(() => {
+  const handleHeaderMenuHide = () => {
     setMenuAnchor(undefined);
-  });
+  };
 
-  const handleTranslateClick = useLastCallback(() => {
-    if (isTranslating) {
-      requestChatTranslation({ chatId, toLanguageCode: undefined });
+  const handleTranslateClick = () => {
+    if (props.isTranslating) {
+      requestChatTranslation({ chatId: props.chatId, toLanguageCode: undefined });
       return;
     }
 
-    requestChatTranslation({ chatId, toLanguageCode: translationLanguage });
-  });
+    requestChatTranslation({ chatId: props.chatId, toLanguageCode: props.translationLanguage });
+  };
 
-  const handleJoinRequestsClick = useLastCallback(() => {
+  const handleJoinRequestsClick = () => {
     requestNextManagementScreen({ screen: ManagementScreens.JoinRequests });
-  });
+  };
 
-  const handleSearchClick = useLastCallback(() => {
-    if (isForForum) {
-      onTopicSearch?.();
+  const handleSearchClick = () => {
+    if (props.isForForum) {
+      props.onTopicSearch?.();
       return;
     }
 
     openMiddleSearch();
 
-    if (noAnimation) {
+    if (props.noAnimation) {
       // The second RAF is necessary because Teact must update the state and render the async component
       requestMeasure(() => {
         requestNextMutation(setFocusInSearchInput);
@@ -184,32 +153,31 @@ const HeaderActions = ({
     } else {
       setFocusInSearchInput();
     }
-  });
+  };
 
-  const handleAsMessagesClick = useLastCallback(() => {
-    openChat({ id: chatId });
-    setViewForumAsMessages({ chatId, isEnabled: true });
-  });
+  const handleAsMessagesClick = () => {
+    openChat({ id: props.chatId });
+    setViewForumAsMessages({ chatId: props.chatId, isEnabled: true });
+  };
 
-  const handleRequestCall = useLastCallback(() => {
-    if (isAccountFrozen) {
+  const handleRequestCall = () => {
+    if (props.isAccountFrozen) {
       openFrozenAccountModal();
       return;
     }
-    requestMasterAndRequestCall({ userId: chatId });
-  });
+    requestMasterAndRequestCall({ userId: props.chatId });
+  };
 
-  const handleHotkeySearchClick = useLastCallback((e: KeyboardEvent) => {
-    if (!canSearch || !IS_APP || e.shiftKey) {
+  const handleHotkeySearchClick = (e: KeyboardEvent) => {
+    if (!props.canSearch || !IS_APP || e.shiftKey) {
       return;
     }
 
     e.preventDefault();
     handleSearchClick();
-  });
+  };
 
-  const getTextWithLanguage = useCallback(
-    (langKey: string, langCode: string) => {
+  const getTextWithLanguage = (langKey: string, langCode: string) => {
       const simplified = langCode.split('-')[0];
       const translationKey = `TranslateLanguage${simplified.toUpperCase()}`;
       const name = oldLang(translationKey);
@@ -217,68 +185,63 @@ const HeaderActions = ({
         return oldLang(langKey, name);
       }
 
-      const translatedNames = new Intl.DisplayNames([language], { type: 'language' });
+      const translatedNames = new Intl.DisplayNames([props.language], { type: 'language' });
       const translatedName = translatedNames.of(langCode)!;
       return oldLang(`${langKey}Other`, translatedName);
-    },
-    [language, oldLang],
-  );
+    };
 
-  const buttonText = useMemo(() => {
-    if (isTranslating) return oldLang('ShowOriginalButton');
+  const buttonText = createMemo(() => {
+    if (props.isTranslating) return oldLang('ShowOriginalButton');
 
-    return getTextWithLanguage('TranslateToButton', translationLanguage);
-  }, [translationLanguage, getTextWithLanguage, isTranslating, oldLang]);
-
-  const doNotTranslateText = useMemo(() => {
-    if (!detectedChatLanguage) return undefined;
-
-    return getTextWithLanguage('DoNotTranslateLanguage', detectedChatLanguage);
-  }, [getTextWithLanguage, detectedChatLanguage]);
-
-  const handleHide = useLastCallback(() => {
-    togglePeerTranslations({ chatId, isEnabled: false });
-    requestChatTranslation({ chatId, toLanguageCode: undefined });
+    return getTextWithLanguage('TranslateToButton', props.translationLanguage);
   });
 
-  const handleChangeLanguage = useLastCallback(() => {
-    openChatLanguageModal({ chatId });
+  const doNotTranslateText = createMemo(() => {
+    if (!props.detectedChatLanguage) return undefined;
+
+    return getTextWithLanguage('DoNotTranslateLanguage', props.detectedChatLanguage);
   });
 
-  const handleCocoonClick = useLastCallback(() => {
+  const handleHide = () => {
+    togglePeerTranslations({ chatId: props.chatId, isEnabled: false });
+    requestChatTranslation({ chatId: props.chatId, toLanguageCode: undefined });
+  };
+
+  const handleChangeLanguage = () => {
+    openChatLanguageModal({ chatId: props.chatId });
+  };
+
+  const handleCocoonClick = () => {
     openCocoonModal();
-  });
+  };
 
-  const handleDoNotTranslate = useLastCallback(() => {
-    if (!detectedChatLanguage) return;
+  const handleDoNotTranslate = () => {
+    if (!props.detectedChatLanguage) return;
 
     setSettingOption({
-      doNotTranslate: [...doNotTranslate, detectedChatLanguage],
+      doNotTranslate: [...props.doNotTranslate, props.detectedChatLanguage],
     });
-    requestChatTranslation({ chatId, toLanguageCode: undefined });
+    requestChatTranslation({ chatId: props.chatId, toLanguageCode: undefined });
 
-    showNotification({ message: getTextWithLanguage('AddedToDoNotTranslate', detectedChatLanguage) });
-  });
+    showNotification({ message: getTextWithLanguage('AddedToDoNotTranslate', props.detectedChatLanguage) });
+  };
 
-  const handleSetTone = useLastCallback((tone: TranslationTone) => {
-    setChatTranslationTone({ chatId, tone });
+  const handleSetTone = (tone: TranslationTone) => {
+    setChatTranslationTone({ chatId: props.chatId, tone });
     setSettingOption({ translationTone: tone });
-  });
+  };
 
   useHotkeys(
-    useMemo(
-      () => ({
+    ({
         'Mod+F': handleHotkeySearchClick,
       }),
-      [],
-    ),
   );
 
-  const MoreMenuButton = useMemo(() => {
+  const MoreMenuButton = createMemo(() => {
     return ({ onTrigger, isOpen }: { onTrigger: () => void; isOpen?: boolean }) => (
       <Button
         round
-        ripple={isRightColumnShown}
+        ripple={props.isRightColumnShown}
         color="translucent"
         size="smaller"
         className={isOpen ? 'active' : ''}
@@ -287,14 +250,14 @@ const HeaderActions = ({
         iconName="language"
       />
     );
-  }, [isRightColumnShown, oldLang]);
+  });
 
   return (
-    <div className="HeaderActions">
-      {!isForForum && canTranslate && (
-        <DropdownMenu className="stickers-more-menu with-menu-transitions" trigger={MoreMenuButton} positionX="right">
+    <div class="HeaderActions">
+      {!props.isForForum && props.canTranslate && (
+        <DropdownMenu className="stickers-more-menu with-menu-transitions" trigger={MoreMenuButton()} positionX="right">
           <MenuItem icon="language" onClick={handleTranslateClick}>
-            {buttonText}
+            {buttonText()}
           </MenuItem>
           <MenuItem icon="replace" onClick={handleChangeLanguage}>
             {oldLang('Chat.Translate.Menu.To')}
@@ -305,22 +268,22 @@ const HeaderActions = ({
             submenu={
               <>
                 <MenuItem
-                  icon={currentTone === 'neutral' ? 'check' : undefined}
-                  customIcon={currentTone !== 'neutral' ? <Icon name="placeholder" /> : undefined}
+                  icon={props.currentTone === 'neutral' ? 'check' : undefined}
+                  customIcon={props.currentTone !== 'neutral' ? <Icon name="placeholder" /> : undefined}
                   onClick={() => handleSetTone('neutral')}
                 >
                   {lang('TranslationToneNeutral')}
                 </MenuItem>
                 <MenuItem
-                  icon={currentTone === 'formal' ? 'check' : undefined}
-                  customIcon={currentTone !== 'formal' ? <Icon name="placeholder" /> : undefined}
+                  icon={props.currentTone === 'formal' ? 'check' : undefined}
+                  customIcon={props.currentTone !== 'formal' ? <Icon name="placeholder" /> : undefined}
                   onClick={() => handleSetTone('formal')}
                 >
                   {lang('TranslationToneFormal')}
                 </MenuItem>
                 <MenuItem
-                  icon={currentTone === 'casual' ? 'check' : undefined}
-                  customIcon={currentTone !== 'casual' ? <Icon name="placeholder" /> : undefined}
+                  icon={props.currentTone === 'casual' ? 'check' : undefined}
+                  customIcon={props.currentTone !== 'casual' ? <Icon name="placeholder" /> : undefined}
                   onClick={() => handleSetTone('casual')}
                 >
                   {lang('TranslationToneCasual')}
@@ -331,9 +294,9 @@ const HeaderActions = ({
             {lang('TranslationTone')}
           </NestedMenuItem>
           <MenuSeparator />
-          {detectedChatLanguage && (
+          {props.detectedChatLanguage && (
             <MenuItem icon="hand-stop" onClick={handleDoNotTranslate}>
-              {doNotTranslateText}
+              {doNotTranslateText()}
             </MenuItem>
           )}
           <MenuItem icon="close-circle" onClick={handleHide}>
@@ -361,12 +324,12 @@ const HeaderActions = ({
           </MenuItem>
         </DropdownMenu>
       )}
-      {!isMobile && (
+      {!props.isMobile && (
         <>
-          {canSearch && (
+          {props.canSearch && (
             <Button
               round
-              ripple={isRightColumnShown}
+              ripple={props.isRightColumnShown}
               color="translucent"
               size="smaller"
               onClick={handleSearchClick}
@@ -374,7 +337,7 @@ const HeaderActions = ({
               iconName="search"
             />
           )}
-          {canCall && (
+          {props.canCall && (
             <Button
               round
               color="translucent"
@@ -386,54 +349,54 @@ const HeaderActions = ({
           )}
         </>
       )}
-      {!isForForum && Boolean(pendingJoinRequests) && (
+      {!props.isForForum && Boolean(props.pendingJoinRequests) && (
         <Button
           round
           className="badge-button"
-          ripple={isRightColumnShown}
+          ripple={props.isRightColumnShown}
           color="translucent"
           size="smaller"
           iconName="user"
           onClick={handleJoinRequestsClick}
-          ariaLabel={isChannel ? oldLang('SubscribeRequests') : oldLang('MemberRequests')}
+          ariaLabel={props.isChannel ? oldLang('SubscribeRequests') : oldLang('MemberRequests')}
         >
-          <div className="badge">{pendingJoinRequests}</div>
+          <div class="badge">{props.pendingJoinRequests}</div>
         </Button>
       )}
       <Button
         ref={menuButtonRef}
-        className={isMenuOpen ? 'active' : ''}
+        className={isMenuOpen() ? 'active' : ''}
         round
-        ripple={!isMobile}
+        ripple={!props.isMobile}
         size="smaller"
         color="translucent"
-        disabled={noMenu}
+        disabled={props.noMenu}
         ariaLabel="More actions"
         onClick={handleHeaderMenuOpen}
         iconName="more"
       />
-      {menuAnchor && (
+      {menuAnchor() && (
         <HeaderMenuContainer
-          chatId={chatId}
-          threadId={threadId}
-          isOpen={isMenuOpen}
-          anchor={menuAnchor}
-          isChannel={isChannel}
-          canSubscribe={isForForum ? canSubscribe : undefined}
-          canSearch={canSearch}
-          canCall={canCall}
-          canMute={canMute}
-          canViewStatistics={canViewStatistics}
-          canViewBoosts={canViewBoosts}
-          canViewMonetization={canViewMonetization}
-          canShowBoostModal={canShowBoostModal}
-          canLeave={canLeave}
-          canEnterVoiceChat={canEnterVoiceChat}
-          canCreateVoiceChat={canCreateVoiceChat}
-          pendingJoinRequests={pendingJoinRequests}
+          chatId={props.chatId}
+          threadId={props.threadId}
+          isOpen={isMenuOpen()}
+          anchor={menuAnchor()}
+          isChannel={props.isChannel}
+          canSubscribe={props.isForForum ? props.canSubscribe : undefined}
+          canSearch={props.canSearch}
+          canCall={props.canCall}
+          canMute={props.canMute}
+          canViewStatistics={props.canViewStatistics}
+          canViewBoosts={props.canViewBoosts}
+          canViewMonetization={props.canViewMonetization}
+          canShowBoostModal={props.canShowBoostModal}
+          canLeave={props.canLeave}
+          canEnterVoiceChat={props.canEnterVoiceChat}
+          canCreateVoiceChat={props.canCreateVoiceChat}
+          pendingJoinRequests={props.pendingJoinRequests}
           onJoinRequestsClick={handleJoinRequestsClick}
-          withForumActions={isForForum}
-          channelMonoforumId={channelMonoforumId}
+          withForumActions={props.isForForum}
+          channelMonoforumId={props.channelMonoforumId}
           onSearchClick={handleSearchClick}
           onAsMessagesClick={handleAsMessagesClick}
           onClose={handleHeaderMenuClose}
@@ -444,8 +407,7 @@ const HeaderActions = ({
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global, { chatId, threadId, messageListType, isMobile }): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState, { chatId, threadId, messageListType, isMobile }: OwnProps): Complete<StateProps> => {
     const chat = selectChat(global, chatId);
     const isChannel = Boolean(chat && isChatChannel(chat));
     const isSuperGroup = Boolean(chat && isChatSuperGroup(chat));
@@ -541,8 +503,9 @@ export default memo(
       channelMonoforumId,
       currentTone,
     };
-  })(HeaderActions),
-);
+  };
+
+export default HeaderActions;
 
 function setFocusInSearchInput() {
   const searchInput = document.querySelector<HTMLInputElement>('#MiddleSearch input');

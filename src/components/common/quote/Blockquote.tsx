@@ -1,11 +1,11 @@
-import { type TeactNode, useRef } from '../../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import { ApiMessageEntityTypes } from '../../../api/types';
 
 import buildClassName from '../../../util/buildClassName';
 
 import useCollapsibleLines from '../../../hooks/element/useCollapsibleLines';
-import useLastCallback from '../../../hooks/useLastCallback';
 
 import Icon from '../icons/Icon';
 
@@ -20,69 +20,61 @@ type OwnProps = {
   recalculationKey?: unknown;
   ignoredLines?: number;
   isCollapsed?: boolean;
-  children: TeactNode;
+  children: JSX.Element;
   onCollapseChange?: (isCollapsed: boolean) => void;
 };
 
 const MAX_LINES = 4;
 
-const Blockquote = ({
-  className,
-  contentClassName,
-  canBeCollapsible,
-  isToggleDisabled,
-  noInitialCollapse,
-  recalculationKey,
-  ignoredLines,
-  isCollapsed: isCollapsedControlled,
-  children,
-  onCollapseChange,
-}: OwnProps) => {
-  const ref = useRef<HTMLQuoteElement>();
-  const { isCollapsed, isCollapsible, setIsCollapsed } = useCollapsibleLines(ref, MAX_LINES, {
-    isDisabled: !canBeCollapsible,
-    noInitialCollapse,
-    recalculationKey,
-    ignoredLines,
-    isCollapsed: isCollapsedControlled,
-    onCollapseChange,
-  });
+const Blockquote = (props: OwnProps) => {
+  let ref!: HTMLQuoteElement;
+  const collapsibleLinesResult = createMemo(() => useCollapsibleLines(() => ref, MAX_LINES, {
+    isDisabled: () => !props.canBeCollapsible,
+    noInitialCollapse: () => props.noInitialCollapse,
+    recalculationKey: () => props.recalculationKey,
+    ignoredLines: () => props.ignoredLines,
+    isCollapsed: () => props.isCollapsed,
+    onCollapseChange: props.onCollapseChange,
+  }));
+  const isCollapsed = () => collapsibleLinesResult().isCollapsed;
+  const isCollapsible = () => collapsibleLinesResult().isCollapsible;
+  const setIsCollapsed = () => collapsibleLinesResult().setIsCollapsed;
 
-  const shouldCollapse = Boolean(canBeCollapsible && isCollapsed);
-  const hasCollapseIcon = canBeCollapsible && isCollapsible;
-  const canExpand = !isToggleDisabled && shouldCollapse;
+  const shouldCollapse = createMemo(() => Boolean(props.canBeCollapsible && isCollapsed()));
+  const hasCollapseIcon = createMemo(() => props.canBeCollapsible && isCollapsible());
+  const canExpand = createMemo(() => !props.isToggleDisabled && shouldCollapse());
 
-  const handleExpand = useLastCallback(() => {
-    setIsCollapsed(false);
-  });
+  const handleExpand = () => {
+    setIsCollapsed()(false);
+  };
 
-  const handleToggle = useLastCallback(() => {
-    setIsCollapsed((prev) => !prev);
-  });
+  const handleToggle = () => {
+    setIsCollapsed()((prev) => !prev);
+  };
 
   return (
     <span
-      className={buildClassName(styles.root, className, shouldCollapse && styles.collapsed)}
-      onClick={canExpand ? handleExpand : undefined}
+      class={buildClassName(styles.root, props.className, shouldCollapse() && styles.collapsed)}
+      onClick={canExpand() ? handleExpand : undefined}
     >
       <blockquote
-        className={buildClassName(styles.blockquote, contentClassName, hasCollapseIcon && styles.withCollapseIcon)}
+        class={buildClassName(styles.blockquote, props.contentClassName, hasCollapseIcon() && styles.withCollapseIcon)}
         ref={ref}
         data-entity-type={ApiMessageEntityTypes.Blockquote}
-        data-collapsed={shouldCollapse || undefined}
-        contentEditable={shouldCollapse ? false : undefined}
+        data-collapsed={shouldCollapse() || undefined}
+        contentEditable={shouldCollapse() ? false : undefined}
       >
-        <div className={styles.gradientContainer} data-rich-copy-wrapper>
-          {children}
+        <div class={styles.gradientContainer} data-rich-copy-wrapper>
+          {props.children}
         </div>
-        {hasCollapseIcon && (
+        {hasCollapseIcon() && (
           <div
-            className={buildClassName(styles.collapseIcon, !isToggleDisabled && styles.clickable)}
+            class={buildClassName(styles.collapseIcon, !props.isToggleDisabled && styles.clickable)}
             contentEditable={false}
-            onClick={!isToggleDisabled ? handleToggle : undefined}
+            onClick={!props.isToggleDisabled ? handleToggle : undefined}
             aria-hidden
           >
-            <Icon name={shouldCollapse ? 'down' : 'up'} />
+            <Icon name={shouldCollapse() ? 'down' : 'up'} />
           </div>
         )}
       </blockquote>

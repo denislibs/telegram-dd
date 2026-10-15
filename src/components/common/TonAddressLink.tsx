@@ -1,5 +1,7 @@
-import { type TeactNode, useCallback, useEffect, useMemo, useRef } from '@teact';
+import { createEffect, createMemo } from 'frameact';
+import type { JSX } from 'frameact/jsx-runtime';
 import { getActions, getGlobal, getPromiseActions } from '../../global';
+import { depsOf } from '../../util/effectDeps';
 
 import type { GlobalState } from '../../global/types';
 import { ApiMessageEntityTypes } from '../../api/types';
@@ -15,7 +17,6 @@ import useSelector from '../../hooks/data/useSelector';
 import useContextMenuHandlers from '../../hooks/useContextMenuHandlers';
 import useFlag from '../../hooks/useFlag';
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
 
 import Menu from '../ui/Menu';
 import MenuItem, { MenuItemSubtitle, MenuItemTitle } from '../ui/MenuItem';
@@ -28,7 +29,7 @@ import styles from './TonAddressLink.module.scss';
 type OwnProps = {
   address: string;
   noCopy?: boolean;
-  children?: TeactNode;
+  children?: JSX.Element;
 };
 
 // Under the line heights of the title and the subtitle, so the skeleton does not make the item taller
@@ -37,43 +38,44 @@ const NAME_SKELETON_HEIGHT = 12;
 const LINK_SKELETON_WIDTH = 64;
 const LINK_SKELETON_HEIGHT = 10;
 
-const TonAddressLink = ({ address, noCopy, children }: OwnProps) => {
+const TonAddressLink = (props: OwnProps) => {
   const { showNotification, openWalletTransferLink, openUrl, openChatWithInfo } = getActions();
   const lang = useLang();
 
-  const ref = useRef<HTMLAnchorElement>();
-  const menuRef = useRef<HTMLDivElement>();
+  let ref!: HTMLAnchorElement;
+  let menuRef!: HTMLDivElement;
 
   const [isOwnerLookupDone, markOwnerLookupDone, unmarkOwnerLookupDone] = useFlag();
 
-  const nonBounceableAddress = useMemo(() => {
-    return parseTonTransferAddress(address) ? toNonBounceableAddress(address) : undefined;
-  }, [address]);
+  const nonBounceableAddress = createMemo(() => {
+    return parseTonTransferAddress(props.address) ? toNonBounceableAddress(props.address) : undefined;
+  });
 
   const isWalletAvailable = useSelector(selectIsWalletAvailable);
-  const ownerSelector = useCallback(
-    (global: GlobalState) => {
-      return nonBounceableAddress ? selectWalletAddressOwner(global, nonBounceableAddress) : undefined;
-    },
-    [nonBounceableAddress],
-  );
+  const ownerSelector = (global: GlobalState) => {
+      return nonBounceableAddress() ? selectWalletAddressOwner(global, nonBounceableAddress()) : undefined;
+    };
   const owner = useSelector(ownerSelector);
-  const ownerUser = owner || undefined;
+  const ownerUser = createMemo(() => owner() || undefined);
 
   // In a protected chat an address the wallet cannot take leaves no items; the last flag stops a long tap here
-  const { isContextMenuOpen, contextMenuAnchor, handleContextMenu, handleContextMenuClose, handleContextMenuHide } =
-    useContextMenuHandlers(ref, noCopy && !nonBounceableAddress, undefined, undefined, undefined, true);
+  const contextMenuHandlersResult = createMemo(() => useContextMenuHandlers(() => ref, () => props.noCopy && !nonBounceableAddress(), undefined, undefined, undefined, true));
+  const isContextMenuOpen = () => contextMenuHandlersResult().isContextMenuOpen;
+  const contextMenuAnchor = () => contextMenuHandlersResult().contextMenuAnchor;
+  const handleContextMenu = () => contextMenuHandlersResult().handleContextMenu;
+  const handleContextMenuClose = () => contextMenuHandlersResult().handleContextMenuClose;
+  const handleContextMenuHide = () => contextMenuHandlersResult().handleContextMenuHide;
 
-  useEffect(() => {
-    if (!isContextMenuOpen || !nonBounceableAddress || owner !== undefined) return undefined;
+  createEffect(depsOf(() => [isContextMenuOpen(), nonBounceableAddress(), owner()] as const), ([isContextMenuOpen2, nonBounceableAddress2, owner2]) => {
+    if (!isContextMenuOpen2 || !nonBounceableAddress2 || owner2 !== undefined) return undefined;
 
     let isCancelled = false;
 
     getPromiseActions()
-      .loadWalletUserAddresses({ addresses: [nonBounceableAddress] })
+      .loadWalletUserAddresses({ addresses: [nonBounceableAddress2] })
       .then(() => {
         // `owner` catches up with the global only at the end of the tick, so only a lookup that stored nothing is marked
-        if (!isCancelled && selectWalletAddressOwner(getGlobal(), nonBounceableAddress) === undefined) {
+        if (!isCancelled && selectWalletAddressOwner(getGlobal(), nonBounceableAddress2) === undefined) {
           markOwnerLookupDone();
         }
       });
@@ -81,61 +83,61 @@ const TonAddressLink = ({ address, noCopy, children }: OwnProps) => {
     return () => {
       isCancelled = true;
     };
-  }, [isContextMenuOpen, nonBounceableAddress, owner]);
+  });
 
-  const getTriggerElement = useLastCallback(() => ref.current);
-  const getRootElement = useLastCallback(() => document.body);
-  const getMenuElement = useLastCallback(() => menuRef.current);
-  const getLayout = useLastCallback(() => ({ withPortal: true }));
+  const getTriggerElement = () => ref;
+  const getRootElement = () => document.body;
+  const getMenuElement = () => menuRef;
+  const getLayout = () => ({ withPortal: true });
 
-  const handleMenuHide = useLastCallback(() => {
-    handleContextMenuHide();
+  const handleMenuHide = () => {
+    handleContextMenuHide()();
     unmarkOwnerLookupDone();
-  });
+  };
 
-  const handleSendMoney = useLastCallback(() => {
-    openWalletTransferLink({ to: address });
-  });
+  const handleSendMoney = () => {
+    openWalletTransferLink({ to: props.address });
+  };
 
-  const handleCopy = useLastCallback(() => {
-    copyTextToClipboard(address);
+  const handleCopy = () => {
+    copyTextToClipboard(props.address);
     showNotification({ message: { key: 'WalletAddressCopied' } });
-  });
+  };
 
   // A URL from the app config needs no open-link prompt, as for gift links
-  const handleOpenInExplorer = useLastCallback(() => {
-    openUrl({ url: `${selectTonExplorerUrl(getGlobal())}${encodeURIComponent(address)}`, shouldSkipModal: true });
-  });
+  const handleOpenInExplorer = () => {
+    openUrl({ url: `${selectTonExplorerUrl(getGlobal())}${encodeURIComponent(props.address)}`, shouldSkipModal: true });
+  };
 
-  const handleOpenProfile = useLastCallback(() => {
-    openChatWithInfo({ id: ownerUser!.id });
-  });
+  const handleOpenProfile = () => {
+    openChatWithInfo({ id: ownerUser()!.id });
+  };
 
-  const isOwnerMissing = !ownerUser && (owner === false || isOwnerLookupDone);
+  const isOwnerMissing = createMemo(() => !ownerUser() && (owner() === false || isOwnerLookupDone()));
 
   // One item serves all three states, so the open menu keeps its size
   function renderOwnerRow() {
     const warning = (
-      <div className={buildClassName(styles.noAccount, isOwnerMissing ? styles.appear : styles.invisible)}>
+      <div class={buildClassName(styles.noAccount, isOwnerMissing() ? styles.appear : styles.invisible)}>
         {lang('WalletAddressNoLinkedAccount', undefined, { withNodes: true, renderTextFilters: ['br'] })}
       </div>
     );
 
-    if (ownerUser) {
+    if (ownerUser()) {
       return (
         <MenuItem
           className={styles.appear}
-          customIcon={<Avatar size="small" peer={ownerUser} className={styles.avatar} />}
+          customIcon={<Avatar size="small" peer={ownerUser()} className={styles.avatar} />}
           onClick={handleOpenProfile}
         >
-          <MenuItemTitle>{getUserFullName(ownerUser)}</MenuItemTitle>
+          <MenuItemTitle>{getUserFullName(ownerUser())}</MenuItemTitle>
           <MenuItemSubtitle>{lang('HeaderMenuViewProfile')}</MenuItemSubtitle>
           {warning}
         </MenuItem>
       );
     }
 
-    const skeletonClassName = isOwnerMissing ? styles.invisible : undefined;
+    const skeletonClassName = isOwnerMissing() ? styles.invisible : undefined;
 
     return (
       <MenuItem
@@ -176,37 +178,37 @@ const TonAddressLink = ({ address, noCopy, children }: OwnProps) => {
   return (
     <a
       ref={ref}
-      onClick={handleContextMenu}
-      onContextMenu={handleContextMenu}
-      className="text-entity-link"
+      onClick={handleContextMenu()}
+      onContextMenu={handleContextMenu()}
+      class="text-entity-link"
       dir="auto"
       data-entity-type={ApiMessageEntityTypes.TonAddress}
     >
-      {children}
+      {props.children}
       <Menu
         ref={menuRef}
-        isOpen={isContextMenuOpen}
-        anchor={contextMenuAnchor}
+        isOpen={isContextMenuOpen()}
+        anchor={contextMenuAnchor()}
         getTriggerElement={getTriggerElement}
         getRootElement={getRootElement}
         getMenuElement={getMenuElement}
         getLayout={getLayout}
-        onClose={handleContextMenuClose}
+        onClose={handleContextMenuClose()}
         onCloseAnimationEnd={handleMenuHide}
         withPortal
         autoClose
       >
-        {nonBounceableAddress && isWalletAvailable && (
+        {nonBounceableAddress() && isWalletAvailable() && (
           <MenuItem icon="gram-outline" onClick={handleSendMoney}>
             {lang('WalletSendMoney')}
           </MenuItem>
         )}
-        {!noCopy && (
+        {!props.noCopy && (
           <MenuItem icon="copy" onClick={handleCopy}>
             {lang('WalletCopyAddress')}
           </MenuItem>
         )}
-        {nonBounceableAddress && (
+        {nonBounceableAddress() && (
           <>
             <MenuItem icon="search" onClick={handleOpenInExplorer}>
               {lang('WalletViewInExplorer')}

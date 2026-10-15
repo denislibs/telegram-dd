@@ -1,4 +1,4 @@
-import { useEffect } from '../../../../lib/teact/teact';
+import { createEffect } from 'frameact';
 
 import { SVG_NAMESPACE } from '../../../../config';
 import { addSvgDefinition, removeSvgDefinition } from '../../../../util/svgController';
@@ -42,8 +42,9 @@ class SvgFluidBackgroundFilter {
   }
 }
 
+// TODO(codemod): useFluidBackgroundFilter: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useFluidBackgroundFilter(color?: string, asValue?: boolean) {
-  useEffect(() => {
+  createEffect(() => color, () => {
     if (!color) return undefined;
 
     return () => {
@@ -55,7 +56,7 @@ export default function useFluidBackgroundFilter(color?: string, asValue?: boole
         }
       }
     };
-  }, [color]);
+  });
 
   if (!color) return undefined;
 

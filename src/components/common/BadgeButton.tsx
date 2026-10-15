@@ -1,11 +1,11 @@
-import { type TeactNode } from '../../lib/teact/teact';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import buildClassName from '../../util/buildClassName';
 
 import styles from './BadgeButton.module.scss';
 
 type OwnProps = {
-  children: TeactNode;
+  children: JSX.Element;
   className?: string;
   isPlain?: boolean;
   inline?: boolean;
@@ -13,20 +13,20 @@ type OwnProps = {
   onMouseDown?: (e: React.MouseEvent<HTMLDivElement>) => void;
 };
 
-const BadgeButton = ({ children, className, isPlain, inline, onClick, onMouseDown }: OwnProps) => {
+const BadgeButton = (props: OwnProps) => {
   return (
     <div
-      className={buildClassName(
+      class={buildClassName(
         styles.root,
-        isPlain && styles.plain,
-        onClick && styles.clickable,
-        inline && styles.inline,
-        className,
+        props.isPlain && styles.plain,
+        props.onClick && styles.clickable,
+        props.inline && styles.inline,
+        props.className,
       )}
-      onClick={onClick}
-      onMouseDown={onMouseDown}
+      onClick={(e) => props.onClick?.(e)}
+      onMouseDown={(e) => props.onMouseDown?.(e)}
     >
-      {children}
+      {props.children}
     </div>
   );
 };

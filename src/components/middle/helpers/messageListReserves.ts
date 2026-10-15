@@ -1,6 +1,8 @@
-import { addExtraClass, removeExtraClass } from '../../../lib/teact/teact-dom';
+import { requestForcedReflow, requestMeasure } from 'frameact';
+import { addExtraClass, removeExtraClass } from 'frameact/dom';
 
-import { forceMeasure, forceMutation, requestForcedReflow, requestMeasure } from '../../../lib/fasterdom/fasterdom';
+// TODO(codemod): still imported from teact: forceMeasure, forceMutation
+import { forceMeasure, forceMutation } from '../../../lib/fasterdom/fasterdom';
 import { isAnimatingScroll } from '../../../util/animateScroll';
 import buildStyle from '../../../util/buildStyle';
 import { REM } from '../../common/helpers/mediaDimensions';

@@ -1,15 +1,14 @@
-import { memo, useRef } from '../../../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import { Show } from 'frameact/dom';
 import { getActions } from '../../../../global';
 
 import type { ApiReaction, ApiSavedReactionTag } from '../../../../api/types';
-import type { ObserveFn } from '../../../../hooks/useIntersectionObserver';
 
 import buildClassName from '../../../../util/buildClassName';
 import { REM } from '../../../common/helpers/mediaDimensions';
 
 import useContextMenuHandlers from '../../../../hooks/useContextMenuHandlers';
 import useFlag from '../../../../hooks/useFlag';
-import useLastCallback from '../../../../hooks/useLastCallback';
 import useOldLang from '../../../../hooks/useOldLang';
 
 import ReactionAnimatedEmoji from '../../../common/reactions/ReactionAnimatedEmoji';
@@ -40,133 +39,117 @@ type OwnProps = {
   onRemove?: (reaction: ApiReaction) => void;
 };
 
-const SavedTagButton = ({
-  reaction,
-  tag,
-  containerId,
-  isChosen,
-  isOwnMessage,
-  className,
-  chosenClassName,
-  withCount,
-  isDisabled,
-  withContextMenu,
-  observeIntersection,
-  onClick,
-  onRemove,
-}: OwnProps) => {
+const SavedTagButton = (props: OwnProps) => {
   const { editSavedReactionTag } = getActions();
-  const ref = useRef<HTMLButtonElement>();
-  const menuRef = useRef<HTMLDivElement>();
+  let ref!: HTMLButtonElement;
+  let menuRef!: HTMLDivElement;
 
   const lang = useOldLang();
   const [isRenamePromptOpen, openRenamePrompt, closeRenamePrompt] = useFlag();
 
-  const { title, count } = tag || {};
-  const hasText = Boolean(title || (withCount && count));
+  const source = createMemo(() => props.tag || {});
+  const title = () => source().title;
+  const count = () => source().count;
+  const hasText = createMemo(() => Boolean(title() || (props.withCount && count())));
 
-  const handleClick = useLastCallback(() => {
-    onClick?.(reaction);
-  });
+  const handleClick = () => {
+    props.onClick?.(props.reaction);
+  };
 
-  const handleRemoveClick = useLastCallback(() => {
-    onRemove?.(reaction);
-  });
+  const handleRemoveClick = () => {
+    props.onRemove?.(props.reaction);
+  };
 
-  const handleRenameTag = useLastCallback((newTitle: string) => {
+  const handleRenameTag = (newTitle: string) => {
     editSavedReactionTag({
-      reaction,
+      reaction: props.reaction,
       title: newTitle,
     });
     closeRenamePrompt();
-  });
+  };
 
-  const {
-    isContextMenuOpen,
-    contextMenuAnchor,
-    handleBeforeContextMenu,
-    handleContextMenu,
-    handleContextMenuClose,
-    handleContextMenuHide,
-  } = useContextMenuHandlers(ref, !withContextMenu, undefined, undefined, undefined, true);
+  const contextMenuHandlersResult = createMemo(() => useContextMenuHandlers(() => ref, () => !props.withContextMenu, undefined, undefined, undefined, true));
+  const isContextMenuOpen = () => contextMenuHandlersResult().isContextMenuOpen;
+  const contextMenuAnchor = () => contextMenuHandlersResult().contextMenuAnchor;
+  const handleBeforeContextMenu = () => contextMenuHandlersResult().handleBeforeContextMenu;
+  const handleContextMenu = () => contextMenuHandlersResult().handleContextMenu;
+  const handleContextMenuClose = () => contextMenuHandlersResult().handleContextMenuClose;
+  const handleContextMenuHide = () => contextMenuHandlersResult().handleContextMenuHide;
 
-  const getTriggerElement = useLastCallback(() => ref.current);
-  const getRootElement = useLastCallback(() => document.body);
-  const getMenuElement = useLastCallback(() => menuRef.current);
-  const getLayout = useLastCallback(() => ({ withPortal: true, shouldAvoidNegativePosition: true }));
-
-  if (withCount && count === 0) {
-    return undefined;
-  }
+  const getTriggerElement = () => ref;
+  const getRootElement = () => document.body;
+  const getMenuElement = () => menuRef;
+  const getLayout = () => ({ withPortal: true, shouldAvoidNegativePosition: true });
 
   return (
+    <Show when={!(props.withCount && count() === 0)}>
     <Button
       className={buildClassName(
         styles.root,
         styles.tag,
-        isOwnMessage && styles.own,
-        isChosen && styles.chosen,
-        isChosen && chosenClassName,
-        isDisabled && styles.disabled,
-        className,
+        props.isOwnMessage && styles.own,
+        props.isChosen && styles.chosen,
+        props.isChosen && props.chosenClassName,
+        props.isDisabled && styles.disabled,
+        props.className,
       )}
       size="tiny"
       onClick={handleClick}
-      onMouseDown={handleBeforeContextMenu}
-      onContextMenu={handleContextMenu}
+      onMouseDown={handleBeforeContextMenu()}
+      onContextMenu={handleContextMenu()}
       ref={ref}
     >
       <ReactionAnimatedEmoji
         className={styles.animatedEmoji}
-        containerId={containerId}
-        reaction={reaction}
+        containerId={props.containerId}
+        reaction={props.reaction}
         loopLimit={LOOP_LIMIT}
         size={REACTION_SIZE}
-        observeIntersection={observeIntersection}
+        observeIntersection={props.observeIntersection}
       />
-      {hasText && (
-        <span className={styles.tagText}>
-          {title && <span>{title}</span>}
-          {withCount && <span>{count}</span>}
+      {hasText() && (
+        <span class={styles.tagText}>
+          {title() && <span>{title()}</span>}
+          {props.withCount && <span>{count()}</span>}
         </span>
       )}
-      <svg className={styles.tail} width="15" height="30" viewBox="0 0 15 30">
+      <svg class={styles.tail} width="15" height="30" viewBox="0 0 15 30">
         <path
-          className={styles.tailFill}
+          class={styles.tailFill}
           d="m 0,30 c 3.1855,0 6.1803,-1.5176 8.0641,-4.0864 l 5.835,-7.9568 c 1.2906,-1.7599 1.2906,-4.1537 0,-5.9136 L 8.0641,4.08636 C 6.1803,1.51761 3.1855,0 0,0"
         />
       </svg>
-      {withContextMenu && (
+      {props.withContextMenu && (
         <PromptDialog
-          isOpen={isRenamePromptOpen}
+          isOpen={isRenamePromptOpen()}
           maxLength={TITLE_MAX_LENGTH}
-          title={lang(tag?.title ? 'SavedTagRenameTag' : 'SavedTagLabelTag')}
+          title={lang(props.tag?.title ? 'SavedTagRenameTag' : 'SavedTagLabelTag')}
           subtitle={lang('SavedTagLabelTagText')}
           placeholder={lang('SavedTagLabelPlaceholder')}
-          initialValue={tag?.title}
+          initialValue={props.tag?.title}
           onClose={closeRenamePrompt}
           onSubmit={handleRenameTag}
         />
       )}
-      {withContextMenu && contextMenuAnchor && (
+      {props.withContextMenu && contextMenuAnchor() && (
         <Menu
           ref={menuRef}
-          isOpen={isContextMenuOpen}
-          anchor={contextMenuAnchor}
+          isOpen={isContextMenuOpen()}
+          anchor={contextMenuAnchor()}
           getTriggerElement={getTriggerElement}
           getRootElement={getRootElement}
           getMenuElement={getMenuElement}
           getLayout={getLayout}
           autoClose
           withPortal
-          onClose={handleContextMenuClose}
-          onCloseAnimationEnd={handleContextMenuHide}
+          onClose={handleContextMenuClose()}
+          onCloseAnimationEnd={handleContextMenuHide()}
         >
           <MenuItem icon="tag-filter" onClick={handleClick}>
             {lang('SavedTagFilterByTag')}
           </MenuItem>
           <MenuItem icon="tag-name" onClick={openRenamePrompt}>
-            {lang(tag?.title ? 'SavedTagRenameTag' : 'SavedTagLabelTag')}
+            {lang(props.tag?.title ? 'SavedTagRenameTag' : 'SavedTagLabelTag')}
           </MenuItem>
           <MenuItem icon="tag-crossed" destructive onClick={handleRemoveClick}>
             {lang('SavedTagRemoveTag')}
@@ -174,7 +157,8 @@ const SavedTagButton = ({
         </Menu>
       )}
     </Button>
+    </Show>
   );
 };
 
-export default memo(SavedTagButton);
+export default SavedTagButton;

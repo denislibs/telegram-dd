@@ -1,5 +1,7 @@
-import { memo, useEffect } from '../../../lib/teact/teact';
+import { createEffect, createMemo } from 'frameact';
 import { getActions, withGlobal } from '../../../global';
+import { depsOf } from '../../../util/effectDeps';
+import type { GlobalState } from '../../../global/types';
 
 import type { ApiTopic } from '../../../api/types';
 
@@ -9,7 +11,6 @@ import renderText from '../../common/helpers/renderText';
 import { preventMessageInputBlurWithBubbling } from '../helpers/preventMessageInputBlur';
 
 import useLang from '../../../hooks/useLang';
-import useLastCallback from '../../../hooks/useLastCallback';
 
 import Icon from '../../common/icons/Icon';
 import TopicIcon from '../../common/TopicIcon';
@@ -27,43 +28,43 @@ type StateProps = {
 
 const TOPIC_ICON_SIZE = 1.25 * REM;
 
-const TopicSeparator = ({ chatId, topicId, topic, chatTitle, areTopicsLoaded }: OwnProps & StateProps) => {
+const TopicSeparator = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const { openThread, loadTopicById } = getActions();
 
   const lang = useLang();
 
-  const isTopicMissing = !topic && areTopicsLoaded;
-  const title = topic ? topic.title : isTopicMissing ? chatTitle : undefined;
+  const isTopicMissing = createMemo(() => !props.topic && props.areTopicsLoaded);
+  const title = createMemo(() => props.topic ? props.topic.title : isTopicMissing() ? props.chatTitle : undefined);
 
-  useEffect(() => {
-    if (isTopicMissing) {
-      loadTopicById({ chatId, topicId });
+  createEffect(depsOf(() => [props.chatId, props.topicId, isTopicMissing()] as const), ([chatId2, topicId2, isTopicMissing2]) => {
+    if (isTopicMissing2) {
+      loadTopicById({ chatId: chatId2, topicId: topicId2 });
     }
-  }, [chatId, topicId, isTopicMissing]);
-
-  const handleClick = useLastCallback(() => {
-    openThread({ chatId, threadId: topicId });
   });
 
+  const handleClick = () => {
+    openThread({ chatId: props.chatId, threadId: props.topicId });
+  };
+
   return (
-    <div className="sticky-topic">
+    <div class="sticky-topic">
       <button
         type="button"
-        className="topic-pill"
+        class="topic-pill"
         dir="auto"
         onMouseDown={preventMessageInputBlurWithBubbling}
         onClick={handleClick}
       >
-        {topic && <TopicIcon topic={topic} size={TOPIC_ICON_SIZE} className="topic-pill-icon" />}
-        <span className="topic-pill-title">{title ? renderText(title) : lang('Loading')}</span>
+        {props.topic && <TopicIcon topic={props.topic} size={TOPIC_ICON_SIZE} className="topic-pill-icon" />}
+        <span class="topic-pill-title">{title() ? renderText(title()) : lang('Loading')}</span>
         <Icon name="next-link" className="topic-pill-chevron" />
       </button>
     </div>
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global, { chatId, topicId }): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState, { chatId, topicId }: OwnProps): Complete<StateProps> => {
     const topicsInfo = selectTopicsInfo(global, chatId);
 
     return {
@@ -71,5 +72,6 @@ export default memo(
       chatTitle: selectChat(global, chatId)?.title,
       areTopicsLoaded: Boolean(topicsInfo?.listedTopicIds && !topicsInfo.isCache),
     };
-  })(TopicSeparator),
-);
+  };
+
+export default TopicSeparator;

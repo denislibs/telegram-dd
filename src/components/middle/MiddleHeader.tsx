@@ -1,4 +1,4 @@
-import { memo, useRef } from '../../lib/teact/teact';
+import { createMemo, previous } from 'frameact';
 import { getActions, withGlobal } from '../../global';
 
 import type { ApiChat, ApiSticker, ApiTypingStatus } from '../../api/types';
@@ -29,9 +29,7 @@ import { isUserId } from '../../util/entities/ids';
 import useAppLayout from '../../hooks/useAppLayout';
 import useConnectionStatus from '../../hooks/useConnectionStatus';
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
 import useLongPress from '../../hooks/useLongPress';
-import usePreviousDeprecated from '../../hooks/usePreviousDeprecated';
 import useWindowSize from '../../hooks/window/useWindowSize';
 
 import GroupChatInfo from '../common/GroupChatInfo';
@@ -76,30 +74,8 @@ type StateProps = {
   emojiStatusSlug?: string;
 };
 
-const MiddleHeader = ({
-  chatId,
-  threadId,
-  messageListType,
-  isMobile,
-  typingStatusByPeerId,
-  isSelectModeActive,
-  isLeftColumnShown,
-  chat,
-  messagesCount,
-  isComments,
-  isChatWithSelf,
-  shouldSkipHistoryAnimations,
-  currentTransitionKey,
-  connectionState,
-  isSyncing,
-  isFetchingDifference,
-  getCurrentPinnedIndex,
-  getLoadingPinnedId,
-  emojiStatusSticker,
-  emojiStatusSlug,
-  isSavedDialog,
-  onFocusPinnedMessage,
-}: OwnProps & StateProps) => {
+const MiddleHeader = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const {
     openThreadWithInfo,
     openChat,
@@ -114,26 +90,26 @@ const MiddleHeader = ({
 
   const lang = useLang();
 
-  const isBackButtonActiveRef = useRef(true);
+  let isBackButtonActiveRef = true;
   const { isTablet } = useAppLayout();
 
   const { width: windowWidth } = useWindowSize();
 
   const isLeftColumnHideable = windowWidth <= MIN_SCREEN_WIDTH_FOR_STATIC_LEFT_COLUMN;
-  const shouldShowCloseButton = isTablet && isLeftColumnShown;
+  const shouldShowCloseButton = createMemo(() => isTablet && props.isLeftColumnShown);
 
-  const componentRef = useRef<HTMLDivElement>();
+  let componentRef!: HTMLDivElement;
 
-  const handleOpenSearch = useLastCallback(() => {
-    updateMiddleSearch({ chatId, threadId, update: {} });
-  });
+  const handleOpenSearch = () => {
+    updateMiddleSearch({ chatId: props.chatId, threadId: props.threadId, update: {} });
+  };
 
-  const handleOpenChat = useLastCallback((event: React.MouseEvent | React.TouchEvent) => {
+  const handleOpenChat = (event: React.MouseEvent | React.TouchEvent) => {
     if ((event.target as Element).closest('.title > .custom-emoji')) return;
 
     // Force close My Profile if clicked on Saved Messages header
-    openThreadWithInfo({ chatId, threadId, isOwnProfile: false });
-  });
+    openThreadWithInfo({ chatId: props.chatId, threadId: props.threadId, isOwnProfile: false });
+  };
 
   const {
     onMouseDown: handleLongPressMouseDown,
@@ -147,48 +123,48 @@ const MiddleHeader = ({
     threshold: SEARCH_LONGTAP_THRESHOLD,
   });
 
-  const setBackButtonActive = useLastCallback(() => {
+  const setBackButtonActive = () => {
     setTimeout(() => {
-      isBackButtonActiveRef.current = true;
+      isBackButtonActiveRef = true;
     }, BACK_BUTTON_INACTIVE_TIME);
-  });
+  };
 
-  const handleUserStatusClick = useLastCallback(() => {
-    if (emojiStatusSlug) {
-      openUniqueGiftBySlug({ slug: emojiStatusSlug });
+  const handleUserStatusClick = () => {
+    if (props.emojiStatusSlug) {
+      openUniqueGiftBySlug({ slug: props.emojiStatusSlug });
       return;
     }
-    openPremiumModal({ fromUserId: chatId });
-  });
+    openPremiumModal({ fromUserId: props.chatId });
+  };
 
-  const handleChannelStatusClick = useLastCallback(() => {
-    if (emojiStatusSlug) {
-      openUniqueGiftBySlug({ slug: emojiStatusSlug });
+  const handleChannelStatusClick = () => {
+    if (props.emojiStatusSlug) {
+      openUniqueGiftBySlug({ slug: props.emojiStatusSlug });
       return;
     }
     openStickerSet({
-      stickerSetInfo: emojiStatusSticker!.stickerSetInfo,
+      stickerSetInfo: props.emojiStatusSticker!.stickerSetInfo,
     });
-  });
+  };
 
-  const navigateBack = useLastCallback(() => {
-    if (!isBackButtonActiveRef.current) return;
+  const navigateBack = () => {
+    if (!isBackButtonActiveRef) return;
 
     // Workaround for missing UI when quickly clicking the Back button
-    isBackButtonActiveRef.current = false;
-    if (isMobile) {
+    isBackButtonActiveRef = false;
+    if (props.isMobile) {
       const messageInput = document.querySelector<HTMLDivElement>(EDITABLE_INPUT_CSS_SELECTOR);
       messageInput?.blur();
     }
 
-    if (isSelectModeActive) {
+    if (props.isSelectModeActive) {
       exitMessageSelectMode();
       setBackButtonActive();
       return;
     }
 
-    if (messageListType === 'thread' && currentTransitionKey === 0) {
-      if (!isTablet || shouldShowCloseButton) {
+    if (props.messageListType === 'thread' && props.currentTransitionKey === 0) {
+      if (!isTablet || shouldShowCloseButton()) {
         openChat({ id: undefined }, { forceOnHeavyAnimation: true });
       } else {
         toggleLeftColumn();
@@ -201,86 +177,87 @@ const MiddleHeader = ({
 
     openPreviousChat();
     setBackButtonActive();
-  });
+  };
 
-  const handleBackClick = useLastCallback((e: React.MouseEvent<HTMLElement, MouseEvent>) => {
+  const handleBackClick = (e: React.MouseEvent<HTMLElement, MouseEvent>) => {
     if (
-      isBackButtonActiveRef.current &&
-      messageListType === 'thread' &&
-      currentTransitionKey === 0 &&
-      (!isTablet || shouldShowCloseButton)
+      isBackButtonActiveRef &&
+      props.messageListType === 'thread' &&
+      props.currentTransitionKey === 0 &&
+      (!isTablet || shouldShowCloseButton())
     ) {
       e.stopPropagation(); // Stop propagation to prevent chat re-opening on tablets
     }
 
     navigateBack();
-  });
+  };
 
-  const prevTransitionKey = usePreviousDeprecated(currentTransitionKey);
+  const prevTransitionKey = previous(() => props.currentTransitionKey);
 
   const cleanupExceptionKey =
-    prevTransitionKey !== undefined && prevTransitionKey < currentTransitionKey ? prevTransitionKey : undefined;
+    createMemo(() => prevTransitionKey() !== undefined && prevTransitionKey() < props.currentTransitionKey ? prevTransitionKey() : undefined);
 
-  const { connectionStatusText } = useConnectionStatus(lang, connectionState, isSyncing || isFetchingDifference, true);
+  const connectionStatusResult = createMemo(() => useConnectionStatus(lang, () => props.connectionState, () => props.isSyncing || props.isFetchingDifference, true));
+  const connectionStatusText = () => connectionStatusResult().connectionStatusText;
 
   function renderInfoTitle() {
-    if (messagesCount === undefined) {
+    if (props.messagesCount === undefined) {
       return lang('Loading');
     }
 
-    if (messageListType === 'thread') {
-      if (!messagesCount) {
-        return lang(isComments ? 'CommentsTitle' : 'RepliesTitle');
+    if (props.messageListType === 'thread') {
+      if (!props.messagesCount) {
+        return lang(props.isComments ? 'CommentsTitle' : 'RepliesTitle');
       }
 
-      return lang(isComments ? 'Comments' : 'Replies', { count: messagesCount }, { pluralValue: messagesCount });
+      return lang(props.isComments ? 'Comments' : 'Replies', { count: props.messagesCount }, { pluralValue: props.messagesCount });
     }
 
-    if (messageListType === 'pinned') {
-      return lang('PinnedMessagesCount', { count: messagesCount }, { pluralValue: messagesCount });
+    if (props.messageListType === 'pinned') {
+      return lang('PinnedMessagesCount', { count: props.messagesCount }, { pluralValue: props.messagesCount });
     }
 
-    if (messageListType === 'scheduled') {
-      if (isChatWithSelf) {
+    if (props.messageListType === 'scheduled') {
+      if (props.isChatWithSelf) {
         return lang('Reminders');
       }
 
-      return lang('Messages', { count: messagesCount }, { pluralValue: messagesCount });
+      return lang('Messages', { count: props.messagesCount }, { pluralValue: props.messagesCount });
     }
 
     return undefined;
   }
 
   function renderInfo() {
-    if (messageListType === 'thread') {
-      if (threadId === MAIN_THREAD_ID || isSavedDialog || chat?.isForum) {
+    if (props.messageListType === 'thread') {
+      if (props.threadId === MAIN_THREAD_ID || props.isSavedDialog || props.chat?.isForum) {
         return renderChatInfo();
       }
     }
 
     return (
       <>
-        {renderBackButton(currentTransitionKey === 0)}
+        {renderBackButton(props.currentTransitionKey === 0)}
         <h3>{renderInfoTitle()}</h3>
       </>
     );
   }
 
   function renderChatInfo() {
-    const savedMessagesStatus = isSavedDialog
-      ? messagesCount !== undefined
-        ? lang('Messages', { count: messagesCount }, { pluralValue: messagesCount })
+    const savedMessagesStatus = props.isSavedDialog
+      ? props.messagesCount !== undefined
+        ? lang('Messages', { count: props.messagesCount }, { pluralValue: props.messagesCount })
         : lang('SavedMessages')
       : undefined;
 
-    const realChatId = isSavedDialog ? String(threadId) : chatId;
+    const realChatId = props.isSavedDialog ? String(props.threadId) : props.chatId;
 
-    const displayChatId = chat?.isMonoforum ? chat.linkedMonoforumId! : realChatId;
+    const displayChatId = props.chat?.isMonoforum ? props.chat.linkedMonoforumId! : realChatId;
     return (
       <>
-        {(isLeftColumnHideable || currentTransitionKey > 0) && renderBackButton(shouldShowCloseButton, !isSavedDialog)}
+        {(isLeftColumnHideable || props.currentTransitionKey > 0) && renderBackButton(shouldShowCloseButton(), !props.isSavedDialog)}
         <div
-          className="chat-info-wrapper"
+          class="chat-info-wrapper"
           onMouseDown={handleLongPressMouseDown}
           onMouseUp={handleLongPressMouseUp}
           onMouseLeave={handleLongPressMouseLeave}
@@ -289,17 +266,16 @@ const MiddleHeader = ({
         >
           {isUserId(displayChatId) ? (
             <PrivateChatInfo
-              key={displayChatId}
               userId={displayChatId}
-              threadId={!isSavedDialog ? threadId : undefined}
-              typingStatusByPeerId={typingStatusByPeerId}
-              status={connectionStatusText || savedMessagesStatus}
-              withDots={Boolean(connectionStatusText)}
-              withFullInfo={threadId === MAIN_THREAD_ID}
-              withMediaViewer={threadId === MAIN_THREAD_ID}
-              withStory={!isChatWithSelf}
+              threadId={!props.isSavedDialog ? props.threadId : undefined}
+              typingStatusByPeerId={props.typingStatusByPeerId}
+              status={connectionStatusText() || savedMessagesStatus}
+              withDots={Boolean(connectionStatusText())}
+              withFullInfo={props.threadId === MAIN_THREAD_ID}
+              withMediaViewer={props.threadId === MAIN_THREAD_ID}
+              withStory={!props.isChatWithSelf}
               withUpdatingStatus
-              isSavedDialog={isSavedDialog}
+              isSavedDialog={props.isSavedDialog}
               storyViewerOrigin={StoryViewerOrigin.MiddleHeaderAvatar}
               emojiStatusSize={EMOJI_STATUS_SIZE}
               noRtl
@@ -307,18 +283,17 @@ const MiddleHeader = ({
             />
           ) : (
             <GroupChatInfo
-              key={displayChatId}
               chatId={displayChatId}
-              threadId={!isSavedDialog ? threadId : undefined}
-              typingStatusByPeerId={typingStatusByPeerId}
-              withMonoforumStatus={chat?.isMonoforum}
-              status={connectionStatusText || savedMessagesStatus}
-              withDots={Boolean(connectionStatusText)}
-              withMediaViewer={threadId === MAIN_THREAD_ID}
-              withFullInfo={threadId === MAIN_THREAD_ID}
+              threadId={!props.isSavedDialog ? props.threadId : undefined}
+              typingStatusByPeerId={props.typingStatusByPeerId}
+              withMonoforumStatus={props.chat?.isMonoforum}
+              status={connectionStatusText() || savedMessagesStatus}
+              withDots={Boolean(connectionStatusText())}
+              withMediaViewer={props.threadId === MAIN_THREAD_ID}
+              withFullInfo={props.threadId === MAIN_THREAD_ID}
               withUpdatingStatus
               withStory
-              isSavedDialog={isSavedDialog}
+              isSavedDialog={props.isSavedDialog}
               storyViewerOrigin={StoryViewerOrigin.MiddleHeaderAvatar}
               emojiStatusSize={EMOJI_STATUS_SIZE}
               onEmojiStatusClick={handleChannelStatusClick}
@@ -332,7 +307,7 @@ const MiddleHeader = ({
 
   function renderBackButton(asClose = false, withUnreadCounter = false) {
     return (
-      <div className="back-button">
+      <div class="back-button">
         <Button
           round
           size="smaller"
@@ -341,7 +316,7 @@ const MiddleHeader = ({
           onFileHoverOpen={navigateBack}
           ariaLabel={lang(asClose ? 'Close' : 'Back')}
         >
-          <div className={buildClassName('animated-close-icon', !asClose && 'state-back')} />
+          <div class={buildClassName('animated-close-icon', !asClose && 'state-back')} />
         </Button>
         {withUnreadCounter && <UnreadCounter />}
       </div>
@@ -349,24 +324,24 @@ const MiddleHeader = ({
   }
 
   return (
-    <div className="MiddleHeader" ref={componentRef} data-tauri-drag-region={IS_TAURI && IS_MAC_OS ? true : undefined}>
+    <div class="MiddleHeader" ref={componentRef} data-tauri-drag-region={IS_TAURI && IS_MAC_OS ? true : undefined}>
+      {/* TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6) */}
       <Transition
-        name={shouldSkipHistoryAnimations ? 'none' : 'slideFade'}
-        activeKey={currentTransitionKey}
+        name={props.shouldSkipHistoryAnimations ? 'none' : 'slideFade'}
+        activeKey={props.currentTransitionKey}
         shouldCleanup
-        cleanupExceptionKey={cleanupExceptionKey}
+        cleanupExceptionKey={cleanupExceptionKey()}
       >
         {renderInfo()}
       </Transition>
-      <div className="header-tools">
-        <HeaderActions chatId={chatId} threadId={threadId} messageListType={messageListType} isMobile={isMobile} />
+      <div class="header-tools">
+        <HeaderActions chatId={props.chatId} threadId={props.threadId} messageListType={props.messageListType} isMobile={props.isMobile} />
       </div>
     </div>
   );
 };
 
-export default memo(
-  withGlobal<OwnProps>((global, { chatId, threadId, messageListType, isMobile }): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState, { chatId, threadId, messageListType, isMobile }: OwnProps): Complete<StateProps> => {
     const { isLeftColumnShown, shouldSkipHistoryAnimations, messageLists } = selectTabState(global);
     const chat = selectChat(global, chatId);
     const peer = selectPeer(global, chatId);
@@ -407,5 +382,6 @@ export default memo(
       emojiStatusSlug,
       isSavedDialog,
     };
-  })(MiddleHeader),
-);
+  };
+
+export default MiddleHeader;

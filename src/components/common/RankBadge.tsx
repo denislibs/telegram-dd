@@ -1,10 +1,10 @@
-import { memo } from '@teact';
+import { createMemo } from 'frameact';
+import { Show } from 'frameact/dom';
 import { getActions } from '../../global';
 
 import buildClassName from '../../util/buildClassName';
 
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
 import { getPeerColorClass } from '../../hooks/usePeerColor';
 
 import BadgeButton from './BadgeButton';
@@ -22,37 +22,35 @@ type OwnProps = {
 const OWNER_PEER_COLOR = 2;
 const ADMIN_PEER_COLOR = 3;
 
-const RankBadge = ({ chatId, className, userId, isAdmin, isOwner, rank, isClickable }: OwnProps) => {
+const RankBadge = (props: OwnProps) => {
   const { openRankModal } = getActions();
   const lang = useLang();
-  const hasCustomColor = isOwner || isAdmin;
-  const isPlain = !hasCustomColor;
+  const hasCustomColor = createMemo(() => props.isOwner || props.isAdmin);
+  const isPlain = createMemo(() => !hasCustomColor());
 
-  const rankText = rank || (isOwner && lang('ChannelCreator')) || (isAdmin && lang('ChannelAdmin'));
+  const rankText = createMemo(() => props.rank || (props.isOwner && lang('ChannelCreator')) || (props.isAdmin && lang('ChannelAdmin')));
 
-  const handleClick = useLastCallback(() => {
-    if (!chatId) return;
-    openRankModal({ chatId, userId, isAdmin, isOwner, rank });
-  });
-
-  if (!rankText) {
-    return undefined;
-  }
+  const handleClick = () => {
+    if (!props.chatId) return;
+    openRankModal({ chatId: props.chatId, userId: props.userId, isAdmin: props.isAdmin, isOwner: props.isOwner, rank: props.rank });
+  };
 
   return (
+    <Show when={rankText()}>
     <BadgeButton
       className={buildClassName(
-        hasCustomColor && getPeerColorClass(isOwner ? OWNER_PEER_COLOR : ADMIN_PEER_COLOR),
-        isPlain && 'admin-title-plain',
-        className,
+        hasCustomColor() && getPeerColorClass(props.isOwner ? OWNER_PEER_COLOR : ADMIN_PEER_COLOR),
+        isPlain() && 'admin-title-plain',
+        props.className,
       )}
-      isPlain={isPlain}
+      isPlain={isPlain()}
       inline
-      onClick={isClickable ? handleClick : undefined}
+      onClick={props.isClickable ? handleClick : undefined}
     >
-      {rankText}
+      {rankText()}
     </BadgeButton>
+    </Show>
   );
 };
 
-export default memo(RankBadge);
+export default RankBadge;
