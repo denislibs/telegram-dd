@@ -86,6 +86,28 @@ const authScreen = (
   threshold,
 });
 
+// The middle column (messages slice): the `messages` scenario (src/lib/gramjs/client/__mocks__/messages.json, its history is
+// paged by __invokeMiddlewares__/messages.ts in both apps). A chat is opened by a click on its row; the composer is not ported:
+// our footer is an inert placeholder of its size (the message list reserves the space under its messages from the footer's
+// height), so tt's composer is masked.
+const MIDDLE_MASK = [...TT_MAIN_MASK, '#MiddleColumn .middle-column-footer'];
+const openChatByName = (name: string) => async (page: import('@playwright/test').Page) => {
+  await page.locator('#LeftColumn .chat-list .ListItem.Chat').filter({ hasText: name }).click();
+  await page.locator('#MiddleColumn .MiddleHeader').getByText(name).waitFor();
+  await page.locator('#MiddleColumn .MessageList .message-list-item').first().waitFor();
+  // the list finished positioning itself (history loads, the scroll restore and the appearance animations)
+  await page.waitForTimeout(2500);
+};
+const middleScreen = (name: string, chat: string, threshold = 0): VisualScreen => ({
+  name,
+  ported: true,
+  scenario: 'messages',
+  reference: { app: 'tt', path: '/', ready: TT_MAIN_READY, prepare: openChatByName(chat) },
+  candidate: { app: 'ours', path: '/', ready: TT_MAIN_READY, prepare: openChatByName(chat) },
+  mask: MIDDLE_MASK,
+  threshold,
+});
+
 export const screens: VisualScreen[] = [
   // --- harness self-checks (real, run today) ------------------------------------------------------------------
   {
@@ -123,6 +145,14 @@ export const screens: VisualScreen[] = [
     qrCode: { token: 'dGVzdC10b2tlbg', expires: 4102444800 },
   }),
 
+  // --- the middle column --------------------------------------------------------------------------------------
+  middleScreen('middle-chat-open', 'Carol Short'),
+  middleScreen('middle-chat-unread', 'Alice Tester'),
+  middleScreen('middle-chat-entities', 'Dave Entities'),
+  // a supergroup: sender groups with avatars and names, a service message, forwarded messages, two days; and a broadcast channel
+  middleScreen('middle-chat-group', 'Team Chat'),
+  middleScreen('middle-chat-channel', 'Daily News'),
+
   // --- the port's to-do list (skipped until `ported: true`) -----------------------------------------------------
   {
     name: 'main-chat-list',
@@ -150,14 +180,5 @@ export const screens: VisualScreen[] = [
     },
     mask: TT_MAIN_MASK,
     threshold: 0,
-  },
-  {
-    name: 'chat-with-history',
-    ported: false,
-    scenario: 'history',
-    reference: { app: 'tt', path: '/', ready: TT_MAIN_READY },
-    candidate: { app: 'ours', path: '/', ready: TT_MAIN_READY },
-    mask: TT_MAIN_MASK,
-    threshold: 0.002,
   },
 ];

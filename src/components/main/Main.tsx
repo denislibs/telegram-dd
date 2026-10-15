@@ -8,10 +8,12 @@ import {
   onFullyIdle,
   requestNextMutation,
 } from 'frameact';
+import { setExtraStyles } from 'frameact/dom';
 import { getActions, getGlobal, withGlobal } from '../../global';
 
 import type { ApiStarGiftAuctionState } from '../../api/types';
 import type { GlobalState } from '../../global/types';
+import type { PaneState } from '../middle/hooks/useHeaderPane';
 
 import { BASE_EMOJI_KEYWORD_LANG, DEBUG, FOLDERS_POSITION_LEFT, INACTIVE_MARKER } from '../../config';
 import { createShowTransition } from '../../lib/kit';
@@ -39,6 +41,8 @@ import { depsOf } from '../../util/effectDeps';
 import { Bundles, loadBundle } from '../../util/moduleLoader';
 import { parseInitialLocationHash, parseLocationHash } from '../../util/routing';
 import updateIcon from '../../util/updateIcon';
+import { REM } from '../common/helpers/mediaDimensions';
+import { updateTopReserveWithScrollCompensation } from '../middle/helpers/messageListReserves';
 
 import useInterval from '../../hooks/schedulers/useInterval';
 import useTimeout from '../../hooks/schedulers/useTimeout';
@@ -49,6 +53,7 @@ import usePreventPinchZoomGesture from '../../hooks/usePreventPinchZoomGesture';
 import useBackgroundMode from '../../hooks/window/useBackgroundMode';
 import useBeforeUnload from '../../hooks/window/useBeforeUnload';
 import { useFullscreenStatus } from '../../hooks/window/useFullscreen';
+import { PANE_GAP_REM } from '../middle/hooks/useHeaderPane';
 
 import UnreadCount from '../common/UnreadCounter';
 import Wallpaper from '../common/Wallpaper';
@@ -56,6 +61,7 @@ import LeftColumn from '../left/LeftColumn';
 import MessageListHistoryHandler from '../middle/MessageListHistoryHandler';
 import MiddleColumn from '../middle/MiddleColumn';
 import RightColumn from '../right/RightColumn';
+import SafeLinkModal from './SafeLinkModal';
 
 import './Main.scss';
 import backgroundStyles from '../../styles/_patternBackground.module.scss';
@@ -72,6 +78,7 @@ type StateProps = {
   isMiddleColumnOpen: boolean;
   isRightColumnOpen: boolean;
   isMediaViewerOpen: boolean;
+  safeLinkModalUrl?: string;
   isStoryViewerOpen: boolean;
   shouldSkipHistoryAnimations?: boolean;
   wasTimeFormatSetManually?: boolean;
@@ -179,15 +186,16 @@ const Main = (ownProps: OwnProps) => {
     () => (props.isSynced ? EDITOR_BUNDLE_LOADING_DELAY_MS : undefined),
   );
 
+  let containerRef!: HTMLDivElement;
   let leftColumnRef!: HTMLDivElement;
 
   const { isDesktop } = useAppLayout();
   createEffect(
     depsOf(
-      () => [isDesktop, props.isLeftColumnOpen, props.isMiddleColumnOpen, props.isMobile, toggleLeftColumn] as const,
+      () => [isDesktop(), props.isLeftColumnOpen, props.isMiddleColumnOpen, props.isMobile, toggleLeftColumn] as const,
     ),
-    ([, isLeftColumnOpen2, isMiddleColumnOpen2, isMobile2]) => {
-      if (!isLeftColumnOpen2 && !isMiddleColumnOpen2 && !isDesktop) {
+    ([isDesktop2, isLeftColumnOpen2, isMiddleColumnOpen2, isMobile2]) => {
+      if (!isLeftColumnOpen2 && !isMiddleColumnOpen2 && !isDesktop2) {
         // Always display at least one column
         toggleLeftColumn();
       } else if (isLeftColumnOpen2 && isMiddleColumnOpen2 && isMobile2) {
@@ -556,7 +564,32 @@ const Main = (ownProps: OwnProps) => {
     updateIcon(false);
   };
 
-  // TODO(port): the audio player pane reserve (`handlePlayerPaneStateChange`) comes with the middle column.
+  let playerReserveRef = 0;
+  const handlePlayerPaneStateChange = ({ height }: PaneState) => {
+    const main = containerRef;
+    const middleColumn = document.getElementById('MiddleColumn');
+    if (!main || !middleColumn) return;
+    const occupiedHeight = height ? height + PANE_GAP_REM * REM : 0;
+    const heightDelta = occupiedHeight - playerReserveRef;
+    if (!heightDelta) return;
+    playerReserveRef = occupiedHeight;
+    const parkedShift = occupiedHeight ? '0px' : 'var(--middle-panel-inline-padding)';
+    updateTopReserveWithScrollCompensation(
+      middleColumn,
+      heightDelta,
+      () => {
+        setExtraStyles(main, {
+          '--middle-header-player-height': `${occupiedHeight}px`,
+          '--middle-header-player-parked': parkedShift,
+        });
+        setExtraStyles(middleColumn, {
+          '--middle-header-player-height': `${occupiedHeight}px`,
+          '--middle-header-player-parked': parkedShift,
+        });
+      },
+      [main],
+    );
+  };
 
   // Online status and browser tab indicators
   useBackgroundMode(handleBlur, handleFocus, IS_TAURI);
@@ -566,6 +599,7 @@ const Main = (ownProps: OwnProps) => {
   return (
     <Wallpaper
       containerRef={(el) => {
+        containerRef = el;
         leftColumnTransition.ref(el);
         rightColumnTransition.ref(el);
       }}
@@ -576,10 +610,15 @@ const Main = (ownProps: OwnProps) => {
       {IS_TAURI && IS_MAC_OS && <div class="tauri-drag-region" data-tauri-drag-region />}
       {/* TODO(port): FoldersSidebar (`foldersPosition: left`) */}
       <LeftColumn ref={(el) => (leftColumnRef = el)} isFoldersSidebarShown={props.isFoldersSidebarShown} />
-      <MiddleColumn leftColumnRef={() => leftColumnRef} isMobile={props.isMobile} />
+      <MiddleColumn
+        leftColumnRef={() => leftColumnRef}
+        isMobile={props.isMobile}
+        onPlayerPaneStateChange={handlePlayerPaneStateChange}
+      />
       <RightColumn isMobile={props.isMobile} />
       {/* TODO(port): MediaViewer, StoryViewer, recipient pickers, Dialogs, AudioPlayer, ModalContainer, HistoryCalendar,
           sticker set / custom emoji set / premium / payment modals, calls, GameModal, DownloadManager, visual effects */}
+      <SafeLinkModal url={props.safeLinkModalUrl} />
       <UnreadCount isForAppBadge />
       <MessageListHistoryHandler />
     </Wallpaper>
@@ -608,6 +647,7 @@ const mapStateToProps = (global: GlobalState, { isMobile }: OwnProps): Complete<
     isMiddleColumnOpen: Boolean(chatId),
     isRightColumnOpen: selectIsRightColumnShown(global, isMobile),
     isMediaViewerOpen: selectIsMediaViewerOpen(global),
+    safeLinkModalUrl: selectTabState(global).safeLinkModalUrl,
     isStoryViewerOpen: selectIsStoryViewerOpen(global),
     shouldSkipHistoryAnimations,
     withInterfaceAnimations: selectCanAnimateInterface(global),

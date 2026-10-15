@@ -23,6 +23,8 @@ type OwnProps = {
   chatId?: string;
   messageId?: number;
   threadId?: ThreadId;
+  // Deviation (security): true while the link is under a concealed spoiler: its tooltip would show the hidden address
+  isConcealed?: () => boolean;
   entityType?:
     | ApiMessageEntityTypes.Url
     | ApiMessageEntityTypes.TextUrl
@@ -71,7 +73,7 @@ const SafeLink = (rawProps: OwnProps) => {
       {(url) => (
         <a
           href={ensureProtocol(url())}
-          title={getUnicodeUrl(url())}
+          title={props.isConcealed?.() ? undefined : getUnicodeUrl(url())}
           target={IS_TAURI ? '_self' : '_blank'}
           rel="noopener noreferrer"
           class={classNames()}

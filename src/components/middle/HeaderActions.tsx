@@ -1,0 +1,520 @@
+import { createMemo, createSignal, requestMeasure, requestNextMutation } from 'frameact';
+import { Show } from 'frameact/dom';
+import { getActions, withGlobal } from '../../global';
+
+import type { GlobalState } from '../../global/types';
+import type { IAnchorPosition, MessageListType, ThreadId, TranslationTone } from '../../types';
+import { MAIN_THREAD_ID } from '../../api/types';
+import { ManagementScreens } from '../../types';
+
+import { COCOON_EMOJI_ID } from '../../config';
+import {
+  getHasAdminRight,
+  getIsSavedDialog,
+  isAnonymousForwardsChat,
+  isChatChannel,
+  isChatSuperGroup,
+} from '../../global/helpers';
+import {
+  selectBot,
+  selectCanAnimateInterface,
+  selectCanTranslateChat,
+  selectChat,
+  selectChatFullInfo,
+  selectIsChatRestricted,
+  selectIsChatWithSelf,
+  selectIsCurrentUserFrozen,
+  selectIsInSelectMode,
+  selectIsRightColumnShown,
+  selectLanguageCode,
+  selectRequestedChatTranslationLanguage,
+  selectRequestedChatTranslationTone,
+  selectTranslationLanguage,
+  selectUserFullInfo,
+} from '../../global/selectors';
+import { ARE_CALLS_SUPPORTED, IS_APP } from '../../util/browser/windowEnvironment';
+import { isUserId } from '../../util/entities/ids';
+import focusNoScroll from '../../util/focusNoScroll';
+
+import { useHotkeys } from '../../hooks/useHotkeys';
+import useLang from '../../hooks/useLang';
+import useOldLang from '../../hooks/useOldLang';
+
+import CustomEmoji from '../common/CustomEmoji';
+import Icon from '../common/icons/Icon';
+import Button from '../ui/Button';
+import DropdownMenu from '../ui/DropdownMenu';
+import Link from '../ui/Link';
+import MenuItem from '../ui/MenuItem';
+import MenuSeparator from '../ui/MenuSeparator';
+import NestedMenuItem from '../ui/NestedMenuItem';
+import HeaderMenuContainer from './HeaderMenuContainer.async';
+
+interface OwnProps {
+  chatId: string;
+  threadId: ThreadId;
+  messageListType: MessageListType;
+  isForForum?: boolean;
+  isMobile?: boolean;
+  onTopicSearch?: NoneToVoidFunction;
+}
+
+interface StateProps {
+  noMenu?: boolean;
+  isChannel?: boolean;
+  isRightColumnShown?: boolean;
+  canSubscribe?: boolean;
+  canSearch?: boolean;
+  canCall?: boolean;
+  canMute?: boolean;
+  canViewStatistics?: boolean;
+  canViewMonetization?: boolean;
+  canViewBoosts?: boolean;
+  canShowBoostModal?: boolean;
+  canLeave?: boolean;
+  canEnterVoiceChat?: boolean;
+  canCreateVoiceChat?: boolean;
+  channelMonoforumId?: string;
+  pendingJoinRequests?: number;
+  noAnimation?: boolean;
+  canTranslate?: boolean;
+  isTranslating?: boolean;
+  translationLanguage: string;
+  language: string;
+  detectedChatLanguage?: string;
+  doNotTranslate: string[];
+  isAccountFrozen?: boolean;
+  currentTone?: TranslationTone;
+}
+
+const HeaderActions = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
+  const {
+    openMiddleSearch,
+    requestMasterAndRequestCall,
+    requestNextManagementScreen,
+    showNotification,
+    openChat,
+    requestChatTranslation,
+    setChatTranslationTone,
+    togglePeerTranslations,
+    openChatLanguageModal,
+    setSettingOption,
+    setViewForumAsMessages,
+    openFrozenAccountModal,
+    openCocoonModal,
+  } = getActions();
+  let menuButtonRef!: HTMLButtonElement;
+  const oldLang = useOldLang();
+  const lang = useLang();
+
+  const [isMenuOpen, setIsMenuOpen] = createSignal(false);
+  const [menuAnchor, setMenuAnchor] = createSignal<IAnchorPosition | undefined>(undefined);
+
+  const handleHeaderMenuOpen = () => {
+    setIsMenuOpen(true);
+    const rect = menuButtonRef.getBoundingClientRect();
+    setMenuAnchor({ x: rect.right, y: rect.bottom });
+  };
+
+  const handleHeaderMenuClose = () => {
+    setIsMenuOpen(false);
+  };
+
+  const handleHeaderMenuHide = () => {
+    setMenuAnchor(undefined);
+  };
+
+  const handleTranslateClick = () => {
+    if (props.isTranslating) {
+      requestChatTranslation({ chatId: props.chatId, toLanguageCode: undefined });
+      return;
+    }
+
+    requestChatTranslation({ chatId: props.chatId, toLanguageCode: props.translationLanguage });
+  };
+
+  const handleJoinRequestsClick = () => {
+    requestNextManagementScreen({ screen: ManagementScreens.JoinRequests });
+  };
+
+  const handleSearchClick = () => {
+    if (props.isForForum) {
+      props.onTopicSearch?.();
+      return;
+    }
+
+    openMiddleSearch();
+
+    if (props.noAnimation) {
+      // The second RAF is necessary because Teact must update the state and render the async component
+      requestMeasure(() => {
+        requestNextMutation(setFocusInSearchInput);
+      });
+    } else {
+      setFocusInSearchInput();
+    }
+  };
+
+  const handleAsMessagesClick = () => {
+    openChat({ id: props.chatId });
+    setViewForumAsMessages({ chatId: props.chatId, isEnabled: true });
+  };
+
+  const handleRequestCall = () => {
+    if (props.isAccountFrozen) {
+      openFrozenAccountModal();
+      return;
+    }
+    requestMasterAndRequestCall({ userId: props.chatId });
+  };
+
+  const handleHotkeySearchClick = (e: KeyboardEvent) => {
+    if (!props.canSearch || !IS_APP || e.shiftKey) {
+      return;
+    }
+
+    e.preventDefault();
+    handleSearchClick();
+  };
+
+  const getTextWithLanguage = (langKey: string, langCode: string) => {
+    const simplified = langCode.split('-')[0];
+    const translationKey = `TranslateLanguage${simplified.toUpperCase()}`;
+    const name = oldLang(translationKey);
+    if (name !== translationKey) {
+      return oldLang(langKey, name);
+    }
+
+    const translatedNames = new Intl.DisplayNames([props.language], { type: 'language' });
+    const translatedName = translatedNames.of(langCode)!;
+    return oldLang(`${langKey}Other`, translatedName);
+  };
+
+  const buttonText = createMemo(() => {
+    if (props.isTranslating) return oldLang('ShowOriginalButton');
+
+    return getTextWithLanguage('TranslateToButton', props.translationLanguage);
+  });
+
+  const doNotTranslateText = createMemo(() => {
+    if (!props.detectedChatLanguage) return undefined;
+
+    return getTextWithLanguage('DoNotTranslateLanguage', props.detectedChatLanguage);
+  });
+
+  const handleHide = () => {
+    togglePeerTranslations({ chatId: props.chatId, isEnabled: false });
+    requestChatTranslation({ chatId: props.chatId, toLanguageCode: undefined });
+  };
+
+  const handleChangeLanguage = () => {
+    openChatLanguageModal({ chatId: props.chatId });
+  };
+
+  const handleCocoonClick = () => {
+    openCocoonModal();
+  };
+
+  const handleDoNotTranslate = () => {
+    if (!props.detectedChatLanguage) return;
+
+    setSettingOption({
+      doNotTranslate: [...props.doNotTranslate, props.detectedChatLanguage],
+    });
+    requestChatTranslation({ chatId: props.chatId, toLanguageCode: undefined });
+
+    showNotification({ message: getTextWithLanguage('AddedToDoNotTranslate', props.detectedChatLanguage) });
+  };
+
+  const handleSetTone = (tone: TranslationTone) => {
+    setChatTranslationTone({ chatId: props.chatId, tone });
+    setSettingOption({ translationTone: tone });
+  };
+
+  useHotkeys({
+    'Mod+F': handleHotkeySearchClick,
+  });
+
+  // Deviation: a plain component function (it reads its props where they are used), no memo around it.
+  const MoreMenuButton = (triggerProps: { onTrigger: () => void; isOpen?: boolean }) => (
+    <Button
+      round
+      ripple={props.isRightColumnShown}
+      color="translucent"
+      size="smaller"
+      className={triggerProps.isOpen ? 'active' : ''}
+      onClick={triggerProps.onTrigger}
+      ariaLabel={oldLang('TranslateMessage')}
+      iconName="language"
+    />
+  );
+
+  return (
+    <div class="HeaderActions">
+      {!props.isForForum && props.canTranslate && (
+        <DropdownMenu className="stickers-more-menu with-menu-transitions" trigger={MoreMenuButton} positionX="right">
+          <MenuItem icon="language" onClick={handleTranslateClick}>
+            {buttonText()}
+          </MenuItem>
+          <MenuItem icon="replace" onClick={handleChangeLanguage}>
+            {oldLang('Chat.Translate.Menu.To')}
+          </MenuItem>
+          <NestedMenuItem
+            icon="tone"
+            submenuClassName="translation-tone-menu"
+            submenu={
+              <>
+                <MenuItem
+                  icon={props.currentTone === 'neutral' ? 'check' : undefined}
+                  customIcon={props.currentTone !== 'neutral' ? <Icon name="placeholder" /> : undefined}
+                  onClick={() => handleSetTone('neutral')}
+                >
+                  {lang('TranslationToneNeutral')}
+                </MenuItem>
+                <MenuItem
+                  icon={props.currentTone === 'formal' ? 'check' : undefined}
+                  customIcon={props.currentTone !== 'formal' ? <Icon name="placeholder" /> : undefined}
+                  onClick={() => handleSetTone('formal')}
+                >
+                  {lang('TranslationToneFormal')}
+                </MenuItem>
+                <MenuItem
+                  icon={props.currentTone === 'casual' ? 'check' : undefined}
+                  customIcon={props.currentTone !== 'casual' ? <Icon name="placeholder" /> : undefined}
+                  onClick={() => handleSetTone('casual')}
+                >
+                  {lang('TranslationToneCasual')}
+                </MenuItem>
+              </>
+            }
+          >
+            {lang('TranslationTone')}
+          </NestedMenuItem>
+          <MenuSeparator />
+          {props.detectedChatLanguage && (
+            <MenuItem icon="hand-stop" onClick={handleDoNotTranslate}>
+              {doNotTranslateText()}
+            </MenuItem>
+          )}
+          <MenuItem icon="close-circle" onClick={handleHide}>
+            {oldLang('Hide')}
+          </MenuItem>
+          <MenuSeparator />
+          <MenuItem withWrap onClick={handleCocoonClick}>
+            {lang(
+              'TranslateMenuCocoon',
+              {
+                link: (
+                  <Link isPrimary onClick={(e) => e.preventDefault()}>
+                    {lang('TranslateMenuCocoonLinkText')}
+                  </Link>
+                ),
+              },
+              {
+                withNodes: true,
+                withMarkdown: true,
+                specialReplacement: {
+                  '🥚': <CustomEmoji documentId={COCOON_EMOJI_ID} />,
+                },
+              },
+            )}
+          </MenuItem>
+        </DropdownMenu>
+      )}
+      {!props.isMobile && (
+        <>
+          {props.canSearch && (
+            <Button
+              round
+              ripple={props.isRightColumnShown}
+              color="translucent"
+              size="smaller"
+              onClick={handleSearchClick}
+              ariaLabel={oldLang('Conversation.SearchPlaceholder')}
+              iconName="search"
+            />
+          )}
+          {props.canCall && (
+            <Button
+              round
+              color="translucent"
+              size="smaller"
+              onClick={handleRequestCall}
+              ariaLabel="Call"
+              iconName="phone"
+            />
+          )}
+        </>
+      )}
+      {!props.isForForum && Boolean(props.pendingJoinRequests) && (
+        <Button
+          round
+          className="badge-button"
+          ripple={props.isRightColumnShown}
+          color="translucent"
+          size="smaller"
+          iconName="user"
+          onClick={handleJoinRequestsClick}
+          ariaLabel={props.isChannel ? oldLang('SubscribeRequests') : oldLang('MemberRequests')}
+        >
+          <div class="badge">{props.pendingJoinRequests}</div>
+        </Button>
+      )}
+      <Button
+        ref={(el) => {
+          menuButtonRef = el as HTMLButtonElement;
+        }}
+        className={isMenuOpen() ? 'active' : ''}
+        round
+        ripple={!props.isMobile}
+        size="smaller"
+        color="translucent"
+        disabled={props.noMenu}
+        ariaLabel="More actions"
+        onClick={handleHeaderMenuOpen}
+        iconName="more"
+      />
+      <Show when={menuAnchor()}>
+        {(anchor) => (
+          <HeaderMenuContainer
+            chatId={props.chatId}
+            threadId={props.threadId}
+            isOpen={isMenuOpen()}
+            anchor={anchor()}
+            isChannel={props.isChannel}
+            canSubscribe={props.isForForum ? props.canSubscribe : undefined}
+            canSearch={props.canSearch}
+            canCall={props.canCall}
+            canMute={props.canMute}
+            canViewStatistics={props.canViewStatistics}
+            canViewBoosts={props.canViewBoosts}
+            canViewMonetization={props.canViewMonetization}
+            canShowBoostModal={props.canShowBoostModal}
+            canLeave={props.canLeave}
+            canEnterVoiceChat={props.canEnterVoiceChat}
+            canCreateVoiceChat={props.canCreateVoiceChat}
+            pendingJoinRequests={props.pendingJoinRequests}
+            onJoinRequestsClick={handleJoinRequestsClick}
+            withForumActions={props.isForForum}
+            channelMonoforumId={props.channelMonoforumId}
+            onSearchClick={handleSearchClick}
+            onAsMessagesClick={handleAsMessagesClick}
+            onClose={handleHeaderMenuClose}
+            onCloseAnimationEnd={handleHeaderMenuHide}
+          />
+        )}
+      </Show>
+    </div>
+  );
+};
+
+const mapStateToProps = (
+  global: GlobalState,
+  { chatId, threadId, messageListType, isMobile }: OwnProps,
+): Complete<StateProps> => {
+  const chat = selectChat(global, chatId);
+  const isChannel = Boolean(chat && isChatChannel(chat));
+  const isSuperGroup = Boolean(chat && isChatSuperGroup(chat));
+  const language = selectLanguageCode(global);
+  const translationLanguage = selectTranslationLanguage(global);
+  const isPrivate = isUserId(chatId);
+  const { doNotTranslate, translationTone } = global.settings.byKey;
+
+  const isRestricted = selectIsChatRestricted(global, chatId);
+  if (!chat || isRestricted || selectIsInSelectMode(global)) {
+    return {
+      noMenu: true,
+      language,
+      translationLanguage,
+      doNotTranslate,
+      currentTone: translationTone,
+    } as Complete<StateProps>;
+  }
+
+  const bot = selectBot(global, chatId);
+  const chatFullInfo = !isPrivate ? selectChatFullInfo(global, chatId) : undefined;
+  const userFullInfo = isPrivate ? selectUserFullInfo(global, chatId) : undefined;
+  const fullInfo = chatFullInfo || userFullInfo;
+  const isChatWithSelf = selectIsChatWithSelf(global, chatId);
+  const isMainThread = messageListType === 'thread' && threadId === MAIN_THREAD_ID;
+  const isDiscussionThread = messageListType === 'thread' && threadId !== MAIN_THREAD_ID;
+  const isRightColumnShown = selectIsRightColumnShown(global, isMobile);
+
+  const isSavedDialog = getIsSavedDialog(chatId, threadId, global.currentUserId);
+
+  const canSubscribe = Boolean(
+    (isMainThread || chat.isForum) && (isChannel || isSuperGroup) && chat.isNotJoined && !chat.isMonoforum,
+  );
+  const canSearch = isMainThread || isDiscussionThread;
+  const canCall =
+    ARE_CALLS_SUPPORTED &&
+    isUserId(chat.id) &&
+    !isChatWithSelf &&
+    !bot &&
+    !chat.isSupport &&
+    !isAnonymousForwardsChat(chat.id);
+  const canMute = isMainThread && !isChatWithSelf && !canSubscribe;
+  const canLeave = isSavedDialog || (isMainThread && !canSubscribe);
+  const canEnterVoiceChat = ARE_CALLS_SUPPORTED && isMainThread && chat.isCallActive;
+  const canCreateVoiceChat =
+    ARE_CALLS_SUPPORTED &&
+    isMainThread &&
+    !chat.isCallActive &&
+    getHasAdminRight(chat, 'manageCall') &&
+    !chat.isMonoforum;
+  const canViewStatistics = isMainThread && chatFullInfo?.canViewStatistics;
+  const canViewMonetization = isMainThread && chatFullInfo?.canViewMonetization;
+  const canViewBoosts =
+    isMainThread &&
+    !chat.isMonoforum &&
+    (isSuperGroup || isChannel) &&
+    (canViewStatistics || getHasAdminRight(chat, 'postStories'));
+  const canShowBoostModal = !canViewBoosts && (isSuperGroup || isChannel) && !chat.isMonoforum;
+  const pendingJoinRequests = isMainThread ? chatFullInfo?.requestsPending : undefined;
+  const noAnimation = !selectCanAnimateInterface(global);
+
+  const isTranslating = Boolean(selectRequestedChatTranslationLanguage(global, chatId));
+  const canTranslate = selectCanTranslateChat(global, chatId) && !fullInfo?.isTranslationDisabled;
+  const isAccountFrozen = selectIsCurrentUserFrozen(global);
+  const currentTone = selectRequestedChatTranslationTone(global, chatId);
+
+  const channelMonoforumId = isChatChannel(chat) ? chat.linkedMonoforumId : undefined;
+
+  return {
+    noMenu: false,
+    isChannel,
+    isRightColumnShown,
+    canSubscribe,
+    canSearch,
+    canCall,
+    canMute,
+    canViewStatistics,
+    canViewMonetization,
+    canViewBoosts,
+    canShowBoostModal,
+    canLeave,
+    canEnterVoiceChat,
+    canCreateVoiceChat,
+    pendingJoinRequests,
+    noAnimation,
+    canTranslate,
+    isTranslating,
+    translationLanguage,
+    language,
+    doNotTranslate,
+    detectedChatLanguage: chat.detectedLanguage,
+    isAccountFrozen,
+    channelMonoforumId,
+    currentTone,
+  };
+};
+
+export default HeaderActions;
+
+function setFocusInSearchInput() {
+  const searchInput = document.querySelector<HTMLInputElement>('#MiddleSearch input');
+  if (searchInput) {
+    focusNoScroll(searchInput);
+  }
+}

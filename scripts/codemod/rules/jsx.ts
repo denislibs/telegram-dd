@@ -293,7 +293,7 @@ export const jsxRule: Rule = {
           ctx.todo(
             element,
             'key-remount',
-            'key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show>',
+            'key= on a single element remounted it: wrap in <Show when={key} keyed>{(key) => …}</Show> (the callback MUST take an argument, a zero-argument child is a plain child and never remounts; a falsy key such as 0 renders nothing: use when={{ id: key }})',
           );
         } else {
           removeAttr(ctx, key);

@@ -64,3 +64,11 @@ export const patches = [
       });`,
   },
 ];
+
+// Files of OUR tree that are added to the COPY of telegram-tt (never to `reference/`): the committed mock scenarios of the
+// middle column gates and the request handler that pages their history. They only use MockClient modules that exist at the
+// same paths in tt, so both apps serve the same data (`tests/visual/mocks.spec.ts` compares them).
+export const extraFiles = [
+  'src/lib/gramjs/client/__mocks__/messages.json',
+  'src/lib/gramjs/client/__invokeMiddlewares__/messages.ts',
+];

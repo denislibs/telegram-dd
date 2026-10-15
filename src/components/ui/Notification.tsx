@@ -249,7 +249,7 @@ const Notification = (props: OwnProps) => {
         {shouldShowTimer() && (
           // Deviation: `key={cacheBreaker}` remounts the timer; a fresh array per `cacheBreaker` change is the key.
           <Show when={[cacheBreaker()]} keyed>
-            {() => <RoundTimer className="notification-timer" duration={Math.ceil(duration() / 1000)} />}
+            {(_key) => <RoundTimer className="notification-timer" duration={Math.ceil(duration() / 1000)} />}
           </Show>
         )}
       </div>

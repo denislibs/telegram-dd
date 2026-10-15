@@ -55,6 +55,27 @@ test.describe('leaks', () => {
       ),
     ).rejects.toThrow(/JS heap grew by/);
   });
+  test('the helper detects a deliberate DOM leak by the node counter, with a heap limit that would not see it', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(
+      expectNoLeak(
+        page,
+        () =>
+          page.evaluate(() => {
+            // a detached tree of 400 nodes kept alive per run: about 100 KB of heap, 8000 nodes over 20 runs
+            const bucket = ((window as unknown as { __domLeak?: unknown[] }).__domLeak ??= []);
+            const tree = document.createElement('div');
+            for (let i = 0; i < 200; i++) {
+              tree.appendChild(document.createElement('span')).appendChild(document.createTextNode('x'));
+            }
+            bucket.push(tree);
+          }),
+        { runs: 20, maxGrowthKb: 100_000, warmupRuns: 1, maxNodeGrowth: 500 },
+      ),
+    ).rejects.toThrow(/DOM nodes were added/);
+  });
 });
 
 test.describe('long tasks under 4x CPU throttling', () => {

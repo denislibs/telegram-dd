@@ -9,7 +9,7 @@
       "maxRatio": 0.85
     },
     "src/components/middle/MessageListHistoryHandler.tsx": {
-      "reason": "55-line component: the component-model change (withGlobal in the body, <For>, props getters) is 20 lines (store-architecture.md \u00a75, the tab-specific example).",
+      "reason": "55-line component: the component-model change (withGlobal in the body, <For>, props getters) is 20 lines (store-architecture.md §5, the tab-specific example).",
       "maxRatio": 0.55
     },
     "src/hooks/useFolderManager.ts": {
@@ -339,6 +339,214 @@
     "src/hooks/useShowTransitionSwap.ts": {
       "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors, effects split by phase, hooks with accessor signatures; see the // Deviation: comments and docs/reports/slice-chatlist.md.",
       "maxRatio": 0.83
+    },
+    "src/components/common/AvatarList.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.53
+    },
+    "src/components/common/CompactMediaPreview.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.52
+    },
+    "src/components/common/FormattedDate.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.46
+    },
+    "src/components/common/GroupChatInfo.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.5
+    },
+    "src/components/common/MediaSpoiler.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.57
+    },
+    "src/components/common/PeerColorWrapper.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.7
+    },
+    "src/components/common/PrivateChatInfo.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.52
+    },
+    "src/components/common/RankBadge.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.56
+    },
+    "src/components/common/SensitiveContentConfirmModal.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.46
+    },
+    "src/components/common/code/CodeBlock.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.72
+    },
+    "src/components/common/code/CodeOverlay.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.61
+    },
+    "src/components/common/embedded/EmbeddedMessage.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.49
+    },
+    "src/components/common/embedded/EmbeddedStory.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.52
+    },
+    "src/components/common/embedded/EmojiIconBackground.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.5
+    },
+    "src/components/common/hooks/useAnimatedEmoji.ts": {
+      "reason": "Hook ported with accessor parameters and accessor results (porting guide 4.2): a component runs once, so refs / signals / effects take their frameact forms.",
+      "maxRatio": 0.64
+    },
+    "src/components/common/quote/Blockquote.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.62
+    },
+    "src/components/common/reactions/CustomEmojiEffect.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.45
+    },
+    "src/components/common/reactions/PaidReactionEmoji.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.52
+    },
+    "src/components/common/reactions/ReactionAnimatedEmoji.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.63
+    },
+    "src/components/common/reactions/ReactionStaticEmoji.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.69
+    },
+    "src/components/common/spoiler/Spoiler.tsx": {
+      "reason": "Component-model rewrite (props getters, effects, callback refs) plus the security deviations of the messages slice: the capture-phase click that only reveals, and the per-container concealed state that removes the link / date tooltips; the DOM and the class contract are tt's.",
+      "maxRatio": 0.85
+    },
+    "src/components/middle/FloatingActionButtons.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.51
+    },
+    "src/components/middle/MessageListAccountInfo.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.53
+    },
+    "src/components/middle/MessageListContent.tsx": {
+      "reason": "tt built the list as an array of keyed elements (teactFastList) in the render body; a component runs once, so the same loops build a plain tree of entries in a memo and nested <For keyed> render it (no component of a row is recreated).",
+      "maxRatio": 0.66
+    },
+    "src/components/middle/MiddleColumn.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.57
+    },
+    "src/components/middle/MiddleHeader.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.52
+    },
+    "src/components/middle/hooks/useContainerHeight.ts": {
+      "reason": "Hook ported with accessor parameters and accessor results (porting guide 4.2): a component runs once, so refs / signals / effects take their frameact forms.",
+      "maxRatio": 0.83
+    },
+    "src/components/middle/hooks/usePinnedMessage.ts": {
+      "reason": "Hook ported with accessor parameters and accessor results (porting guide 4.2): a component runs once, so refs / signals / effects take their frameact forms.",
+      "maxRatio": 0.57
+    },
+    "src/components/middle/hooks/useScrollHooks.ts": {
+      "reason": "Hook ported with accessor parameters and accessor results (porting guide 4.2): a component runs once, so refs / signals / effects take their frameact forms.",
+      "maxRatio": 0.51
+    },
+    "src/components/middle/message/ActionMessage.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.47
+    },
+    "src/components/middle/message/AnimatedCustomEmoji.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.5
+    },
+    "src/components/middle/message/AnimatedEmoji.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.57
+    },
+    "src/components/middle/message/Message.tsx": {
+      "reason": "The largest component of the middle column: every derived const is a memo, the render helpers read memos / <Show>, the effects are split by phase (compute / apply), the hooks take accessors; the DOM and the class contract are tt's.",
+      "maxRatio": 0.59
+    },
+    "src/components/middle/message/MessageMeta.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.49
+    },
+    "src/components/middle/message/Sticker.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.58
+    },
+    "src/components/middle/message/TopicSeparator.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.45
+    },
+    "src/components/middle/message/hooks/useFluidBackgroundFilter.tsx": {
+      "reason": "Hook ported with accessor parameters and accessor results (porting guide 4.2): a component runs once, so refs / signals / effects take their frameact forms.",
+      "maxRatio": 0.5
+    },
+    "src/components/middle/message/hooks/useFocusMessageListElement.ts": {
+      "reason": "Hook ported with accessor parameters and accessor results (porting guide 4.2): a component runs once, so refs / signals / effects take their frameact forms.",
+      "maxRatio": 0.45
+    },
+    "src/components/middle/message/hooks/useInnerHandlers.ts": {
+      "reason": "Hook ported with accessor parameters and accessor results (porting guide 4.2): a component runs once, so refs / signals / effects take their frameact forms.",
+      "maxRatio": 0.54
+    },
+    "src/components/middle/message/hooks/useOverlayPosition.ts": {
+      "reason": "Hook ported with accessor parameters and accessor results (porting guide 4.2): a component runs once, so refs / signals / effects take their frameact forms.",
+      "maxRatio": 0.54
+    },
+    "src/components/middle/message/reactions/Reactions.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.46
+    },
+    "src/components/middle/message/reactions/SavedTagButton.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.46
+    },
+    "src/components/modals/prompt/PromptDialog.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.56
+    },
+    "src/components/ui/placeholder/Skeleton.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
+      "maxRatio": 0.62
+    },
+    "src/hooks/element/useCollapsibleLines.ts": {
+      "reason": "Hook ported with accessor parameters and accessor results (porting guide 4.2): a component runs once, so refs / signals / effects take their frameact forms.",
+      "maxRatio": 0.58
+    },
+    "src/hooks/useCanvasBlur.ts": {
+      "reason": "Hook ported with accessor parameters and accessor results (porting guide 4.2): a component runs once, so refs / signals / effects take their frameact forms.",
+      "maxRatio": 0.69
+    },
+    "src/hooks/useLongPress.ts": {
+      "reason": "Hook ported with accessor parameters and accessor results (porting guide 4.2): a component runs once, so refs / signals / effects take their frameact forms.",
+      "maxRatio": 0.45
+    },
+    "src/hooks/useSchedule.tsx": {
+      "reason": "Hook ported with accessor parameters and accessor results (porting guide 4.2): a component runs once, so refs / signals / effects take their frameact forms.",
+      "maxRatio": 0.47
+    },
+    "src/hooks/useTextLanguage.ts": {
+      "reason": "Hook ported with accessor parameters and accessor results (porting guide 4.2): a component runs once, so refs / signals / effects take their frameact forms.",
+      "maxRatio": 0.58
+    },
+    "src/components/middle/footer/FooterActionBar.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for the main button and the side slots, a keyed Show for tt's `key={mainButton.key}`); the markup, the classes and the logic are tt's.",
+      "maxRatio": 0.52
+    },
+    "src/components/main/SafeLinkModal.tsx": {
+      "reason": "A ConfirmDialog instead of tt's `@gili/modal` Modal (the dialog of this app), props getters and memos; the text, the rendering of the address (host labels, suspicious characters, credentials, invisible characters) and the warning are tt's.",
+      "maxRatio": 0.5
+    },
+    "src/components/common/MessageOutgoingStatus.tsx": {
+      "reason": "Perf (not in tt): a plain icon in the DOM of a Transition until the status changes, then the real Transition; props getters.",
+      "maxRatio": 0.72
     }
   }
 }

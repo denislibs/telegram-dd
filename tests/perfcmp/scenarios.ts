@@ -146,6 +146,34 @@ export const SCENARIOS: Scenario[] = [
       return { animationEnd };
     },
   },
+  {
+    id: 'open-chat',
+    title: '7. Open a chat and scroll its history',
+    description:
+      "The top chat of the list (a 400-message history, every request is answered with the whole chat, as telegram-tt's mock does) is opened " +
+      'through the `openChat` action; once its first message is rendered, the list is scrolled up, 400 px per frame, until the first message is reached.',
+    needs: ['chatList', 'inject'],
+    async run({ page }) {
+      await sleep(page, 300);
+      const opened = await pc<boolean>(page, 'openFirstChat');
+      await sleep(page, 1500);
+      const scrolled = await pc<{ frames: number; messages: number; firstId: number }>(
+        page,
+        'scrollHistoryUp',
+        400,
+        60_000,
+      );
+      await sleep(page, 500);
+      return {
+        extra: {
+          chatOpened: opened ? 1 : 0,
+          scrollFrames: scrolled.frames,
+          messagesRendered: scrolled.messages,
+          firstMessageId: scrolled.firstId,
+        },
+      };
+    },
+  },
 ];
 
 export function scenarioById(id: string) {

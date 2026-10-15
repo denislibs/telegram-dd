@@ -401,8 +401,9 @@ Each step ends with `pnpm check` green and a dev run with a clean stricterdom co
 4. **Auth**: `src/components/auth/*`, `src/bundles/auth.ts`, the UI primitives they need (`components/ui`, `Transition`
    adapters), and the styles. Done on `port/auth` ([`reports/slice-auth.md`](reports/slice-auth.md)).
 5. **Chat list**: `src/components/left/main/*` (`ChatList` with `<ManualFor orderKey>`, `Chat`), folders, archive. Done on `port/chatlist` ([`reports/slice-chatlist.md`](reports/slice-chatlist.md)).
-6. **Message list**: `src/components/middle/MessageList*`, `message/*`, scroll anchoring (`createScrollAnchor`), the
-   `useInfiniteScroll` port.
+6. **Message list**: `src/components/middle/MessageList*`, `message/*`, the text entity renderer, the header. Done on
+   `port/messages` ([`reports/slice-messages.md`](reports/slice-messages.md)): the scroll anchoring of tt's `MessageList` is a measure
+   effect + a forced-reflow effect with tt's body, not the kit's `createScrollAnchor`; the media components are placeholders.
 7. **Composer**: `src/components/middle/composer/*`, `util/tiptap`, controlled inputs (`use:value`), voice recording.
 8. **Right column**: `src/components/right/*` (Profile and its `teactFastList` lists → `ManualFor`).
 9. **Settings**: `src/components/left/settings/*`, including the License/About TODO below.
