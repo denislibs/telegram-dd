@@ -1,9 +1,10 @@
-import { createMemo, previous } from 'frameact';
+import { type Accessor, createEffect, createMemo, createSignal, frozenWhile } from 'frameact';
+import { Show } from 'frameact/dom';
 import { getActions, withGlobal } from '../../global';
 
 import type { ApiChat, ApiSticker, ApiTypingStatus } from '../../api/types';
 import type { GlobalState } from '../../global/types';
-import type { Signal } from '../../util/signals';
+import type { TransitionSlide } from '../../lib/kit';
 import { MAIN_THREAD_ID } from '../../api/types';
 import { type MessageListType, StoryViewerOrigin, type ThreadId } from '../../types';
 
@@ -21,6 +22,7 @@ import {
   selectTabState,
 } from '../../global/selectors';
 import { selectThreadLocalStateParam, selectThreadMessagesCount } from '../../global/selectors/threads';
+import { areRecordsShallowEqual } from '../../util/areShallowEqual';
 import { IS_TAURI } from '../../util/browser/globalEnvironment';
 import { IS_MAC_OS } from '../../util/browser/windowEnvironment';
 import buildClassName from '../../util/buildClassName';
@@ -51,8 +53,8 @@ type OwnProps = {
   messageListType: MessageListType;
   isComments?: boolean;
   isMobile?: boolean;
-  getCurrentPinnedIndex: Signal<number>;
-  getLoadingPinnedId: Signal<number | undefined>;
+  getCurrentPinnedIndex: Accessor<number>;
+  getLoadingPinnedId: Accessor<number | undefined>;
   onFocusPinnedMessage: (messageId: number) => void;
 };
 
@@ -93,12 +95,10 @@ const MiddleHeader = (ownProps: OwnProps) => {
   let isBackButtonActiveRef = true;
   const { isTablet } = useAppLayout();
 
-  const { width: windowWidth } = useWindowSize();
+  const windowSize = useWindowSize();
 
-  const isLeftColumnHideable = windowWidth <= MIN_SCREEN_WIDTH_FOR_STATIC_LEFT_COLUMN;
-  const shouldShowCloseButton = createMemo(() => isTablet && props.isLeftColumnShown);
-
-  let componentRef!: HTMLDivElement;
+  const isLeftColumnHideable = createMemo(() => windowSize().width <= MIN_SCREEN_WIDTH_FOR_STATIC_LEFT_COLUMN);
+  const shouldShowCloseButton = createMemo(() => Boolean(isTablet() && props.isLeftColumnShown));
 
   const handleOpenSearch = () => {
     updateMiddleSearch({ chatId: props.chatId, threadId: props.threadId, update: {} });
@@ -164,7 +164,7 @@ const MiddleHeader = (ownProps: OwnProps) => {
     }
 
     if (props.messageListType === 'thread' && props.currentTransitionKey === 0) {
-      if (!isTablet || shouldShowCloseButton()) {
+      if (!isTablet() || shouldShowCloseButton()) {
         openChat({ id: undefined }, { forceOnHeavyAnimation: true });
       } else {
         toggleLeftColumn();
@@ -184,7 +184,7 @@ const MiddleHeader = (ownProps: OwnProps) => {
       isBackButtonActiveRef &&
       props.messageListType === 'thread' &&
       props.currentTransitionKey === 0 &&
-      (!isTablet || shouldShowCloseButton())
+      (!isTablet() || shouldShowCloseButton())
     ) {
       e.stopPropagation(); // Stop propagation to prevent chat re-opening on tablets
     }
@@ -192,70 +192,121 @@ const MiddleHeader = (ownProps: OwnProps) => {
     navigateBack();
   };
 
-  const prevTransitionKey = previous(() => props.currentTransitionKey);
+  // Deviation: `usePreviousDeprecated` is an effect over the key (`previous()` is lazy, and the Transition reads the
+  // exception only when a step ends, so it would miss the steps).
+  const [cleanupExceptionKey, setCleanupExceptionKey] = createSignal<number | undefined>(undefined);
+  createEffect(
+    () => props.currentTransitionKey,
+    (currentTransitionKey2, prevTransitionKey) => {
+      setCleanupExceptionKey(
+        prevTransitionKey !== undefined && prevTransitionKey < currentTransitionKey2 ? prevTransitionKey : undefined,
+      );
+    },
+  );
 
-  const cleanupExceptionKey =
-    createMemo(() => prevTransitionKey() !== undefined && prevTransitionKey() < props.currentTransitionKey ? prevTransitionKey() : undefined);
+  const { connectionStatusText } = useConnectionStatus(
+    lang,
+    () => props.connectionState,
+    () => props.isSyncing || props.isFetchingDifference,
+    true,
+  );
 
-  const connectionStatusResult = createMemo(() => useConnectionStatus(lang, () => props.connectionState, () => props.isSyncing || props.isFetchingDifference, true));
-  const connectionStatusText = () => connectionStatusResult().connectionStatusText;
+  // Deviation: tt's inactive `Transition` slide keeps the last render of its key, so a slide that is not the active one
+  // must not follow the props (the previous chat info slides away while the new key's title slides in): every slide
+  // reads the values of its render through `frozenWhile`.
+  const slideSource = createMemo(
+    () => ({
+      chatId: props.chatId,
+      threadId: props.threadId,
+      messageListType: props.messageListType,
+      isComments: props.isComments,
+      chat: props.chat,
+      isSavedDialog: props.isSavedDialog,
+      messagesCount: props.messagesCount,
+      isChatWithSelf: props.isChatWithSelf,
+      typingStatusByPeerId: props.typingStatusByPeerId,
+      currentTransitionKey: props.currentTransitionKey,
+    }),
+    { equals: areRecordsShallowEqual },
+  );
+  type SlideState = ReturnType<typeof slideSource>;
 
-  function renderInfoTitle() {
-    if (props.messagesCount === undefined) {
+  function renderInfoTitle(state: Accessor<SlideState>) {
+    if (state().messagesCount === undefined) {
       return lang('Loading');
     }
 
-    if (props.messageListType === 'thread') {
-      if (!props.messagesCount) {
-        return lang(props.isComments ? 'CommentsTitle' : 'RepliesTitle');
+    const messagesCount = state().messagesCount!;
+
+    if (state().messageListType === 'thread') {
+      if (!messagesCount) {
+        return lang(state().isComments ? 'CommentsTitle' : 'RepliesTitle');
       }
 
-      return lang(props.isComments ? 'Comments' : 'Replies', { count: props.messagesCount }, { pluralValue: props.messagesCount });
+      return lang(
+        state().isComments ? 'Comments' : 'Replies',
+        { count: messagesCount },
+        { pluralValue: messagesCount },
+      );
     }
 
-    if (props.messageListType === 'pinned') {
-      return lang('PinnedMessagesCount', { count: props.messagesCount }, { pluralValue: props.messagesCount });
+    if (state().messageListType === 'pinned') {
+      return lang('PinnedMessagesCount', { count: messagesCount }, { pluralValue: messagesCount });
     }
 
-    if (props.messageListType === 'scheduled') {
-      if (props.isChatWithSelf) {
+    if (state().messageListType === 'scheduled') {
+      if (state().isChatWithSelf) {
         return lang('Reminders');
       }
 
-      return lang('Messages', { count: props.messagesCount }, { pluralValue: props.messagesCount });
+      return lang('Messages', { count: messagesCount }, { pluralValue: messagesCount });
     }
 
     return undefined;
   }
 
-  function renderInfo() {
-    if (props.messageListType === 'thread') {
-      if (props.threadId === MAIN_THREAD_ID || props.isSavedDialog || props.chat?.isForum) {
-        return renderChatInfo();
-      }
-    }
+  // Deviation: `renderInfo` and the functions below take the slide's state as an accessor and read it in the JSX, so a
+  // change of one field updates one binding (tt re-rendered the whole info and kept the elements by position).
+  function renderInfo(state: Accessor<SlideState>) {
+    const withChatInfo = createMemo(
+      () =>
+        state().messageListType === 'thread' &&
+        (state().threadId === MAIN_THREAD_ID || state().isSavedDialog || state().chat?.isForum),
+    );
 
     return (
-      <>
-        {renderBackButton(props.currentTransitionKey === 0)}
-        <h3>{renderInfoTitle()}</h3>
-      </>
+      <Show
+        when={withChatInfo()}
+        fallback={
+          <>
+            {renderBackButton(() => state().currentTransitionKey === 0)}
+            <h3>{renderInfoTitle(state)}</h3>
+          </>
+        }
+      >
+        {renderChatInfo(state)}
+      </Show>
     );
   }
 
-  function renderChatInfo() {
-    const savedMessagesStatus = props.isSavedDialog
-      ? props.messagesCount !== undefined
-        ? lang('Messages', { count: props.messagesCount }, { pluralValue: props.messagesCount })
-        : lang('SavedMessages')
-      : undefined;
+  function renderChatInfo(state: Accessor<SlideState>) {
+    const savedMessagesStatus = () =>
+      state().isSavedDialog
+        ? state().messagesCount !== undefined
+          ? lang('Messages', { count: state().messagesCount! }, { pluralValue: state().messagesCount! })
+          : lang('SavedMessages')
+        : undefined;
 
-    const realChatId = props.isSavedDialog ? String(props.threadId) : props.chatId;
+    const realChatId = () => (state().isSavedDialog ? String(state().threadId) : state().chatId);
 
-    const displayChatId = props.chat?.isMonoforum ? props.chat.linkedMonoforumId! : realChatId;
+    const displayChatId = createMemo(() =>
+      state().chat?.isMonoforum ? state().chat!.linkedMonoforumId! : realChatId(),
+    );
     return (
       <>
-        {(isLeftColumnHideable || props.currentTransitionKey > 0) && renderBackButton(shouldShowCloseButton(), !props.isSavedDialog)}
+        <Show when={isLeftColumnHideable() || state().currentTransitionKey > 0}>
+          {renderBackButton(shouldShowCloseButton, () => !state().isSavedDialog)}
+        </Show>
         <div
           class="chat-info-wrapper"
           onMouseDown={handleLongPressMouseDown}
@@ -264,48 +315,53 @@ const MiddleHeader = (ownProps: OwnProps) => {
           onTouchStart={handleLongPressTouchStart}
           onTouchEnd={handleLongPressTouchEnd}
         >
-          {isUserId(displayChatId) ? (
-            <PrivateChatInfo
-              userId={displayChatId}
-              threadId={!props.isSavedDialog ? props.threadId : undefined}
-              typingStatusByPeerId={props.typingStatusByPeerId}
-              status={connectionStatusText() || savedMessagesStatus}
-              withDots={Boolean(connectionStatusText())}
-              withFullInfo={props.threadId === MAIN_THREAD_ID}
-              withMediaViewer={props.threadId === MAIN_THREAD_ID}
-              withStory={!props.isChatWithSelf}
-              withUpdatingStatus
-              isSavedDialog={props.isSavedDialog}
-              storyViewerOrigin={StoryViewerOrigin.MiddleHeaderAvatar}
-              emojiStatusSize={EMOJI_STATUS_SIZE}
-              noRtl
-              onEmojiStatusClick={handleUserStatusClick}
-            />
-          ) : (
-            <GroupChatInfo
-              chatId={displayChatId}
-              threadId={!props.isSavedDialog ? props.threadId : undefined}
-              typingStatusByPeerId={props.typingStatusByPeerId}
-              withMonoforumStatus={props.chat?.isMonoforum}
-              status={connectionStatusText() || savedMessagesStatus}
-              withDots={Boolean(connectionStatusText())}
-              withMediaViewer={props.threadId === MAIN_THREAD_ID}
-              withFullInfo={props.threadId === MAIN_THREAD_ID}
-              withUpdatingStatus
-              withStory
-              isSavedDialog={props.isSavedDialog}
-              storyViewerOrigin={StoryViewerOrigin.MiddleHeaderAvatar}
-              emojiStatusSize={EMOJI_STATUS_SIZE}
-              onEmojiStatusClick={handleChannelStatusClick}
-              noRtl
-            />
-          )}
+          {/* `key={displayChatId}` of tt: a new chat id remounts the info. */}
+          <Show when={{ id: displayChatId() }} keyed>
+            {(key) =>
+              isUserId(key.id) ? (
+                <PrivateChatInfo
+                  userId={key.id}
+                  threadId={!state().isSavedDialog ? state().threadId : undefined}
+                  typingStatusByPeerId={state().typingStatusByPeerId}
+                  status={connectionStatusText() || savedMessagesStatus()}
+                  withDots={Boolean(connectionStatusText())}
+                  withFullInfo={state().threadId === MAIN_THREAD_ID}
+                  withMediaViewer={state().threadId === MAIN_THREAD_ID}
+                  withStory={!state().isChatWithSelf}
+                  withUpdatingStatus
+                  isSavedDialog={state().isSavedDialog}
+                  storyViewerOrigin={StoryViewerOrigin.MiddleHeaderAvatar}
+                  emojiStatusSize={EMOJI_STATUS_SIZE}
+                  noRtl
+                  onEmojiStatusClick={handleUserStatusClick}
+                />
+              ) : (
+                <GroupChatInfo
+                  chatId={key.id}
+                  threadId={!state().isSavedDialog ? state().threadId : undefined}
+                  typingStatusByPeerId={state().typingStatusByPeerId}
+                  withMonoforumStatus={state().chat?.isMonoforum}
+                  status={connectionStatusText() || savedMessagesStatus()}
+                  withDots={Boolean(connectionStatusText())}
+                  withMediaViewer={state().threadId === MAIN_THREAD_ID}
+                  withFullInfo={state().threadId === MAIN_THREAD_ID}
+                  withUpdatingStatus
+                  withStory
+                  isSavedDialog={state().isSavedDialog}
+                  storyViewerOrigin={StoryViewerOrigin.MiddleHeaderAvatar}
+                  emojiStatusSize={EMOJI_STATUS_SIZE}
+                  onEmojiStatusClick={handleChannelStatusClick}
+                  noRtl
+                />
+              )
+            }
+          </Show>
         </div>
       </>
     );
   }
 
-  function renderBackButton(asClose = false, withUnreadCounter = false) {
+  function renderBackButton(asClose: () => boolean, withUnreadCounter?: () => boolean) {
     return (
       <div class="back-button">
         <Button
@@ -314,74 +370,87 @@ const MiddleHeader = (ownProps: OwnProps) => {
           color="translucent"
           onClick={handleBackClick}
           onFileHoverOpen={navigateBack}
-          ariaLabel={lang(asClose ? 'Close' : 'Back')}
+          ariaLabel={lang(asClose() ? 'Close' : 'Back')}
         >
-          <div class={buildClassName('animated-close-icon', !asClose && 'state-back')} />
+          <div class={buildClassName('animated-close-icon', !asClose() && 'state-back')} />
         </Button>
-        {withUnreadCounter && <UnreadCounter />}
+        {withUnreadCounter?.() && <UnreadCounter />}
       </div>
     );
   }
 
+  const renderSlide = (slide: TransitionSlide) => {
+    const state = frozenWhile(slideSource, () => !slide.isActive());
+
+    return renderInfo(state);
+  };
+
   return (
-    <div class="MiddleHeader" ref={componentRef} data-tauri-drag-region={IS_TAURI && IS_MAC_OS ? true : undefined}>
-      {/* TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6) */}
+    <div class="MiddleHeader" data-tauri-drag-region={IS_TAURI && IS_MAC_OS ? true : undefined}>
       <Transition
         name={props.shouldSkipHistoryAnimations ? 'none' : 'slideFade'}
         activeKey={props.currentTransitionKey}
         shouldCleanup
         cleanupExceptionKey={cleanupExceptionKey()}
       >
-        {renderInfo()}
+        {renderSlide}
       </Transition>
       <div class="header-tools">
-        <HeaderActions chatId={props.chatId} threadId={props.threadId} messageListType={props.messageListType} isMobile={props.isMobile} />
+        <HeaderActions
+          chatId={props.chatId}
+          threadId={props.threadId}
+          messageListType={props.messageListType}
+          isMobile={props.isMobile}
+        />
       </div>
     </div>
   );
 };
 
-const mapStateToProps = (global: GlobalState, { chatId, threadId, messageListType, isMobile }: OwnProps): Complete<StateProps> => {
-    const { isLeftColumnShown, shouldSkipHistoryAnimations, messageLists } = selectTabState(global);
-    const chat = selectChat(global, chatId);
-    const peer = selectPeer(global, chatId);
+const mapStateToProps = (
+  global: GlobalState,
+  { chatId, threadId, messageListType, isMobile }: OwnProps,
+): Complete<StateProps> => {
+  const { isLeftColumnShown, shouldSkipHistoryAnimations, messageLists } = selectTabState(global);
+  const chat = selectChat(global, chatId);
+  const peer = selectPeer(global, chatId);
 
-    const isSavedDialog = getIsSavedDialog(chatId, threadId, global.currentUserId);
+  const isSavedDialog = getIsSavedDialog(chatId, threadId, global.currentUserId);
 
-    let messagesCount: number | undefined;
-    if (messageListType === 'pinned') {
-      const pinnedIds = selectPinnedIds(global, chatId, threadId);
-      messagesCount = pinnedIds?.length;
-    } else if (messageListType === 'scheduled') {
-      const scheduledIds = selectScheduledIds(global, chatId, threadId);
-      messagesCount = scheduledIds?.length;
-    } else if (messageListType === 'thread' && threadId !== MAIN_THREAD_ID) {
-      messagesCount = selectThreadMessagesCount(global, chatId, threadId);
-    }
+  let messagesCount: number | undefined;
+  if (messageListType === 'pinned') {
+    const pinnedIds = selectPinnedIds(global, chatId, threadId);
+    messagesCount = pinnedIds?.length;
+  } else if (messageListType === 'scheduled') {
+    const scheduledIds = selectScheduledIds(global, chatId, threadId);
+    messagesCount = scheduledIds?.length;
+  } else if (messageListType === 'thread' && threadId !== MAIN_THREAD_ID) {
+    messagesCount = selectThreadMessagesCount(global, chatId, threadId);
+  }
 
-    const typingStatusByPeerId = selectThreadLocalStateParam(global, chatId, threadId, 'typingStatusByPeerId');
+  const typingStatusByPeerId = selectThreadLocalStateParam(global, chatId, threadId, 'typingStatusByPeerId');
 
-    const emojiStatus = peer?.emojiStatus;
-    const emojiStatusSticker = emojiStatus && selectCustomEmoji(global, emojiStatus.documentId);
-    const emojiStatusSlug = emojiStatus?.type === 'collectible' ? emojiStatus.slug : undefined;
+  const emojiStatus = peer?.emojiStatus;
+  const emojiStatusSticker = emojiStatus && selectCustomEmoji(global, emojiStatus.documentId);
+  const emojiStatusSlug = emojiStatus?.type === 'collectible' ? emojiStatus.slug : undefined;
 
-    return {
-      typingStatusByPeerId,
-      isLeftColumnShown,
-      isRightColumnShown: selectIsRightColumnShown(global, isMobile),
-      isSelectModeActive: selectIsInSelectMode(global),
-      chat,
-      messagesCount,
-      isChatWithSelf: selectIsChatWithSelf(global, chatId),
-      shouldSkipHistoryAnimations,
-      currentTransitionKey: Math.max(0, messageLists.length - 1),
-      connectionState: global.connectionState,
-      isSyncing: global.isSyncing,
-      isFetchingDifference: global.isFetchingDifference,
-      emojiStatusSticker,
-      emojiStatusSlug,
-      isSavedDialog,
-    };
+  return {
+    typingStatusByPeerId,
+    isLeftColumnShown,
+    isRightColumnShown: selectIsRightColumnShown(global, isMobile),
+    isSelectModeActive: selectIsInSelectMode(global),
+    chat,
+    messagesCount,
+    isChatWithSelf: selectIsChatWithSelf(global, chatId),
+    shouldSkipHistoryAnimations,
+    currentTransitionKey: Math.max(0, messageLists.length - 1),
+    connectionState: global.connectionState,
+    isSyncing: global.isSyncing,
+    isFetchingDifference: global.isFetchingDifference,
+    emojiStatusSticker,
+    emojiStatusSlug,
+    isSavedDialog,
   };
+};
 
 export default MiddleHeader;

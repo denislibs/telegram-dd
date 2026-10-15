@@ -1,26 +1,35 @@
-import { createEffect, createMemo, createMutationEffect, createSignal, requestForcedReflow, requestMeasure } from 'frameact';
-import { depsOf } from '../../util/effectDeps';
+import {
+  type Accessor,
+  createEffect,
+  createMemo,
+  createMutationEffect,
+  createSignal,
+  requestForcedReflow,
+  requestMeasure,
+} from 'frameact';
 
+import { type MaybeAccessor, read } from '../../util/accessors';
+import { depsOf } from '../../util/effectDeps';
 import calcTextLineHeightAndCount from '../../util/element/calcTextLineHeightAndCount';
 import useDebouncedCallback from '../useDebouncedCallback';
-import useLastCallback from '../useLastCallback';
 import useWindowSize from '../window/useWindowSize';
 
 const WINDOW_RESIZE_LINE_RECALC_DEBOUNCE = 200;
 
+// Deviation: a hook runs once, so the options are accessors (or plain values for a constant). `recalculationKey` is an
+// accessor only: its value is any type, which `MaybeAccessor` could not tell from a getter. Element refs are accessors.
 type UseCollapsibleLinesOptions<C extends HTMLElement> = {
-  cutoutRef?: (el: C) => void;
-  isDisabled?: boolean;
-  noInitialCollapse?: boolean;
-  recalculationKey?: unknown;
-  ignoredLines?: number;
-  isCollapsed?: boolean;
+  cutoutRef?: Accessor<C | undefined>;
+  isDisabled?: MaybeAccessor<boolean | undefined>;
+  noInitialCollapse?: MaybeAccessor<boolean | undefined>;
+  recalculationKey?: Accessor<unknown>;
+  ignoredLines?: MaybeAccessor<number | undefined>;
+  isCollapsed?: MaybeAccessor<boolean | undefined>;
   onCollapseChange?: (isCollapsed: boolean) => void;
 };
 
-// TODO(codemod): useCollapsibleLines: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export default function useCollapsibleLines<T extends HTMLElement, C extends HTMLElement>(
-  ref: (el: T) => void,
+  ref: Accessor<T | undefined>,
   maxLinesBeforeCollapse: number,
   {
     cutoutRef,
@@ -32,53 +41,53 @@ export default function useCollapsibleLines<T extends HTMLElement, C extends HTM
     onCollapseChange,
   }: UseCollapsibleLinesOptions<C> = {},
 ) {
-  let isFirstRenderRef = true;
-  let cutoutHeightRef: number | undefined;
-  let fullHeightRef: number | undefined;
-  const shouldInitiallyCollapse = isCollapsedControlled ?? !noInitialCollapse;
-  const [isCollapsible, setIsCollapsible] = createSignal(!isDisabled && shouldInitiallyCollapse);
+  let isFirstRender = true;
+  let cutoutHeight: number | undefined;
+  let fullHeight: number | undefined;
+  const shouldInitiallyCollapse = read(isCollapsedControlled) ?? !read(noInitialCollapse);
+  const [isCollapsible, setIsCollapsible] = createSignal(!read(isDisabled) && shouldInitiallyCollapse);
   const [isCollapsedUncontrolled, setIsCollapsedUncontrolled] = createSignal(isCollapsible());
-  const isCollapsed = createMemo(() => isCollapsible() && (isCollapsedControlled ?? isCollapsedUncontrolled()));
-  const shouldKeepExpandedHeightAuto = recalculationKey !== undefined;
+  const isCollapsed = createMemo(() => isCollapsible() && (read(isCollapsedControlled) ?? isCollapsedUncontrolled()));
+  // A value in tt (`recalculationKey !== undefined`), read where it is used: the key is an accessor here
+  const shouldKeepExpandedHeightAuto = () => recalculationKey?.() !== undefined;
 
-  const setIsCollapsed = (newValue) => {
+  const setIsCollapsed = (newValue: boolean | ((prev: boolean) => boolean)) => {
     const isNextCollapsed = typeof newValue === 'function' ? newValue(isCollapsed()) : newValue;
     if (isNextCollapsed === isCollapsed()) return;
 
-    if (isCollapsedControlled === undefined) {
+    if (read(isCollapsedControlled) === undefined) {
       setIsCollapsedUncontrolled(isNextCollapsed);
     }
     onCollapseChange?.(isNextCollapsed);
   };
 
-  createMutationEffect(depsOf(() => [cutoutRef, isCollapsed(), isDisabled, ref, shouldKeepExpandedHeightAuto]), () => {
-    const element = (cutoutRef || ref).current;
-    const shouldUseStyleInExpand = !cutoutRef && !shouldKeepExpandedHeightAuto;
+  // The first apply (at creation, before the ref is set) returns at `isFirstRender`
+  createMutationEffect(
+    depsOf(() => [cutoutRef?.() ?? ref(), isCollapsed(), read(isDisabled), shouldKeepExpandedHeightAuto()] as const),
+    ([element, isCollapsed2, isDisabled2, shouldKeepExpandedHeightAuto2]) => {
+      const shouldUseStyleInExpand = !cutoutRef && !shouldKeepExpandedHeightAuto2;
 
-    if (!element || isFirstRenderRef) return;
+      if (!element || isFirstRender) return;
 
-    if (isDisabled) {
-      element.style.maxHeight = '';
-      return;
-    }
+      if (isDisabled2) {
+        element.style.maxHeight = '';
+        return;
+      }
 
-    element.style.maxHeight = isCollapsed()
-      ? `${cutoutHeightRef}px`
-      : shouldUseStyleInExpand
-        ? `${fullHeightRef}px`
-        : ``;
-  });
+      element.style.maxHeight = isCollapsed2 ? `${cutoutHeight}px` : shouldUseStyleInExpand ? `${fullHeight}px` : ``;
+    },
+  );
 
   const recalculateTextLines = () => {
-    if (isDisabled || !ref.current) {
+    const element = ref();
+    if (read(isDisabled) || !element) {
       return;
     }
-    const element = ref.current;
 
     const { lineHeight, totalLines } = calcTextLineHeightAndCount(element);
-    fullHeightRef = element.scrollHeight;
-    if (totalLines - (ignoredLines || 0) > maxLinesBeforeCollapse) {
-      cutoutHeightRef = lineHeight * maxLinesBeforeCollapse;
+    fullHeight = element.scrollHeight;
+    if (totalLines - (read(ignoredLines) || 0) > maxLinesBeforeCollapse) {
+      cutoutHeight = lineHeight * maxLinesBeforeCollapse;
       setIsCollapsible(true);
     } else {
       setIsCollapsible(false);
@@ -92,47 +101,56 @@ export default function useCollapsibleLines<T extends HTMLElement, C extends HTM
     WINDOW_RESIZE_LINE_RECALC_DEBOUNCE,
   );
 
-  createMutationEffect(depsOf(() => [cutoutRef, isCollapsed(), isDisabled, recalculateTextLines, ref, shouldKeepExpandedHeightAuto]), () => {
-    if (!isDisabled && isFirstRenderRef) {
-      requestForcedReflow(() => {
-        recalculateTextLines();
+  createMutationEffect(
+    depsOf(() => [cutoutRef?.() ?? ref(), isCollapsed(), read(isDisabled), shouldKeepExpandedHeightAuto()] as const),
+    ([, , isDisabled2]) => {
+      if (!isDisabled2 && isFirstRender) {
+        requestForcedReflow(() => {
+          recalculateTextLines();
 
-        return () => {
-          isFirstRenderRef = false;
-          const element = (cutoutRef || ref).current;
-          if (!element) return;
-          element.style.maxHeight =
-            isCollapsed() && cutoutHeightRef
-              ? `${cutoutHeightRef}px`
-              : shouldKeepExpandedHeightAuto
-                ? ''
-                : `${fullHeightRef}px`;
-        };
-      });
-    }
-  });
+          return () => {
+            isFirstRender = false;
+            const element = cutoutRef?.() ?? ref();
+            if (!element) return;
+            element.style.maxHeight =
+              isCollapsed() && cutoutHeight
+                ? `${cutoutHeight}px`
+                : shouldKeepExpandedHeightAuto()
+                  ? ''
+                  : `${fullHeight}px`;
+          };
+        });
+      }
+    },
+  );
 
-  createEffect(depsOf(() => [isDisabled, recalculateTextLines, recalculationKey]), () => {
-    if (isDisabled || isFirstRenderRef || recalculationKey === undefined) return;
+  createEffect(
+    depsOf(() => [read(isDisabled), recalculationKey?.()] as const),
+    ([isDisabled2, recalculationKey2]) => {
+      if (isDisabled2 || isFirstRender || recalculationKey2 === undefined) return;
 
-    requestMeasure(recalculateTextLines);
-  });
+      requestMeasure(recalculateTextLines);
+    },
+  );
 
   // Parent resize is triggered on every collapse/expand, so we do recalculation only on window resize to save resources
-  const { width: windowWidth } = useWindowSize();
-  createEffect(depsOf(() => [debouncedRecalcTextLines, isDisabled, windowWidth]), () => {
-    if (!isDisabled) {
-      if (isFirstRenderRef) return;
+  const windowSize = useWindowSize();
+  createEffect(
+    depsOf(() => [read(isDisabled), windowSize().width] as const),
+    ([isDisabled2]) => {
+      if (!isDisabled2) {
+        if (isFirstRender) return;
 
-      debouncedRecalcTextLines();
-    } else {
-      setIsCollapsible(false);
-      setIsCollapsedUncontrolled(false);
-    }
-  });
+        debouncedRecalcTextLines();
+      } else {
+        setIsCollapsible(false);
+        setIsCollapsedUncontrolled(false);
+      }
+    },
+  );
 
   return {
-    isCollapsed: isCollapsed(),
+    isCollapsed,
     isCollapsible,
     setIsCollapsed,
   };

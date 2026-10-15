@@ -302,7 +302,12 @@ const Chat = (ownProps: OwnProps) => {
       e.preventDefault();
     }
 
-    if (openChatEntry() && props.isSelected && props.canScrollDown && e.detail <= 1) {
+    // Deviation: tt's `isSelected` / `canScrollDown` are the values of the render before the click; `openChat` updates the
+    // props at once here, so a click that selects the chat would scroll its list to the bottom (found by the messages
+    // slice: a chat with unread messages opened at its end instead of its first unread message).
+    const wasSelected = props.isSelected;
+    const couldScrollDown = props.canScrollDown;
+    if (openChatEntry() && wasSelected && couldScrollDown && e.detail <= 1) {
       scrollMessageListToBottom();
     }
   };

@@ -1,4 +1,5 @@
 import { getActions, withGlobal } from '../../global';
+
 import type { GlobalState } from '../../global/types';
 
 import { getUserFirstOrLastName } from '../../global/helpers';
@@ -34,11 +35,11 @@ function PremiumRequiredPlaceholder(ownProps: OwnProps) {
 }
 
 const mapStateToProps = (global: GlobalState, { userId }: OwnProps): Complete<StateProps> => {
-    const user = selectUser(global, userId);
+  const user = selectUser(global, userId);
 
-    return {
-      userName: getUserFirstOrLastName(user),
-    };
+  return {
+    userName: getUserFirstOrLastName(user),
   };
+};
 
 export default PremiumRequiredPlaceholder;

@@ -8,6 +8,7 @@ import type {
   ApiReplyInfo,
   MediaContainer,
 } from '../../../api/types';
+import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 import type { ChatTranslatedMessages, TranslationTone } from '../../../types';
 import type { IconName } from '../../../types/icons';
 
@@ -72,8 +73,9 @@ const NBSP = '\u00A0';
 const EMOJI_SIZE = 17;
 
 const EmbeddedMessage = (props: OwnProps) => {
-  // TODO(codemod): dependency on a container (replyInfo) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
-  const containedMedia: MediaContainer | undefined = createMemo(() => {
+  // The memo reads `replyInfo.replyMedia` / `message.content` (the leaves that are replaced as a whole when the media
+  // changes); the fields of the media are read by the memos below that consume it.
+  const containedMedia = createMemo((): MediaContainer | undefined => {
     const media = (props.replyInfo?.type === 'message' && props.replyInfo.replyMedia) || props.message?.content;
     if (!media) {
       return undefined;
@@ -85,31 +87,40 @@ const EmbeddedMessage = (props: OwnProps) => {
   });
   const hasPictogram = createMemo(() => canRenderCompactMediaPreview(containedMedia()?.content));
 
-  const isRoundVideo = createMemo(() => Boolean(containedMedia() && getMessageRoundVideo(containedMedia())));
-  const isSpoiler = createMemo(() => Boolean(containedMedia() && getMessageIsSpoiler(containedMedia())) || props.isMediaNsfw);
+  const isRoundVideo = createMemo(() => {
+    const media = containedMedia();
+    return Boolean(media && getMessageRoundVideo(media));
+  });
+  const isSpoiler = createMemo(() => {
+    const media = containedMedia();
+    return Boolean(media && getMessageIsSpoiler(media)) || props.isMediaNsfw;
+  });
   const isQuote = createMemo(() => Boolean(props.replyInfo?.type === 'message' && props.replyInfo.isQuote));
-  const replyForwardInfo = createMemo(() => props.replyInfo?.type === 'message' ? props.replyInfo.replyFrom : undefined);
+  const replyForwardInfo = createMemo(() =>
+    props.replyInfo?.type === 'message' ? props.replyInfo.replyFrom : undefined,
+  );
 
   const shouldTranslate = createMemo(() => props.message && isMessageTranslatable(props.message));
-  const messageTranslationResult = createMemo(() => useMessageTranslation(
+  const { translatedText, translatedRichMessage } = useMessageTranslation(
     () => props.chatTranslations,
     () => props.message?.chatId,
-    () => shouldTranslate() ? props.message?.id : undefined,
+    () => (shouldTranslate() ? props.message?.id : undefined),
     () => props.requestedChatTranslationLanguage,
     () => props.requestedChatTranslationTone,
-  ));
-  const translatedText = () => messageTranslationResult().translatedText;
-  const translatedRichMessage = () => messageTranslationResult().translatedRichMessage;
-  const translatedPreview = createMemo(
-    () => (translatedRichMessage() ? { text: getRichMessagePreviewText(translatedRichMessage()) } : translatedText()),
   );
+  const translatedPreview = createMemo(() => {
+    const richMessage = translatedRichMessage();
+    return richMessage ? { text: getRichMessagePreviewText(richMessage) } : translatedText();
+  });
 
   const oldLang = useOldLang();
   const lang = useLang();
 
-  const senderTitle = createMemo(() => props.sender
-    ? getPeerTitle(oldLang, props.sender)
-    : replyForwardInfo()?.hiddenUserName || props.message?.forwardInfo?.hiddenUserName);
+  const senderTitle = createMemo(() =>
+    props.sender
+      ? getPeerTitle(oldLang, props.sender)
+      : replyForwardInfo()?.hiddenUserName || props.message?.forwardInfo?.hiddenUserName,
+  );
 
   const forwardSendersTitle = createMemo(() => {
     if (!props.composerForwardSenders) return undefined;
@@ -118,10 +129,10 @@ const EmbeddedMessage = (props: OwnProps) => {
     return lang.conjunction(peerTitles);
   });
 
-  const senderChatTitle = createMemo(() => props.senderChat ? getPeerTitle(oldLang, props.senderChat) : undefined);
-  const forwardSenderTitle = createMemo(() => props.forwardSender
-    ? getPeerTitle(oldLang, props.forwardSender)
-    : props.message?.forwardInfo?.hiddenUserName);
+  const senderChatTitle = createMemo(() => (props.senderChat ? getPeerTitle(oldLang, props.senderChat) : undefined));
+  const forwardSenderTitle = createMemo(() =>
+    props.forwardSender ? getPeerTitle(oldLang, props.forwardSender) : props.message?.forwardInfo?.hiddenUserName,
+  );
   const areSendersSame = createMemo(() => props.sender && props.sender.id === props.forwardSender?.id);
 
   function renderTextContent() {
@@ -241,7 +252,8 @@ const EmbeddedMessage = (props: OwnProps) => {
       }
     }
 
-    const isReplyToQuote = props.isInComposer && Boolean(props.replyInfo && 'quoteText' in props.replyInfo && props.replyInfo?.quoteText);
+    const isReplyToQuote =
+      props.isInComposer && Boolean(props.replyInfo && 'quoteText' in props.replyInfo && props.replyInfo?.quoteText);
 
     return (
       <span class="embedded-sender-wrapper">

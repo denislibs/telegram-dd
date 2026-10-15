@@ -1,7 +1,6 @@
 import { createEffect, createMemo } from 'frameact';
 import type { JSX } from 'frameact/jsx-runtime';
 import { getActions, getGlobal, getPromiseActions } from '../../global';
-import { depsOf } from '../../util/effectDeps';
 
 import type { GlobalState } from '../../global/types';
 import { ApiMessageEntityTypes } from '../../api/types';
@@ -11,6 +10,7 @@ import { getUserFullName } from '../../global/helpers';
 import { selectIsWalletAvailable, selectTonExplorerUrl, selectWalletAddressOwner } from '../../global/selectors';
 import buildClassName from '../../util/buildClassName';
 import { copyTextToClipboard } from '../../util/clipboard';
+import { depsOf } from '../../util/effectDeps';
 import { parseTonTransferAddress } from '../../util/tonAddress';
 
 import useSelector from '../../hooks/data/useSelector';
@@ -53,37 +53,44 @@ const TonAddressLink = (props: OwnProps) => {
 
   const isWalletAvailable = useSelector(selectIsWalletAvailable);
   const ownerSelector = (global: GlobalState) => {
-      return nonBounceableAddress() ? selectWalletAddressOwner(global, nonBounceableAddress()) : undefined;
-    };
+    const address = nonBounceableAddress();
+    return address ? selectWalletAddressOwner(global, address) : undefined;
+  };
   const owner = useSelector(ownerSelector);
   const ownerUser = createMemo(() => owner() || undefined);
 
   // In a protected chat an address the wallet cannot take leaves no items; the last flag stops a long tap here
-  const contextMenuHandlersResult = createMemo(() => useContextMenuHandlers(() => ref, () => props.noCopy && !nonBounceableAddress(), undefined, undefined, undefined, true));
-  const isContextMenuOpen = () => contextMenuHandlersResult().isContextMenuOpen;
-  const contextMenuAnchor = () => contextMenuHandlersResult().contextMenuAnchor;
-  const handleContextMenu = () => contextMenuHandlersResult().handleContextMenu;
-  const handleContextMenuClose = () => contextMenuHandlersResult().handleContextMenuClose;
-  const handleContextMenuHide = () => contextMenuHandlersResult().handleContextMenuHide;
+  const { isContextMenuOpen, contextMenuAnchor, handleContextMenu, handleContextMenuClose, handleContextMenuHide } =
+    useContextMenuHandlers(
+      () => ref,
+      () => props.noCopy && !nonBounceableAddress(),
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
 
-  createEffect(depsOf(() => [isContextMenuOpen(), nonBounceableAddress(), owner()] as const), ([isContextMenuOpen2, nonBounceableAddress2, owner2]) => {
-    if (!isContextMenuOpen2 || !nonBounceableAddress2 || owner2 !== undefined) return undefined;
+  createEffect(
+    depsOf(() => [isContextMenuOpen(), nonBounceableAddress(), owner()] as const),
+    ([isContextMenuOpen2, nonBounceableAddress2, owner2]) => {
+      if (!isContextMenuOpen2 || !nonBounceableAddress2 || owner2 !== undefined) return undefined;
 
-    let isCancelled = false;
+      let isCancelled = false;
 
-    getPromiseActions()
-      .loadWalletUserAddresses({ addresses: [nonBounceableAddress2] })
-      .then(() => {
-        // `owner` catches up with the global only at the end of the tick, so only a lookup that stored nothing is marked
-        if (!isCancelled && selectWalletAddressOwner(getGlobal(), nonBounceableAddress2) === undefined) {
-          markOwnerLookupDone();
-        }
-      });
+      getPromiseActions()
+        .loadWalletUserAddresses({ addresses: [nonBounceableAddress2] })
+        .then(() => {
+          // `owner` catches up with the global only at the end of the tick, so only a lookup that stored nothing is marked
+          if (!isCancelled && selectWalletAddressOwner(getGlobal(), nonBounceableAddress2) === undefined) {
+            markOwnerLookupDone();
+          }
+        });
 
-    return () => {
-      isCancelled = true;
-    };
-  });
+      return () => {
+        isCancelled = true;
+      };
+    },
+  );
 
   const getTriggerElement = () => ref;
   const getRootElement = () => document.body;
@@ -91,7 +98,7 @@ const TonAddressLink = (props: OwnProps) => {
   const getLayout = () => ({ withPortal: true });
 
   const handleMenuHide = () => {
-    handleContextMenuHide()();
+    handleContextMenuHide();
     unmarkOwnerLookupDone();
   };
 
@@ -178,22 +185,24 @@ const TonAddressLink = (props: OwnProps) => {
   return (
     <a
       ref={ref}
-      onClick={handleContextMenu()}
-      onContextMenu={handleContextMenu()}
+      onClick={handleContextMenu}
+      onContextMenu={handleContextMenu}
       class="text-entity-link"
       dir="auto"
       data-entity-type={ApiMessageEntityTypes.TonAddress}
     >
       {props.children}
       <Menu
-        ref={menuRef}
+        ref={(el) => {
+          menuRef = el;
+        }}
         isOpen={isContextMenuOpen()}
         anchor={contextMenuAnchor()}
         getTriggerElement={getTriggerElement}
         getRootElement={getRootElement}
         getMenuElement={getMenuElement}
         getLayout={getLayout}
-        onClose={handleContextMenuClose()}
+        onClose={handleContextMenuClose}
         onCloseAnimationEnd={handleMenuHide}
         withPortal
         autoClose

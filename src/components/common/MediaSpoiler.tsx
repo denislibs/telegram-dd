@@ -1,7 +1,7 @@
 import { requestMutation } from 'frameact';
 import { Show } from 'frameact/dom';
-import { createShowTransition } from '../../lib/kit';
 
+import { createShowTransition } from '../../lib/kit';
 import buildClassName from '../../util/buildClassName';
 
 import useCanvasBlur from '../../hooks/useCanvasBlur';
@@ -29,9 +29,22 @@ const MediaSpoiler = (props: OwnProps) => {
 
   const lang = useLang();
 
-  // TODO(codemod): useShowTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element (transitionClassNames/hasOpenClass are gone)
-  const { shouldRender, transitionClassNames } = createShowTransition({ isOpen: () => props.isVisible, noMountTransition: true, className: props.withAnimation ? false : undefined, closeDuration: ANIMATION_DURATION });
-  const canvasRef = useCanvasBlur(() => props.thumbDataUri, !shouldRender(), undefined, BLUR_RADIUS, () => props.width, () => props.height);
+  // Deviation: `useShowTransitionDeprecated` -> `createShowTransition`; the state classes are written through `ref`
+  // (tt returned them as `transitionClassNames`). `className` is read once, at creation.
+  const { shouldRender, ref: transitionRef } = createShowTransition({
+    isOpen: () => props.isVisible,
+    noMountTransition: true,
+    className: props.withAnimation ? false : undefined,
+    closeDuration: ANIMATION_DURATION,
+  });
+  const canvasRef = useCanvasBlur(
+    () => props.thumbDataUri,
+    () => !shouldRender(),
+    undefined,
+    BLUR_RADIUS,
+    () => props.width,
+    () => props.height,
+  );
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!ref) return;
@@ -48,20 +61,25 @@ const MediaSpoiler = (props: OwnProps) => {
 
   return (
     <Show when={shouldRender()}>
-    <div
-      class={buildClassName(styles.root, transitionClassNames, props.className, props.withAnimation && styles.maskAnimation)}
-      ref={ref}
-      onClick={props.withAnimation ? handleClick : undefined}
-    >
-      <canvas ref={canvasRef} class={styles.canvas} width={props.width} height={props.height} />
-      <div class={styles.dots} />
-      {props.isNsfw && (
-        <span class={styles.nsfw}>
-          <Icon name="eye-crossed-outline" className={styles.nsfwIcon} />
-          {lang('MediaSpoilerSensitive')}
-        </span>
-      )}
-    </div>
+      <div
+        class={buildClassName(styles.root, props.className, props.withAnimation && styles.maskAnimation)}
+        ref={(el) => {
+          ref = el;
+          transitionRef(el);
+        }}
+        onClick={(e) => {
+          if (props.withAnimation) handleClick(e);
+        }}
+      >
+        <canvas ref={canvasRef} class={styles.canvas} width={props.width} height={props.height} />
+        <div class={styles.dots} />
+        {props.isNsfw && (
+          <span class={styles.nsfw}>
+            <Icon name="eye-crossed-outline" className={styles.nsfwIcon} />
+            {lang('MediaSpoilerSensitive')}
+          </span>
+        )}
+      </div>
     </Show>
   );
 };

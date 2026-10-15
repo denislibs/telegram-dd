@@ -1,7 +1,6 @@
+import type { JSX } from 'frameact/jsx-runtime';
 import type { Element, Root } from 'hast';
 import { createLowlight } from 'lowlight';
-import type { TeactNode } from '../lib/teact/teact';
-import Teact from '../lib/teact/teact';
 
 import { createCallbackManager } from './callbacks';
 import { getCodeLanguageName } from './codeLanguages';
@@ -9,10 +8,13 @@ import { getCodeLanguageName } from './codeLanguages';
 const THIRD_PARTY_LANGUAGES = ['typelanguage'];
 export const CODE_HIGHLIGHTING_CHANGED_META = 'codeHighlightingChanged';
 
-const LANGUAGE_MODULES = import.meta.glob('../../node_modules/highlight.js/es/languages/*.js') as Record<
-  string,
-  () => Promise<{ default: any }>
->;
+// Deviation: tt reads the grammars of highlight.js from the hoisted `node_modules/highlight.js`. highlight.js is a
+// dependency of `lowlight` only, so with pnpm that path does not exist and no language would ever load: the second
+// pattern is where pnpm keeps it. (A direct dependency on highlight.js would make the first one enough.)
+const LANGUAGE_MODULES = import.meta.glob([
+  '../../node_modules/highlight.js/es/languages/*.js',
+  '/node_modules/.pnpm/highlight.js@*/node_modules/highlight.js/es/languages/*.js',
+]) as Record<string, () => Promise<{ default: any }>>;
 
 const {
   addCallback: subscribeToCodeLanguageLoad,
@@ -70,7 +72,8 @@ function notifyLanguageLoad() {
 }
 
 function loadFirstPartyLanguage(langCode: string) {
-  const loadLanguageModule = LANGUAGE_MODULES[`../../node_modules/highlight.js/es/languages/${langCode}.js`];
+  const languageModulePath = Object.keys(LANGUAGE_MODULES).find((path) => path.endsWith(`/es/languages/${langCode}.js`));
+  const loadLanguageModule = languageModulePath && LANGUAGE_MODULES[languageModulePath];
   if (!loadLanguageModule) return undefined;
 
   const languagePromise = loadLanguageModule();
@@ -87,7 +90,9 @@ function loadThirdPartyLanguage(langCode: string) {
   return undefined;
 }
 
-function treeToElements(tree: Element | Root): TeactNode {
+// Deviation: teact's `createElement` calls became DOM nodes built here (this is a `.ts` file, no JSX); the text of the
+// code only ever goes into text nodes (`append` of a string), never into markup.
+function treeToElements(tree: Element | Root): JSX.Element {
   const children = tree.children.map((child) => {
     if (child.type === 'text') {
       return child.value;
@@ -96,15 +101,20 @@ function treeToElements(tree: Element | Root): TeactNode {
       return treeToElements(child);
     }
     return undefined;
-  }).filter(Boolean);
+  }).filter(Boolean) as (Node | string)[];
 
   if (tree.type === 'root') {
-    return Teact.createElement('code', { className: 'hljs custom-scroll-x' }, children) as unknown as TeactNode;
+    const code = document.createElement('code');
+    code.className = 'hljs custom-scroll-x';
+    code.append(...children);
+    return code;
   }
 
-  const name = tree.tagName;
-  const classNameArray = tree.properties?.className as string[];
+  // Deviation: lowlight emits `span` only; the tag name of the tree is not used to create an element
+  const span = document.createElement('span');
+  const classNameArray = tree.properties?.className;
   const className = classNameArray?.join(' ');
-
-  return Teact.createElement(name, { className }, children) as unknown as TeactNode;
+  if (className) span.className = className;
+  span.append(...children);
+  return span;
 }

@@ -1,94 +1,116 @@
 import { createEffect, createMemo, createSignal } from 'frameact';
 import { getGlobal } from '../../../global';
-import { depsOf } from '../../../util/effectDeps';
 
 import type { ThreadId } from '../../../types';
 
 import { selectListedIds, selectOutlyingListByMessageId } from '../../../global/selectors';
+import { type MaybeAccessor, read } from '../../../util/accessors';
 import cycleRestrict from '../../../util/cycleRestrict';
-
+import { depsOf } from '../../../util/effectDeps';
 
 export type OnIntersectPinnedMessage = (params: { firstViewportId?: number; shouldCancelWaiting?: boolean }) => void;
 
-// TODO(codemod): usePinnedMessage: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function usePinnedMessage(chatId?: string, threadId?: ThreadId, pinnedIds?: number[]) {
+// Deviation: the parameters are `MaybeAccessor`s, the signals are accessors.
+export default function usePinnedMessage(
+  chatId?: MaybeAccessor<string | undefined>,
+  threadId?: MaybeAccessor<ThreadId | undefined>,
+  pinnedIds?: MaybeAccessor<number[] | undefined>,
+) {
   const [getPinnedIndexByKey, setPinnedIndexByKey] = createSignal<Record<string, number>>({});
   const [getLoadingPinnedId, setLoadingPinnedId] = createSignal<number | undefined>(undefined);
-  const key = chatId ? `${chatId}_${threadId}` : undefined;
-  const getCurrentPinnedIndex = createMemo(() => getPinnedIndexByKey()()[key!] ?? 0);
+  const key = createMemo(() => {
+    const chatId2 = read(chatId);
+    return chatId2 ? `${chatId2}_${read(threadId)}` : undefined;
+  });
+  const getCurrentPinnedIndex = createMemo(() => getPinnedIndexByKey()[key()!] ?? 0);
 
   // Reset when switching chat
-  createEffect(depsOf(() => [chatId, threadId, setPinnedIndexByKey, setLoadingPinnedId]), () => {
-    setLoadingPinnedId(undefined);
-  });
+  createEffect(
+    depsOf(() => [read(chatId), read(threadId)] as const),
+    () => {
+      setLoadingPinnedId(undefined);
+    },
+  );
 
-  createEffect(depsOf(() => [getPinnedIndexByKey(), key, pinnedIds?.length, setPinnedIndexByKey] as const), ([getPinnedIndexByKey2]) => {
-    if (!key) return;
-    const currentPinnedIndex = getPinnedIndexByKey2()[key];
-    const pinnedLength = pinnedIds?.length || 0;
-    if (currentPinnedIndex >= pinnedLength) {
-      setPinnedIndexByKey({
-        ...getPinnedIndexByKey2(),
-        [key]: clampIndex(pinnedLength - 1),
-      });
-    }
-  });
+  createEffect(
+    depsOf(() => [getPinnedIndexByKey(), key(), read(pinnedIds)?.length] as const),
+    ([pinnedIndexByKey, key2, pinnedLength0]) => {
+      if (!key2) return;
+      const currentPinnedIndex = pinnedIndexByKey[key2];
+      const pinnedLength = pinnedLength0 || 0;
+      // Deviation: skipped when the clamped index is already stored (the effect follows the signal it writes, so tt's
+      // unconditional write would loop for an empty list).
+      if (currentPinnedIndex >= pinnedLength && currentPinnedIndex !== clampIndex(pinnedLength - 1)) {
+        setPinnedIndexByKey({
+          ...pinnedIndexByKey,
+          [key2]: clampIndex(pinnedLength - 1),
+        });
+      }
+    },
+  );
 
   const handleIntersectPinnedMessage: OnIntersectPinnedMessage = ({ firstViewportId, shouldCancelWaiting }) => {
-      if (!chatId || !threadId || !key || !pinnedIds?.length) return;
+    const chatId2 = read(chatId);
+    const threadId2 = read(threadId);
+    const pinnedIds2 = read(pinnedIds);
+    const key2 = key();
+    if (!chatId2 || !threadId2 || !key2 || !pinnedIds2?.length) return;
 
-      if (shouldCancelWaiting) {
-        setLoadingPinnedId(undefined);
+    if (shouldCancelWaiting) {
+      setLoadingPinnedId(undefined);
+      return;
+    }
+
+    const loadingPinnedId = getLoadingPinnedId();
+    if (loadingPinnedId) {
+      const newPinnedIndex = pinnedIds2.indexOf(loadingPinnedId);
+      setPinnedIndexByKey({
+        ...getPinnedIndexByKey(),
+        [key2]: clampIndex(newPinnedIndex),
+      });
+      setLoadingPinnedId(undefined);
+
+      // We're still scrolling, prevent updating the index
+      if (loadingPinnedId < (firstViewportId || 0)) {
         return;
       }
+    }
 
-      const loadingPinnedId = getLoadingPinnedId()();
-      if (loadingPinnedId) {
-        const newPinnedIndex = pinnedIds.indexOf(loadingPinnedId);
-        setPinnedIndexByKey({
-          ...getPinnedIndexByKey()(),
-          [key]: clampIndex(newPinnedIndex),
-        });
-        setLoadingPinnedId(undefined);
+    let newIndex = pinnedIds2.findIndex((id) => id < (firstViewportId || 0));
+    if (newIndex === -1) {
+      newIndex = 0; // Pinned are sorted from newest to oldest
+    }
 
-        // We're still scrolling, prevent updating the index
-        if (loadingPinnedId < (firstViewportId || 0)) {
-          return;
-        }
-      }
-
-      let newIndex = pinnedIds.findIndex((id) => id < (firstViewportId || 0));
-      if (newIndex === -1) {
-        newIndex = 0; // Pinned are sorted from newest to oldest
-      }
-
-      setPinnedIndexByKey({
-        ...getPinnedIndexByKey()(),
-        [key]: clampIndex(newIndex),
-      });
-    };
+    setPinnedIndexByKey({
+      ...getPinnedIndexByKey(),
+      [key2]: clampIndex(newIndex),
+    });
+  };
 
   const handleFocusPinnedMessage = (messageId: number) => {
+    const chatId2 = read(chatId);
+    const threadId2 = read(threadId);
+    const pinnedIds2 = read(pinnedIds);
     // Focusing on a post in comments
-    if (!chatId || !threadId || !pinnedIds?.length) {
+    if (!chatId2 || !threadId2 || !pinnedIds2?.length) {
       return;
     }
 
     const global = getGlobal();
-    const listedIds = selectListedIds(global, chatId, threadId);
+    const listedIds = selectListedIds(global, chatId2, threadId2);
     const isMessageLoaded =
-      listedIds?.includes(messageId) || selectOutlyingListByMessageId(global, chatId, threadId, messageId);
+      listedIds?.includes(messageId) || selectOutlyingListByMessageId(global, chatId2, threadId2, messageId);
 
-    const currentIndex = pinnedIds.indexOf(messageId);
-    const newIndex = cycleRestrict(pinnedIds.length, currentIndex + 1);
+    const currentIndex = pinnedIds2.indexOf(messageId);
+    const newIndex = cycleRestrict(pinnedIds2.length, currentIndex + 1);
 
     if (isMessageLoaded) {
       setPinnedIndexByKey({
-        ...getPinnedIndexByKey()(),
-        [key!]: newIndex,
+        ...getPinnedIndexByKey(),
+        [key()!]: newIndex,
       });
     } else {
-      setLoadingPinnedId(pinnedIds[newIndex]);
+      setLoadingPinnedId(pinnedIds2[newIndex]);
     }
   };
 

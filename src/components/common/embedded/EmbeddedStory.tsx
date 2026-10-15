@@ -2,6 +2,7 @@ import { createMemo } from 'frameact';
 import { getActions } from '../../../global';
 
 import type { ApiPeer, ApiTypeStory } from '../../../api/types';
+import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 
 import { getPeerTitle } from '../../../global/helpers/peers';
 import buildClassName from '../../../util/buildClassName';
@@ -34,11 +35,15 @@ const EmbeddedStory = (props: OwnProps) => {
   const lang = useOldLang();
   const isFullStory = createMemo(() => props.story && 'content' in props.story);
   const isExpiredStory = createMemo(() => props.story && 'isDeleted' in props.story);
-  const title = createMemo(() => isFullStory() ? 'Story' : isExpiredStory() ? 'ExpiredStory' : 'Loading');
+  const title = createMemo(() => (isFullStory() ? 'Story' : isExpiredStory() ? 'ExpiredStory' : 'Loading'));
 
-  const hasPictogram = createMemo(() => isFullStory() && canRenderCompactMediaPreview(props.story.content));
+  // Deviation: the narrowed story content is read through a memo (a prop getter cannot be narrowed across reads)
+  const fullStoryContent = createMemo(() =>
+    props.story && 'content' in props.story ? props.story.content : undefined,
+  );
+  const hasPictogram = createMemo(() => isFullStory() && canRenderCompactMediaPreview(fullStoryContent()));
 
-  const senderTitle = createMemo(() => props.sender ? getPeerTitle(lang, props.sender) : undefined);
+  const senderTitle = createMemo(() => (props.sender ? getPeerTitle(lang, props.sender) : undefined));
   const handleFastClick = () => {
     if (props.story && !isExpiredStory()) {
       props.onClick();
@@ -62,7 +67,7 @@ const EmbeddedStory = (props: OwnProps) => {
     >
       {isFullStory() && hasPictogram() && (
         <CompactMediaPreview
-          media={props.story.content}
+          media={fullStoryContent()}
           className="embedded-thumb"
           isPictogram
           isProtected={props.isProtected}

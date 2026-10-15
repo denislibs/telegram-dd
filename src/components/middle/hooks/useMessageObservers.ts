@@ -1,11 +1,12 @@
 import { createEffect } from 'frameact';
 import { getActions } from '../../../global';
-import { depsOf } from '../../../util/effectDeps';
 
 import type { MessageListType, ThreadId } from '../../../types';
 import type { OnIntersectPinnedMessage } from './usePinnedMessage';
 
+import { type MaybeAccessor, read } from '../../../util/accessors';
 import { IS_ANDROID } from '../../../util/browser/windowEnvironment';
+import { depsOf } from '../../../util/effectDeps';
 import { unique } from '../../../util/iteratees';
 
 import useAppLayout from '../../../hooks/useAppLayout';
@@ -15,7 +16,7 @@ import useBackgroundMode, { isBackgroundModeActive } from '../../../hooks/window
 const INTERSECTION_THROTTLE_FOR_READING = 150;
 const INTERSECTION_THROTTLE_FOR_MEDIA = IS_ANDROID ? 1000 : 350;
 
-// TODO(codemod): useMessageObservers: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: the reactive parameters are `MaybeAccessor`s, `containerRef` is an accessor of the scroll container.
 export default function useMessageObservers({
   type,
   containerRef,
@@ -25,24 +26,28 @@ export default function useMessageObservers({
   isQuickPreview,
   onIntersectPinnedMessage,
 }: {
-  containerRef: (el: HTMLDivElement) => void;
+  containerRef: () => HTMLDivElement | undefined;
   memoFirstUnreadIdRef: { current: number | undefined };
-  chatId: string;
-  threadId: ThreadId;
-  type: MessageListType;
-  isQuickPreview?: boolean;
+  chatId: MaybeAccessor<string>;
+  threadId: MaybeAccessor<ThreadId>;
+  type: MaybeAccessor<MessageListType>;
+  isQuickPreview?: MaybeAccessor<boolean | undefined>;
+  // A callback: pass a forwarding closure (`(params) => props.onIntersectPinnedMessage?.(params)`) if it can change.
   onIntersectPinnedMessage: OnIntersectPinnedMessage | undefined;
 }) {
   const { markMessageListRead, markMentionsRead, markPollVotesRead, animateUnreadReaction, scheduleForViewsIncrement } =
     getActions();
 
   const { isMobile } = useAppLayout();
-  const INTERSECTION_MARGIN_FOR_LOADING = isMobile ? 300 : 500;
+  const INTERSECTION_MARGIN_FOR_LOADING = isMobile() ? 300 : 500;
 
   let visibleViewportIdsRef: number[] = [];
-  createEffect(depsOf(() => [threadId, chatId, type]), () => {
-    visibleViewportIdsRef = [];
-  });
+  createEffect(
+    depsOf(() => [read(threadId), read(chatId), read(type)] as const),
+    () => {
+      visibleViewportIdsRef = [];
+    },
+  );
 
   // Note: Targets bottom marker, not the message itself
   const {
@@ -58,9 +63,12 @@ export default function useMessageObservers({
       shouldSkipFirst: true,
     },
     (entries) => {
-      if (type !== 'thread' || isBackgroundModeActive()) {
+      if (read(type) !== 'thread' || isBackgroundModeActive()) {
         return;
       }
+
+      const chatId2 = read(chatId);
+      const memoFirstUnreadId = memoFirstUnreadIdRef.current;
 
       let maxId = 0;
       const mentionIds: number[] = [];
@@ -116,26 +124,26 @@ export default function useMessageObservers({
         .filter((id) => !hiddenViewportIds.has(id))
         .sort((a, b) => a - b);
 
-      if (!isQuickPreview) {
-        if (memoFirstUnreadIdRef.current && maxId && maxId >= memoFirstUnreadIdRef.current) {
+      if (!read(isQuickPreview)) {
+        if (memoFirstUnreadId && maxId && maxId >= memoFirstUnreadId) {
           markMessageListRead({ maxId });
         }
 
         if (mentionIds.length) {
-          markMentionsRead({ chatId, messageIds: mentionIds });
+          markMentionsRead({ chatId: chatId2, messageIds: mentionIds });
         }
 
         if (pollVoteIds.length) {
-          markPollVotesRead({ chatId, messageIds: pollVoteIds });
+          markPollVotesRead({ chatId: chatId2, messageIds: pollVoteIds });
         }
 
         if (scheduledToUpdateViews.length) {
-          scheduleForViewsIncrement({ chatId, ids: scheduledToUpdateViews });
+          scheduleForViewsIncrement({ chatId: chatId2, ids: scheduledToUpdateViews });
         }
       }
 
       if (reactionIds.length) {
-        animateUnreadReaction({ chatId, messageIds: reactionIds });
+        animateUnreadReaction({ chatId: chatId2, messageIds: reactionIds });
       }
 
       if (visibleViewportIdsRef.length) {

@@ -1,6 +1,5 @@
-import { Show } from 'frameact/dom';
-
 import type { ApiTopic } from '../../api/types';
+import type { OldLangFn } from '../../hooks/useOldLang';
 import type { MessageListType } from '../../types';
 
 import { REM } from '../common/helpers/mediaDimensions';
@@ -26,18 +25,34 @@ type OwnProps = {
 const NoMessages = (props: OwnProps) => {
   const lang = useOldLang();
 
+  // Deviation: a function child re-evaluates tt's chain of early returns when its inputs change.
   return (
-    <Show when={!(props.type === 'scheduled')} fallback={renderScheduled(lang)}>
-    <Show when={!props.isChatWithSelf} fallback={renderSavedMessages(lang)}>
-    <Show when={!props.isGroupChatJustCreated} fallback={renderGroup(lang)}>
-    <Show when={!props.topic} fallback={renderTopic(lang, props.topic)}>
-    <div class="empty">
-      <span>{lang('NoMessages')}</span>
-    </div>
-    </Show>
-    </Show>
-    </Show>
-    </Show>
+    <>
+      {() => {
+        if (props.type === 'scheduled') {
+          return renderScheduled(lang);
+        }
+
+        if (props.isChatWithSelf) {
+          return renderSavedMessages(lang);
+        }
+
+        if (props.isGroupChatJustCreated) {
+          return renderGroup(lang);
+        }
+
+        const topic = props.topic;
+        if (topic) {
+          return renderTopic(lang, topic);
+        }
+
+        return (
+          <div class="empty">
+            <span>{lang('NoMessages')}</span>
+          </div>
+        );
+      }}
+    </>
   );
 };
 

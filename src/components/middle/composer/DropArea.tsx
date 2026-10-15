@@ -2,6 +2,12 @@
 // the callers compile; it renders nothing.
 import type { ApiMessage } from '../../../api/types';
 
+export enum DropAreaState {
+  None = 'none',
+  Document = 'document',
+  QuickFile = 'quick_file',
+}
+
 export type OwnProps = {
   isOpen: boolean;
   withQuick?: boolean;

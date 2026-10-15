@@ -1,46 +1,55 @@
-import { createEffect, createSignal } from 'frameact';
+import { type Accessor, createEffect, createSignal } from 'frameact';
+
+import { type MaybeAccessor, read } from '../util/accessors';
 import { depsOf } from '../util/effectDeps';
-
-import type { Signal } from '../util/signals';
-
 import { detectLanguage } from '../util/languageDetection';
 
-// TODO(codemod): useTextLanguage: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function useTextLanguage(text?: string, isDisabled?: boolean, getIsReady?: Signal<boolean>) {
+// Deviation: a hook runs once. The parameters are `MaybeAccessor`s and the result is an accessor. `getIsReady` is read in
+// the compute half (it is a signal here, not a render prop), so the detection starts when the list becomes ready.
+export default function useTextLanguage(
+  text?: MaybeAccessor<string | undefined>,
+  isDisabled?: MaybeAccessor<boolean | undefined>,
+  getIsReady?: Accessor<boolean>,
+): Accessor<string | undefined> {
   const [language, setLanguage] = createSignal<string | undefined>(undefined);
   let lastTextRef: string | undefined;
 
-  createEffect(depsOf(() => [isDisabled, text, getIsReady]), () => {
-    if (isDisabled || (getIsReady && !getIsReady()) || lastTextRef === text) return;
+  createEffect(
+    depsOf(() => [read(isDisabled), read(text), getIsReady ? getIsReady() : true] as const),
+    ([isDisabled2, text2, isReady]) => {
+      if (isDisabled2 || !isReady || lastTextRef === text2) return undefined;
 
-    let isCancelled = false;
+      let isCancelled = false;
 
-    if (!text) {
-      setLanguage(undefined);
-      lastTextRef = undefined;
-      return;
-    }
+      if (!text2) {
+        setLanguage(undefined);
+        lastTextRef = undefined;
+        return undefined;
+      }
 
-    detectLanguage(text)
-      .then((lang) => {
-        if (isCancelled) {
-          return;
-        }
+      detectLanguage(text2)
+        .then((lang) => {
+          if (isCancelled) {
+            return;
+          }
 
-        setLanguage(lang);
-      })
-      .finally(() => {
-        if (isCancelled) {
-          return;
-        }
+          setLanguage(lang);
+        })
+        // Deviation: the detector is optional (the worker or its wasm may fail to load): no language, no error.
+        .catch(() => undefined)
+        .finally(() => {
+          if (isCancelled) {
+            return;
+          }
 
-        lastTextRef = text;
-      });
+          lastTextRef = text2;
+        });
 
-    return () => {
-      isCancelled = true;
-    };
-  });
+      return () => {
+        isCancelled = true;
+      };
+    },
+  );
 
   return language;
 }

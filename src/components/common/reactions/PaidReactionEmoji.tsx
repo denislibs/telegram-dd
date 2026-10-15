@@ -1,15 +1,17 @@
 import { createEffect, createMemo, createSignal } from 'frameact';
+import { For } from 'frameact/dom';
 import { getActions, withGlobal } from '../../../global';
-import { depsOf } from '../../../util/effectDeps';
-import { createShowTransition } from '../../../lib/kit';
+
+import type { ApiReactionPaid, ApiReactionWithPaid } from '../../../api/types';
 import type { GlobalState } from '../../../global/types';
+import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 
-import type { ApiReaction, ApiReactionPaid } from '../../../api/types';
-
+import { createShowTransition } from '../../../lib/kit';
 import { isSameReaction } from '../../../global/helpers';
 import { selectPerformanceSettingsValue, selectTabState } from '../../../global/selectors';
 import { IS_ANDROID, IS_IOS } from '../../../util/browser/windowEnvironment';
 import buildClassName from '../../../util/buildClassName';
+import { depsOf } from '../../../util/effectDeps';
 import { LOCAL_TGS_URLS } from '../helpers/animatedAssets';
 import { REM } from '../helpers/mediaDimensions';
 
@@ -31,7 +33,7 @@ type OwnProps = {
 };
 
 type StateProps = {
-  activeReactions?: ApiReaction[];
+  activeReactions?: ApiReactionWithPaid[];
   withEffects?: boolean;
 };
 
@@ -45,40 +47,42 @@ const PaidReactionEmoji = (ownProps: OwnProps) => {
   const { stopActiveReaction } = getActions();
 
   let ref!: HTMLDivElement;
-  let effectRef!: HTMLDivElement;
 
   const [effectsIds, setEffectsIds] = createSignal<number[]>([]);
 
-  const isIntersecting = useIsIntersecting(() => ref, () => props.observeIntersection);
+  const isIntersecting = useIsIntersecting(
+    () => ref,
+    () => props.observeIntersection,
+  );
 
-  const activeReaction = createMemo(
-    () => props.activeReactions?.find((active) => isSameReaction(active, props.reaction)),
+  const activeReaction = createMemo(() =>
+    props.activeReactions?.find((active) => isSameReaction(active, props.reaction)),
   );
 
   const shouldPlayEffect = createMemo(() => Boolean(props.withEffects && activeReaction()));
   const canAddMoreEffects = createMemo(() => effectsIds().length < MAX_EFFECT_COUNT);
 
   createEffect(
-    depsOf(() => [props.localAmount, canAddMoreEffects(), shouldPlayEffect()]), (_deps, prev) => {
+    depsOf(() => [props.localAmount, canAddMoreEffects(), shouldPlayEffect()] as const),
+    ([localAmount, canAddMore, shouldPlay], prev) => {
       const [prevLocalAmount] = prev ?? [];
-      if (!shouldPlayEffect()) {
+      if (!shouldPlay) {
         setEffectsIds([]);
         return;
       }
 
-      if (!props.localAmount || props.localAmount <= (prevLocalAmount || 0)) {
+      if (!localAmount || localAmount <= (prevLocalAmount || 0)) {
         return;
       }
 
-      if (canAddMoreEffects()) {
-        setEffectsIds((prev) => [...prev, Date.now()]);
+      if (canAddMore) {
+        setEffectsIds((prevIds) => [...prevIds, Date.now()]);
       }
     },
   );
 
-  const { shouldRender: shouldRenderEffect } = createShowTransition({
-    // TODO(codemod): ref option: hand the result `ref` to the element (ref={t.ref}) instead
-    ref: () => effectRef,
+  // Deviation: `useShowTransition({ ref })` -> the transition's `ref` is handed to every effect icon (the last one wins, as in tt).
+  const { shouldRender: shouldRenderEffect, ref: effectRef } = createShowTransition({
     noMountTransition: true,
     isOpen: () => shouldPlayEffect(),
     className: 'slow',
@@ -92,40 +96,48 @@ const PaidReactionEmoji = (ownProps: OwnProps) => {
     }
   };
 
-  const rootClassName = createMemo(() => buildClassName(styles.root, shouldRenderEffect() && styles.animating, props.className));
+  const rootClassName = createMemo(() =>
+    buildClassName(styles.root, shouldRenderEffect() && styles.animating, props.className),
+  );
 
   return (
-    // TODO(codemod): teactFastList without a single .map() child: use <For> / <ManualFor> for the rows
     <div class={rootClassName()} ref={ref}>
-      <StarIcon type="gold" size="adaptive" style={`width: ${(props.size === undefined ? ICON_SIZE : props.size)}px; height: ${(props.size === undefined ? ICON_SIZE : props.size)}px`} />
-      {shouldRenderEffect() &&
-        effectsIds().map((id) => (
-          <AnimatedIcon
-            ref={effectRef}
-            className={styles.effect}
-            size={(props.effectSize === undefined ? EFFECT_SIZE : props.effectSize)}
-            tgsUrl={LOCAL_TGS_URLS.StarReactionEffect}
-            play={isIntersecting}
-            noLoop
-            forceAlways
-            nonInteractive
-            quality={QUALITY}
-            onEnded={handleEnded}
-          />
-        ))}
+      <StarIcon
+        type="gold"
+        size="adaptive"
+        style={`width: ${props.size === undefined ? ICON_SIZE : props.size}px; height: ${props.size === undefined ? ICON_SIZE : props.size}px`}
+      />
+      {shouldRenderEffect() && (
+        <For each={effectsIds()}>
+          {() => (
+            <AnimatedIcon
+              ref={effectRef}
+              className={styles.effect}
+              size={props.effectSize === undefined ? EFFECT_SIZE : props.effectSize}
+              tgsUrl={LOCAL_TGS_URLS.StarReactionEffect}
+              play={isIntersecting()}
+              noLoop
+              forceAlways
+              nonInteractive
+              quality={QUALITY}
+              onEnded={handleEnded}
+            />
+          )}
+        </For>
+      )}
     </div>
   );
 };
 
-const mapStateToProps = (global: GlobalState, { containerId }: OwnProps) => {
-    const { activeReactions } = selectTabState(global);
+const mapStateToProps = (global: GlobalState, { containerId }: OwnProps): Complete<StateProps> => {
+  const { activeReactions } = selectTabState(global);
 
-    const withEffects = selectPerformanceSettingsValue(global, 'reactionEffects');
+  const withEffects = selectPerformanceSettingsValue(global, 'reactionEffects');
 
-    return {
-      activeReactions: activeReactions?.[containerId],
-      withEffects,
-    };
+  return {
+    activeReactions: activeReactions?.[containerId],
+    withEffects,
   };
+};
 
 export default PaidReactionEmoji;

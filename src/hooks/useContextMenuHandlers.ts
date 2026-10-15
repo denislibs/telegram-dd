@@ -2,7 +2,6 @@ import { createEffect, createSignal, requestMutation } from 'frameact';
 import { addExtraClass, removeExtraClass } from 'frameact/dom';
 
 import type { IAnchorPosition } from '../types';
-import type { Signal } from '../util/signals';
 
 import { type MaybeAccessor, read } from '../util/accessors';
 import { IS_IOS, IS_PWA, IS_TOUCH_ENV } from '../util/browser/windowEnvironment';
@@ -33,7 +32,8 @@ const useContextMenuHandlers = (
   isMenuDisabled?: MaybeAccessor<boolean | undefined>,
   shouldDisableOnLink?: MaybeAccessor<boolean | undefined>,
   shouldDisableOnLongTap?: MaybeAccessor<boolean | undefined>,
-  getIsReady?: Signal<boolean>,
+  // Deviation: an accessor (tt: a `Signal<boolean>`).
+  getIsReady?: () => boolean,
   shouldDisablePropagation?: MaybeAccessor<boolean | undefined>,
 ) => {
   const [isContextMenuOpen, setIsContextMenuOpen] = createSignal(false);

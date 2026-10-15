@@ -57,13 +57,14 @@ export function formatFormattedDateText(
   });
 }
 
+// Deviation: `date` goes into the markup as a number (tt: as it is), so a non-number from a malformed entity cannot carry markup
 export function buildFormattedDateHtml(content: string, entity: ApiMessageEntityFormattedDate) {
   const format = getFormattedDateFormatString(entity);
 
   return `<a
     class="text-entity-link"
     data-entity-type="${ApiMessageEntityTypes.FormattedDate}"
-    data-unix="${entity.date}"
+    data-unix="${Number(entity.date) || 0}"
     ${format ? `data-format="${format}"` : ''}
     contenteditable="false"
     draggable="false"

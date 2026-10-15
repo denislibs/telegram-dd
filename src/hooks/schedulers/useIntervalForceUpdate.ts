@@ -1,10 +1,15 @@
-import useForceUpdate from '../useForceUpdate';
+import { type Accessor, createSignal } from 'frameact';
+
+import type { MaybeAccessor } from '../../util/accessors';
+
 import useInterval from './useInterval';
 
-// TODO(codemod): useIntervalForceUpdate: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function useIntervalForceUpdate(interval?: number) {
-  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
-  const forceUpdate = useForceUpdate();
+// Deviation: there is no force update in a component that runs once. The hook returns a tick accessor that changes
+// every `interval` ms: a computation that depends on the time (a relative "last seen") reads it.
+export default function useIntervalForceUpdate(interval?: MaybeAccessor<number | undefined>): Accessor<number> {
+  const [tick, setTick] = createSignal(0);
 
-  useInterval(forceUpdate, interval, true);
+  useInterval(() => setTick((value) => value + 1), interval, true);
+
+  return tick;
 }

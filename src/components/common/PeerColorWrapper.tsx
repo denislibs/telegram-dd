@@ -1,5 +1,6 @@
 import { createMemo } from 'frameact';
 import { splitProps } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import type { ApiPeer, ApiTypePeerColor } from '../../api/types';
 
@@ -15,7 +16,8 @@ import EmojiIconBackground from './embedded/EmojiIconBackground';
 
 import styles from './PeerColorWrapper.module.scss';
 
-interface OwnProps extends React.HTMLAttributes<HTMLDivElement> {
+// Deviation: `React.HTMLAttributes` -> the JSX attributes of the runtime; `class` is not an own prop (`className` is).
+interface OwnProps extends Omit<JSX.HTMLAttributes<HTMLDivElement>, 'ref' | 'children' | 'class'> {
   ref?: (el: HTMLDivElement) => void;
   peer?: ApiPeer;
   peerColor?: ApiTypePeerColor;
@@ -25,17 +27,34 @@ interface OwnProps extends React.HTMLAttributes<HTMLDivElement> {
   shouldReset?: boolean;
   className?: string;
   emojiIconClassName?: string;
-  children: React.ReactNode;
+  children: JSX.Element;
 }
 
 const GIFT_EMOJI_SIZE = 1.25 * REM;
 
 function PeerColorWrapper(props: OwnProps) {
-  const [, otherProps] = splitProps(props, ['ref', 'peer', 'peerColor', 'isReply', 'noBar', 'noUserColors', 'shouldReset', 'className', 'emojiIconClassName', 'children']);
+  const [, otherProps] = splitProps(props, [
+    'ref',
+    'peer',
+    'peerColor',
+    'isReply',
+    'noBar',
+    'noUserColors',
+    'shouldReset',
+    'className',
+    'emojiIconClassName',
+    'children',
+  ]);
   const color = createMemo(() => props.peerColor || props.peer?.color);
   const theme = useSelector(selectTheme);
 
-  const peerColorResult = createMemo(() => usePeerColor({ peer: () => props.peer, color: () => color(), noUserColors: () => props.noUserColors, shouldReset: () => props.shouldReset, theme: () => theme() }));
+  const peerColorResult = usePeerColor({
+    peer: () => props.peer,
+    color,
+    noUserColors: () => props.noUserColors,
+    shouldReset: () => props.shouldReset,
+    theme,
+  });
   const style = () => peerColorResult().style;
   const peerColorClassName = () => peerColorResult().className;
   const backgroundEmojiId = () => peerColorResult().backgroundEmojiId;
@@ -58,12 +77,12 @@ function PeerColorWrapper(props: OwnProps) {
       {backgroundEmojiId() && (
         <EmojiIconBackground
           className={props.emojiIconClassName}
-          emojiDocumentId={backgroundEmojiId()}
+          emojiDocumentId={backgroundEmojiId()!}
           withEmojiSpace={hasGiftEmoji()}
         />
       )}
       {hasGiftEmoji() && (
-        <CustomEmoji className={styles.giftEmoji} documentId={giftEmojiId()} size={GIFT_EMOJI_SIZE} noPlay />
+        <CustomEmoji className={styles.giftEmoji} documentId={giftEmojiId()!} size={GIFT_EMOJI_SIZE} noPlay />
       )}
       {props.children}
     </div>

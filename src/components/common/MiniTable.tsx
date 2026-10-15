@@ -18,12 +18,14 @@ type OwnProps = {
 const MiniTable = (props: OwnProps) => {
   return (
     <div class={buildClassName(styles.root, props.className)} style={props.style}>
-      <For each={props.data}>{([key, value]) => (
-        <>
-          <div class={buildClassName(styles.key, props.keyClassName)}>{key}</div>
-          <div class={buildClassName(styles.value, props.valueClassName)}>{value}</div>
-        </>
-      )}</For>
+      <For each={props.data}>
+        {([key, value]) => (
+          <>
+            <div class={buildClassName(styles.key, props.keyClassName)}>{key}</div>
+            <div class={buildClassName(styles.value, props.valueClassName)}>{value}</div>
+          </>
+        )}
+      </For>
     </div>
   );
 };

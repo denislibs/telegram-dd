@@ -3,22 +3,22 @@ import { createMemo, createSignal } from 'frameact';
 import type { RepeatedMessageMode } from '../util/scheduledMessages';
 
 import { SCHEDULED_WHEN_ONLINE } from '../config';
+import { type MaybeAccessor, read } from '../util/accessors';
 import { getDayStartAt } from '../util/dates/oldDateFormat';
 import { getRepeatModeFromSeconds, getRepeatPeriodSeconds } from '../util/scheduledMessages';
 import { getServerTimeOffset } from '../util/serverTime';
-import useLastCallback from './useLastCallback';
 import useOldLang from './useOldLang';
 
 import CalendarModal from '../components/common/CalendarModal.async';
 
 type OnScheduledCallback = (scheduledAt: number, repeatPeriod?: number) => void;
 
-// TODO(codemod): useSchedule: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: a hook runs once, so the reactive parameters are accessors (or plain values for a constant)
 const useSchedule = (
-  canScheduleUntilOnline?: boolean,
+  canScheduleUntilOnline?: MaybeAccessor<boolean | undefined>,
   onCancel?: () => void,
-  openAt?: number,
-  initialRepeatPeriod?: number,
+  openAt?: MaybeAccessor<number | undefined>,
+  initialRepeatPeriod?: MaybeAccessor<number | undefined>,
 ) => {
   const lang = useOldLang();
   const [onScheduled, setOnScheduled] = createSignal<OnScheduledCallback | undefined>(undefined);
@@ -47,7 +47,8 @@ const useSchedule = (
   };
 
   const scheduledDefaultDate = createMemo(() => {
-    const date = openAt ? new Date(openAt * 1000) : new Date();
+    const openAt2 = read(openAt);
+    const date = openAt2 ? new Date(openAt2 * 1000) : new Date();
     date.setSeconds(0);
     date.setMilliseconds(0);
     return date;
@@ -59,21 +60,19 @@ const useSchedule = (
     return date;
   })();
 
-  const initialRepeatMode = getRepeatModeFromSeconds(initialRepeatPeriod);
-
   const calendar = (
     <CalendarModal
       isOpen={Boolean(onScheduled())}
       withTimePicker
       withRepeatMode
-      initialRepeatMode={initialRepeatMode}
+      initialRepeatMode={getRepeatModeFromSeconds(read(initialRepeatPeriod))}
       selectedAt={scheduledDefaultDate().getTime()}
       maxAt={getDayStartAt(scheduledMaxDate)}
       isFutureMode
-      secondButtonLabel={canScheduleUntilOnline ? lang('Schedule.SendWhenOnline') : undefined}
+      secondButtonLabel={read(canScheduleUntilOnline) ? lang('Schedule.SendWhenOnline') : undefined}
       onClose={handleCloseCalendar}
       onSubmit={handleMessageSchedule}
-      onSecondButtonClick={canScheduleUntilOnline ? handleMessageScheduleUntilOnline : undefined}
+      onSecondButtonClick={read(canScheduleUntilOnline) ? handleMessageScheduleUntilOnline : undefined}
     />
   );
 

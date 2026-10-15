@@ -1,8 +1,9 @@
 import { createEffect, createMemo } from 'frameact';
-import { getActions, getGlobal, withGlobal } from '../../global';
-import type { GlobalState } from '../../global/types';
+import { Show } from 'frameact/dom';
+import { getActions, useGlobal, withGlobal } from '../../global';
 
 import type { ApiBotInfo, ApiChat, ApiCountryCode, ApiUserCommonChats, ApiUserFullInfo } from '../../api/types';
+import type { GlobalState } from '../../global/types';
 
 import {
   getBotCoverMediaHash,
@@ -53,37 +54,46 @@ const MessageListAccountInfo = (ownProps: OwnProps) => {
   const { loadCommonChats, openChatWithInfo } = getActions();
   const oldLang = useOldLang();
   const lang = useLang();
+  const global = useGlobal();
 
-  const source = createMemo(() => props.userFullInfo?.settings || {});
-  const phoneCountry = () => source().phoneCountry;
-  const registrationMonth = () => source().registrationMonth;
-  const nameChangeDate = () => source().nameChangeDate;
-  const photoChangeDate = () => source().photoChangeDate;
+  const phoneCountry = () => props.userFullInfo?.settings?.phoneCountry;
+  const registrationMonth = () => props.userFullInfo?.settings?.registrationMonth;
+  const nameChangeDate = () => props.userFullInfo?.settings?.nameChangeDate;
+  const photoChangeDate = () => props.userFullInfo?.settings?.photoChangeDate;
 
-  createEffect(() => props.chatId, (chatId2) => {
-    loadCommonChats({ userId: chatId2 });
-  });
+  createEffect(
+    () => props.chatId,
+    (chatId2) => {
+      loadCommonChats({ userId: chatId2 });
+    },
+  );
 
   const country = createMemo(() => {
-    if (!props.phoneCodeList || !phoneCountry()) return undefined;
-    return getCountryCodeByIso(props.phoneCodeList, phoneCountry());
+    const phoneCountry2 = phoneCountry();
+    if (!props.phoneCodeList || !phoneCountry2) return undefined;
+    return getCountryCodeByIso(props.phoneCodeList, phoneCountry2);
   });
 
-  const botInfoPhotoUrl = useMedia(() => props.botInfo?.photo ? getBotCoverMediaHash(props.botInfo.photo) : undefined);
-  const botInfoGifUrl = useMedia(() => props.botInfo?.gif ? getVideoMediaHash(props.botInfo.gif, 'full') : undefined);
-  const botInfoDimensions = createMemo(() => props.botInfo?.photo
-    ? getPhotoFullDimensions(props.botInfo.photo)
-    : props.botInfo?.gif
-      ? getVideoDimensions(props.botInfo.gif)
-      : undefined);
-  const isBotInfoEmpty = createMemo(() => props.botInfo && !props.botInfo.description && !props.botInfo.gif && !props.botInfo.photo);
+  const botInfoPhotoUrl = useMedia(() =>
+    props.botInfo?.photo ? getBotCoverMediaHash(props.botInfo.photo) : undefined,
+  );
+  const botInfoGifUrl = useMedia(() => (props.botInfo?.gif ? getVideoMediaHash(props.botInfo.gif, 'full') : undefined));
+  const botInfoDimensions = createMemo(() =>
+    props.botInfo?.photo
+      ? getPhotoFullDimensions(props.botInfo.photo)
+      : props.botInfo?.gif
+        ? getVideoDimensions(props.botInfo.gif)
+        : undefined,
+  );
+  const isBotInfoEmpty = createMemo(
+    () => props.botInfo && !props.botInfo.description && !props.botInfo.gif && !props.botInfo.photo,
+  );
   const isChatInfoEmpty = createMemo(() => !country() || !registrationMonth());
 
   const isVerifyCodes = createMemo(() => isChatWithVerificationCodesBot(props.chatId));
 
-  const source2 = createMemo(() => botInfoDimensions() || {});
-  const width = () => source2().width;
-  const height = () => source2().height;
+  const width = () => botInfoDimensions()?.width;
+  const height = () => botInfoDimensions()?.height;
 
   const handleClick = (e: React.SyntheticEvent<any>) => {
     stopEvent(e);
@@ -95,56 +105,56 @@ const MessageListAccountInfo = (ownProps: OwnProps) => {
     });
   };
 
-  const securityNameInfo =
-    createMemo(() => nameChangeDate() && props.chat ? (
+  const securityNameInfo = createMemo(() =>
+    nameChangeDate() && props.chat ? (
       <div class="local-action-message">
         <span>
           {lang(
             'UserUpdatedName',
             {
               user: props.chat.title,
-              time: formatPastDatetime(lang, nameChangeDate()),
+              time: formatPastDatetime(lang, nameChangeDate()!),
             },
             { withNodes: true, withMarkdown: true },
           )}
         </span>
       </div>
-    ) : undefined);
+    ) : undefined,
+  );
 
-  const securityPhotoInfo =
-    createMemo(() => photoChangeDate() && props.chat ? (
+  const securityPhotoInfo = createMemo(() =>
+    photoChangeDate() && props.chat ? (
       <div class="local-action-message">
         <span>
           {lang(
             'UserUpdatedPhoto',
             {
               user: props.chat.title,
-              time: formatPastDatetime(lang, photoChangeDate()),
+              time: formatPastDatetime(lang, photoChangeDate()!),
             },
             { withNodes: true, withMarkdown: true },
           )}
         </span>
       </div>
-    ) : undefined);
+    ) : undefined,
+  );
 
-  // TODO(codemod): dependency on a container (userFullInfo) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
   const tableData = createMemo((): TableEntry[] => {
     const entries: TableEntry[] = [];
     if (country()) {
       entries.push([
         oldLang('PrivacyPhone'),
         <span class={styles.chatDescription}>
-          <span class={styles.country}>{renderText(isoToEmoji(country()?.iso2))}</span>
+          <span class={styles.country}>{renderText(isoToEmoji(country()!.iso2))}</span>
           {country()?.defaultName}
         </span>,
       ]);
     }
     if (registrationMonth()) {
-      entries.push([lang('ContactInfoRegistration'), formatRegistrationMonth(lang.code, registrationMonth())]);
+      entries.push([lang('ContactInfoRegistration'), formatRegistrationMonth(lang.code, registrationMonth()!)]);
     }
     if (props.userFullInfo?.commonChatsCount) {
-      // TODO(codemod): getGlobal() in a memo / JSX is a one-time read: use useGlobal() (store contract §12.4)
-      const global = getGlobal();
+      // Deviation: `useGlobal()` (tracked) instead of `getGlobal()`, so the peers follow the store.
       const peers = props.commonChats?.ids
         .slice(0, 3)
         .map((id) => selectPeer(global, id)!)
@@ -174,28 +184,35 @@ const MessageListAccountInfo = (ownProps: OwnProps) => {
   return (
     <div class={buildClassName(styles.root, 'empty')}>
       {props.isLoadingFullUser && isChatInfoEmpty() && <span>{oldLang('Loading')}</span>}
-      {isBotInfoEmpty() && isChatInfoEmpty() && !props.isLoadingFullUser && !props.hasMessages && <span>{oldLang('NoMessages')}</span>}
+      {isBotInfoEmpty() && isChatInfoEmpty() && !props.isLoadingFullUser && !props.hasMessages && (
+        <span>{oldLang('NoMessages')}</span>
+      )}
       {props.botInfo && (
         <div
           class={buildClassName(styles.chatInfo, styles.botBackground)}
           style={buildStyle(width() ? `width: ${width()}px` : undefined)}
         >
-          {botInfoPhotoUrl && (
-            <img class={styles.media} src={botInfoPhotoUrl} width={width()} height={height()} alt="Bot info" />
+          {botInfoPhotoUrl() && (
+            <img class={styles.media} src={botInfoPhotoUrl()} width={width()} height={height()} alt="Bot info" />
           )}
-          {botInfoGifUrl && (
-            <OptimizedVideo
-              canPlay
-              className={styles.media}
-              src={botInfoGifUrl}
-              loop
-              disablePictureInPicture
-              muted
-              playsInline
-              style={buildStyle(Boolean(width()) && `width: ${width()}px`, Boolean(height()) && `height: ${height()}px`)}
-            />
-          )}
-          {botInfoDimensions() && !botInfoPhotoUrl && !botInfoGifUrl && (
+          <Show when={botInfoGifUrl()}>
+            {(gifUrl) => (
+              <OptimizedVideo
+                canPlay
+                class={styles.media}
+                src={gifUrl()}
+                loop
+                disablepictureinpicture
+                muted
+                playsinline
+                style={buildStyle(
+                  Boolean(width()) && `width: ${width()}px`,
+                  Boolean(height()) && `height: ${height()}px`,
+                )}
+              />
+            )}
+          </Show>
+          {botInfoDimensions() && !botInfoPhotoUrl() && !botInfoGifUrl() && (
             <Skeleton className={styles.media} width={width()} height={height()} forceAspectRatio animation="pulse" />
           )}
           {isVerifyCodes() && <div class={styles.botInfoDescription}>{oldLang('VerifyChatInfo')}</div>}
@@ -210,9 +227,7 @@ const MessageListAccountInfo = (ownProps: OwnProps) => {
       {!isChatInfoEmpty() && props.chat && (
         <div class={buildClassName(styles.chatInfo, styles.chatBackground)}>
           <h3 class={styles.chatInfoTitle}>{renderText(getChatTitle(lang, props.chat))}</h3>
-          <p class={buildClassName(styles.chatInfoSubtitle, styles.textColor)}>
-            {lang('ChatNonContactUserSubtitle')}
-          </p>
+          <p class={buildClassName(styles.chatInfoSubtitle, styles.textColor)}>{lang('ChatNonContactUserSubtitle')}</p>
           <MiniTable keyClassName={styles.textColor} data={tableData()} />
           {!props.chat?.isVerified && (
             <div class={buildClassName(styles.chatNotVerified, styles.textColor)}>
@@ -228,33 +243,33 @@ const MessageListAccountInfo = (ownProps: OwnProps) => {
   );
 };
 
-const mapStateToProps = (global: GlobalState, { chatId }: OwnProps) => {
-    const {
-      countryList: { phoneCodes: phoneCodeList },
-    } = global;
-    const chat = selectChat(global, chatId);
-    const userFullInfo = selectUserFullInfo(global, chatId);
-    const commonChats = selectUserCommonChats(global, chatId);
-    const chatBot = selectBot(global, chatId);
+const mapStateToProps = (global: GlobalState, { chatId }: OwnProps): Complete<StateProps> => {
+  const {
+    countryList: { phoneCodes: phoneCodeList },
+  } = global;
+  const chat = selectChat(global, chatId);
+  const userFullInfo = selectUserFullInfo(global, chatId);
+  const commonChats = selectUserCommonChats(global, chatId);
+  const chatBot = selectBot(global, chatId);
 
-    let isLoadingFullUser = false;
-    let botInfo;
-    if (chatBot) {
-      if (userFullInfo) {
-        botInfo = userFullInfo.botInfo;
-      } else {
-        isLoadingFullUser = true;
-      }
+  let isLoadingFullUser = false;
+  let botInfo;
+  if (chatBot) {
+    if (userFullInfo) {
+      botInfo = userFullInfo.botInfo;
+    } else {
+      isLoadingFullUser = true;
     }
+  }
 
-    return {
-      chat,
-      userFullInfo,
-      botInfo,
-      isLoadingFullUser,
-      phoneCodeList,
-      commonChats,
-    };
+  return {
+    chat,
+    userFullInfo,
+    botInfo,
+    isLoadingFullUser,
+    phoneCodeList,
+    commonChats,
   };
+};
 
 export default MessageListAccountInfo;

@@ -9,3 +9,5 @@ export interface PaneState {
   isPending?: boolean;
   key?: string;
 }
+
+export const PANE_GAP_REM = 0.5;

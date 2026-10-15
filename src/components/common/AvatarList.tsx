@@ -26,7 +26,7 @@ const AvatarList = (rawProps: OwnProps) => {
   const props = mergeProps({ limit: DEFAULT_LIMIT }, rawProps) as OwnProps & Required<Pick<OwnProps, 'limit'>>;
   const lang = useLang();
 
-  const pxSize = createMemo(() => typeof props.size === 'number' ? props.size : AVATAR_SIZES[props.size]);
+  const pxSize = createMemo(() => (typeof props.size === 'number' ? props.size : AVATAR_SIZES[props.size]));
 
   const renderingBadgeText = createMemo(() => {
     if (props.badgeText) return props.badgeText;
@@ -40,9 +40,9 @@ const AvatarList = (rawProps: OwnProps) => {
       style={`--_size: ${pxSize()}px;`}
       dir={lang.isRtl ? 'rtl' : 'ltr'}
     >
-      <For each={props.peers?.slice(0, props.limit)}>{(peer) => (
-        <Avatar size={props.size} peer={peer} className={styles.avatar} />
-      )}</For>
+      <For each={props.peers?.slice(0, props.limit)} keyed={(peer) => peer.id}>
+        {(peer) => <Avatar size={props.size} peer={peer()} className={styles.avatar} />}
+      </For>
       {renderingBadgeText() && <div class={styles.badge}>{renderingBadgeText()}</div>}
     </div>
   );

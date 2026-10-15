@@ -1,8 +1,24 @@
-import { beginHeavyAnimation, createEffect, createMeasureEffect, createMemo, createMutationEffect, createSignal, onDestroy, previous, requestMeasure, requestMutation } from 'frameact';
-import { addExtraClass, removeExtraClass } from 'frameact/dom';
+import {
+  beginHeavyAnimation,
+  createEffect,
+  createMeasureEffect,
+  createMemo,
+  createSignal,
+  frameForcedReflow,
+  frameMutation,
+  onDestroy,
+  previous,
+  requestMeasure,
+  requestMutation,
+  untrack,
+} from 'frameact';
+import { addExtraClass, removeExtraClass, Show } from 'frameact/dom';
+import { forceMeasure, forceMutation } from 'frameact/stricterdom';
 import { getActions, getGlobal, withGlobal } from '../../global';
 import { depsOf } from '../../util/effectDeps';
+
 import type { GlobalState } from '../../global/types';
+import type { OnIntersectPinnedMessage } from './hooks/usePinnedMessage';
 
 import type { ApiChatFullInfo, ApiMessage, ApiRestrictionReason, ApiTopic } from '../../api/types';
 import { MAIN_THREAD_ID } from '../../api/types';
@@ -16,8 +32,6 @@ import {
   SCROLL_MAX_DURATION,
   SERVICE_NOTIFICATIONS_USER_ID,
 } from '../../config';
-// TODO(codemod): still imported from teact: forceMeasure, forceMutation
-import { forceMeasure, forceMutation } from '../../lib/fasterdom/fasterdom';
 import {
   getApplicableRestrictionReasons,
   getIsSavedDialog,
@@ -89,7 +103,6 @@ import { preventMessageInputBlur } from './helpers/preventMessageInputBlur';
 
 import useInterval from '../../hooks/schedulers/useInterval';
 import useNativeCopySelectedMessages from '../../hooks/useNativeCopySelectedMessages';
-import { useStateRef } from '../../hooks/useStateRef';
 import { isBackgroundModeActive } from '../../hooks/window/useBackgroundMode';
 import useContainerHeight from './hooks/useContainerHeight';
 import useStickyDates from './hooks/useStickyDates';
@@ -235,35 +248,44 @@ const MessageList = (ownProps: OwnProps) => {
     requestChatTranslation,
   } = getActions();
 
-  const restrictionReasons = createMemo(
-    () => getApplicableRestrictionReasons(props.restrictionReasons, props.ignoreRestrictionReasons),
+  const restrictionReasons = createMemo(() =>
+    getApplicableRestrictionReasons(props.restrictionReasons, props.ignoreRestrictionReasons),
   );
   const isRestricted = createMemo(() => restrictionReasons().length > 0);
 
   let containerRef!: HTMLDivElement;
 
-  createMutationEffect(depsOf(() => [props.chatId, props.threadId, props.type] as const), ([chatId2, threadId2, type2]) => {
-    const container = containerRef;
-    if (container) container.dataset.listKey = buildTopStackCacheKey(chatId2, threadId2, type2);
-  });
+  // Deviation: `createEffect(..., frameMutation)`, not `createMutationEffect`: the container is the `Transition` root, which
+  // gets its ref after the creation, and a mutation effect applies at creation (engine gap #4 of the chat list report).
+  createEffect(
+    depsOf(() => [props.chatId, props.threadId, props.type] as const),
+    ([chatId2, threadId2, type2]) => {
+      const container = containerRef;
+      if (container) container.dataset.listKey = buildTopStackCacheKey(chatId2, threadId2, type2);
+    },
+    frameMutation,
+  );
 
   // We update local cached `scrollOffsetRef` when opening chat.
   // Then we update global version every second on scrolling.
-  let scrollOffsetRef: number = (props.type === 'thread' &&
-      (selectScrollOffset(getGlobal(), props.chatId, props.threadId) || selectLastScrollOffset(getGlobal(), props.chatId, props.threadId))) ||
-      0;
+  let scrollOffsetRef: number =
+    (props.type === 'thread' &&
+      (selectScrollOffset(getGlobal(), props.chatId, props.threadId) ||
+        selectLastScrollOffset(getGlobal(), props.chatId, props.threadId))) ||
+    0;
 
-  let anchorIdRef: string | undefined;
+  // Deviation: the four refs that are handed to `MessageListContent` / the message observers stay `{ current }` boxes
+  // (shared mutable state, not reactive, as in tt); the others are plain variables of the component body.
+  const anchorIdRef: { current: string | undefined } = { current: undefined };
   let anchorTopRef: number | undefined;
-  let listItemElementsRef!: HTMLDivElement[];
-  let memoFirstUnreadIdRef: number | undefined;
-  let memoUnreadDividerBeforeIdRef: number | undefined;
-  let memoFocusingIdRef: number | undefined;
+  let listItemElementsRef: HTMLDivElement[] | undefined;
+  const memoFirstUnreadIdRef: { current: number | undefined } = { current: props.firstUnreadId };
+  const memoUnreadDividerBeforeIdRef: { current: number | undefined } = { current: undefined };
   let isScrollTopJustUpdatedRef = false;
   let forceMessagesScrollTimerRef: number | undefined;
   // Suppresses spurious load-more triggers caused by Safari delivering stale
   // `IntersectionObserver` entries between DOM mutation and scroll restore
-  let isReplacingHistoryRef = false;
+  const isReplacingHistoryRef: { current: boolean } = { current: false };
   let shouldAnimateAppearanceRef = Boolean(props.lastMessage);
   let scrollSnapDisabledTimerRef: number | undefined;
   let isLiveTailBottomSnapSuppressedRef = false;
@@ -271,23 +293,31 @@ const MessageList = (ownProps: OwnProps) => {
   let liveTailReleaseTimerRef: number | undefined;
   let liveTailStartOriginalIdRef: number | undefined;
   let scrollTopBeforeUpdateRef: number | undefined;
-  const [releasedLiveTailStartOriginalId, setReleasedLiveTailStartOriginalId] = createSignal<number | undefined>(undefined);
+  const [releasedLiveTailStartOriginalId, setReleasedLiveTailStartOriginalId] = createSignal<number | undefined>(
+    undefined,
+  );
 
   const isSavedDialog = createMemo(() => getIsSavedDialog(props.chatId, props.threadId, props.currentUserId));
-  const hasOpenChatButton = createMemo(() => isSavedDialog() && props.threadId !== ANONYMOUS_USER_ID && props.threadId !== props.currentUserId);
+  const hasOpenChatButton = createMemo(
+    () => isSavedDialog() && props.threadId !== ANONYMOUS_USER_ID && props.threadId !== props.currentUserId,
+  );
 
   const areMessagesLoaded = createMemo(() => Boolean(props.messageIds));
 
-  // TODO(codemod): dependency on a container (anchoredById, ephemeralById, messagesById) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
+  // The containers (`messagesById`, `anchoredById`, `ephemeralById`) are store proxies that keep their identity: the
+  // memo reads the entries it needs (`messagesById[id]` per listed id, the keys of `ephemeralById`), which are its
+  // subscriptions (store contract §12.7).
   const renderData = createMemo(() => {
-    if (props.type !== 'thread' || !props.messageIds || !props.messagesById) {
+    const messageIds = props.messageIds;
+    const messagesById = props.messagesById;
+    if (props.type !== 'thread' || !messageIds || !messagesById) {
       return {
-        renderMessageIds: props.messageIds,
-        renderMessagesById: props.messagesById,
+        renderMessageIds: messageIds,
+        renderMessagesById: messagesById,
       };
     }
 
-    const normalMessages = props.messageIds.map((id) => props.anchoredById?.[id] || props.messagesById[id]).filter(Boolean);
+    const normalMessages = messageIds.map((id) => props.anchoredById?.[id] || messagesById[id]).filter(Boolean);
     const normalDates = normalMessages.map(({ date }) => date);
     const oldestDate = normalDates.length ? Math.min(...normalDates) : undefined;
     const newestDate = normalDates.length ? Math.max(...normalDates) : undefined;
@@ -313,25 +343,35 @@ const MessageList = (ownProps: OwnProps) => {
   const renderMessageIds = () => renderDataResult().renderMessageIds;
   const renderMessagesById = () => renderDataResult().renderMessagesById;
   const previousRenderMessageIds = previous(() => renderMessageIds());
-  const addedMessageInfo = createMemo(
-    () =>
-      props.isViewportNewest
-        ? getAddedMessageInfo(renderMessageIds(), renderMessagesById(), previousRenderMessageIds())
-        : undefined,
+  const addedMessageInfo = createMemo(() =>
+    props.isViewportNewest
+      ? getAddedMessageInfo(renderMessageIds(), renderMessagesById(), previousRenderMessageIds())
+      : undefined,
   );
-  const source = createMemo(() => addedMessageInfo() || {});
+  const source = createMemo(
+    (): Partial<NonNullable<ReturnType<typeof getAddedMessageInfo>>> => addedMessageInfo() || {},
+  );
   const addedMessageIds = () => source().addedMessageIds;
   const areAddedMessagesOutgoing = () => source().areAddedMessagesOutgoing;
   const previousLastCurrentMessageId = () => source().previousLastCurrentMessageId;
 
   const isPrivate = createMemo(() => isUserId(props.chatId));
-  const withUsers = createMemo(() => Boolean(
-    (!isPrivate() && !props.isChannelChat) || props.isChatWithSelf || props.isSystemBotChat || props.isAnonymousForwards || props.isChannelWithAvatars,
-  ));
+  const withUsers = createMemo(() =>
+    Boolean(
+      (!isPrivate() && !props.isChannelChat) ||
+      props.isChatWithSelf ||
+      props.isSystemBotChat ||
+      props.isAnonymousForwards ||
+      props.isChannelWithAvatars,
+    ),
+  );
 
-  // TODO(codemod): dependency on a container (messagesById) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
-  const liveTailStartOriginalId = createMemo(() => {
-    if (!props.messageIds?.length || !props.messagesById) {
+  // Deviation: tt kept the last result in `liveTailStartOriginalIdRef` (assigned on every render); the memo records its own
+  // result for the next run.
+  const computeLiveTailStartOriginalId = (): number | undefined => {
+    const messageIds = props.messageIds;
+    const messagesById = props.messagesById;
+    if (!messageIds?.length || !messagesById) {
       return undefined;
     }
 
@@ -341,8 +381,8 @@ const MessageList = (ownProps: OwnProps) => {
       previousLiveTailStartOriginalId !== releasedLiveTailStartOriginalId();
     let renderedLiveTailStartOriginalId: number | undefined;
 
-    for (let i = props.messageIds.length - 1; i >= 0; i--) {
-      const message = props.messagesById[props.messageIds[i]];
+    for (let i = messageIds.length - 1; i >= 0; i--) {
+      const message = messagesById[messageIds[i]];
       if (!message) {
         continue;
       }
@@ -363,7 +403,7 @@ const MessageList = (ownProps: OwnProps) => {
         }
 
         // Start new live tail from our message to keep consistency with in-tail focusing
-        const previousMessage = i > 0 ? props.messagesById[props.messageIds[i - 1]] : undefined;
+        const previousMessage = i > 0 ? messagesById[messageIds[i - 1]] : undefined;
         if (previousMessage?.isOutgoing) {
           return getMessageOriginalId(previousMessage);
         }
@@ -381,76 +421,109 @@ const MessageList = (ownProps: OwnProps) => {
     }
 
     return renderedLiveTailStartOriginalId;
+  };
+  const liveTailStartOriginalId = createMemo(() => {
+    const result = computeLiveTailStartOriginalId();
+    liveTailStartOriginalIdRef = result;
+    return result;
   });
 
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  liveTailStartOriginalIdRef = liveTailStartOriginalId();
-
-  const effectiveLiveTailStartOriginalId =
-    createMemo(() => liveTailStartOriginalId() !== releasedLiveTailStartOriginalId() ? liveTailStartOriginalId() : undefined);
+  const effectiveLiveTailStartOriginalId = createMemo(() =>
+    liveTailStartOriginalId() !== releasedLiveTailStartOriginalId() ? liveTailStartOriginalId() : undefined,
+  );
 
   onDestroy(() => {
     clearTimeout(forceMessagesScrollTimerRef);
     clearTimeout(liveTailReleaseTimerRef);
   });
 
-  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
-  createEffect(() => areMessagesLoaded(), (areMessagesLoaded2) => {
-    // We only need it first time when message list appears
-    if (areMessagesLoaded2) {
-      onTickEnd(() => {
-        shouldAnimateAppearanceRef = false;
-      });
-    }
-  });
+  // We only need it first time when message list appears
+  // Deviation: tt cleared the flag at the tick end of the render that created the content. The content is created in
+  // the mutate phase of the next frame here, so the flag is cleared one frame after that.
+  createEffect(
+    () => areMessagesLoaded(),
+    (areMessagesLoaded2) => {
+      if (areMessagesLoaded2) {
+        requestMeasure(() => {
+          requestMeasure(() => {
+            shouldAnimateAppearanceRef = false;
+          });
+        });
+      }
+    },
+  );
 
   // Updated every time (to be used from intersection callback closure)
-  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
-  createEffect(() => props.firstUnreadId, (firstUnreadId2) => {
-    memoFirstUnreadIdRef = firstUnreadId2;
-  });
+  // Deviation: set at the tick end (tt: during the render); the initial value is read at the creation.
+  createEffect(
+    () => props.firstUnreadId,
+    (firstUnreadId2) => {
+      memoFirstUnreadIdRef.current = firstUnreadId2;
+    },
+  );
 
   const canShowSponsoredMessages = createMemo(() => Boolean(props.areAdsEnabled && props.type === 'thread'));
 
-  createEffect(depsOf(() => [props.chatId, props.isSynced, props.isReady, props.isChannelChat, props.isBot, canShowSponsoredMessages(), props.isAppConfigLoaded] as const), ([chatId2, isSynced2, isReady2, isChannelChat2, isBot2, canShowSponsoredMessages2, isAppConfigLoaded2]) => {
-    const canHaveAds = isChannelChat2 || isBot2;
-    if (canShowSponsoredMessages2 && canHaveAds && isSynced2 && isReady2 && isAppConfigLoaded2) {
-      loadSponsoredMessages({ peerId: chatId2 });
-    }
-  });
+  createEffect(
+    depsOf(
+      () =>
+        [
+          props.chatId,
+          props.isSynced,
+          props.isReady,
+          props.isChannelChat,
+          props.isBot,
+          canShowSponsoredMessages(),
+          props.isAppConfigLoaded,
+        ] as const,
+    ),
+    ([chatId2, isSynced2, isReady2, isChannelChat2, isBot2, canShowSponsoredMessages2, isAppConfigLoaded2]) => {
+      const canHaveAds = isChannelChat2 || isBot2;
+      if (canShowSponsoredMessages2 && canHaveAds && isSynced2 && isReady2 && isAppConfigLoaded2) {
+        loadSponsoredMessages({ peerId: chatId2 });
+      }
+    },
+  );
 
   // Updated only once when messages are loaded (as we want the unread divider to keep its position)
-  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
-  createEffect(() => areMessagesLoaded(), (areMessagesLoaded2) => {
-    if (areMessagesLoaded2) {
-      memoUnreadDividerBeforeIdRef = memoFirstUnreadIdRef;
-    }
+  // Deviation: a memo (tt: a sync effect run before `groupMessages` in the same render) that is read by `messageGroups`;
+  // `memoUnreadDividerBeforeIdRef.current` follows it.
+  const unreadDividerBeforeId = createMemo(() => {
+    if (areMessagesLoaded()) memoUnreadDividerBeforeIdRef.current = untrack(() => props.firstUnreadId);
+    return memoUnreadDividerBeforeIdRef.current;
   });
-
-  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
-  createEffect(() => props.focusingId, (focusingId2) => {
-    memoFocusingIdRef = focusingId2;
-  });
+  // tt's `memoFocusingIdRef` is `props.focusingId` read where it is used.
 
   // Enable auto translation for the chat if it's available
-  createEffect(depsOf(() => [props.shouldAutoTranslate, props.canTranslate, props.translationLanguage, props.chatId] as const), ([shouldAutoTranslate2, canTranslate2, translationLanguage2, chatId2]) => {
-    if (!shouldAutoTranslate2 || !canTranslate2) return;
-    requestChatTranslation({ chatId: chatId2, toLanguageCode: translationLanguage2 });
-  });
+  createEffect(
+    depsOf(() => [props.shouldAutoTranslate, props.canTranslate, props.translationLanguage, props.chatId] as const),
+    ([shouldAutoTranslate2, canTranslate2, translationLanguage2, chatId2]) => {
+      if (!shouldAutoTranslate2 || !canTranslate2) return;
+      requestChatTranslation({ chatId: chatId2, toLanguageCode: translationLanguage2 });
+    },
+  );
 
-  useNativeCopySelectedMessages(() => props.isActive, () => props.chatId, () => props.threadId, () => props.type, copyMessagesByIds);
+  useNativeCopySelectedMessages(
+    () => props.isActive,
+    () => props.chatId,
+    () => props.threadId,
+    () => props.type,
+    copyMessagesByIds,
+  );
 
-  // TODO(codemod): dependency on a container (channelJoinInfo) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
+  // `channelJoinInfo` is read field by field (a store container keeps its identity: the reads are the subscriptions).
   const messageGroups = createMemo(() => {
-    if (!renderMessageIds()?.length || !renderMessagesById()) {
+    const ids = renderMessageIds();
+    const messagesById = renderMessagesById();
+    if (!ids?.length || !messagesById) {
       return undefined;
     }
 
     const listedMessages: ApiMessage[] = [];
-    renderMessageIds().forEach((id, index, arr) => {
+    ids.forEach((id, index, arr) => {
       const prevMessage = listedMessages[listedMessages.length - 1];
 
-      const message = renderMessagesById()[id];
+      const message = messagesById[id];
       if (!message) {
         return;
       }
@@ -506,7 +579,7 @@ const MessageList = (ownProps: OwnProps) => {
     return listedMessages.length
       ? groupMessages(
           listedMessages.sort(compareRenderedMessages),
-          memoUnreadDividerBeforeIdRef,
+          unreadDividerBeforeId(),
           !props.isForum ? Number(props.threadId) : undefined,
           props.isChatWithSelf,
           withUsers(),
@@ -516,27 +589,43 @@ const MessageList = (ownProps: OwnProps) => {
       : undefined;
   });
 
-  const currentLastMessageId = createMemo(() => renderMessageIds()?.[renderMessageIds().length - 1]);
-  const currentLastMessage =
-    createMemo(() => currentLastMessageId() !== undefined ? renderMessagesById()?.[currentLastMessageId()] : undefined);
-  const currentLastMessageOriginalId = createMemo(() => currentLastMessage()
-    ? getMessageOriginalId(currentLastMessage())
-    : currentLastMessageId());
-  const isCurrentLastMessageTypingDraft = createMemo(() => Boolean(
-    currentLastMessage()?.isTypingDraft || currentLastMessage()?.wasTypingDraft,
-  ));
-  const isCurrentLastMessageIncomingTypingDraft = createMemo(() => Boolean(
-    currentLastMessage()?.isTypingDraft && !currentLastMessage().isOutgoing,
-  ));
+  const currentLastMessageId = createMemo(() => {
+    const ids = renderMessageIds();
+    return ids?.[ids.length - 1];
+  });
+  const currentLastMessage = createMemo(() => {
+    const id = currentLastMessageId();
+    return id !== undefined ? renderMessagesById()?.[id] : undefined;
+  });
+  const currentLastMessageOriginalId = createMemo(() => {
+    const message = currentLastMessage();
+    return message ? getMessageOriginalId(message) : currentLastMessageId();
+  });
+  const isCurrentLastMessageTypingDraft = createMemo(() =>
+    Boolean(currentLastMessage()?.isTypingDraft || currentLastMessage()?.wasTypingDraft),
+  );
+  const isCurrentLastMessageIncomingTypingDraft = createMemo(() => {
+    const message = currentLastMessage();
+    return Boolean(message?.isTypingDraft && !message.isOutgoing);
+  });
   const isCurrentLastMessageOwnSent = createMemo(() => Boolean(currentLastMessage()?.isOutgoing));
 
   useInterval(() => {
-    if (!props.messageIds || !props.messagesById || props.type === 'scheduled' || props.isAccountFrozen || !props.isActive) return;
+    if (
+      !props.messageIds ||
+      !props.messagesById ||
+      props.type === 'scheduled' ||
+      props.isAccountFrozen ||
+      !props.isActive
+    )
+      return;
     if (!props.isChannelChat && !props.isGroupChat) return;
-    if (props.reactionPollingPause?.chatId === props.chatId && props.reactionPollingPause.until > getServerTime()) return;
+    if (props.reactionPollingPause?.chatId === props.chatId && props.reactionPollingPause.until > getServerTime())
+      return;
 
+    const messagesById = props.messagesById;
     const ids = props.messageIds.filter((id) => {
-      const message = props.messagesById[id];
+      const message = messagesById[id];
       return message && message.reactions && !message.content.action;
     });
 
@@ -549,7 +638,8 @@ const MessageList = (ownProps: OwnProps) => {
     if (!props.messageIds || !props.messagesById || props.type === 'scheduled' || !props.isActive) {
       return;
     }
-    const storyDataList = props.messageIds.map((id) => props.messagesById[id]?.content.storyData).filter(Boolean);
+    const messagesById = props.messagesById;
+    const storyDataList = props.messageIds.map((id) => messagesById[id]?.content.storyData).filter(Boolean);
 
     if (!storyDataList.length) return;
 
@@ -572,12 +662,20 @@ const MessageList = (ownProps: OwnProps) => {
 
   useInterval(
     () => {
-      if (!props.messageIds || !props.messagesById || props.threadId !== MAIN_THREAD_ID || props.type === 'scheduled' || !props.isActive) {
+      if (
+        !props.messageIds ||
+        !props.messagesById ||
+        props.threadId !== MAIN_THREAD_ID ||
+        props.type === 'scheduled' ||
+        !props.isActive
+      ) {
         return;
       }
       const global = getGlobal();
+      const messagesById = props.messagesById;
       const ids = props.messageIds.filter(
-        (id) => selectThreadInfo(global, props.chatId, id)?.isCommentsInfo || props.messagesById[id]?.viewsCount !== undefined,
+        (id) =>
+          selectThreadInfo(global, props.chatId, id)?.isCommentsInfo || messagesById[id]?.viewsCount !== undefined,
       );
 
       if (!ids.length) return;
@@ -589,28 +687,37 @@ const MessageList = (ownProps: OwnProps) => {
   );
 
   useInterval(() => {
-    if (!props.messageIds || !props.messagesById || props.threadId !== MAIN_THREAD_ID || props.type === 'scheduled' || !props.isActive) {
+    if (
+      !props.messageIds ||
+      !props.messagesById ||
+      props.threadId !== MAIN_THREAD_ID ||
+      props.type === 'scheduled' ||
+      !props.isActive
+    ) {
       return;
     }
-    const ids = props.messageIds.filter((id) => props.messagesById[id]?.factCheck?.shouldFetch);
+    const messagesById = props.messagesById;
+    const ids = props.messageIds.filter((id) => messagesById[id]?.factCheck?.shouldFetch);
 
     if (!ids.length) return;
 
     loadFactChecks({ chatId: props.chatId, ids });
   }, MESSAGE_FACT_CHECK_UPDATE_INTERVAL);
 
+  // Recreated (its debounce state is reset) when the listed ids change, as in tt (`[loadViewportMessages, messageIds]`).
   const loadMoreAround = createMemo(() => {
+    void props.messageIds;
     if (props.type !== 'thread') {
       return undefined;
     }
 
     return debounce(
-      () => loadViewportMessages({ direction: LoadMoreDirection.Around, chatId: props.chatId, threadId: props.threadId }),
+      () =>
+        loadViewportMessages({ direction: LoadMoreDirection.Around, chatId: props.chatId, threadId: props.threadId }),
       1000,
       true,
       false,
     );
-    // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps
   });
 
   const { isScrolled, updateStickyDates } = useStickyDates();
@@ -673,7 +780,7 @@ const MessageList = (ownProps: OwnProps) => {
       return;
     }
 
-    if (!memoFocusingIdRef) {
+    if (!props.focusingId) {
       updateStickyDates(container);
     }
 
@@ -725,7 +832,7 @@ const MessageList = (ownProps: OwnProps) => {
       isLiveTailAutoScrollingRef ||
       (effectiveLiveTailStartOriginalId() !== undefined && isLiveTailBottomSnapSuppressedRef) ||
       isScrollTopJustUpdatedRef ||
-      isReplacingHistoryRef
+      isReplacingHistoryRef.current
     ) {
       return;
     }
@@ -754,9 +861,12 @@ const MessageList = (ownProps: OwnProps) => {
     }, [container]);
   };
 
-  const [getContainerHeight, prevContainerHeightRef] = useContainerHeight(() => containerRef, () => props.canPost && !props.isSelectModeActive);
+  const [getContainerHeight, prevContainerHeightRef] = useContainerHeight(
+    () => containerRef,
+    () => props.canPost && !props.isSelectModeActive,
+  );
 
-  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+  const handleWheel = (e: WheelEvent) => {
     if (e.deltaY > 0) {
       isLiveTailAutoScrollingRef = false;
       allowLiveTailBottomSnap();
@@ -775,31 +885,33 @@ const MessageList = (ownProps: OwnProps) => {
   };
 
   // Initial message loading
-  createMeasureEffect(depsOf(() => [props.isChatLoaded, props.messageIds, loadMoreAround(), props.focusingId, isRestricted()] as const), ([isChatLoaded2, messageIds2, loadMoreAround2, focusingId2]) => {
-    if (!loadMoreAround2 || !isChatLoaded2 || isRestricted() || focusingId2) {
-      return;
-    }
+  createMeasureEffect(
+    depsOf(() => [props.isChatLoaded, props.messageIds, loadMoreAround(), props.focusingId, isRestricted()] as const),
+    ([isChatLoaded2, messageIds2, loadMoreAround2, focusingId2, isRestricted2]) => {
+      if (!loadMoreAround2 || !isChatLoaded2 || isRestricted2 || focusingId2) {
+        return;
+      }
 
-    // Loading history while sending a message can return the same message and cause ambiguity
-    const isLastMessageLocal = messageIds2 && isLocalMessageId(messageIds2[messageIds2.length - 1]);
-    if (isLastMessageLocal) {
-      return;
-    }
+      // Loading history while sending a message can return the same message and cause ambiguity
+      const isLastMessageLocal = messageIds2 && isLocalMessageId(messageIds2[messageIds2.length - 1]);
+      if (isLastMessageLocal) {
+        return;
+      }
 
-    const container = containerRef!;
+      const container = containerRef!;
 
-    if (
-      !messageIds2 ||
-      messageIds2.length === 1 ||
-      (messageIds2.length < MESSAGE_LIST_SLICE / 2 &&
-        (container.firstElementChild as HTMLDivElement).clientHeight <= container.offsetHeight)
-    ) {
-      loadMoreAround2();
-    }
-  });
+      if (
+        !messageIds2 ||
+        messageIds2.length === 1 ||
+        (messageIds2.length < MESSAGE_LIST_SLICE / 2 &&
+          (container.firstElementChild as HTMLDivElement).clientHeight <= container.offsetHeight)
+      ) {
+        loadMoreAround2();
+      }
+    },
+  );
 
-  // TODO(codemod): useStateRef: a handler reads the current value through the accessor; replace ref.current with the accessor call
-  const rememberScrollPositionRef = useStateRef(() => {
+  const rememberScrollPosition = () => {
     if (!renderMessageIds() || !listItemElementsRef) {
       return;
     }
@@ -816,22 +928,25 @@ const MessageList = (ownProps: OwnProps) => {
       return;
     }
 
-    anchorIdRef = anchor.id;
+    anchorIdRef.current = anchor.id;
     anchorTopRef = anchor.getBoundingClientRect().top;
-  });
+  };
 
-  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
+  // Deviation: the snapshot of the scroll position before the update (tt: `useSyncEffect` + `forceMeasure` during the
+  // render that changes the ids) is a measure effect: it runs in the measure phase of the frame in which the ids change,
+  // before the mutate phase that updates the DOM. `deps` match the reflow effect below.
   createMeasureEffect(
-    depsOf(() => [renderMessageIds(), props.isViewportNewest, effectiveLiveTailStartOriginalId(), rememberScrollPositionRef] as const), ([, isViewportNewest2]) => {
-      isReplacingHistoryRef = true;
-      forceMeasure(() => {
-        scrollTopBeforeUpdateRef = containerRef?.scrollTop;
-        rememberScrollPositionRef.current();
-      });
+    depsOf(() => [renderMessageIds(), props.isViewportNewest, effectiveLiveTailStartOriginalId()] as const),
+    () => {
+      isReplacingHistoryRef.current = true;
+      scrollTopBeforeUpdateRef = containerRef?.scrollTop;
+      rememberScrollPosition();
     },
   );
-  createEffect(
-    depsOf(() => [getContainerHeight, rememberScrollPositionRef] as const), ([getContainerHeight2]) => rememberScrollPositionRef.current(),
+  // tt: `useEffect(..., [getContainerHeight])` re-ran when the signal changed
+  createMeasureEffect(
+    () => getContainerHeight(),
+    () => rememberScrollPosition(),
   );
 
   /* Handles updated message list, takes care of scroll repositioning
@@ -840,24 +955,31 @@ const MessageList = (ownProps: OwnProps) => {
     - New messages attach to it. New outgoing message kick older out
     - If outgoing message is tall, we should show at least one line of typing draft that replies to it
   */
-  createMutationEffect(
-    depsOf(() => [
-      props.messageIds,
-      renderMessageIds(),
-      props.isViewportNewest,
-      effectiveLiveTailStartOriginalId(),
-      currentLastMessageOriginalId(),
-      currentLastMessageId(),
-      addedMessageIds(),
-      areAddedMessagesOutgoing(),
-      previousLastCurrentMessageId(),
-      isCurrentLastMessageTypingDraft(),
-      isCurrentLastMessageIncomingTypingDraft(),
-      isCurrentLastMessageOwnSent(),
-      getContainerHeight,
-      prevContainerHeightRef,
-      props.noMessageSendingAnimation,
-    ]), (_deps, prev) => {
+  // Deviation: tt's `useLayoutEffectWithPrevDeps` runs after the DOM update of its render, before paint. Here it is a
+  // forced-reflow effect (after the mutate phase of the frame in which the ids change); the measuring and the scroll
+  // write stay in `requestMessageListReflow` (a forced-reflow task whose returned function is the mutation), and the two
+  // direct class writes go through `forceMutation`.
+  createEffect(
+    depsOf(
+      () =>
+        [
+          props.messageIds,
+          renderMessageIds(),
+          props.isViewportNewest,
+          effectiveLiveTailStartOriginalId(),
+          currentLastMessageOriginalId(),
+          currentLastMessageId(),
+          addedMessageIds(),
+          areAddedMessagesOutgoing(),
+          previousLastCurrentMessageId(),
+          isCurrentLastMessageTypingDraft(),
+          isCurrentLastMessageIncomingTypingDraft(),
+          isCurrentLastMessageOwnSent(),
+          getContainerHeight(),
+          props.noMessageSendingAnimation,
+        ] as const,
+    ),
+    (_deps, prev) => {
       const [prevMessageIds, prevRenderMessageIds, prevIsViewportNewest, prevLiveTailStartOriginalId] = prev ?? [];
       if (IS_PERF) {
         // eslint-disable-next-line no-console
@@ -882,8 +1004,8 @@ const MessageList = (ownProps: OwnProps) => {
       const listItemElements = Array.from(container.querySelectorAll<HTMLDivElement>('.message-list-item'));
       listItemElementsRef = listItemElements;
       const lastItemElement = listItemElements[listItemElements.length - 1];
-      const firstUnreadElement = memoFirstUnreadIdRef
-        ? container.querySelector<HTMLDivElement>(`#${getMessageHtmlId(memoFirstUnreadIdRef)}`)
+      const firstUnreadElement = memoFirstUnreadIdRef.current
+        ? container.querySelector<HTMLDivElement>(`#${getMessageHtmlId(memoFirstUnreadIdRef.current)}`)
         : undefined;
 
       const firstMessageId = props.messageIds?.[0];
@@ -940,7 +1062,9 @@ const MessageList = (ownProps: OwnProps) => {
               () => (container.firstElementChild as HTMLDivElement).clientHeight <= container.offsetHeight * 2,
             )))
       ) {
-        addExtraClass(messageListParent, FORCE_MESSAGES_SCROLL_CLASS);
+        forceMutation(() => {
+          addExtraClass(messageListParent, FORCE_MESSAGES_SCROLL_CLASS);
+        }, messageListParent);
 
         clearTimeout(forceMessagesScrollTimerRef);
         forceMessagesScrollTimerRef = window.setTimeout(() => {
@@ -956,7 +1080,9 @@ const MessageList = (ownProps: OwnProps) => {
         clearTimeout(scrollSnapDisabledTimerRef);
         scrollSnapDisabledTimerRef = undefined;
 
-        removeExtraClass(container, BOTTOM_SNAP_CLASS);
+        forceMutation(() => {
+          removeExtraClass(container, BOTTOM_SNAP_CLASS);
+        }, container);
 
         scrollSnapDisabledTimerRef = window.setTimeout(() => {
           scrollSnapDisabledTimerRef = undefined;
@@ -1012,8 +1138,7 @@ const MessageList = (ownProps: OwnProps) => {
           shouldRevealLiveTailTypingDraft && (isAtBottom || wasAtBottomBeforeTypingDraft),
         );
 
-        const isAlreadyFocusing =
-          currentLastMessageId() !== undefined && memoFocusingIdRef === currentLastMessageId();
+        const isAlreadyFocusing = currentLastMessageId() !== undefined && props.focusingId === currentLastMessageId();
 
         // Animate incoming message, but if app is in background mode, scroll to the first unread
         if (
@@ -1055,10 +1180,10 @@ const MessageList = (ownProps: OwnProps) => {
           return undefined;
         }
 
-        const anchor = anchorIdRef && container.querySelector(`#${anchorIdRef}`);
+        const anchor = anchorIdRef.current && container.querySelector(`#${anchorIdRef.current}`);
         const unreadDivider =
           !anchor &&
-          memoUnreadDividerBeforeIdRef &&
+          memoUnreadDividerBeforeIdRef.current &&
           container.querySelector<HTMLDivElement>(`.${UNREAD_DIVIDER_CLASS}`);
         const liveTailElement = shouldFocusLiveTail ? container.querySelector<HTMLDivElement>('.live-tail') : undefined;
         const animateLiveTailScroll = liveTailElement
@@ -1184,7 +1309,7 @@ const MessageList = (ownProps: OwnProps) => {
             animateScrollMutation();
             scrollOffsetRef = Math.max(Math.ceil(effectiveScrollHeight - newScrollTop), offsetHeight);
             requestMeasure(() => {
-              isReplacingHistoryRef = false;
+              isReplacingHistoryRef.current = false;
             });
             return;
           }
@@ -1192,7 +1317,7 @@ const MessageList = (ownProps: OwnProps) => {
           resetScroll(container, Math.ceil(newScrollTop));
 
           requestMeasure(() => {
-            isReplacingHistoryRef = false;
+            isReplacingHistoryRef.current = false;
           });
           restartCurrentScrollAnimation();
 
@@ -1200,7 +1325,7 @@ const MessageList = (ownProps: OwnProps) => {
             ? offsetHeight
             : Math.max(Math.ceil(effectiveScrollHeight - newScrollTop), offsetHeight);
 
-          if (!memoFocusingIdRef) {
+          if (!props.focusingId) {
             isScrollTopJustUpdatedRef = true;
 
             requestMeasure(() => {
@@ -1216,13 +1341,13 @@ const MessageList = (ownProps: OwnProps) => {
           }
         };
       });
-      // This should match deps for `useSyncEffect` above
     },
+    frameForcedReflow,
   );
 
-  createEffect(
-    depsOf(() => [props.isSelectModeActive]), (_deps, prev) => {
-      const [prevIsSelectModeActive] = prev ?? [];
+  createMeasureEffect(
+    () => props.isSelectModeActive,
+    (_isSelectModeActive, prevIsSelectModeActive) => {
       if (prevIsSelectModeActive === undefined) return;
       beginHeavyAnimation(SELECT_MODE_ANIMATION_DURATION + ANIMATION_END_DELAY);
 
@@ -1235,84 +1360,110 @@ const MessageList = (ownProps: OwnProps) => {
   );
 
   const noAvatars = createMemo(() => Boolean(!withUsers() || (props.isChannelChat && !props.isChannelWithAvatars)));
-  const shouldRenderGreeting =
-    createMemo(() => isUserId(props.chatId) &&
-    !props.isChatWithSelf &&
-    !props.isBot &&
-    !props.isAnonymousForwards &&
-    props.type === 'thread' &&
-    ((!messageGroups() &&
-      !props.lastMessage &&
-      props.messageIds &&
-      // Used to avoid flickering when deleting a greeting that has just been sent
-      (!listItemElementsRef || listItemElementsRef.length === 0)) ||
-      (props.messageIds?.length === 1 && props.messagesById?.[props.messageIds[0]]?.content.action?.type === 'contactSignUp') ||
-      props.lastMessage?.content?.action?.type === 'contactSignUp'));
+  const shouldRenderGreeting = createMemo(
+    () =>
+      isUserId(props.chatId) &&
+      !props.isChatWithSelf &&
+      !props.isBot &&
+      !props.isAnonymousForwards &&
+      props.type === 'thread' &&
+      ((!messageGroups() &&
+        !props.lastMessage &&
+        props.messageIds &&
+        // Used to avoid flickering when deleting a greeting that has just been sent
+        (!listItemElementsRef || listItemElementsRef.length === 0)) ||
+        (props.messageIds?.length === 1 &&
+          props.messagesById?.[props.messageIds[0]]?.content.action?.type === 'contactSignUp') ||
+        props.lastMessage?.content?.action?.type === 'contactSignUp'),
+  );
 
-  const isGroupChatJustCreated =
-    createMemo(() => props.isGroupChat &&
-    props.isOwner &&
-    props.messageIds?.length === 1 &&
-    props.messagesById?.[props.messageIds[0]]?.content.action?.type === 'chatCreate');
-  const isEmptyTopic =
-    createMemo(() => props.messageIds?.length === 1 && props.messagesById?.[props.messageIds[0]]?.content.action?.type === 'topicCreate');
+  const isGroupChatJustCreated = createMemo(
+    () =>
+      props.isGroupChat &&
+      props.isOwner &&
+      props.messageIds?.length === 1 &&
+      props.messagesById?.[props.messageIds[0]]?.content.action?.type === 'chatCreate',
+  );
+  const isEmptyTopic = createMemo(
+    () =>
+      props.messageIds?.length === 1 &&
+      props.messagesById?.[props.messageIds[0]]?.content.action?.type === 'topicCreate',
+  );
 
-  const className = createMemo(() => buildClassName(
-    'MessageList custom-scroll',
-    noAvatars() && 'no-avatars',
-    !props.hasFooter && 'no-footer',
-    props.type === 'pinned' && 'type-pinned',
-    props.withBottomShift && 'with-bottom-shift',
-    props.withDefaultBg && 'with-default-bg',
-    props.isSelectModeActive && 'select-mode-active',
-    isScrolled && 'scrolled',
-    !props.isReady && 'is-animating',
-    hasOpenChatButton() && 'saved-dialog',
-    props.isChatProtected && 'hide-on-print',
-  ));
+  const className = createMemo(() =>
+    buildClassName(
+      'MessageList custom-scroll',
+      noAvatars() && 'no-avatars',
+      !props.hasFooter && 'no-footer',
+      props.type === 'pinned' && 'type-pinned',
+      props.withBottomShift && 'with-bottom-shift',
+      props.withDefaultBg && 'with-default-bg',
+      props.isSelectModeActive && 'select-mode-active',
+      isScrolled() && 'scrolled',
+      !props.isReady && 'is-animating',
+      hasOpenChatButton() && 'saved-dialog',
+      props.isChatProtected && 'hide-on-print',
+    ),
+  );
 
   const hasMessages = createMemo(() => Boolean((renderMessageIds() && messageGroups()) || props.lastMessage));
 
-  createEffect(depsOf(() => [hasMessages(), props.onScrollDownToggle] as const), ([hasMessages2, onScrollDownToggle2]) => {
-    if (hasMessages2) return;
+  createEffect(
+    depsOf(() => [hasMessages(), props.onScrollDownToggle] as const),
+    ([hasMessages2, onScrollDownToggle2]) => {
+      if (hasMessages2) return;
 
-    onScrollDownToggle2?.(false);
-  });
+      onScrollDownToggle2?.(false);
+    },
+  );
 
-  const activeKey = createMemo(() => isRestricted()
-    ? Content.Restricted
-    : props.paidMessagesStars && !hasMessages() && !props.hasCustomGreeting
-      ? Content.StarsRequired
-      : props.isContactRequirePremium && !hasMessages()
-        ? Content.PremiumRequired
-        : (props.isBot || props.isNonContact) && !hasMessages() && props.threadId === MAIN_THREAD_ID
-          ? Content.AccountInfo
-          : shouldRenderGreeting()
-            ? Content.ContactGreeting
-            : renderMessageIds() && (!messageGroups() || isGroupChatJustCreated() || isEmptyTopic())
-              ? Content.NoMessages
-              : hasMessages()
-                ? Content.MessageList
-                : Content.Loading);
+  const activeKey = createMemo(() =>
+    isRestricted()
+      ? Content.Restricted
+      : props.paidMessagesStars && !hasMessages() && !props.hasCustomGreeting
+        ? Content.StarsRequired
+        : props.isContactRequirePremium && !hasMessages()
+          ? Content.PremiumRequired
+          : (props.isBot || props.isNonContact) && !hasMessages() && props.threadId === MAIN_THREAD_ID
+            ? Content.AccountInfo
+            : shouldRenderGreeting()
+              ? Content.ContactGreeting
+              : renderMessageIds() && (!messageGroups() || isGroupChatJustCreated() || isEmptyTopic())
+                ? Content.NoMessages
+                : hasMessages()
+                  ? Content.MessageList
+                  : Content.Loading,
+  );
   const previousActiveKey = previous(() => activeKey());
-  const shouldSkipContentTransition =
-    createMemo(() => previousActiveKey() !== undefined && (activeKey() === Content.AccountInfo || previousActiveKey() === Content.AccountInfo));
+  const shouldSkipContentTransition = createMemo(
+    () =>
+      previousActiveKey() !== undefined &&
+      (activeKey() === Content.AccountInfo || previousActiveKey() === Content.AccountInfo),
+  );
 
-  function renderContent() {
-    return activeKey() === Content.Restricted ? (
+  // Deviation: each `Transition` slide renders the content of its own key (tt rendered the current content for the
+  // active slide only), so the outgoing slide keeps its content while it fades out.
+  function renderContent(key: Content) {
+    return key === Content.Restricted ? (
       <div class="empty">
-        <span>{restrictionReasons()?.[0]?.text || `This is a private ${props.isChannelChat ? 'channel' : 'chat'}`}</span>
+        <span>
+          {restrictionReasons()?.[0]?.text || `This is a private ${props.isChannelChat ? 'channel' : 'chat'}`}
+        </span>
       </div>
-    ) : activeKey() === Content.StarsRequired ? (
-      <RequirementToContactMessage paidMessagesStars={props.paidMessagesStars} peerId={props.monoforumChannelId || props.chatId} />
-    ) : activeKey() === Content.PremiumRequired ? (
+    ) : key === Content.StarsRequired ? (
+      <RequirementToContactMessage
+        paidMessagesStars={props.paidMessagesStars}
+        peerId={props.monoforumChannelId || props.chatId}
+      />
+    ) : key === Content.PremiumRequired ? (
       <RequirementToContactMessage peerId={props.chatId} />
-    ) : activeKey() === Content.AccountInfo ? (
+    ) : key === Content.AccountInfo ? (
       <MessageListAccountInfo chatId={props.chatId} hasMessages={hasMessages()} />
-    ) : activeKey() === Content.ContactGreeting ? (
-      // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show>
-      <ContactGreeting key={props.chatId} userId={props.chatId} />
-    ) : activeKey() === Content.NoMessages ? (
+    ) : key === Content.ContactGreeting ? (
+      <Show when={props.chatId} keyed>
+        {(chatId) => <ContactGreeting userId={chatId} />}
+      </Show>
+    ) : key === Content.NoMessages ? (
       <NoMessages
         chatId={props.chatId}
         topic={props.topic}
@@ -1320,7 +1471,7 @@ const MessageList = (ownProps: OwnProps) => {
         isChatWithSelf={props.isChatWithSelf}
         isGroupChatJustCreated={isGroupChatJustCreated()}
       />
-    ) : activeKey() === Content.MessageList ? (
+    ) : key === Content.MessageList ? (
       <MessageListContent
         canShowAds={canShowSponsoredMessages() && props.isChannelChat}
         chatId={props.chatId}
@@ -1328,21 +1479,21 @@ const MessageList = (ownProps: OwnProps) => {
         isChannelChat={props.isChannelChat}
         isChatMonoforum={props.isChatMonoforum}
         isSavedDialog={isSavedDialog()}
-        messageIds={renderMessageIds() || [props.lastMessage!.id]}
-        historyMessageIds={props.messageIds || [props.lastMessage!.id]}
-        messageGroups={messageGroups() || groupMessages([props.lastMessage!])}
+        messageIds={renderMessageIds() || (props.lastMessage ? [props.lastMessage.id] : [])}
+        historyMessageIds={props.messageIds || (props.lastMessage ? [props.lastMessage.id] : [])}
+        messageGroups={messageGroups() || (props.lastMessage ? groupMessages([props.lastMessage]) : [])}
         getContainerHeight={getContainerHeight}
         isViewportNewest={Boolean(props.isViewportNewest)}
         isUnread={Boolean(props.firstUnreadId)}
         isEmptyThread={props.isEmptyThread}
         withUsers={withUsers()}
         noAvatars={noAvatars()}
-        containerRef={(el) => { containerRef = el; }}
-        anchorIdRef={(el) => { anchorIdRef = el; }}
-        memoUnreadDividerBeforeIdRef={(el) => { memoUnreadDividerBeforeIdRef = el; }}
-        memoFirstUnreadIdRef={(el) => { memoFirstUnreadIdRef = el; }}
+        containerRef={() => containerRef}
+        anchorIdRef={anchorIdRef}
+        memoUnreadDividerBeforeIdRef={memoUnreadDividerBeforeIdRef}
+        memoFirstUnreadIdRef={memoFirstUnreadIdRef}
         liveTailStartOriginalId={effectiveLiveTailStartOriginalId()}
-        isReplacingHistoryRef={(el) => { isReplacingHistoryRef = el; }}
+        isReplacingHistoryRef={isReplacingHistoryRef}
         threadId={props.threadId}
         type={props.type}
         isReady={props.isReady}
@@ -1370,9 +1521,10 @@ const MessageList = (ownProps: OwnProps) => {
   }
 
   return (
-    // TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6)
     <Transition
-      ref={containerRef}
+      ref={(el) => {
+        containerRef = el;
+      }}
       className={className()}
       name={shouldSkipContentTransition() ? 'none' : 'fade'}
       activeKey={activeKey()}
@@ -1381,138 +1533,138 @@ const MessageList = (ownProps: OwnProps) => {
       onWheel={handleWheel}
       onMouseDown={preventMessageInputBlur}
     >
-      {renderContent()}
+      {(slide) => renderContent(slide.key)}
     </Transition>
   );
 };
 
 const mapStateToProps = (global: GlobalState, { chatId, threadId, type }: OwnProps): Complete<StateProps> => {
-    const tabState = selectTabState(global);
-    const currentUserId = global.currentUserId!;
-    const chat = selectChat(global, chatId);
-    const user = selectUser(global, chatId);
-    const userFullInfo = selectUserFullInfo(global, chatId);
-    const readState = selectThreadReadState(global, chatId, threadId);
-    if (!chat) {
-      return { currentUserId } as Complete<StateProps>;
-    }
+  const tabState = selectTabState(global);
+  const currentUserId = global.currentUserId!;
+  const chat = selectChat(global, chatId);
+  const user = selectUser(global, chatId);
+  const userFullInfo = selectUserFullInfo(global, chatId);
+  const readState = selectThreadReadState(global, chatId, threadId);
+  if (!chat) {
+    return { currentUserId } as Complete<StateProps>;
+  }
 
-    const messageIds = selectCurrentMessageIds(global, chatId, threadId, type);
-    const chatMessagesById = selectChatMessages(global, chatId);
-    const ephemeralById = type === 'thread' ? selectChatEphemeralMessages(global, chatId) : undefined;
-    const anchoredById = type === 'thread' ? selectChatAnchoredMessages(global, chatId) : undefined;
-    const messagesById = type === 'scheduled' ? selectChatScheduledMessages(global, chatId) : chatMessagesById;
+  const messageIds = selectCurrentMessageIds(global, chatId, threadId, type);
+  const chatMessagesById = selectChatMessages(global, chatId);
+  const ephemeralById = type === 'thread' ? selectChatEphemeralMessages(global, chatId) : undefined;
+  const anchoredById = type === 'thread' ? selectChatAnchoredMessages(global, chatId) : undefined;
+  const messagesById = type === 'scheduled' ? selectChatScheduledMessages(global, chatId) : chatMessagesById;
 
-    const isSavedDialog = getIsSavedDialog(chatId, threadId, currentUserId);
+  const isSavedDialog = getIsSavedDialog(chatId, threadId, currentUserId);
 
-    if (
-      threadId !== MAIN_THREAD_ID &&
-      !isSavedDialog &&
-      !chat?.isForum &&
-      !(chatMessagesById && threadId && chatMessagesById[Number(threadId)])
-    ) {
-      return { currentUserId } as Complete<StateProps>;
-    }
+  if (
+    threadId !== MAIN_THREAD_ID &&
+    !isSavedDialog &&
+    !chat?.isForum &&
+    !(chatMessagesById && threadId && chatMessagesById[Number(threadId)])
+  ) {
+    return { currentUserId } as Complete<StateProps>;
+  }
 
-    const lastMessage =
-      type === 'thread' ? selectChatLastMessage(global, chatId, isSavedDialog ? 'saved' : 'all') : undefined;
-    const focusingId = selectFocusedMessageId(global, chatId);
+  const lastMessage =
+    type === 'thread' ? selectChatLastMessage(global, chatId, isSavedDialog ? 'saved' : 'all') : undefined;
+  const focusingId = selectFocusedMessageId(global, chatId);
 
-    const withLastMessageWhenPreloading =
-      threadId === MAIN_THREAD_ID &&
-      !messageIds &&
-      readState &&
-      !readState.unreadCount &&
-      !focusingId &&
-      lastMessage &&
-      !lastMessage.groupedId;
+  const withLastMessageWhenPreloading =
+    threadId === MAIN_THREAD_ID &&
+    !messageIds &&
+    readState &&
+    !readState.unreadCount &&
+    !focusingId &&
+    lastMessage &&
+    !lastMessage.groupedId;
 
-    const chatBot = selectBot(global, chatId);
-    const isNonContact = Boolean(userFullInfo?.settings?.canAddContact);
-    const nameChangeDate = userFullInfo?.settings?.nameChangeDate;
-    const photoChangeDate = userFullInfo?.settings?.photoChangeDate;
+  const chatBot = selectBot(global, chatId);
+  const isNonContact = Boolean(userFullInfo?.settings?.canAddContact);
+  const nameChangeDate = userFullInfo?.settings?.nameChangeDate;
+  const photoChangeDate = userFullInfo?.settings?.photoChangeDate;
 
-    const topic = selectTopic(global, chatId, threadId);
-    const chatFullInfo = !isUserId(chatId) ? selectChatFullInfo(global, chatId) : undefined;
-    const isEmptyThread = selectThreadInfo(global, chatId, threadId)?.messagesCount === 0;
+  const topic = selectTopic(global, chatId, threadId);
+  const chatFullInfo = !isUserId(chatId) ? selectChatFullInfo(global, chatId) : undefined;
+  const isEmptyThread = selectThreadInfo(global, chatId, threadId)?.messagesCount === 0;
 
-    const isCurrentUserPremium = selectIsCurrentUserPremium(global);
-    const areAdsEnabled = !isCurrentUserPremium || selectUserFullInfo(global, currentUserId)?.areAdsEnabled;
-    const isAccountFrozen = selectIsCurrentUserFrozen(global);
+  const isCurrentUserPremium = selectIsCurrentUserPremium(global);
+  const areAdsEnabled = !isCurrentUserPremium || selectUserFullInfo(global, currentUserId)?.areAdsEnabled;
+  const isAccountFrozen = selectIsCurrentUserFrozen(global);
 
-    const hasCustomGreeting = Boolean(userFullInfo?.businessIntro);
-    const isAppConfigLoaded = global.isAppConfigLoaded;
+  const hasCustomGreeting = Boolean(userFullInfo?.businessIntro);
+  const isAppConfigLoaded = global.isAppConfigLoaded;
 
-    const monoforumChannelId = selectMonoforumChannel(global, chatId)?.id;
-    const canTranslate = selectCanTranslateChat(global, chatId) && !chatFullInfo?.isTranslationDisabled;
-    const shouldAutoTranslate = chat?.hasAutoTranslation;
-    const translationLanguage = selectTranslationLanguage(global);
+  const monoforumChannelId = selectMonoforumChannel(global, chatId)?.id;
+  const canTranslate = selectCanTranslateChat(global, chatId) && !chatFullInfo?.isTranslationDisabled;
+  const shouldAutoTranslate = chat?.hasAutoTranslation;
+  const translationLanguage = selectTranslationLanguage(global);
 
-    const currentMessageList = selectCurrentMessageList(global);
-    const isActive =
-      currentMessageList &&
-      currentMessageList.chatId === chatId &&
-      currentMessageList.threadId === threadId &&
-      currentMessageList.type === type;
+  const currentMessageList = selectCurrentMessageList(global);
+  const isActive =
+    currentMessageList &&
+    currentMessageList.chatId === chatId &&
+    currentMessageList.threadId === threadId &&
+    currentMessageList.type === type;
 
-    const {
-      chatId: focusedChatId,
-      threadId: focusedThreadId,
-      messageId: focusedMessageId,
-    } = tabState.focusedMessage || {};
-    const shouldScrollToBottom = focusedChatId === chatId && focusedThreadId === threadId && !focusedMessageId;
+  const {
+    chatId: focusedChatId,
+    threadId: focusedThreadId,
+    messageId: focusedMessageId,
+  } = tabState.focusedMessage || {};
+  const shouldScrollToBottom = focusedChatId === chatId && focusedThreadId === threadId && !focusedMessageId;
 
-    return {
-      isActive,
-      areAdsEnabled,
-      isChatLoaded: true,
-      restrictionReasons: chat.restrictionReasons,
-      ignoreRestrictionReasons: global.appConfig.ignoreRestrictionReasons,
-      isChannelChat: isChatChannel(chat),
-      isChatMonoforum: isChatMonoforum(chat),
-      isGroupChat: isChatGroup(chat),
-      isChannelWithAvatars: chat.areProfilesShown,
-      isOwner: chat.isOwner,
-      isChatWithSelf: selectIsChatWithSelf(global, chatId),
-      isSystemBotChat: isSystemBot(chatId),
-      isAnonymousForwards: isAnonymousForwardsChat(chatId),
-      isBot: Boolean(chatBot),
-      isNonContact,
-      nameChangeDate,
-      photoChangeDate,
-      isSynced: global.isSynced,
-      messageIds,
-      messagesById,
-      ephemeralById,
-      anchoredById,
-      firstUnreadId: selectFirstUnreadId(global, chatId, threadId),
-      isViewportNewest: type !== 'thread' || selectIsViewportNewest(global, chatId, threadId),
-      focusingId,
-      isSelectModeActive: selectIsInSelectMode(global),
-      hasLinkedChat: chatFullInfo ? Boolean(chatFullInfo.linkedChatId) : undefined,
-      channelJoinInfo: chatFullInfo?.joinInfo,
-      topic,
-      noMessageSendingAnimation: !selectPerformanceSettingsValue(global, 'messageSendingAnimations'),
-      isServiceNotificationsChat: chatId === SERVICE_NOTIFICATIONS_USER_ID,
-      isForum: chat.isForum,
-      withTopicSeparators: chat.isForum && threadId === MAIN_THREAD_ID,
-      isBotForum: chat.isBotForum,
-      isEmptyThread,
-      currentUserId,
-      isChatProtected: selectIsChatProtected(global, chatId),
-      lastMessage: withLastMessageWhenPreloading ? lastMessage : undefined,
-      isAccountFrozen,
-      hasCustomGreeting,
-      isAppConfigLoaded,
-      monoforumChannelId,
-      canTranslate,
-      translationLanguage,
-      shouldAutoTranslate,
-      canManageBotForumTopics: chat.isBotForum && user?.canManageBotForumTopics,
-      shouldScrollToBottom,
-      reactionPollingPause: global.reactionPollingPause,
-    };
+  return {
+    isActive,
+    areAdsEnabled,
+    isChatLoaded: true,
+    restrictionReasons: chat.restrictionReasons,
+    ignoreRestrictionReasons: global.appConfig.ignoreRestrictionReasons,
+    isChannelChat: isChatChannel(chat),
+    isChatMonoforum: isChatMonoforum(chat),
+    isGroupChat: isChatGroup(chat),
+    isChannelWithAvatars: chat.areProfilesShown,
+    isOwner: chat.isOwner,
+    isChatWithSelf: selectIsChatWithSelf(global, chatId),
+    isSystemBotChat: isSystemBot(chatId),
+    isAnonymousForwards: isAnonymousForwardsChat(chatId),
+    isBot: Boolean(chatBot),
+    isNonContact,
+    nameChangeDate,
+    photoChangeDate,
+    isSynced: global.isSynced,
+    messageIds,
+    messagesById,
+    ephemeralById,
+    anchoredById,
+    firstUnreadId: selectFirstUnreadId(global, chatId, threadId),
+    isViewportNewest: type !== 'thread' || selectIsViewportNewest(global, chatId, threadId),
+    focusingId,
+    isSelectModeActive: selectIsInSelectMode(global),
+    hasLinkedChat: chatFullInfo ? Boolean(chatFullInfo.linkedChatId) : undefined,
+    channelJoinInfo: chatFullInfo?.joinInfo,
+    topic,
+    noMessageSendingAnimation: !selectPerformanceSettingsValue(global, 'messageSendingAnimations'),
+    isServiceNotificationsChat: chatId === SERVICE_NOTIFICATIONS_USER_ID,
+    isForum: chat.isForum,
+    withTopicSeparators: chat.isForum && threadId === MAIN_THREAD_ID,
+    isBotForum: chat.isBotForum,
+    isEmptyThread,
+    currentUserId,
+    isChatProtected: selectIsChatProtected(global, chatId),
+    lastMessage: withLastMessageWhenPreloading ? lastMessage : undefined,
+    isAccountFrozen,
+    hasCustomGreeting,
+    isAppConfigLoaded,
+    monoforumChannelId,
+    canTranslate,
+    translationLanguage,
+    shouldAutoTranslate,
+    canManageBotForumTopics: chat.isBotForum && user?.canManageBotForumTopics,
+    shouldScrollToBottom,
+    reactionPollingPause: global.reactionPollingPause,
   };
+};
 
 export default MessageList;
 

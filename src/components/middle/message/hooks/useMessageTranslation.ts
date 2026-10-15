@@ -1,9 +1,10 @@
-import { createEffect } from 'frameact';
+import { createEffect, createMemo } from 'frameact';
 import { getActions } from '../../../../global';
-import { depsOf } from '../../../../util/effectDeps';
 
 import type { ChatTranslatedMessages, TranslationTone } from '../../../../types';
 
+import { type MaybeAccessor, read } from '../../../../util/accessors';
+import { depsOf } from '../../../../util/effectDeps';
 import { getTranslationCacheKey, parseTranslationCacheKey } from '../../../../util/keys/translationKey';
 import { throttle } from '../../../../util/schedulers';
 
@@ -11,39 +12,57 @@ const MESSAGE_LIMIT_PER_REQUEST = 20;
 const THROTTLE_DELAY = 500;
 const PENDING_TRANSLATIONS = new Map<string, Map<string, number[]>>();
 
-// TODO(codemod): useMessageTranslation: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: a hook runs once. The parameters are `MaybeAccessor`s and the result fields are accessors.
 export default function useMessageTranslation(
-  chatTranslations: ChatTranslatedMessages | undefined,
-  chatId?: string,
-  messageId?: number,
-  requestedLanguageCode?: string,
-  tone?: TranslationTone,
+  chatTranslations: MaybeAccessor<ChatTranslatedMessages | undefined>,
+  chatId?: MaybeAccessor<string | undefined>,
+  messageId?: MaybeAccessor<number | undefined>,
+  requestedLanguageCode?: MaybeAccessor<string | undefined>,
+  tone?: MaybeAccessor<TranslationTone | undefined>,
 ) {
-  const cacheKey = requestedLanguageCode ? getTranslationCacheKey(requestedLanguageCode, tone) : undefined;
-  const messageTranslation = cacheKey && messageId ? chatTranslations?.byLangCode[cacheKey]?.[messageId] : undefined;
-
-  const { isPending, text, richMessage } = messageTranslation || {};
-
-  createEffect(depsOf(() => [chatId, text, richMessage, isPending, messageId, cacheKey, requestedLanguageCode, tone]), () => {
-    if (!chatId || !messageId || !cacheKey || !requestedLanguageCode) return;
-
-    if (!text && !richMessage && isPending === undefined) {
-      addPendingTranslation(chatId, messageId, requestedLanguageCode, tone);
-    }
+  const cacheKey = createMemo(() => {
+    const languageCode = read(requestedLanguageCode);
+    return languageCode ? getTranslationCacheKey(languageCode, read(tone)) : undefined;
+  });
+  const messageTranslation = createMemo(() => {
+    const cacheKey2 = cacheKey();
+    const messageId2 = read(messageId);
+    return cacheKey2 && messageId2 ? read(chatTranslations)?.byLangCode[cacheKey2]?.[messageId2] : undefined;
   });
 
-  if (!chatId || !messageId) {
-    return {
-      isPending: false,
-      translatedText: undefined,
-      translatedRichMessage: undefined,
-    };
-  }
+  const isPending = () => messageTranslation()?.isPending;
+  const text = () => messageTranslation()?.text;
+  const richMessage = () => messageTranslation()?.richMessage;
+
+  createEffect(
+    depsOf(
+      () =>
+        [
+          read(chatId),
+          text(),
+          richMessage(),
+          isPending(),
+          read(messageId),
+          cacheKey(),
+          read(requestedLanguageCode),
+          read(tone),
+        ] as const,
+    ),
+    ([chatId2, text2, richMessage2, isPending2, messageId2, cacheKey2, requestedLanguageCode2, tone2]) => {
+      if (!chatId2 || !messageId2 || !cacheKey2 || !requestedLanguageCode2) return;
+
+      if (!text2 && !richMessage2 && isPending2 === undefined) {
+        addPendingTranslation(chatId2, messageId2, requestedLanguageCode2, tone2);
+      }
+    },
+  );
+
+  const hasMessage = () => Boolean(read(chatId) && read(messageId));
 
   return {
-    isPending,
-    translatedText: text,
-    translatedRichMessage: richMessage,
+    isPending: () => (hasMessage() ? isPending() : false),
+    translatedText: () => (hasMessage() ? text() : undefined),
+    translatedRichMessage: () => (hasMessage() ? richMessage() : undefined),
   };
 }
 

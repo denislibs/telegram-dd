@@ -1,11 +1,10 @@
-import { createEffect, requestMeasure } from 'frameact';
+import { type Accessor, createEffect, requestMeasure } from 'frameact';
 import { getActions } from '../../../../global';
-import { depsOf } from '../../../../util/effectDeps';
 
-import type { Signal } from '../../../../util/signals';
-
+import { type MaybeAccessor, read } from '../../../../util/accessors';
 import { IS_ANDROID, IS_TOUCH_ENV } from '../../../../util/browser/windowEnvironment';
 import { captureEvents, SwipeDirection } from '../../../../util/captureEvents';
+import { depsOf } from '../../../../util/effectDeps';
 import stopEvent from '../../../../util/stopEvent';
 import windowSize from '../../../../util/windowSize';
 import { REM } from '../../../common/helpers/mediaDimensions';
@@ -21,22 +20,25 @@ const QUICK_REACTION_AREA_WIDTH = 3 * REM;
 const QUICK_REACTION_AREA_HEIGHT = Number(REM);
 const GROUP_MESSAGE_HOVER_ATTRIBUTE = 'data-is-document-group-hover';
 
-// TODO(codemod): useOuterHandlers: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: a hook runs once. The reactive parameters are `MaybeAccessor`s and the refs are accessors of the element.
+// The returned handlers are always defined and check the select mode / protection when the event arrives (tt returned
+// `undefined` for a render in which the handler is off, and the bound handler of an element cannot change here);
+// `isSwiped` and `isQuickReactionVisible` are accessors.
 export default function useOuterHandlers(
   selectMessage: (e?: React.MouseEvent<HTMLDivElement, MouseEvent>, groupedId?: string) => void,
-  containerRef: (el: HTMLDivElement) => void,
-  messageId: number,
-  isInSelectMode: boolean,
-  canReply: boolean,
-  isProtected: boolean,
+  containerRef: Accessor<HTMLDivElement | undefined>,
+  messageId: MaybeAccessor<number>,
+  isInSelectMode: MaybeAccessor<boolean>,
+  canReply: MaybeAccessor<boolean>,
+  isProtected: MaybeAccessor<boolean>,
   onContextMenu: (e: React.MouseEvent) => void,
   handleBeforeContextMenu: (e: React.MouseEvent) => void,
-  chatId: string,
-  isContextMenuShown: boolean,
-  quickReactionRef: (el: HTMLDivElement) => void,
-  shouldHandleMouseLeave: boolean,
-  getIsMessageListReady?: Signal<boolean>,
-  isEphemeral?: boolean,
+  chatId: MaybeAccessor<string>,
+  isContextMenuShown: MaybeAccessor<boolean>,
+  quickReactionRef: Accessor<HTMLDivElement | undefined>,
+  shouldHandleMouseLeave: MaybeAccessor<boolean>,
+  getIsMessageListReady?: Accessor<boolean>,
+  isEphemeral?: MaybeAccessor<boolean | undefined>,
 ) {
   const { updateDraftReplyInfo, sendDefaultReaction } = getActions();
 
@@ -45,13 +47,15 @@ export default function useOuterHandlers(
   let doubleTapTimeoutRef: number | undefined;
 
   function handleMouseDown(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
+    if (read(isInSelectMode)) return;
+
     preventMessageInputBlur(e);
     handleBeforeContextMenu(e);
   }
 
   const handleMouseMove = useThrottledCallback(
     (e: React.MouseEvent) => {
-      const quickReactionContainer = quickReactionRef.current;
+      const quickReactionContainer = quickReactionRef();
       if (!quickReactionContainer) return;
 
       const { clientX, clientY } = e;
@@ -78,10 +82,10 @@ export default function useOuterHandlers(
 
   function handleSendQuickReaction(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
     e.stopPropagation();
-    if (isEphemeral) return;
+    if (read(isEphemeral)) return;
     sendDefaultReaction({
-      chatId,
-      messageId,
+      chatId: read(chatId),
+      messageId: read(messageId),
     });
   }
 
@@ -103,15 +107,15 @@ export default function useOuterHandlers(
   }
 
   function handleDoubleTap() {
-    if (isEphemeral) return;
+    if (read(isEphemeral)) return;
     sendDefaultReaction({
-      chatId,
-      messageId,
+      chatId: read(chatId),
+      messageId: read(messageId),
     });
   }
 
   function handleClick(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
-    if (isInSelectMode) {
+    if (read(isInSelectMode)) {
       selectMessage(e);
       return;
     }
@@ -125,15 +129,20 @@ export default function useOuterHandlers(
       return;
     }
 
-    doubleTapTimeoutRef = setTimeout(() => {
+    doubleTapTimeoutRef = window.setTimeout(() => {
       doubleTapTimeoutRef = undefined;
       handleTap(e);
     }, QUICK_REACTION_DOUBLE_TAP_DELAY);
   }
 
   function handleContextMenu(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
+    if (read(isInSelectMode)) {
+      if (read(isProtected)) stopEvent(e);
+      return;
+    }
+
     if (IS_ANDROID) {
-      if ((e.target as HTMLElement).matches('a[href]') || isContextMenuShown) {
+      if ((e.target as HTMLElement).matches('a[href]') || read(isContextMenuShown)) {
         return;
       }
 
@@ -145,99 +154,112 @@ export default function useOuterHandlers(
   }
 
   function handleContainerDoubleClick() {
-    if (IS_TOUCH_ENV || !canReply) return;
+    if (read(isInSelectMode)) return;
+    if (IS_TOUCH_ENV || !read(canReply)) return;
 
-    if (isEphemeral) {
+    if (read(isEphemeral)) {
       updateDraftReplyInfo({
         type: 'ephemeral',
-        replyToMsgId: messageId,
+        replyToMsgId: read(messageId),
       });
       return;
     }
 
     updateDraftReplyInfo({
-      replyToMsgId: messageId,
+      replyToMsgId: read(messageId),
       replyToPeerId: undefined,
       quoteText: undefined,
       quoteOffset: undefined,
     });
   }
 
-  function stopPropagation(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
+  function handleContentDoubleClick(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
+    if (IS_TOUCH_ENV) return;
+
     e.stopPropagation();
   }
 
-  createEffect(depsOf(() => [
-    containerRef,
-    isInSelectMode,
-    messageId,
-    markSwiped,
-    unmarkSwiped,
-    canReply,
-    isContextMenuShown,
-    getIsMessageListReady,
-    isEphemeral,
-  ]), () => {
-    if (!IS_TOUCH_ENV || isInSelectMode || !canReply || isContextMenuShown || !getIsMessageListReady?.()) {
-      return undefined;
-    }
+  createEffect(
+    depsOf(
+      () =>
+        [
+          read(isInSelectMode),
+          read(messageId),
+          read(canReply),
+          read(isContextMenuShown),
+          // Deviation: the readiness of the list is a signal here (tt read it in the effect body, which re-ran with the
+          // render): it is read in the compute half, so the swipe is attached when the list becomes ready.
+          getIsMessageListReady ? getIsMessageListReady() : true,
+          read(isEphemeral),
+        ] as const,
+    ),
+    ([isInSelectMode2, messageId2, canReply2, isContextMenuShown2, isListReady, isEphemeral2]) => {
+      const container = containerRef();
+      if (!IS_TOUCH_ENV || isInSelectMode2 || !canReply2 || isContextMenuShown2 || !isListReady || !container) {
+        return undefined;
+      }
 
-    let startedAt: number | undefined;
-    return captureEvents(containerRef.current!, {
-      selectorToPreventScroll: '.MessageList',
-      excludedClosestSelector: '.no-word-wrap',
-      onSwipe: (e, direction) => {
-        if (direction === SwipeDirection.Left) {
-          if (!startedAt) {
-            startedAt = Date.now();
+      let startedAt: number | undefined;
+      return captureEvents(container, {
+        selectorToPreventScroll: '.MessageList',
+        excludedClosestSelector: '.no-word-wrap',
+        onSwipe: (e, direction) => {
+          if (direction === SwipeDirection.Left) {
+            if (!startedAt) {
+              startedAt = Date.now();
+            }
+
+            markSwiped();
+
+            return true;
           }
 
-          markSwiped();
+          return false;
+        },
+        onRelease: () => {
+          if (!startedAt || !canReply2) {
+            return;
+          }
 
-          return true;
-        }
+          if (isEphemeral2) {
+            updateDraftReplyInfo({
+              type: 'ephemeral',
+              replyToMsgId: messageId2,
+            });
+          } else {
+            updateDraftReplyInfo({ replyToMsgId: messageId2 });
+          }
 
-        return false;
-      },
-      onRelease: () => {
-        if (!startedAt || !canReply) {
-          return;
-        }
-
-        if (isEphemeral) {
-          updateDraftReplyInfo({
-            type: 'ephemeral',
-            replyToMsgId: messageId,
-          });
-        } else {
-          updateDraftReplyInfo({ replyToMsgId: messageId });
-        }
-
-        setTimeout(unmarkSwiped, Math.max(0, SWIPE_ANIMATION_DURATION - (Date.now() - startedAt)));
-        startedAt = undefined;
-      },
-    });
-  });
+          setTimeout(unmarkSwiped, Math.max(0, SWIPE_ANIMATION_DURATION - (Date.now() - startedAt)));
+          startedAt = undefined;
+        },
+      });
+    },
+  );
 
   function handleMouseLeave(e: React.MouseEvent<HTMLDivElement>) {
     // Because `mousemove` event is throttled, we need to also throttle `mouseleave` event,
     // so the order of events is preserved
     requestMeasure(unmarkQuickReactionVisible);
-    if (shouldHandleMouseLeave) handleDocumentGroupMouseLeave(e);
+    if (read(shouldHandleMouseLeave)) handleDocumentGroupMouseLeave(e);
+  }
+
+  function handleDocumentGroupMouseEnterIfNeeded(e: React.MouseEvent<HTMLDivElement>) {
+    if (read(shouldHandleMouseLeave)) handleDocumentGroupMouseEnter(e);
   }
 
   return {
-    handleMouseDown: !isInSelectMode ? handleMouseDown : undefined,
+    handleMouseDown,
     handleClick,
-    handleContextMenu: !isInSelectMode ? handleContextMenu : isProtected ? stopEvent : undefined,
-    handleDoubleClick: !isInSelectMode ? handleContainerDoubleClick : undefined,
-    handleContentDoubleClick: !IS_TOUCH_ENV ? stopPropagation : undefined,
+    handleContextMenu,
+    handleDoubleClick: handleContainerDoubleClick,
+    handleContentDoubleClick,
     handleMouseMove,
     handleSendQuickReaction,
     handleMouseLeave,
     isSwiped,
     isQuickReactionVisible,
-    handleDocumentGroupMouseEnter,
+    handleDocumentGroupMouseEnter: handleDocumentGroupMouseEnterIfNeeded,
   };
 }
 

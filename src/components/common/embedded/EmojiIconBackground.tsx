@@ -1,13 +1,19 @@
-import { createEffect, createMemo, createSignal, onMount, requestMutation } from 'frameact';
-import { depsOf } from '../../../util/effectDeps';
+import {
+  createEffect,
+  createMeasureEffect,
+  createMemo,
+  createSignal,
+  requestMutation,
+  watchHeavyAnimation,
+} from 'frameact';
 
 import { getStickerMediaHash } from '../../../global/helpers';
 import buildClassName from '../../../util/buildClassName';
+import { depsOf } from '../../../util/effectDeps';
 import { preloadImage } from '../../../util/files';
 import { REM } from '../helpers/mediaDimensions';
 
 import useDynamicColorListener from '../../../hooks/stickers/useDynamicColorListener';
-import { useThrottleForHeavyAnimation } from '../../../hooks/useHeavyAnimation';
 import useMedia from '../../../hooks/useMedia';
 import useOldLang from '../../../hooks/useOldLang';
 import useResizeObserver from '../../../hooks/useResizeObserver';
@@ -85,6 +91,36 @@ type OwnProps = {
   withEmojiSpace?: boolean;
 };
 
+// Deviation: tt's `useThrottleForHeavyAnimation` (src/hooks/useHeavyAnimation.ts, used only here) is a local helper over
+// `watchHeavyAnimation`: a call during a heavy animation is postponed to its end (the latest call wins), as in tt.
+function createThrottleForHeavyAnimation<A extends unknown[]>(callback: (...args: A) => void) {
+  // `watchHeavyAnimation` calls `onStart` at once when the scope chain is already animating
+  let isAnimating = false;
+  let pendingCall: (() => void) | undefined;
+
+  watchHeavyAnimation(
+    () => {
+      isAnimating = true;
+    },
+    () => {
+      isAnimating = false;
+      const call = pendingCall;
+      pendingCall = undefined;
+      call?.();
+    },
+  );
+
+  return (...args: A) => {
+    if (isAnimating) {
+      pendingCall = () => callback(...args);
+      return;
+    }
+
+    pendingCall = undefined;
+    callback(...args);
+  };
+}
+
 const EmojiIconBackground = (props: OwnProps) => {
   let canvasRef!: HTMLCanvasElement;
   let containerRef!: HTMLDivElement;
@@ -95,48 +131,58 @@ const EmojiIconBackground = (props: OwnProps) => {
 
   const lang = useOldLang();
 
-  const customEmojiResult = createMemo(() => useCustomEmoji(() => props.emojiDocumentId));
-  const customEmoji = () => customEmojiResult().customEmoji;
-  const previewMediaHash = createMemo(() => customEmoji() ? getStickerMediaHash(customEmoji(), 'preview') : undefined);
-  const previewUrl = useMedia(() => previewMediaHash());
+  const { customEmoji } = useCustomEmoji(() => props.emojiDocumentId);
+  const previewMediaHash = createMemo(() => {
+    const emoji = customEmoji();
+    return emoji ? getStickerMediaHash(emoji, 'preview') : undefined;
+  });
+  const previewUrl = useMedia(previewMediaHash);
 
   const customColor = useDynamicColorListener(() => containerRef);
+  // Read in `updateCanvas`, which also runs outside of a tracked scope (a prop getter is not readable there)
+  const withEmojiSpace = createMemo(() => Boolean(props.withEmojiSpace));
 
-  // TODO(codemod): useThrottleForHeavyAnimation: throttle with watchHeavyAnimation / onFullyIdle
-  const preloadAfterHeavyAnimation = useThrottleForHeavyAnimation(() => {
-    if (!previewUrl) return;
-    preloadImage(previewUrl).then(setEmojiImage);
-  }, [previewUrl]);
-
-  onMount(() => {
-    preloadAfterHeavyAnimation();
+  const preloadAfterHeavyAnimation = createThrottleForHeavyAnimation(() => {
+    const url = previewUrl();
+    if (!url) return;
+    preloadImage(url).then(setEmojiImage);
   });
+
+  createEffect(
+    () => previewUrl(),
+    () => {
+      preloadAfterHeavyAnimation();
+    },
+  );
 
   const updateCanvas = () => {
     const canvas = canvasRef;
-    if (!canvas || !emojiImage() || !customColor) return;
+    const image = emojiImage();
+    const color = customColor();
+    if (!canvas || !image || !color) return;
 
     const context = canvas.getContext('2d')!;
     const { width, height } = canvas;
+    const pixelRatio = dpr();
 
     context.clearRect(0, 0, width, height);
 
     ICON_POSITIONS.forEach(({ inline, block, opacity, scale }) => {
-      const xShift = props.withEmojiSpace ? -EMOJI_SPACE : 0;
-      const x = ((lang.isRtl ? inline : width / dpr - inline) + xShift) * dpr;
-      const y = block * dpr;
+      const xShift = withEmojiSpace() ? -EMOJI_SPACE : 0;
+      const x = ((lang.isRtl ? inline : width / pixelRatio - inline) + xShift) * pixelRatio;
+      const y = block * pixelRatio;
 
-      const emojiSize = EMOJI_SIZE * dpr;
+      const emojiSize = EMOJI_SIZE * pixelRatio;
 
       context.save();
       context.globalAlpha = opacity;
       context.translate(x, y);
       context.scale(scale, scale);
-      context.drawImage(emojiImage(), -emojiSize / 2, -emojiSize / 2, emojiSize, emojiSize);
+      context.drawImage(image, -emojiSize / 2, -emojiSize / 2, emojiSize, emojiSize);
       context.restore();
     });
 
-    const tintColor = `${customColor}${customEmoji()!.isLottie ? LOTTIE_TINT_OPACITY : NON_LOTTIE_TINT_OPACITY}`;
+    const tintColor = `${color}${customEmoji()!.isLottie ? LOTTIE_TINT_OPACITY : NON_LOTTIE_TINT_OPACITY}`;
 
     context.save();
     context.fillStyle = tintColor;
@@ -145,52 +191,51 @@ const EmojiIconBackground = (props: OwnProps) => {
     context.restore();
   };
 
-  // TODO(codemod): useThrottleForHeavyAnimation: throttle with watchHeavyAnimation / onFullyIdle
-  const updateCanvasAfterHeavyAnimation = useThrottleForHeavyAnimation(updateCanvas, [updateCanvas]);
+  const updateCanvasAfterHeavyAnimation = createThrottleForHeavyAnimation(updateCanvas);
 
-  createEffect(depsOf(() => [emojiImage(), lang.isRtl, customColor, updateCanvasAfterHeavyAnimation, props.withEmojiSpace] as const), ([emojiImage2, , , , withEmojiSpace2]) => {
-    updateCanvasAfterHeavyAnimation();
+  createEffect(
+    depsOf(() => [emojiImage(), lang.isRtl, customColor(), withEmojiSpace()] as const),
+    () => {
+      updateCanvasAfterHeavyAnimation();
+    },
+  );
+
+  const updateCanvasSize = createThrottleForHeavyAnimation((parentWidth: number, parentHeight: number) => {
+    requestMutation(() => {
+      const canvas = canvasRef;
+      if (!canvas) return;
+
+      const pixelRatio = dpr();
+      canvas.width = parentWidth * pixelRatio;
+      canvas.height = parentHeight * pixelRatio;
+
+      canvas.style.width = `${parentWidth}px`;
+      canvas.style.height = `${parentHeight}px`;
+
+      updateCanvas();
+    });
   });
 
-  // TODO(codemod): useThrottleForHeavyAnimation: throttle with watchHeavyAnimation / onFullyIdle
-  const updateCanvasSize = useThrottleForHeavyAnimation(
-    (parentWidth: number, parentHeight: number) => {
-      requestMutation(() => {
-        const canvas = canvasRef;
-        if (!canvas) return;
-
-        canvas.width = parentWidth * dpr;
-        canvas.height = parentHeight * dpr;
-
-        canvas.style.width = `${parentWidth}px`;
-        canvas.style.height = `${parentHeight}px`;
-
-        updateCanvas();
-      });
-    },
-    [dpr],
-  );
-
-  // TODO(codemod): useThrottleForHeavyAnimation: throttle with watchHeavyAnimation / onFullyIdle
-  const handleResize = useThrottleForHeavyAnimation(
-    (entry: ResizeObserverEntry) => {
-      const { width, height } = entry.contentRect;
-
-      updateCanvasSize(width, height);
-    },
-    [updateCanvasSize],
-  );
-
-  useResizeObserver(() => containerRef, handleResize);
-
-  onMount(() => {
-    const container = containerRef;
-    if (!container) return;
-
-    const { width, height } = container.getBoundingClientRect();
+  const handleResize = createThrottleForHeavyAnimation((entry: ResizeObserverEntry) => {
+    const { width, height } = entry.contentRect;
 
     updateCanvasSize(width, height);
   });
+
+  useResizeObserver(() => containerRef, handleResize);
+
+  // tt: an effect with `updateCanvasSize` (which depends on `dpr`) in its deps.
+  createMeasureEffect(
+    () => dpr(),
+    () => {
+      const container = containerRef;
+      if (!container) return;
+
+      const { width, height } = container.getBoundingClientRect();
+
+      updateCanvasSize(width, height);
+    },
+  );
 
   return (
     <div class={buildClassName(styles.root, props.className)} ref={containerRef}>

@@ -1,8 +1,7 @@
 import { requestForcedReflow, requestMeasure } from 'frameact';
 import { addExtraClass, removeExtraClass } from 'frameact/dom';
+import { forceMeasure, forceMutation } from 'frameact/stricterdom';
 
-// TODO(codemod): still imported from teact: forceMeasure, forceMutation
-import { forceMeasure, forceMutation } from '../../../lib/fasterdom/fasterdom';
 import { isAnimatingScroll } from '../../../util/animateScroll';
 import buildStyle from '../../../util/buildStyle';
 import { REM } from '../../common/helpers/mediaDimensions';
@@ -269,7 +268,9 @@ function getMinBottomInset() {
       'visibility: hidden',
       'height: var(--composer-min-bottom-reserve)',
     );
-    document.body.appendChild(minBottomInsetProbe);
+    // Deviation: a deliberate write in the measure phase (the probe is created lazily, by the first reserve read)
+    const probe = minBottomInsetProbe;
+    forceMutation(() => document.body.appendChild(probe), document.body, true);
   }
 
   return minBottomInsetProbe.offsetHeight || FALLBACK_MIN_BOTTOM_INSET;

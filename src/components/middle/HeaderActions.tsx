@@ -1,7 +1,8 @@
 import { createMemo, createSignal, requestMeasure, requestNextMutation } from 'frameact';
+import { Show } from 'frameact/dom';
 import { getActions, withGlobal } from '../../global';
-import type { GlobalState } from '../../global/types';
 
+import type { GlobalState } from '../../global/types';
 import type { IAnchorPosition, MessageListType, ThreadId, TranslationTone } from '../../types';
 import { MAIN_THREAD_ID } from '../../api/types';
 import { ManagementScreens } from '../../types';
@@ -112,7 +113,7 @@ const HeaderActions = (ownProps: OwnProps) => {
 
   const handleHeaderMenuOpen = () => {
     setIsMenuOpen(true);
-    const rect = menuButtonRef!.getBoundingClientRect();
+    const rect = menuButtonRef.getBoundingClientRect();
     setMenuAnchor({ x: rect.right, y: rect.bottom });
   };
 
@@ -178,17 +179,17 @@ const HeaderActions = (ownProps: OwnProps) => {
   };
 
   const getTextWithLanguage = (langKey: string, langCode: string) => {
-      const simplified = langCode.split('-')[0];
-      const translationKey = `TranslateLanguage${simplified.toUpperCase()}`;
-      const name = oldLang(translationKey);
-      if (name !== translationKey) {
-        return oldLang(langKey, name);
-      }
+    const simplified = langCode.split('-')[0];
+    const translationKey = `TranslateLanguage${simplified.toUpperCase()}`;
+    const name = oldLang(translationKey);
+    if (name !== translationKey) {
+      return oldLang(langKey, name);
+    }
 
-      const translatedNames = new Intl.DisplayNames([props.language], { type: 'language' });
-      const translatedName = translatedNames.of(langCode)!;
-      return oldLang(`${langKey}Other`, translatedName);
-    };
+    const translatedNames = new Intl.DisplayNames([props.language], { type: 'language' });
+    const translatedName = translatedNames.of(langCode)!;
+    return oldLang(`${langKey}Other`, translatedName);
+  };
 
   const buttonText = createMemo(() => {
     if (props.isTranslating) return oldLang('ShowOriginalButton');
@@ -231,31 +232,28 @@ const HeaderActions = (ownProps: OwnProps) => {
     setSettingOption({ translationTone: tone });
   };
 
-  useHotkeys(
-    ({
-        'Mod+F': handleHotkeySearchClick,
-      }),
-  );
-
-  const MoreMenuButton = createMemo(() => {
-    return ({ onTrigger, isOpen }: { onTrigger: () => void; isOpen?: boolean }) => (
-      <Button
-        round
-        ripple={props.isRightColumnShown}
-        color="translucent"
-        size="smaller"
-        className={isOpen ? 'active' : ''}
-        onClick={onTrigger}
-        ariaLabel={oldLang('TranslateMessage')}
-        iconName="language"
-      />
-    );
+  useHotkeys({
+    'Mod+F': handleHotkeySearchClick,
   });
+
+  // Deviation: a plain component function (it reads its props where they are used), no memo around it.
+  const MoreMenuButton = (triggerProps: { onTrigger: () => void; isOpen?: boolean }) => (
+    <Button
+      round
+      ripple={props.isRightColumnShown}
+      color="translucent"
+      size="smaller"
+      className={triggerProps.isOpen ? 'active' : ''}
+      onClick={triggerProps.onTrigger}
+      ariaLabel={oldLang('TranslateMessage')}
+      iconName="language"
+    />
+  );
 
   return (
     <div class="HeaderActions">
       {!props.isForForum && props.canTranslate && (
-        <DropdownMenu className="stickers-more-menu with-menu-transitions" trigger={MoreMenuButton()} positionX="right">
+        <DropdownMenu className="stickers-more-menu with-menu-transitions" trigger={MoreMenuButton} positionX="right">
           <MenuItem icon="language" onClick={handleTranslateClick}>
             {buttonText()}
           </MenuItem>
@@ -364,7 +362,9 @@ const HeaderActions = (ownProps: OwnProps) => {
         </Button>
       )}
       <Button
-        ref={menuButtonRef}
+        ref={(el) => {
+          menuButtonRef = el as HTMLButtonElement;
+        }}
         className={isMenuOpen() ? 'active' : ''}
         round
         ripple={!props.isMobile}
@@ -375,135 +375,140 @@ const HeaderActions = (ownProps: OwnProps) => {
         onClick={handleHeaderMenuOpen}
         iconName="more"
       />
-      {menuAnchor() && (
-        <HeaderMenuContainer
-          chatId={props.chatId}
-          threadId={props.threadId}
-          isOpen={isMenuOpen()}
-          anchor={menuAnchor()}
-          isChannel={props.isChannel}
-          canSubscribe={props.isForForum ? props.canSubscribe : undefined}
-          canSearch={props.canSearch}
-          canCall={props.canCall}
-          canMute={props.canMute}
-          canViewStatistics={props.canViewStatistics}
-          canViewBoosts={props.canViewBoosts}
-          canViewMonetization={props.canViewMonetization}
-          canShowBoostModal={props.canShowBoostModal}
-          canLeave={props.canLeave}
-          canEnterVoiceChat={props.canEnterVoiceChat}
-          canCreateVoiceChat={props.canCreateVoiceChat}
-          pendingJoinRequests={props.pendingJoinRequests}
-          onJoinRequestsClick={handleJoinRequestsClick}
-          withForumActions={props.isForForum}
-          channelMonoforumId={props.channelMonoforumId}
-          onSearchClick={handleSearchClick}
-          onAsMessagesClick={handleAsMessagesClick}
-          onClose={handleHeaderMenuClose}
-          onCloseAnimationEnd={handleHeaderMenuHide}
-        />
-      )}
+      <Show when={menuAnchor()}>
+        {(anchor) => (
+          <HeaderMenuContainer
+            chatId={props.chatId}
+            threadId={props.threadId}
+            isOpen={isMenuOpen()}
+            anchor={anchor()}
+            isChannel={props.isChannel}
+            canSubscribe={props.isForForum ? props.canSubscribe : undefined}
+            canSearch={props.canSearch}
+            canCall={props.canCall}
+            canMute={props.canMute}
+            canViewStatistics={props.canViewStatistics}
+            canViewBoosts={props.canViewBoosts}
+            canViewMonetization={props.canViewMonetization}
+            canShowBoostModal={props.canShowBoostModal}
+            canLeave={props.canLeave}
+            canEnterVoiceChat={props.canEnterVoiceChat}
+            canCreateVoiceChat={props.canCreateVoiceChat}
+            pendingJoinRequests={props.pendingJoinRequests}
+            onJoinRequestsClick={handleJoinRequestsClick}
+            withForumActions={props.isForForum}
+            channelMonoforumId={props.channelMonoforumId}
+            onSearchClick={handleSearchClick}
+            onAsMessagesClick={handleAsMessagesClick}
+            onClose={handleHeaderMenuClose}
+            onCloseAnimationEnd={handleHeaderMenuHide}
+          />
+        )}
+      </Show>
     </div>
   );
 };
 
-const mapStateToProps = (global: GlobalState, { chatId, threadId, messageListType, isMobile }: OwnProps): Complete<StateProps> => {
-    const chat = selectChat(global, chatId);
-    const isChannel = Boolean(chat && isChatChannel(chat));
-    const isSuperGroup = Boolean(chat && isChatSuperGroup(chat));
-    const language = selectLanguageCode(global);
-    const translationLanguage = selectTranslationLanguage(global);
-    const isPrivate = isUserId(chatId);
-    const { doNotTranslate, translationTone } = global.settings.byKey;
+const mapStateToProps = (
+  global: GlobalState,
+  { chatId, threadId, messageListType, isMobile }: OwnProps,
+): Complete<StateProps> => {
+  const chat = selectChat(global, chatId);
+  const isChannel = Boolean(chat && isChatChannel(chat));
+  const isSuperGroup = Boolean(chat && isChatSuperGroup(chat));
+  const language = selectLanguageCode(global);
+  const translationLanguage = selectTranslationLanguage(global);
+  const isPrivate = isUserId(chatId);
+  const { doNotTranslate, translationTone } = global.settings.byKey;
 
-    const isRestricted = selectIsChatRestricted(global, chatId);
-    if (!chat || isRestricted || selectIsInSelectMode(global)) {
-      return {
-        noMenu: true,
-        language,
-        translationLanguage,
-        doNotTranslate,
-        currentTone: translationTone,
-      } as Complete<StateProps>;
-    }
-
-    const bot = selectBot(global, chatId);
-    const chatFullInfo = !isPrivate ? selectChatFullInfo(global, chatId) : undefined;
-    const userFullInfo = isPrivate ? selectUserFullInfo(global, chatId) : undefined;
-    const fullInfo = chatFullInfo || userFullInfo;
-    const isChatWithSelf = selectIsChatWithSelf(global, chatId);
-    const isMainThread = messageListType === 'thread' && threadId === MAIN_THREAD_ID;
-    const isDiscussionThread = messageListType === 'thread' && threadId !== MAIN_THREAD_ID;
-    const isRightColumnShown = selectIsRightColumnShown(global, isMobile);
-
-    const isSavedDialog = getIsSavedDialog(chatId, threadId, global.currentUserId);
-
-    const canSubscribe = Boolean(
-      (isMainThread || chat.isForum) && (isChannel || isSuperGroup) && chat.isNotJoined && !chat.isMonoforum,
-    );
-    const canSearch = isMainThread || isDiscussionThread;
-    const canCall =
-      ARE_CALLS_SUPPORTED &&
-      isUserId(chat.id) &&
-      !isChatWithSelf &&
-      !bot &&
-      !chat.isSupport &&
-      !isAnonymousForwardsChat(chat.id);
-    const canMute = isMainThread && !isChatWithSelf && !canSubscribe;
-    const canLeave = isSavedDialog || (isMainThread && !canSubscribe);
-    const canEnterVoiceChat = ARE_CALLS_SUPPORTED && isMainThread && chat.isCallActive;
-    const canCreateVoiceChat =
-      ARE_CALLS_SUPPORTED &&
-      isMainThread &&
-      !chat.isCallActive &&
-      getHasAdminRight(chat, 'manageCall') &&
-      !chat.isMonoforum;
-    const canViewStatistics = isMainThread && chatFullInfo?.canViewStatistics;
-    const canViewMonetization = isMainThread && chatFullInfo?.canViewMonetization;
-    const canViewBoosts =
-      isMainThread &&
-      !chat.isMonoforum &&
-      (isSuperGroup || isChannel) &&
-      (canViewStatistics || getHasAdminRight(chat, 'postStories'));
-    const canShowBoostModal = !canViewBoosts && (isSuperGroup || isChannel) && !chat.isMonoforum;
-    const pendingJoinRequests = isMainThread ? chatFullInfo?.requestsPending : undefined;
-    const noAnimation = !selectCanAnimateInterface(global);
-
-    const isTranslating = Boolean(selectRequestedChatTranslationLanguage(global, chatId));
-    const canTranslate = selectCanTranslateChat(global, chatId) && !fullInfo?.isTranslationDisabled;
-    const isAccountFrozen = selectIsCurrentUserFrozen(global);
-    const currentTone = selectRequestedChatTranslationTone(global, chatId);
-
-    const channelMonoforumId = isChatChannel(chat) ? chat.linkedMonoforumId : undefined;
-
+  const isRestricted = selectIsChatRestricted(global, chatId);
+  if (!chat || isRestricted || selectIsInSelectMode(global)) {
     return {
-      noMenu: false,
-      isChannel,
-      isRightColumnShown,
-      canSubscribe,
-      canSearch,
-      canCall,
-      canMute,
-      canViewStatistics,
-      canViewMonetization,
-      canViewBoosts,
-      canShowBoostModal,
-      canLeave,
-      canEnterVoiceChat,
-      canCreateVoiceChat,
-      pendingJoinRequests,
-      noAnimation,
-      canTranslate,
-      isTranslating,
-      translationLanguage,
+      noMenu: true,
       language,
+      translationLanguage,
       doNotTranslate,
-      detectedChatLanguage: chat.detectedLanguage,
-      isAccountFrozen,
-      channelMonoforumId,
-      currentTone,
-    };
+      currentTone: translationTone,
+    } as Complete<StateProps>;
+  }
+
+  const bot = selectBot(global, chatId);
+  const chatFullInfo = !isPrivate ? selectChatFullInfo(global, chatId) : undefined;
+  const userFullInfo = isPrivate ? selectUserFullInfo(global, chatId) : undefined;
+  const fullInfo = chatFullInfo || userFullInfo;
+  const isChatWithSelf = selectIsChatWithSelf(global, chatId);
+  const isMainThread = messageListType === 'thread' && threadId === MAIN_THREAD_ID;
+  const isDiscussionThread = messageListType === 'thread' && threadId !== MAIN_THREAD_ID;
+  const isRightColumnShown = selectIsRightColumnShown(global, isMobile);
+
+  const isSavedDialog = getIsSavedDialog(chatId, threadId, global.currentUserId);
+
+  const canSubscribe = Boolean(
+    (isMainThread || chat.isForum) && (isChannel || isSuperGroup) && chat.isNotJoined && !chat.isMonoforum,
+  );
+  const canSearch = isMainThread || isDiscussionThread;
+  const canCall =
+    ARE_CALLS_SUPPORTED &&
+    isUserId(chat.id) &&
+    !isChatWithSelf &&
+    !bot &&
+    !chat.isSupport &&
+    !isAnonymousForwardsChat(chat.id);
+  const canMute = isMainThread && !isChatWithSelf && !canSubscribe;
+  const canLeave = isSavedDialog || (isMainThread && !canSubscribe);
+  const canEnterVoiceChat = ARE_CALLS_SUPPORTED && isMainThread && chat.isCallActive;
+  const canCreateVoiceChat =
+    ARE_CALLS_SUPPORTED &&
+    isMainThread &&
+    !chat.isCallActive &&
+    getHasAdminRight(chat, 'manageCall') &&
+    !chat.isMonoforum;
+  const canViewStatistics = isMainThread && chatFullInfo?.canViewStatistics;
+  const canViewMonetization = isMainThread && chatFullInfo?.canViewMonetization;
+  const canViewBoosts =
+    isMainThread &&
+    !chat.isMonoforum &&
+    (isSuperGroup || isChannel) &&
+    (canViewStatistics || getHasAdminRight(chat, 'postStories'));
+  const canShowBoostModal = !canViewBoosts && (isSuperGroup || isChannel) && !chat.isMonoforum;
+  const pendingJoinRequests = isMainThread ? chatFullInfo?.requestsPending : undefined;
+  const noAnimation = !selectCanAnimateInterface(global);
+
+  const isTranslating = Boolean(selectRequestedChatTranslationLanguage(global, chatId));
+  const canTranslate = selectCanTranslateChat(global, chatId) && !fullInfo?.isTranslationDisabled;
+  const isAccountFrozen = selectIsCurrentUserFrozen(global);
+  const currentTone = selectRequestedChatTranslationTone(global, chatId);
+
+  const channelMonoforumId = isChatChannel(chat) ? chat.linkedMonoforumId : undefined;
+
+  return {
+    noMenu: false,
+    isChannel,
+    isRightColumnShown,
+    canSubscribe,
+    canSearch,
+    canCall,
+    canMute,
+    canViewStatistics,
+    canViewMonetization,
+    canViewBoosts,
+    canShowBoostModal,
+    canLeave,
+    canEnterVoiceChat,
+    canCreateVoiceChat,
+    pendingJoinRequests,
+    noAnimation,
+    canTranslate,
+    isTranslating,
+    translationLanguage,
+    language,
+    doNotTranslate,
+    detectedChatLanguage: chat.detectedLanguage,
+    isAccountFrozen,
+    channelMonoforumId,
+    currentTone,
   };
+};
 
 export default HeaderActions;
 

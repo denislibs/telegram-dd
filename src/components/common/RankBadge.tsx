@@ -28,27 +28,35 @@ const RankBadge = (props: OwnProps) => {
   const hasCustomColor = createMemo(() => props.isOwner || props.isAdmin);
   const isPlain = createMemo(() => !hasCustomColor());
 
-  const rankText = createMemo(() => props.rank || (props.isOwner && lang('ChannelCreator')) || (props.isAdmin && lang('ChannelAdmin')));
+  const rankText = createMemo(
+    () => props.rank || (props.isOwner && lang('ChannelCreator')) || (props.isAdmin && lang('ChannelAdmin')),
+  );
 
   const handleClick = () => {
     if (!props.chatId) return;
-    openRankModal({ chatId: props.chatId, userId: props.userId, isAdmin: props.isAdmin, isOwner: props.isOwner, rank: props.rank });
+    openRankModal({
+      chatId: props.chatId,
+      userId: props.userId,
+      isAdmin: props.isAdmin,
+      isOwner: props.isOwner,
+      rank: props.rank,
+    });
   };
 
   return (
     <Show when={rankText()}>
-    <BadgeButton
-      className={buildClassName(
-        hasCustomColor() && getPeerColorClass(props.isOwner ? OWNER_PEER_COLOR : ADMIN_PEER_COLOR),
-        isPlain() && 'admin-title-plain',
-        props.className,
-      )}
-      isPlain={isPlain()}
-      inline
-      onClick={props.isClickable ? handleClick : undefined}
-    >
-      {rankText()}
-    </BadgeButton>
+      <BadgeButton
+        className={buildClassName(
+          hasCustomColor() && getPeerColorClass(props.isOwner ? OWNER_PEER_COLOR : ADMIN_PEER_COLOR),
+          isPlain() && 'admin-title-plain',
+          props.className,
+        )}
+        isPlain={isPlain()}
+        inline
+        onClick={props.isClickable ? handleClick : undefined}
+      >
+        {rankText()}
+      </BadgeButton>
     </Show>
   );
 };

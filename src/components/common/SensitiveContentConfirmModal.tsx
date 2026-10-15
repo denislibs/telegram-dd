@@ -1,4 +1,5 @@
 import { withGlobal } from '../../global';
+
 import type { GlobalState } from '../../global/types';
 
 import { VERIFY_AGE_MIN_DEFAULT } from '../../config';
@@ -46,12 +47,12 @@ const SensitiveContentConfirmModal = (ownProps: OwnProps) => {
 };
 
 const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
-    const appConfig = global.appConfig;
-    const verifyAgeMin = appConfig.verifyAgeMin;
+  const appConfig = global.appConfig;
+  const verifyAgeMin = appConfig.verifyAgeMin;
 
-    return {
-      verifyAgeMin: verifyAgeMin || VERIFY_AGE_MIN_DEFAULT,
-    };
+  return {
+    verifyAgeMin: verifyAgeMin || VERIFY_AGE_MIN_DEFAULT,
   };
+};
 
 export default SensitiveContentConfirmModal;

@@ -5,9 +5,11 @@ interface OwnProps {
 }
 
 function MessageAppendix(props: OwnProps) {
-  const path = createMemo(() => props.isOwn
-    ? 'M6 17H0V0c.193 2.84.876 5.767 2.05 8.782.904 2.325 2.446 4.485 4.625 6.48A1 1 0 016 17z'
-    : 'M3 17h6V0c-.193 2.84-.876 5.767-2.05 8.782-.904 2.325-2.446 4.485-4.625 6.48A1 1 0 003 17z');
+  const path = createMemo(() =>
+    props.isOwn
+      ? 'M6 17H0V0c.193 2.84.876 5.767 2.05 8.782.904 2.325 2.446 4.485 4.625 6.48A1 1 0 016 17z'
+      : 'M3 17h6V0c-.193 2.84-.876 5.767-2.05 8.782-.904 2.325-2.446 4.485-4.625 6.48A1 1 0 003 17z',
+  );
   return (
     <svg width="9" height="20" class="svg-appendix">
       <defs>

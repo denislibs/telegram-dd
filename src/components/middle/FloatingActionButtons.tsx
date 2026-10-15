@@ -56,7 +56,7 @@ const FloatingActionButtons = (ownProps: OwnProps) => {
 
   let elementRef!: HTMLDivElement;
 
-  const source = createMemo(() => (props.shouldShowCount && props.threadReadState) || {});
+  const source = createMemo((): Partial<ThreadReadState> => (props.shouldShowCount && props.threadReadState) || {});
   const unreadPollVotesCount = () => source().unreadPollVotesCount;
   const unreadReactionsCount = () => source().unreadReactionsCount;
   const unreadMentionsCount = () => source().unreadMentionsCount;
@@ -84,23 +84,32 @@ const FloatingActionButtons = (ownProps: OwnProps) => {
     readAllMentions({ chatId: props.chatId, threadId: props.threadId });
   };
 
-  createEffect(depsOf(() => [props.chatId, props.threadId, hasUnreadPollVotes(), unreadPollVotes()?.length] as const), ([chatId2, threadId2, hasUnreadPollVotes2]) => {
-    if (hasUnreadPollVotes2 && chatId2 && !unreadPollVotes()?.length) {
-      loadUnreadPollVotes({ chatId: chatId2, threadId: threadId2 });
-    }
-  });
+  createEffect(
+    depsOf(() => [props.chatId, props.threadId, hasUnreadPollVotes(), unreadPollVotes()?.length] as const),
+    ([chatId2, threadId2, hasUnreadPollVotes2]) => {
+      if (hasUnreadPollVotes2 && chatId2 && !unreadPollVotes()?.length) {
+        loadUnreadPollVotes({ chatId: chatId2, threadId: threadId2 });
+      }
+    },
+  );
 
-  createEffect(depsOf(() => [props.chatId, props.threadId, hasUnreadReactions(), unreadReactions()?.length] as const), ([chatId2, threadId2, hasUnreadReactions2]) => {
-    if (hasUnreadReactions2 && chatId2 && !unreadReactions()?.length) {
-      loadUnreadReactions({ chatId: chatId2, threadId: threadId2 });
-    }
-  });
+  createEffect(
+    depsOf(() => [props.chatId, props.threadId, hasUnreadReactions(), unreadReactions()?.length] as const),
+    ([chatId2, threadId2, hasUnreadReactions2]) => {
+      if (hasUnreadReactions2 && chatId2 && !unreadReactions()?.length) {
+        loadUnreadReactions({ chatId: chatId2, threadId: threadId2 });
+      }
+    },
+  );
 
-  createEffect(depsOf(() => [props.chatId, props.threadId, hasUnreadMentions(), unreadMentions()?.length] as const), ([chatId2, threadId2, hasUnreadMentions2]) => {
-    if (hasUnreadMentions2 && chatId2 && !unreadMentions()?.length) {
-      loadUnreadMentions({ chatId: chatId2, threadId: threadId2 });
-    }
-  });
+  createEffect(
+    depsOf(() => [props.chatId, props.threadId, hasUnreadMentions(), unreadMentions()?.length] as const),
+    ([chatId2, threadId2, hasUnreadMentions2]) => {
+      if (hasUnreadMentions2 && chatId2 && !unreadMentions()?.length) {
+        loadUnreadMentions({ chatId: chatId2, threadId: threadId2 });
+      }
+    },
+  );
 
   const handleScrollDownClick = () => {
     if (!props.withScrollDown) {
@@ -129,46 +138,51 @@ const FloatingActionButtons = (ownProps: OwnProps) => {
     focusNextMention({ chatId: props.chatId, threadId: props.threadId });
   };
 
-  const unreadCountButtonsConfig = createMemo(() => [
-    {
-      icon: 'poll',
-      ariaLabelLang: 'AccDescrPollVoteDown',
-      unreadCount: unreadPollVotesCount(),
-      isHidden: !hasUnreadPollVotes(),
-      onClick: handleFocusNextPollVote,
-      onReadAll: handleReadAllPollVotes,
-    },
-    {
-      icon: 'heart-outline',
-      ariaLabelLang: 'AccDescrReactionMentionDown',
-      unreadCount: unreadReactionsCount(),
-      isHidden: !hasUnreadReactions(),
-      onClick: handleFocusNextReaction,
-      onReadAll: handleReadAllReactions,
-    },
-    {
-      icon: 'mention',
-      ariaLabelLang: 'AccDescrMentionDown',
-      unreadCount: unreadMentionsCount(),
-      isHidden: !hasUnreadMentions(),
-      onClick: handleFocusNextMention,
-      onReadAll: handleReadAllMentions,
-    },
-  ] satisfies Omit<UnreadCountButton, 'hiddenUnreadCountButtonsBelow'>[]);
+  const unreadCountButtonsConfig = createMemo(
+    () =>
+      [
+        {
+          icon: 'poll',
+          ariaLabelLang: 'AccDescrPollVoteDown',
+          unreadCount: unreadPollVotesCount(),
+          isHidden: !hasUnreadPollVotes(),
+          onClick: handleFocusNextPollVote,
+          onReadAll: handleReadAllPollVotes,
+        },
+        {
+          icon: 'heart-outline',
+          ariaLabelLang: 'AccDescrReactionMentionDown',
+          unreadCount: unreadReactionsCount(),
+          isHidden: !hasUnreadReactions(),
+          onClick: handleFocusNextReaction,
+          onReadAll: handleReadAllReactions,
+        },
+        {
+          icon: 'mention',
+          ariaLabelLang: 'AccDescrMentionDown',
+          unreadCount: unreadMentionsCount(),
+          isHidden: !hasUnreadMentions(),
+          onClick: handleFocusNextMention,
+          onReadAll: handleReadAllMentions,
+        },
+      ] satisfies Omit<UnreadCountButton, 'hiddenUnreadCountButtonsBelow'>[],
+  );
 
-  let hiddenUnreadCountButtonsBelow = 0;
-  const unreadCountButtons = createMemo(() => unreadCountButtonsConfig().reduceRight<UnreadCountButton[]>((result, button) => {
-    result.unshift({
-      ...button,
-      hiddenUnreadCountButtonsBelow,
-    });
+  const unreadCountButtons = createMemo(() => {
+    let hiddenUnreadCountButtonsBelow = 0;
+    return unreadCountButtonsConfig().reduceRight<UnreadCountButton[]>((result, button) => {
+      result.unshift({
+        ...button,
+        hiddenUnreadCountButtonsBelow,
+      });
 
-    if (button.isHidden) {
-      hiddenUnreadCountButtonsBelow++;
-    }
+      if (button.isHidden) {
+        hiddenUnreadCountButtonsBelow++;
+      }
 
-    return result;
-  }, []));
+      return result;
+    }, []);
+  });
 
   const hasUnreadCountButtons = createMemo(() => unreadCountButtons().some((button) => !button.isHidden));
 
@@ -180,24 +194,28 @@ const FloatingActionButtons = (ownProps: OwnProps) => {
       button.hiddenUnreadCountButtonsBelow === 2 && styles.transformDownDouble,
     );
 
-  const fabClassName = createMemo(() => buildClassName(
-    styles.root,
-    !props.isHidden && (props.withScrollDown || hasUnreadCountButtons()) && styles.revealed,
-    !props.isHidden && hasUnreadCountButtons() && !props.withScrollDown && styles.hideScrollDown,
-  ));
+  const fabClassName = createMemo(() =>
+    buildClassName(
+      styles.root,
+      !props.isHidden && (props.withScrollDown || hasUnreadCountButtons()) && styles.revealed,
+      !props.isHidden && hasUnreadCountButtons() && !props.withScrollDown && styles.hideScrollDown,
+    ),
+  );
 
   return (
     <div ref={elementRef} class={fabClassName()} inert={props.isHidden}>
-      <For each={unreadCountButtons()} keyed={(button) => button.icon}>{(button) => (
-        <ScrollDownButton
-          icon={button().icon}
-          ariaLabelLang={button().ariaLabelLang}
-          onClick={button().onClick}
-          onReadAll={button().onReadAll}
-          unreadCount={button().unreadCount}
-          className={buildUnreadCountButtonClassName(button())}
-        />
-      )}</For>
+      <For each={unreadCountButtons()} keyed={(button) => button.icon}>
+        {(button) => (
+          <ScrollDownButton
+            icon={button().icon}
+            ariaLabelLang={button().ariaLabelLang}
+            onClick={button().onClick}
+            onReadAll={button().onReadAll}
+            unreadCount={button().unreadCount}
+            className={buildUnreadCountButtonClassName(button())}
+          />
+        )}
+      </For>
 
       <ScrollDownButton
         icon="arrow-down"
@@ -211,30 +229,30 @@ const FloatingActionButtons = (ownProps: OwnProps) => {
 };
 
 const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
-    const currentMessageList = selectCurrentMessageList(global);
-    if (!currentMessageList) {
-      return {
-        chatId: undefined,
-        messageListType: undefined,
-        shouldShowCount: undefined,
-        threadId: undefined,
-        threadReadState: undefined,
-      };
-    }
-
-    const { chatId, threadId, type: messageListType } = currentMessageList;
-    const chat = selectChat(global, chatId);
-    const hasActiveMiddleSearch = Boolean(selectCurrentMiddleSearch(global));
-
-    const shouldShowCount = chat && messageListType === 'thread' && !hasActiveMiddleSearch;
-
+  const currentMessageList = selectCurrentMessageList(global);
+  if (!currentMessageList) {
     return {
-      messageListType,
-      chatId,
-      threadId,
-      threadReadState: selectThreadReadState(global, chatId, threadId),
-      shouldShowCount,
+      chatId: undefined,
+      messageListType: undefined,
+      shouldShowCount: undefined,
+      threadId: undefined,
+      threadReadState: undefined,
     };
+  }
+
+  const { chatId, threadId, type: messageListType } = currentMessageList;
+  const chat = selectChat(global, chatId);
+  const hasActiveMiddleSearch = Boolean(selectCurrentMiddleSearch(global));
+
+  const shouldShowCount = chat && messageListType === 'thread' && !hasActiveMiddleSearch;
+
+  return {
+    messageListType,
+    chatId,
+    threadId,
+    threadReadState: selectThreadReadState(global, chatId, threadId),
+    shouldShowCount,
   };
+};
 
 export default FloatingActionButtons;

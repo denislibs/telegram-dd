@@ -38,11 +38,18 @@ const FormattedDate = (props: OwnProps) => {
 
   const lang = useLang();
 
-  const [requestCalendar, calendar] = useSchedule(undefined, undefined, () => Math.max(props.entity.date, getServerTime()));
+  const [requestCalendar, calendar] = useSchedule(undefined, undefined, () =>
+    Math.max(props.entity.date, getServerTime()),
+  );
 
+  // Deviation: tt re-evaluated the delay on every render (a tick re-rendered it); here the delay reads the tick counter,
+  // so the interval gets slower as the date moves away. `relative ? … : undefined`: never a `false` delay.
   useInterval(
     () => setCacheBreaker((prev) => prev + 1),
-    () => props.entity.relative && getUpdateInterval(Math.abs(props.entity.date - getServerTime())),
+    () => {
+      void cacheBreaker();
+      return props.entity.relative ? getUpdateInterval(Math.abs(props.entity.date - getServerTime())) : undefined;
+    },
   );
 
   const canSetReminder = createMemo(() => Boolean(props.chatId && props.messageId));
@@ -59,12 +66,11 @@ const FormattedDate = (props: OwnProps) => {
   const formattedDate = () => memoResult().formattedDate;
   const canonicalDate = () => memoResult().canonicalDate;
 
-  const contextMenuHandlersResult = createMemo(() => useContextMenuHandlers(() => ref, () => props.asPreview));
-  const isContextMenuOpen = () => contextMenuHandlersResult().isContextMenuOpen;
-  const contextMenuAnchor = () => contextMenuHandlersResult().contextMenuAnchor;
-  const handleContextMenu = () => contextMenuHandlersResult().handleContextMenu;
-  const handleContextMenuClose = () => contextMenuHandlersResult().handleContextMenuClose;
-  const handleContextMenuHide = () => contextMenuHandlersResult().handleContextMenuHide;
+  const { isContextMenuOpen, contextMenuAnchor, handleContextMenu, handleContextMenuClose, handleContextMenuHide } =
+    useContextMenuHandlers(
+      () => ref,
+      () => props.asPreview,
+    );
 
   const getTriggerElement = () => ref;
   const getRootElement = () => document.body;
@@ -77,9 +83,12 @@ const FormattedDate = (props: OwnProps) => {
   };
 
   const handleSetReminder = () => {
-    if (!props.chatId || !props.messageId) return;
+    // Read when the handler runs: the narrowing holds inside the callback below
+    const chatId = props.chatId;
+    const messageId = props.messageId;
+    if (!chatId || !messageId) return;
     requestCalendar((scheduledAt) => {
-      openForwardMenu({ fromChatId: props.chatId, messageIds: [props.messageId] });
+      openForwardMenu({ fromChatId: chatId, messageIds: [messageId] });
       forwardToSavedMessages({ scheduledAt });
       showNotification({
         message: {
@@ -93,44 +102,47 @@ const FormattedDate = (props: OwnProps) => {
     });
   };
 
+  // Deviation: tt returned `formattedDate ?? children` for `asPreview` before the markup; a render function runs once
   return (
     <Show when={!props.asPreview} fallback={formattedDate() ?? props.children}>
-    <a
-      ref={ref}
-      onClick={handleContextMenu()}
-      onContextMenu={handleContextMenu()}
-      class="text-entity-link"
-      dir="auto"
-      data-entity-type={ApiMessageEntityTypes.FormattedDate}
-      data-unix={props.entity.date}
-      data-format={getFormattedDateFormatString(props.entity)}
-      title={canonicalDate()}
-    >
-      {formattedDate() ?? props.children}
-      <Menu
-        ref={menuRef}
-        isOpen={isContextMenuOpen()}
-        anchor={contextMenuAnchor()}
-        getTriggerElement={getTriggerElement}
-        getRootElement={getRootElement}
-        getMenuElement={getMenuElement}
-        getLayout={getLayout}
-        onClose={handleContextMenuClose()}
-        onCloseAnimationEnd={handleContextMenuHide()}
-        withPortal
-        autoClose
+      <a
+        ref={ref}
+        onClick={handleContextMenu}
+        onContextMenu={handleContextMenu}
+        class="text-entity-link"
+        dir="auto"
+        data-entity-type={ApiMessageEntityTypes.FormattedDate}
+        data-unix={props.entity.date}
+        data-format={getFormattedDateFormatString(props.entity)}
+        title={canonicalDate()}
       >
-        <MenuItem icon="copy" onClick={handleCopy}>
-          {lang('MenuCopyDate')}
-        </MenuItem>
-        {canSetReminder() && (
-          <MenuItem icon="unmute" onClick={handleSetReminder}>
-            {lang('SetReminder')}
+        {formattedDate() ?? props.children}
+        <Menu
+          ref={(el) => {
+            menuRef = el;
+          }}
+          isOpen={isContextMenuOpen()}
+          anchor={contextMenuAnchor()}
+          getTriggerElement={getTriggerElement}
+          getRootElement={getRootElement}
+          getMenuElement={getMenuElement}
+          getLayout={getLayout}
+          onClose={handleContextMenuClose}
+          onCloseAnimationEnd={handleContextMenuHide}
+          withPortal
+          autoClose
+        >
+          <MenuItem icon="copy" onClick={handleCopy}>
+            {lang('MenuCopyDate')}
           </MenuItem>
-        )}
-      </Menu>
-      {calendar}
-    </a>
+          {canSetReminder() && (
+            <MenuItem icon="unmute" onClick={handleSetReminder}>
+              {lang('SetReminder')}
+            </MenuItem>
+          )}
+        </Menu>
+        {calendar}
+      </a>
     </Show>
   );
 };

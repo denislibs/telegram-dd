@@ -1,10 +1,13 @@
+import { type Accessor, getOwner } from 'frameact';
 import { getActions } from '../../../global';
 
-import type { ApiMessageEntity } from '../../../api/types';
+import type { ApiMessageEntity, ApiMessageEntityFormattedDate } from '../../../api/types';
+import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 import type { TextPart, ThreadId } from '../../../types';
 import type { TextFilter } from './renderText';
 import { ApiMessageEntityTypes } from '../../../api/types';
 
+import { generateBrailleSpoiler } from '../../../global/helpers/messageSummary';
 import { ensureProtocol } from '../../../util/browser/url';
 import buildClassName from '../../../util/buildClassName';
 import { copyTextToClipboard } from '../../../util/clipboard';
@@ -31,8 +34,53 @@ type RenderTextParams = Parameters<typeof renderText>[2];
 
 const HQ_EMOJI_THRESHOLD = 64;
 
+// Deviation (untrusted entities): the entities of a message come from the server. More than `MAX_ENTITIES` are ignored
+// (the text between them stays plain), nested entities are rendered up to `MAX_NESTING_DEPTH` levels (a deeper
+// entity is rendered as plain text of its range), and entities with a range outside the text are dropped.
+// Telegram itself allows far fewer entities per message and a few levels of nesting.
+const MAX_ENTITIES = 2048;
+const MAX_NESTING_DEPTH = 32;
+// A custom emoji id is a 64-bit integer as a decimal string
+const CUSTOM_EMOJI_ID_REGEX = /^-?\d{1,20}$/;
+// The latest time (in seconds) that a Date can hold: the formatting of a later one throws
+const MAX_DATE_SECONDS = 8.64e12;
+
+/** `text` with the ranges of Spoiler entities replaced by braille characters of the same length (overlaps merged). */
+export function concealSpoilers(text: string, entities?: ApiMessageEntity[]): string {
+  if (!entities?.length) return text;
+
+  const ranges: [number, number][] = [];
+  for (const { type, offset, length } of entities) {
+    if (type !== ApiMessageEntityTypes.Spoiler) continue;
+
+    // A range that is not a pair of numbers conceals nothing; `Infinity` is clamped to the text
+    if (typeof offset !== 'number' || typeof length !== 'number') continue;
+
+    const start = Math.max(0, Math.floor(offset));
+    const end = Math.min(text.length, Math.ceil(offset + length));
+    if (start < end) ranges.push([start, end]);
+  }
+  if (!ranges.length) return text;
+
+  ranges.sort((a, b) => a[0] - b[0]);
+
+  let result = '';
+  let position = 0;
+  for (const [start, end] of ranges) {
+    if (end <= position) continue;
+
+    const from = Math.max(start, position);
+    result += text.slice(position, from) + generateBrailleSpoiler(end - from);
+    position = end;
+  }
+
+  return result + text.slice(position);
+}
+
+// TODO(port): the nodes are created anew on each call (a text edit re-creates every CustomEmoji/lottie); a `<For>` keyed
+// by entity (porting guide 4.2) would keep them. Deviation until then: the callers re-run this function in a binding.
 export function renderTextWithEntities({
-  text,
+  text: rawText,
   entities,
   highlight,
   emojiSize,
@@ -45,7 +93,6 @@ export function renderTextWithEntities({
   withTranslucentThumbs,
   sharedCanvasRef,
   sharedCanvasHqRef,
-  cacheBuster,
   forcePlayback,
   noCustomEmojiPlayback,
   isInSelectMode,
@@ -65,8 +112,10 @@ export function renderTextWithEntities({
   observeIntersectionForLoading?: ObserveFn;
   observeIntersectionForPlaying?: ObserveFn;
   withTranslucentThumbs?: boolean;
-  sharedCanvasRef?: (el: HTMLCanvasElement) => void;
-  sharedCanvasHqRef?: (el: HTMLCanvasElement) => void;
+  sharedCanvasRef?: Accessor<HTMLCanvasElement | undefined>;
+  sharedCanvasHqRef?: Accessor<HTMLCanvasElement | undefined>;
+  // Deviation: not used. The `key` that tt gave the custom emoji and the date (`${cacheBuster}-${offset}`) to remount
+  // them on a text change is gone: the nodes are created anew on each call of this function.
   cacheBuster?: string;
   forcePlayback?: boolean;
   noCustomEmojiPlayback?: boolean;
@@ -76,7 +125,19 @@ export function renderTextWithEntities({
   threadId?: ThreadId;
   maxTimestamp?: number;
 }) {
-  if (!entities?.length) {
+  // Deviation (security): tt renders the text of a Spoiler inside `<Spoiler>`, hidden by CSS only: its characters are
+  // in the DOM (`textContent`, copy, screen readers). A preview is always on screen (the chat list: the login code of
+  // the 777000 chat is a Spoiler there), so in a preview the text of every Spoiler range is replaced by braille
+  // characters of the same length before the entities are rendered, as the plain-string summaries do
+  // (`getMessageTextWithSpoilers`). Nothing of the range can come out as plain text, whatever the other entities are
+  // (all the entities are used, not only the ones below `MAX_ENTITIES`). The `Spoiler` wrapper (the dots) stays.
+  const text = asPreview ? concealSpoilers(rawText, entities) : rawText;
+  // Deviation: the components of the result (Spoiler, CustomEmoji, links, ...) live as long as their owner. A helper
+  // without one (`getMessageSummaryText` makes the nodes of a poll question and drops them) would leave them
+  // subscribed for good, so the text is returned without them. The HTML strings have no components.
+  const validEntities =
+    entities?.length && (shouldRenderAsHtml || getOwner()) ? sanitizeEntities(text, entities) : undefined;
+  if (!validEntities?.length) {
     return renderMessagePart({
       content: text,
       highlight,
@@ -89,7 +150,7 @@ export function renderTextWithEntities({
   const result: TextPart[] = [];
   let deleteLineBreakAfterPre = false;
 
-  const organizedEntities = organizeEntities(entities);
+  const organizedEntities = organizeEntities(validEntities);
 
   // Recursive function to render regular and nested entities
   function renderEntity(
@@ -97,6 +158,7 @@ export function renderTextWithEntities({
     textPartEnd: number,
     organizedEntity: IOrganizedEntity,
     isLastEntity: boolean,
+    depth = 0,
   ) {
     const renderResult: TextPart[] = [];
     const { entity, nestedEntities } = organizedEntity;
@@ -139,7 +201,8 @@ export function renderTextWithEntities({
     }
 
     // Render nested entities, if any
-    if (nestedEntities.length) {
+    // Deviation: a depth over `MAX_NESTING_DEPTH` is not rendered
+    if (nestedEntities.length && depth < MAX_NESTING_DEPTH) {
       let nestedIndex = entityStartIndex;
 
       nestedEntities.forEach((nestedEntity, nestedEntityIndex) => {
@@ -148,6 +211,7 @@ export function renderTextWithEntities({
           entityEndIndex,
           nestedEntity,
           nestedEntityIndex === nestedEntities.length - 1,
+          depth + 1,
         );
 
         nestedEntityContent.push(...nestedResult);
@@ -172,7 +236,6 @@ export function renderTextWithEntities({
           emojiSize,
           sharedCanvasRef,
           sharedCanvasHqRef,
-          cacheBuster,
           forcePlayback,
           noCustomEmojiPlayback,
           isInSelectMode,
@@ -340,17 +403,40 @@ export function insertTextEntity(entities: ApiMessageEntity[], newEntity: ApiMes
   return resultEntities.sort((a, b) => a.offset - b.offset || b.length - a.length);
 }
 
+// Drops the entities that cannot be rendered and caps their number (see `MAX_ENTITIES`)
+function sanitizeEntities(text: string, entities: ApiMessageEntity[]) {
+  const result: ApiMessageEntity[] = [];
+
+  for (const entity of entities) {
+    if (result.length >= MAX_ENTITIES) break;
+
+    const { offset, length } = entity;
+    if (!Number.isInteger(offset) || !Number.isInteger(length) || offset < 0 || length <= 0 || offset >= text.length) {
+      continue;
+    }
+
+    result.push(offset + length > text.length ? { ...entity, length: text.length - offset } : entity);
+  }
+
+  return result;
+}
+
 // Organize entities in a tree-like structure to better represent how the text will be displayed
-function organizeEntities(entities: ApiMessageEntity[]) {
+// (exported for the test that compares it with tt's algorithm)
+export function organizeEntities(entities: ApiMessageEntity[]) {
   const organizedEntityIndexes = new Set<number>();
   const organizedEntities: IOrganizedEntity[] = [];
+  // Deviation: tt computed the tree of an entity again for each entity that contains it, which takes time exponential in
+  // the nesting; the result for an index is the same within one top-level call, so it is computed once
+  const cache = new Map<number, IOrganizedEntity>();
 
   entities.forEach((entity, index) => {
     if (organizedEntityIndexes.has(index)) {
       return;
     }
 
-    const organizedEntity = organizeEntity(entity, index, entities, organizedEntityIndexes);
+    cache.clear();
+    const organizedEntity = organizeEntity(entity, index, entities, organizedEntityIndexes, cache);
     if (organizedEntity) {
       organizedEntity.organizedIndexes.forEach((organizedIndex) => {
         organizedEntityIndexes.add(organizedIndex);
@@ -368,6 +454,7 @@ function organizeEntity(
   index: number,
   entities: ApiMessageEntity[],
   organizedEntityIndexes: Set<number>,
+  cache: Map<number, IOrganizedEntity>,
 ): IOrganizedEntity | undefined {
   const { offset, length } = entity;
   const organizedIndexes = new Set([index]);
@@ -376,34 +463,42 @@ function organizeEntity(
     return undefined;
   }
 
+  const cached = cache.get(index);
+  if (cached) {
+    return cached;
+  }
+
   // Determine any nested entities inside current entity
   const nestedEntities: IOrganizedEntity[] = [];
-  const parsedNestedEntities = entities
-    .filter((e, i) => i > index && e.offset >= offset && e.offset < offset + length)
-    .map((e) => organizeEntity(e, entities.indexOf(e), entities, organizedEntityIndexes))
-    .filter(Boolean);
+  for (let i = index + 1; i < entities.length; i++) {
+    const nestedCandidate = entities[i];
+    // Deviation: tt took the index of the candidate with `entities.indexOf` (a candidate that is the same object as an
+    // earlier entity sent it into an endless recursion); a nested entity whose index is already in the set of this
+    // entity has everything it contains in the set too, so it would not have been added (`isChanged` of tt)
+    if (!(nestedCandidate.offset >= offset && nestedCandidate.offset < offset + length) || organizedIndexes.has(i)) {
+      continue;
+    }
 
-  parsedNestedEntities.forEach((parsedEntity) => {
-    let isChanged = false;
+    const parsedEntity = organizeEntity(nestedCandidate, i, entities, organizedEntityIndexes, cache);
+    if (!parsedEntity) {
+      continue;
+    }
 
     parsedEntity.organizedIndexes.forEach((organizedIndex) => {
-      if (!isChanged && !organizedIndexes.has(organizedIndex)) {
-        isChanged = true;
-      }
-
       organizedIndexes.add(organizedIndex);
     });
 
-    if (isChanged) {
-      nestedEntities.push(parsedEntity);
-    }
-  });
+    nestedEntities.push(parsedEntity);
+  }
 
-  return {
+  const organizedEntity = {
     entity,
     organizedIndexes,
     nestedEntities,
   };
+  cache.set(index, organizedEntity);
+
+  return organizedEntity;
 }
 
 function processEntity({
@@ -420,7 +515,6 @@ function processEntity({
   emojiSize,
   sharedCanvasRef,
   sharedCanvasHqRef,
-  cacheBuster,
   forcePlayback,
   noCustomEmojiPlayback,
   isInSelectMode,
@@ -441,9 +535,8 @@ function processEntity({
   observeIntersectionForPlaying?: ObserveFn;
   withTranslucentThumbs?: boolean;
   emojiSize?: number;
-  sharedCanvasRef?: (el: HTMLCanvasElement) => void;
-  sharedCanvasHqRef?: (el: HTMLCanvasElement) => void;
-  cacheBuster?: string;
+  sharedCanvasRef?: Accessor<HTMLCanvasElement | undefined>;
+  sharedCanvasHqRef?: Accessor<HTMLCanvasElement | undefined>;
   forcePlayback?: boolean;
   noCustomEmojiPlayback?: boolean;
   isInSelectMode?: boolean;
@@ -455,13 +548,18 @@ function processEntity({
   const entityText = typeof entityContent === 'string' && entityContent;
   const renderedContent = nestedEntityContent.length ? nestedEntityContent : entityContent;
 
+  // Deviation: the part is rendered once per entity. A prop of a component (`<Spoiler>{renderNestedMessagePart()}</Spoiler>`)
+  // is a getter that runs the expression on each read, and the nodes it makes can be placed in one spot only.
+  let nestedMessagePart: TextPart[] | undefined;
   function renderNestedMessagePart() {
-    return renderMessagePart({
+    nestedMessagePart ??= renderMessagePart({
       content: renderedContent,
       highlight,
       emojiSize,
       asPreview,
     });
+
+    return nestedMessagePart;
   }
 
   if (!entityText) {
@@ -475,6 +573,11 @@ function processEntity({
     }
 
     if (entity.type === ApiMessageEntityTypes.CustomEmoji) {
+      // Deviation: an id that is not an integer is not a custom emoji (the text is rendered)
+      if (!CUSTOM_EMOJI_ID_REGEX.test(entity.documentId)) {
+        return text;
+      }
+
       return (
         <CustomEmoji
           documentId={entity.documentId}
@@ -492,7 +595,7 @@ function processEntity({
       );
     }
 
-    if (entity.type === ApiMessageEntityTypes.FormattedDate && entity.date) {
+    if (entity.type === ApiMessageEntityTypes.FormattedDate && isValidFormattedDate(entity)) {
       // Old entities can have missing fields
       return (
         <FormattedDate entity={entity} asPreview>
@@ -626,6 +729,10 @@ function processEntity({
     case ApiMessageEntityTypes.Spoiler:
       return <Spoiler containerId={containerId}>{renderNestedMessagePart()}</Spoiler>;
     case ApiMessageEntityTypes.CustomEmoji:
+      if (!CUSTOM_EMOJI_ID_REGEX.test(entity.documentId)) {
+        return renderNestedMessagePart();
+      }
+
       return (
         <CustomEmoji
           documentId={entity.documentId}
@@ -644,6 +751,11 @@ function processEntity({
     case ApiMessageEntityTypes.QuoteFocus:
       return <span class="matching-text-highlight is-quote">{renderNestedMessagePart()}</span>;
     case ApiMessageEntityTypes.FormattedDate:
+      // Deviation: a date that cannot be formatted (it would throw) is rendered as the text
+      if (!isValidFormattedDate(entity)) {
+        return renderNestedMessagePart();
+      }
+
       return (
         <FormattedDate entity={entity} chatId={chatId} messageId={messageId}>
           {renderNestedMessagePart()}
@@ -704,10 +816,11 @@ function processEntityAsHtml(entity: ApiMessageEntity, entityContent: TextPart, 
     case ApiMessageEntityTypes.Strike:
       return `<del>${renderedContent}</del>`;
     case ApiMessageEntityTypes.MentionName:
+      // Deviation: `userId` is escaped (tt put it into the attribute as it is; the ids are numeric strings, so the result is the same)
       return `<a
         class="text-entity-link"
         data-entity-type="${ApiMessageEntityTypes.MentionName}"
-        data-user-id="${entity.userId}"
+        data-user-id="${escapeHtmlAttribute(entity.userId)}"
         contenteditable="false"
         dir="auto"
       >${renderedContent}</a>`;
@@ -736,6 +849,10 @@ function processEntityAsHtml(entity: ApiMessageEntity, entityContent: TextPart, 
     default:
       return renderedContent;
   }
+}
+
+function isValidFormattedDate(entity: ApiMessageEntityFormattedDate) {
+  return Boolean(entity.date) && Number.isFinite(entity.date) && Math.abs(entity.date) <= MAX_DATE_SECONDS;
 }
 
 function getLinkUrl(entityContent: string, entity: ApiMessageEntity) {

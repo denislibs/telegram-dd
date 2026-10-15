@@ -1,14 +1,16 @@
 import { createEffect, createMemo, createSignal } from 'frameact';
+import { Show } from 'frameact/dom';
 import { getActions, withGlobal } from '../../../global';
-import { depsOf } from '../../../util/effectDeps';
-import type { GlobalState } from '../../../global/types';
 
 import type { ApiMessage } from '../../../api/types';
+import type { GlobalState } from '../../../global/types';
+import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 import { ApiMediaFormat } from '../../../api/types';
 
 import { getMediaThumbUri, getStickerMediaHash } from '../../../global/helpers';
 import { IS_WEBM_SUPPORTED } from '../../../util/browser/windowEnvironment';
 import buildClassName from '../../../util/buildClassName';
+import { depsOf } from '../../../util/effectDeps';
 import { getStickerDimensions } from '../../common/helpers/mediaDimensions';
 
 import useAppLayout from '../../../hooks/useAppLayout';
@@ -53,13 +55,12 @@ const Sticker = (ownProps: OwnProps) => {
 
   let ref!: HTMLDivElement;
 
-  let effectRef!: HTMLDivElement;
+  let effectRef: HTMLDivElement | undefined;
 
   const sticker = createMemo(() => props.message.content.sticker!);
-  const source = createMemo(() => sticker());
-  const stickerSetInfo = () => source().stickerSetInfo;
-  const isVideo = () => source().isVideo;
-  const hasEffect = () => source().hasEffect;
+  const stickerSetInfo = () => sticker().stickerSetInfo;
+  const isVideo = () => sticker().isVideo;
+  const hasEffect = () => sticker().hasEffect;
   const isMirrored = createMemo(() => !props.message.isOutgoing);
 
   const [isNsfwModalOpen, openNsfwModal, closeNsfwModal] = useFlag();
@@ -68,13 +69,16 @@ const Sticker = (ownProps: OwnProps) => {
   const shouldShowSpoiler = createMemo(() => props.isMediaNsfw);
   const [isSpoilerShown, showSpoiler, hideSpoiler] = useFlag(shouldShowSpoiler());
 
-  createEffect(() => shouldShowSpoiler(), (shouldShowSpoiler2) => {
-    if (shouldShowSpoiler2) {
-      showSpoiler();
-    } else {
-      hideSpoiler();
-    }
-  });
+  createEffect(
+    () => shouldShowSpoiler(),
+    (shouldShowSpoiler2) => {
+      if (shouldShowSpoiler2) {
+        showSpoiler();
+      } else {
+        hideSpoiler();
+      }
+    },
+  );
 
   const handleNsfwConfirm = () => {
     closeNsfwModal();
@@ -85,12 +89,24 @@ const Sticker = (ownProps: OwnProps) => {
     }
   };
 
-  const mediaHash = createMemo(() => getStickerMediaHash(sticker(), isVideo() && !IS_WEBM_SUPPORTED ? 'pictogram' : 'inline'));
+  const mediaHash = createMemo(() =>
+    getStickerMediaHash(sticker(), isVideo() && !IS_WEBM_SUPPORTED ? 'pictogram' : 'inline'),
+  );
 
-  const canLoad = useIsIntersecting(() => ref, () => props.observeIntersection);
-  const canPlay = useIsIntersecting(() => ref, () => props.observeIntersectionForPlaying);
+  const canLoad = useIsIntersecting(
+    () => ref,
+    () => props.observeIntersection,
+  );
+  const canPlay = useIsIntersecting(
+    () => ref,
+    () => props.observeIntersectionForPlaying,
+  );
   const mediaHashEffect = createMemo(() => `sticker${sticker().id}?size=f`);
-  const effectBlobUrl = useMedia(() => mediaHashEffect(), () => !canLoad || !hasEffect() || !props.withEffect, ApiMediaFormat.BlobUrl);
+  const effectBlobUrl = useMedia(
+    mediaHashEffect,
+    () => !canLoad() || !hasEffect() || !props.withEffect,
+    ApiMediaFormat.BlobUrl,
+  );
   const [isPlayingEffect, startPlayingEffect, stopPlayingEffect] = useFlag();
 
   const thumbDataUri = createMemo(() => getMediaThumbUri(sticker()));
@@ -100,13 +116,16 @@ const Sticker = (ownProps: OwnProps) => {
     props.onStopEffect?.();
   };
 
-  createEffect(depsOf(() => [hasEffect(), canPlay, props.shouldPlayEffect, startPlayingEffect, props.withEffect] as const), ([hasEffect2, , shouldPlayEffect2, , withEffect2]) => {
-    if (hasEffect2 && withEffect2 && canPlay && shouldPlayEffect2) {
-      startPlayingEffect();
-    }
-  });
+  createEffect(
+    depsOf(() => [hasEffect(), canPlay(), props.shouldPlayEffect, props.withEffect] as const),
+    ([hasEffect2, canPlay2, shouldPlayEffect2, withEffect2]) => {
+      if (hasEffect2 && withEffect2 && canPlay2 && shouldPlayEffect2) {
+        startPlayingEffect();
+      }
+    },
+  );
 
-  const shouldRenderEffect = createMemo(() => hasEffect() && props.withEffect && effectBlobUrl && isPlayingEffect());
+  const shouldRenderEffect = createMemo(() => hasEffect() && props.withEffect && effectBlobUrl() && isPlayingEffect());
   useOverlayPosition({
     anchorRef: () => ref,
     overlayRef: () => effectRef,
@@ -156,32 +175,37 @@ const Sticker = (ownProps: OwnProps) => {
   };
 
   const isMemojiSticker = createMemo(() => 'isMissing' in stickerSetInfo());
-  const getStickerDimensionsResult = createMemo(() => getStickerDimensions(sticker(), isMobile));
+  const getStickerDimensionsResult = createMemo(() => getStickerDimensions(sticker(), isMobile()));
   const width = () => getStickerDimensionsResult().width;
   const height = () => getStickerDimensionsResult().height;
-  const className = createMemo(() => buildClassName(
-    'media-inner',
-    styles.root,
-    isMemojiSticker() && styles.inactive,
-    hasEffect() && isMirrored() && styles.mirrored,
-  ));
+  const className = createMemo(() =>
+    buildClassName(
+      'media-inner',
+      styles.root,
+      isMemojiSticker() && styles.inactive,
+      hasEffect() && isMirrored() && styles.mirrored,
+    ),
+  );
 
   return (
     <div
       ref={ref}
       class={className()}
       style={`width: ${width()}px; height: ${height()}px;`}
-      onClick={!isMemojiSticker() ? handleClick : undefined}
+      // Deviation: a handler is bound once, so the memoji check is made when the click happens
+      onClick={() => {
+        if (!isMemojiSticker()) handleClick();
+      }}
     >
       <StickerView
-        containerRef={(el) => { ref = el; }}
+        containerRef={() => ref}
         sticker={sticker()}
         fullMediaHash={mediaHash()}
         fullMediaClassName="full-media"
         size={width()}
         shouldLoop={props.shouldLoop}
-        noLoad={!canLoad}
-        noPlay={!canPlay}
+        noLoad={!canLoad()}
+        noPlay={!canPlay()}
         withSharedAnimation
       />
       <MediaSpoiler
@@ -195,18 +219,23 @@ const Sticker = (ownProps: OwnProps) => {
       />
       {shouldRenderEffect() && (
         <Portal>
-          {/* TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show> */}
-          <AnimatedSticker
-            ref={effectRef}
-            key={mediaHashEffect()}
-            className={buildClassName(styles.effect, isMirrored() && styles.mirrored)}
-            tgsUrl={effectBlobUrl}
-            size={width() * EFFECT_SIZE_MULTIPLIER}
-            play
-            isLowPriority
-            noLoop
-            onEnded={handleEffectEnded}
-          />
+          {/* Deviation: tt's `key={mediaHashEffect}` -> a keyed Show */}
+          <Show when={mediaHashEffect()} keyed>
+            {() => (
+              <AnimatedSticker
+                ref={(el) => {
+                  effectRef = el;
+                }}
+                className={buildClassName(styles.effect, isMirrored() && styles.mirrored)}
+                tgsUrl={effectBlobUrl()}
+                size={width() * EFFECT_SIZE_MULTIPLIER}
+                play
+                isLowPriority
+                noLoop
+                onEnded={handleEffectEnded}
+              />
+            )}
+          </Show>
         </Portal>
       )}
       <SensitiveContentConfirmModal
@@ -221,12 +250,12 @@ const Sticker = (ownProps: OwnProps) => {
 };
 
 const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
-    const appConfig = global.appConfig;
-    const needsAgeVerification = appConfig.needAgeVideoVerification;
+  const appConfig = global.appConfig;
+  const needsAgeVerification = appConfig.needAgeVideoVerification;
 
-    return {
-      needsAgeVerification,
-    };
+  return {
+    needsAgeVerification,
   };
+};
 
 export default Sticker;

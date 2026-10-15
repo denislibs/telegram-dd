@@ -1,12 +1,11 @@
 import { createEffect, createMemo } from 'frameact';
 import { getActions, withGlobal } from '../../../global';
-import { depsOf } from '../../../util/effectDeps';
-import { createShowTransition } from '../../../lib/kit';
-import type { GlobalState } from '../../../global/types';
 
 import type { ApiChatMember, ApiMessage, ApiPeer } from '../../../api/types';
+import type { GlobalState } from '../../../global/types';
 
 import { EDITABLE_INPUT_CSS_SELECTOR, MESSAGE_APPEARANCE_DELAY } from '../../../config';
+import { createShowTransition } from '../../../lib/kit';
 import {
   getMainUsername,
   isAnonymousForwardsChat,
@@ -25,6 +24,7 @@ import {
   selectSender,
 } from '../../../global/selectors';
 import buildClassName from '../../../util/buildClassName';
+import { depsOf } from '../../../util/effectDeps';
 
 import useContextMenuHandlers from '../../../hooks/useContextMenuHandlers';
 import useFlag from '../../../hooks/useFlag';
@@ -62,104 +62,123 @@ const SenderGroupContainer = (ownProps: OwnProps) => {
   const props = withGlobal(ownProps, mapStateToProps);
   const { openChat, updateInsertingPeerIdMention, openMiddleSearch, openDeleteMemberModal } = getActions();
 
-  const source = createMemo(() => props.message);
-  const forwardInfo = () => source().forwardInfo;
+  const forwardInfo = () => props.message.forwardInfo;
 
-  const messageSender = createMemo(() => props.canShowSender ? props.sender : undefined);
+  const messageSender = createMemo(() => (props.canShowSender ? props.sender : undefined));
   const lang = useLang();
 
   const canBanSender = createMemo(() => {
-    if (!props.canRemoveSender || !props.sender) {
+    const sender = props.sender;
+    if (!props.canRemoveSender || !sender) {
       return false;
     }
 
     const isRemoved =
-      props.kickedMembers?.some((m) => m.userId === props.sender.id) ||
-      (props.chatMembers && isApiPeerUser(props.sender) && !props.chatMembers.some((m) => m.userId === props.sender.id));
+      props.kickedMembers?.some((m) => m.userId === sender.id) ||
+      (props.chatMembers && isApiPeerUser(sender) && !props.chatMembers.some((m) => m.userId === sender.id));
 
     return !isRemoved;
   });
 
   const noAppearanceAnimation = createMemo(() => props.appearanceOrder <= 0);
   const [isShown, markShown] = useFlag(noAppearanceAnimation());
-  createEffect(depsOf(() => [props.appearanceOrder, noAppearanceAnimation()] as const), ([appearanceOrder2, noAppearanceAnimation2]) => {
-    if (noAppearanceAnimation2) {
-      return;
-    }
+  createEffect(
+    depsOf(() => [props.appearanceOrder, noAppearanceAnimation()] as const),
+    ([appearanceOrder2, noAppearanceAnimation2]) => {
+      if (noAppearanceAnimation2) {
+        return;
+      }
 
-    // Message appearance animation works only if this timeout is not cleared
-    setTimeout(markShown, appearanceOrder2 * MESSAGE_APPEARANCE_DELAY);
+      // Message appearance animation works only if this timeout is not cleared
+      setTimeout(markShown, appearanceOrder2 * MESSAGE_APPEARANCE_DELAY);
+    },
+  );
+
+  const shouldPreferOriginSender = createMemo(
+    () =>
+      forwardInfo() && (props.isChatWithSelf || props.isRepliesChat || props.isAnonymousForwards || !messageSender()),
+  );
+  const avatarPeer = createMemo(() => (shouldPreferOriginSender() ? props.originSender : messageSender()));
+  const isAvatarPeerUser = createMemo(() => {
+    const peer = avatarPeer();
+    return peer && isApiPeerUser(peer);
   });
 
-  const shouldPreferOriginSender =
-    createMemo(() => forwardInfo() && (props.isChatWithSelf || props.isRepliesChat || props.isAnonymousForwards || !messageSender()));
-  const avatarPeer = createMemo(() => shouldPreferOriginSender() ? props.originSender : messageSender());
-  const isAvatarPeerUser = createMemo(() => avatarPeer() && isApiPeerUser(avatarPeer()));
-
   const handleOpenChat = () => {
-    if (!avatarPeer()) {
+    const peer = avatarPeer();
+    if (!peer) {
       return;
     }
 
-    openChat({ id: avatarPeer().id });
+    openChat({ id: peer.id });
   };
 
   const handleMention = () => {
-    if (!avatarPeer()) {
+    const peer = avatarPeer();
+    if (!peer) {
       return;
     }
 
     const messageInput = document.querySelector<HTMLDivElement>(EDITABLE_INPUT_CSS_SELECTOR);
     if (messageInput) {
-      updateInsertingPeerIdMention({ peerId: avatarPeer().id });
+      updateInsertingPeerIdMention({ peerId: peer.id });
     }
   };
 
   const handleSearchMessages = () => {
-    if (!avatarPeer()) {
+    const peer = avatarPeer();
+    if (!peer) {
       return;
     }
 
-    openMiddleSearch({ fromPeerId: avatarPeer().id });
+    openMiddleSearch({ fromPeerId: peer.id });
   };
 
   const handleBanClick = () => {
-    if (!props.sender) {
+    const sender = props.sender;
+    if (!sender) {
       return;
     }
 
-    openDeleteMemberModal({ chatId: props.message.chatId, peerId: props.sender.id });
+    openDeleteMemberModal({ chatId: props.message.chatId, peerId: sender.id });
   };
 
   const handleAvatarClick = () => {
     handleOpenChat();
   };
 
-  const { ref: avatarRef, shouldRender } = createShowTransition({
+  // Deviation: the avatar element is kept in a variable (`avatarRef` is the transition's callback ref here) for the
+  // context menu handlers and the menu trigger.
+  let avatarElement: HTMLDivElement | undefined;
+
+  const { ref: avatarTransitionRef, shouldRender } = createShowTransition({
     isOpen: () => props.withAvatar && isShown(),
     noMountTransition: isShown(),
   });
 
   const { isContextMenuOpen, contextMenuAnchor, handleContextMenu, handleContextMenuClose, handleContextMenuHide } =
-    useContextMenuHandlers(avatarRef);
+    useContextMenuHandlers(() => avatarElement);
 
-  // TODO(codemod): avatarRef is a callback ref now: keep the element in a let assigned from ref={(el) => { avatarRef(el); element = el; }}
-  const getTriggerElement = () => avatarRef.current;
-  const getRootElement = () => document.querySelector('.Transition_slide-active > .MessageList');
+  const getTriggerElement = () => avatarElement;
+  const getRootElement = () => document.querySelector<HTMLElement>('.Transition_slide-active > .MessageList');
   const getMenuElement = () =>
-    document.querySelector('#portals')?.querySelector(`.${styles.contextMenu} .bubble`);
+    document.querySelector('#portals')?.querySelector<HTMLElement>(`.${styles.contextMenu} .bubble`);
   const getLayout = () => ({ withPortal: true });
 
-  const canMention = createMemo(() => props.canPost && avatarPeer() && (isAvatarPeerUser() || Boolean(getMainUsername(avatarPeer()))));
+  const canMention = createMemo(() => {
+    const peer = avatarPeer();
+    return props.canPost && peer && (isAvatarPeerUser() || Boolean(getMainUsername(peer)));
+  });
   const canSearch = createMemo(() => !props.isChannel);
-  const shouldRenderContextMenu =
-    createMemo(() => Boolean(contextMenuAnchor) && (isAvatarPeerUser() || canMention() || canSearch() || canBanSender()));
+  const shouldRenderContextMenu = createMemo(
+    () => Boolean(contextMenuAnchor()) && (isAvatarPeerUser() || canMention() || canSearch() || canBanSender()),
+  );
 
   function renderContextMenu() {
     return (
       <Menu
-        isOpen={isContextMenuOpen}
-        anchor={contextMenuAnchor}
+        isOpen={isContextMenuOpen()}
+        anchor={contextMenuAnchor()}
         getTriggerElement={getTriggerElement}
         getRootElement={getRootElement}
         getLayout={getLayout}
@@ -197,7 +216,7 @@ const SenderGroupContainer = (ownProps: OwnProps) => {
   }
 
   function renderAvatar() {
-    const hiddenName = !avatarPeer() && forwardInfo() ? forwardInfo().hiddenUserName : undefined;
+    const hiddenName = !avatarPeer() && forwardInfo() ? forwardInfo()!.hiddenUserName : undefined;
 
     return (
       <Avatar
@@ -216,7 +235,13 @@ const SenderGroupContainer = (ownProps: OwnProps) => {
   return (
     <div id={props.id} class={className}>
       {shouldRender() && (
-        <div ref={avatarRef} class={styles.avatarContainer}>
+        <div
+          ref={(el) => {
+            avatarElement = el;
+            avatarTransitionRef(el);
+          }}
+          class={styles.avatarContainer}
+        >
           {renderAvatar()}
           {shouldRenderContextMenu() && renderContextMenu()}
         </div>
@@ -227,56 +252,56 @@ const SenderGroupContainer = (ownProps: OwnProps) => {
 };
 
 const mapStateToProps = (global: GlobalState, ownProps: OwnProps): Complete<StateProps> => {
-    const { message, withAvatar } = ownProps;
-    const { chatId } = message;
+  const { message, withAvatar } = ownProps;
+  const { chatId } = message;
 
-    const chat = selectChat(global, chatId);
-    const isChatWithSelf = selectIsChatWithSelf(global, chatId);
-    const isSystemBotChat = isSystemBot(chatId);
-    const isAnonymousForwards = isAnonymousForwardsChat(chatId);
+  const chat = selectChat(global, chatId);
+  const isChatWithSelf = selectIsChatWithSelf(global, chatId);
+  const isSystemBotChat = isSystemBot(chatId);
+  const isAnonymousForwards = isAnonymousForwardsChat(chatId);
 
-    const forceSenderName = !isChatWithSelf && isAnonymousOwnMessage(message);
-    const canShowSender = withAvatar || forceSenderName;
-    const sender = selectSender(global, message);
-    const originSender = selectForwardedSender(global, message);
+  const forceSenderName = !isChatWithSelf && isAnonymousOwnMessage(message);
+  const canShowSender = withAvatar || forceSenderName;
+  const sender = selectSender(global, message);
+  const originSender = selectForwardedSender(global, message);
 
-    const fullInfo = selectChatFullInfo(global, chatId);
-    const canBanUsers = selectCanBanUsers(global, chatId);
-    const isSenderAdmin = Boolean(sender && fullInfo?.adminMembersById?.[sender.id]);
-    const canBanTarget = chat?.isOwner || (Boolean(fullInfo?.adminMembersById) && !isSenderAdmin);
-    const isSenderRemovable = Boolean(
-      sender && sender.id !== chatId && sender.id !== fullInfo?.linkedChatId && sender.id !== chat?.linkedMonoforumId,
-    );
-    const canRemoveSender = Boolean(
-      sender &&
-      sender.id !== global.currentUserId &&
-      chat &&
-      !isChatChannel(chat) &&
-      !isChatWithSelf &&
-      isSenderRemovable &&
-      canBanUsers &&
-      canBanTarget,
-    );
+  const fullInfo = selectChatFullInfo(global, chatId);
+  const canBanUsers = selectCanBanUsers(global, chatId);
+  const isSenderAdmin = Boolean(sender && fullInfo?.adminMembersById?.[sender.id]);
+  const canBanTarget = chat?.isOwner || (Boolean(fullInfo?.adminMembersById) && !isSenderAdmin);
+  const isSenderRemovable = Boolean(
+    sender && sender.id !== chatId && sender.id !== fullInfo?.linkedChatId && sender.id !== chat?.linkedMonoforumId,
+  );
+  const canRemoveSender = Boolean(
+    sender &&
+    sender.id !== global.currentUserId &&
+    chat &&
+    !isChatChannel(chat) &&
+    !isChatWithSelf &&
+    isSenderRemovable &&
+    canBanUsers &&
+    canBanTarget,
+  );
 
-    const members = fullInfo?.members;
-    const isMemberListComplete = Boolean(
-      chat &&
-      members &&
-      (isChatBasicGroup(chat) || (chat.membersCount !== undefined && members.length >= chat.membersCount)),
-    );
+  const members = fullInfo?.members;
+  const isMemberListComplete = Boolean(
+    chat &&
+    members &&
+    (isChatBasicGroup(chat) || (chat.membersCount !== undefined && members.length >= chat.membersCount)),
+  );
 
-    return {
-      sender,
-      canShowSender,
-      originSender,
-      isChatWithSelf,
-      isRepliesChat: isSystemBotChat,
-      isAnonymousForwards,
-      isChannel: chat && isChatChannel(chat),
-      canRemoveSender,
-      kickedMembers: canRemoveSender ? fullInfo?.kickedMembers : undefined,
-      chatMembers: canRemoveSender && isMemberListComplete ? members : undefined,
-    };
+  return {
+    sender,
+    canShowSender,
+    originSender,
+    isChatWithSelf,
+    isRepliesChat: isSystemBotChat,
+    isAnonymousForwards,
+    isChannel: chat && isChatChannel(chat),
+    canRemoveSender,
+    kickedMembers: canRemoveSender ? fullInfo?.kickedMembers : undefined,
+    chatMembers: canRemoveSender && isMemberListComplete ? members : undefined,
   };
+};
 
 export default SenderGroupContainer;

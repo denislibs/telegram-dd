@@ -1,10 +1,16 @@
-import { createEffect, createSignal } from 'frameact';
+import { createEffect, createSignal, requestMutation } from 'frameact';
+
+import { type MaybeAccessor, read } from '../../../util/accessors';
 import { depsOf } from '../../../util/effectDeps';
 
 import useResizeObserver from '../../../hooks/useResizeObserver';
 
-// TODO(codemod): useContainerHeight: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function useContainerHeight(containerRef: (el: HTMLDivElement) => void, isComposerVisible: boolean) {
+// Deviation: `containerRef` is an accessor of the element, `isComposerVisible` a `MaybeAccessor`; the height is an accessor
+// (tt: a `Signal`) and the previous height is a `{ current }` box that the caller owns, as in tt.
+export default function useContainerHeight(
+  containerRef: () => HTMLDivElement | undefined,
+  isComposerVisible: MaybeAccessor<boolean>,
+) {
   const [getContainerHeight, setContainerHeight] = createSignal<number | undefined>(undefined);
 
   // Container resize observer (caused by Composer reply/webpage panels)
@@ -14,17 +20,23 @@ export default function useContainerHeight(containerRef: (el: HTMLDivElement) =>
 
   useResizeObserver(containerRef, handleResize);
 
-  createEffect(depsOf(() => [isComposerVisible, containerRef, getContainerHeight()] as const), ([, , getContainerHeight2]) => {
-    const currentNormalHeight = Number(containerRef.current!.dataset.normalHeight) || 0;
-    const containerHeight = getContainerHeight2();
+  createEffect(
+    depsOf(() => [read(isComposerVisible), getContainerHeight()] as const),
+    ([isComposerVisible2, containerHeight]) => {
+      const container = containerRef();
+      if (!container) return;
 
-    if (containerHeight && containerHeight > currentNormalHeight && isComposerVisible) {
-      containerRef.current!.dataset.normalHeight = String(containerHeight);
-    }
-  });
+      const currentNormalHeight = Number(container.dataset.normalHeight) || 0;
 
-  let prevContainerHeightRef: number | undefined;
+      if (containerHeight && containerHeight > currentNormalHeight && isComposerVisible2) {
+        requestMutation(() => {
+          container.dataset.normalHeight = String(containerHeight);
+        });
+      }
+    },
+  );
 
-  // TODO(codemod): "prevContainerHeightRef" was a ref object passed as a value: pass an accessor (() => prevContainerHeightRef) or a callback ref
-  return [getContainerHeight(), prevContainerHeightRef] as const;
+  const prevContainerHeightRef: { current: number | undefined } = { current: undefined };
+
+  return [getContainerHeight, prevContainerHeightRef] as const;
 }

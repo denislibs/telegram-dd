@@ -1,4 +1,3 @@
-
 import buildClassName from '../../util/buildClassName';
 import renderText from './helpers/renderText';
 

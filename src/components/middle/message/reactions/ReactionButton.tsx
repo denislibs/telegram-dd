@@ -1,13 +1,14 @@
 import { createEffect, createMeasureEffect, createMemo, previous } from 'frameact';
 import { getActions } from '../../../../global';
-import { depsOf } from '../../../../util/effectDeps';
-import { createShowTransition } from '../../../../lib/kit';
 
 import type { ApiPeer, ApiReaction, ApiReactionCount } from '../../../../api/types';
 import type { GlobalState } from '../../../../global/types';
+import type { ObserveFn } from '../../../../hooks/useIntersectionObserver';
 
+import { createShowTransition } from '../../../../lib/kit';
 import { isReactionChosen } from '../../../../global/helpers';
 import buildClassName from '../../../../util/buildClassName';
+import { depsOf } from '../../../../util/effectDeps';
 import { formatIntegerCompact } from '../../../../util/textFormat';
 import { REM } from '../../../common/helpers/mediaDimensions';
 
@@ -48,8 +49,7 @@ function selectStarsState(global: GlobalState) {
 
 const ReactionButton = (props: OwnProps) => {
   const { openStarsBalanceModal, resetLocalPaidReactions, openPaidReactionModal, requestWave } = getActions();
-  let ref!: HTMLButtonElement;
-  let counterRef!: HTMLSpanElement;
+  let ref: HTMLButtonElement | undefined;
   let animationRef: Animation | undefined;
 
   const lang = useLang();
@@ -74,48 +74,64 @@ const ReactionButton = (props: OwnProps) => {
     props.onClick?.(props.reaction.reaction);
   };
 
-  const contextMenuHandlersResult = createMemo(() => useContextMenuHandlers(() => ref, () => props.reaction.reaction.type !== 'paid', undefined, undefined, undefined, true));
-  const isContextMenuOpen = () => contextMenuHandlersResult().isContextMenuOpen;
-  const handleBeforeContextMenu = () => contextMenuHandlersResult().handleBeforeContextMenu;
-  const handleContextMenu = () => contextMenuHandlersResult().handleContextMenu;
-  const handleContextMenuClose = () => contextMenuHandlersResult().handleContextMenuClose;
-  const handleContextMenuHide = () => contextMenuHandlersResult().handleContextMenuHide;
+  const {
+    isContextMenuOpen,
+    handleBeforeContextMenu,
+    handleContextMenu,
+    handleContextMenuClose,
+    handleContextMenuHide,
+  } = useContextMenuHandlers(
+    () => ref,
+    () => props.reaction.reaction.type !== 'paid',
+    undefined,
+    undefined,
+    undefined,
+    true,
+  );
 
-  createEffect(depsOf(() => [handleContextMenuClose(), handleContextMenuHide(), isContextMenuOpen(), props.chatId, props.messageId] as const), ([handleContextMenuClose2, handleContextMenuHide2, isContextMenuOpen2, chatId2, messageId2]) => {
-    if (isContextMenuOpen2) {
-      openPaidReactionModal({
-        chatId: chatId2,
-        messageId: messageId2,
-      });
+  createEffect(
+    depsOf(() => [isContextMenuOpen(), props.chatId, props.messageId] as const),
+    ([isContextMenuOpen2, chatId, messageId]) => {
+      if (isContextMenuOpen2) {
+        openPaidReactionModal({
+          chatId,
+          messageId,
+        });
 
-      handleContextMenuClose2();
-      handleContextMenuHide2();
-    }
-  });
+        handleContextMenuClose();
+        handleContextMenuHide();
+      }
+    },
+  );
 
+  // Reads layout (`getBoundingClientRect`, `getComputedStyle`), so a measure effect. The props it needs come through the
+  // dependency tuple (a prop getter is not readable in an apply).
   createMeasureEffect(
-    depsOf(() => [props.reaction, starsState()?.balance, areStarsLoaded(), props.chatId, props.messageId]), (_deps, prev) => {
+    depsOf(
+      () => [props.reaction, starsState()?.balance?.amount, areStarsLoaded(), props.chatId, props.messageId] as const,
+    ),
+    ([reaction, balanceAmount, areStarsLoaded2, chatId, messageId], prev) => {
       const [prevReaction] = prev ?? [];
-      const amount = props.reaction.localAmount;
+      const amount = reaction.localAmount;
       const button = ref;
       if (!amount || !button || amount === prevReaction?.localAmount) return;
 
-      if (areStarsLoaded() && amount > starsState().balance.amount) {
+      if (areStarsLoaded2 && balanceAmount !== undefined && amount > balanceAmount) {
         openStarsBalanceModal({
           originReaction: {
-            chatId: props.chatId,
-            messageId: props.messageId,
+            chatId,
+            messageId,
             amount,
           },
         });
         resetLocalPaidReactions({
-          chatId: props.chatId,
-          messageId: props.messageId,
+          chatId,
+          messageId,
         });
         return;
       }
 
-      if (props.reaction.localAmount) {
+      if (reaction.localAmount) {
         const { left, top } = button.getBoundingClientRect();
         const startX = left + button.offsetWidth / 2;
         const startY = top + button.offsetHeight / 2;
@@ -137,10 +153,9 @@ const ReactionButton = (props: OwnProps) => {
 
   const prevAmount = previous(() => props.reaction.localAmount);
 
-  const { shouldRender: shouldRenderPaidCounter } = createShowTransition({
+  // Deviation: `useShowTransition({ ref: counterRef })` -> the transition's `ref` is handed to the counter.
+  const { shouldRender: shouldRenderPaidCounter, ref: counterRef } = createShowTransition({
     isOpen: () => Boolean(props.reaction.localAmount),
-    // TODO(codemod): ref option: hand the result `ref` to the element (ref={t.ref}) instead
-    ref: () => counterRef,
     className: 'slow',
   });
 
@@ -156,9 +171,11 @@ const ReactionButton = (props: OwnProps) => {
         props.className,
       )}
       size="tiny"
-      ref={ref}
-      onMouseDown={handleBeforeContextMenu()}
-      onContextMenu={handleContextMenu()}
+      ref={(el) => {
+        ref = el as HTMLButtonElement;
+      }}
+      onMouseDown={handleBeforeContextMenu}
+      onContextMenu={handleContextMenu}
       onClick={handleClick}
     >
       {props.reaction.reaction.type === 'paid' ? (

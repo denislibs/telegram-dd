@@ -69,7 +69,8 @@ export type TransitionProps = {
   onStop?: NoneToVoidFunction;
   onScroll?: NoneToVoidFunction;
   onWheel?: (e: WheelEvent) => void;
-  onMouseDown?: (e: MouseEvent) => void;
+  // Deviation: typed with tt's `React.MouseEvent` so that call sites keep passing `preventMessageInputBlur`.
+  onMouseDown?: (e: React.MouseEvent<HTMLDivElement>) => void;
 };
 
 const DISABLEABLE_ANIMATIONS = new Set<AnimationName>([

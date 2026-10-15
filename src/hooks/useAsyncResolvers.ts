@@ -1,13 +1,10 @@
-import { createMemo } from 'frameact';
+import { type Accessor, createEffect, createSignal, untrack } from 'frameact';
 
 import type { Scheduler } from '../util/schedulers';
-import type { Signal } from '../util/signals';
 
 import useDebouncedCallback from './useDebouncedCallback';
-import useDerivedSignal from './useDerivedSignal';
 import useThrottledCallback from './useThrottledCallback';
 
-// TODO(codemod): useThrottledResolver: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export function useThrottledResolver<T>(
   resolver: () => T,
   deps: any[],
@@ -17,7 +14,6 @@ export function useThrottledResolver<T>(
   return useThrottledCallback(
     (setValue: (newValue: T) => void) => {
       setValue(resolver());
-      // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps
     },
     deps,
     msOrSchedulerFn,
@@ -25,19 +21,24 @@ export function useThrottledResolver<T>(
   );
 }
 
-// TODO(codemod): useThrottledSignal: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export function useThrottledSignal<T>(getValue: Signal<T>, ms: number, noFirst = false): Signal<T> {
+// Deviation: tt's `Signal` (`useDerivedSignal` with an async resolver) is an accessor of a frameact signal that follows
+// `getValue` through the throttled resolver.
+export function useThrottledSignal<T>(getValue: Accessor<T>, ms: number, noFirst = false): Accessor<T> {
+  const [value, setValue] = createSignal<T>(untrack(getValue) as T);
   const throttledResolver = useThrottledResolver(() => getValue(), [getValue], ms, noFirst);
 
-  return createMemo(throttledResolver);
+  createEffect(
+    () => getValue(),
+    () => throttledResolver((newValue) => setValue(() => newValue)),
+  );
+
+  return value;
 }
 
-// TODO(codemod): useDebouncedResolver: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
 export function useDebouncedResolver<T>(resolver: () => T, deps: any[], ms: number, noFirst = false, noLast = false) {
   return useDebouncedCallback(
     (setValue: (newValue: T) => void) => {
       setValue(resolver());
-      // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps
     },
     deps,
     ms,
@@ -46,9 +47,16 @@ export function useDebouncedResolver<T>(resolver: () => T, deps: any[], ms: numb
   );
 }
 
-// TODO(codemod): useDebouncedSignal: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export function useDebouncedSignal<T>(getValue: Signal<T>, ms: number, noFirst = false, noLast = false): Signal<T> {
+// Deviation: see `useThrottledSignal`. The value is available at once (tt's derived signal was filled by its sync effect
+// at the first render).
+export function useDebouncedSignal<T>(getValue: Accessor<T>, ms: number, noFirst = false, noLast = false): Accessor<T> {
+  const [value, setValue] = createSignal<T>(untrack(getValue) as T);
   const debouncedResolver = useDebouncedResolver(() => getValue(), [getValue], ms, noFirst, noLast);
 
-  return createMemo(debouncedResolver);
+  createEffect(
+    () => getValue(),
+    () => debouncedResolver((newValue) => setValue(() => newValue)),
+  );
+
+  return value;
 }

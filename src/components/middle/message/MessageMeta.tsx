@@ -44,6 +44,9 @@ type OwnProps = {
   paidMessageStars?: number;
 };
 
+// Deviation: tt's handlers are typed for a div, the events of the span elements carry their own `currentTarget`.
+type MetaClickEvent = React.MouseEvent<HTMLDivElement>;
+
 const MessageMeta = (props: OwnProps) => {
   const { showNotification } = getActions();
 
@@ -73,9 +76,15 @@ const MessageMeta = (props: OwnProps) => {
 
   const dateTitle = createMemo(() => {
     if (!isActivated()) return undefined;
-    const createDateTime = formatDateTimeToString(props.message.date * 1000, oldLang.code, undefined, oldLang.timeFormat);
+    const createDateTime = formatDateTimeToString(
+      props.message.date * 1000,
+      oldLang.code,
+      undefined,
+      oldLang.timeFormat,
+    );
     const editDateTime =
-      props.message.isEdited && formatDateTimeToString(props.message.editDate! * 1000, oldLang.code, undefined, oldLang.timeFormat);
+      props.message.isEdited &&
+      formatDateTimeToString(props.message.editDate! * 1000, oldLang.code, undefined, oldLang.timeFormat);
     const forwardedDateTime =
       props.message.forwardInfo &&
       formatDateTimeToString(
@@ -96,8 +105,6 @@ const MessageMeta = (props: OwnProps) => {
     }
 
     return text;
-    // We need to listen to timeformat change
-    // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps
   });
 
   const viewsTitle = createMemo(() => {
@@ -123,18 +130,25 @@ const MessageMeta = (props: OwnProps) => {
     return text;
   });
 
-  // TODO(codemod): dependency on a container (repliesThreadInfo) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
   const repliesTitle = createMemo(() => {
     const count = props.repliesThreadInfo?.messagesCount;
     if (!count) return undefined;
     return lang('MessageTooltipReplies', { count }, { pluralValue: count });
   });
 
-  const shouldShowPrimaryEditedDate = createMemo(() => Boolean(props.message.isEdited && props.isMessagePrimaryEditedDateEnabled));
+  const shouldShowPrimaryEditedDate = createMemo(() =>
+    Boolean(props.message.isEdited && props.isMessagePrimaryEditedDateEnabled),
+  );
 
   const date = createMemo(() => {
     if (shouldShowPrimaryEditedDate()) {
-      return formatEditedDate(lang, props.message.date, props.message.editDate!, props.withFullDate, props.message.isVideoProcessingPending);
+      return formatEditedDate(
+        lang,
+        props.message.date,
+        props.message.editDate!,
+        props.withFullDate,
+        props.message.isVideoProcessingPending,
+      );
     }
 
     const time = formatTime(oldLang, props.message.date * 1000);
@@ -149,20 +163,33 @@ const MessageMeta = (props: OwnProps) => {
     return baseDate;
   });
 
-  const fullClassName = createMemo(() => buildClassName(
-    'MessageMeta',
-    props.withReactionOffset && 'reactions-offset',
-    props.message.forwardInfo?.isImported && 'is-imported',
-  ));
+  const fullClassName = createMemo(() =>
+    buildClassName(
+      'MessageMeta',
+      props.withReactionOffset && 'reactions-offset',
+      props.message.forwardInfo?.isImported && 'is-imported',
+    ),
+  );
 
   return (
-    <span class={fullClassName()} dir={lang.isRtl ? 'rtl' : 'ltr'} onClick={(e) => props.onClick?.(e)} data-ignore-on-paste>
+    <span
+      class={fullClassName()}
+      dir={lang.isRtl ? 'rtl' : 'ltr'}
+      onClick={(e) => props.onClick(e as unknown as MetaClickEvent)}
+      data-ignore-on-paste
+    >
       {props.effectEmoji && (
-        <span class="message-effect-icon" onClick={(e) => props.onEffectClick?.(e)}>
+        <span class="message-effect-icon" onClick={(e) => props.onEffectClick(e as unknown as MetaClickEvent)}>
           {renderText(props.effectEmoji)}
         </span>
       )}
-      {props.isTranslated && <Icon name="language" className="message-translated" onClick={props.onTranslationClick} />}
+      {props.isTranslated && (
+        <Icon
+          name="language"
+          className="message-translated"
+          onClick={(e) => props.onTranslationClick(e as unknown as MetaClickEvent)}
+        />
+      )}
       {Boolean(props.message.viewsCount) && (
         <>
           <span class="message-views" title={viewsTitle()}>
@@ -201,7 +228,9 @@ const MessageMeta = (props: OwnProps) => {
           </>
         )}
         {props.message.isEdited && !shouldShowPrimaryEditedDate() && `${lang('MessageMetaEdited')} `}
-        {props.message.isVideoProcessingPending && !shouldShowPrimaryEditedDate() && `${lang('MessageMetaApproximate')} `}
+        {props.message.isVideoProcessingPending &&
+          !shouldShowPrimaryEditedDate() &&
+          `${lang('MessageMetaApproximate')} `}
         {date()}
       </span>
       {props.outgoingStatus && <MessageOutgoingStatus status={props.outgoingStatus} />}

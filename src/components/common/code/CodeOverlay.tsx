@@ -1,9 +1,9 @@
-import { createEffect, createMemo, createSignal } from 'frameact';
+import { createMeasureEffect, createSignal } from 'frameact';
 import { getActions } from '../../../global';
-import { depsOf } from '../../../util/effectDeps';
 
 import buildClassName from '../../../util/buildClassName';
 import { copyTextToClipboard } from '../../../util/clipboard';
+import { depsOf } from '../../../util/effectDeps';
 import { areLinesWrapping } from '../helpers/renderText';
 
 import useOldLang from '../../../hooks/useOldLang';
@@ -29,15 +29,19 @@ const CodeOverlay = (props: OwnProps) => {
   const [withWordWrapButton, setWithWordWrapButton] = createSignal(false);
 
   const checkWordWrap = () => {
-    const isWrap = areLinesWrapping(props.text, ref!.parentElement!);
+    const isWrap = areLinesWrapping(props.text, ref.parentElement!);
     setWithWordWrapButton(isWrap);
   };
 
-  createEffect(depsOf(() => [checkWordWrap, isWordWrap(), props.text, windowSize] as const), ([checkWordWrap2, isWordWrap2, text2]) => {
-    if (isWordWrap2) {
-      checkWordWrap2();
-    }
-  });
+  // `areLinesWrapping` reads the layout: a measure effect (tt's `useEffect` of the measure phase)
+  createMeasureEffect(
+    depsOf(() => [isWordWrap(), props.text, windowSize()] as const),
+    ([isWordWrap2]) => {
+      if (isWordWrap2) {
+        checkWordWrap();
+      }
+    },
+  );
 
   const handleCopy = () => {
     copyTextToClipboard(props.text);
@@ -47,19 +51,21 @@ const CodeOverlay = (props: OwnProps) => {
   };
 
   const handleWordWrapClick = () => {
-    setIsWordWrap(!isWordWrap());
-    props.onWordWrapToggle?.(!isWordWrap());
+    // Read before the write: a signal write is visible at once
+    const wrap = !isWordWrap();
+    setIsWordWrap(wrap);
+    props.onWordWrapToggle?.(wrap);
   };
 
-  const contentClass = createMemo(() => buildClassName(styles.content, !withWordWrapButton() && props.noCopy && styles.hidden));
-  const overlayClass = createMemo(() => buildClassName(styles.overlay, props.className));
-  const wrapClass = createMemo(() => buildClassName(styles.wrap, isWordWrap() && styles.wrapOn));
-
   return (
-    <div class={overlayClass()} ref={ref}>
-      <div class={contentClass()}>
+    <div class={buildClassName(styles.overlay, props.className)} ref={ref}>
+      <div class={buildClassName(styles.content, !withWordWrapButton() && props.noCopy && styles.hidden)}>
         {withWordWrapButton() && (
-          <div class={wrapClass()} onClick={handleWordWrapClick} title="Word Wrap">
+          <div
+            class={buildClassName(styles.wrap, isWordWrap() && styles.wrapOn)}
+            onClick={handleWordWrapClick}
+            title="Word Wrap"
+          >
             <Icon name="word-wrap" />
           </div>
         )}

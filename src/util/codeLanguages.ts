@@ -106,7 +106,8 @@ export const SUPPORTED_CODE_LANGUAGES = Object.keys(CODE_LANGUAGE_ALIASES);
 
 export function getPrettyCodeLanguageName(codeLanguage: string) {
   const languageName = getCodeLanguageName(codeLanguage.toLowerCase()) || codeLanguage;
-  return PRETTY_LANGUAGE_NAMES[languageName] ?? languageName;
+  // Deviation: `languageName` is a message sender's string; `__proto__` or `constructor` must not find a member of Object.prototype
+  return (Object.hasOwn(PRETTY_LANGUAGE_NAMES, languageName) ? PRETTY_LANGUAGE_NAMES[languageName] : undefined) ?? languageName;
 }
 
 export function getCodeLanguageName(alias: string) {

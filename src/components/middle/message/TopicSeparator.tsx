@@ -1,11 +1,11 @@
 import { createEffect, createMemo } from 'frameact';
 import { getActions, withGlobal } from '../../../global';
-import { depsOf } from '../../../util/effectDeps';
-import type { GlobalState } from '../../../global/types';
 
 import type { ApiTopic } from '../../../api/types';
+import type { GlobalState } from '../../../global/types';
 
 import { selectChat, selectTopic, selectTopicsInfo } from '../../../global/selectors';
+import { depsOf } from '../../../util/effectDeps';
 import { REM } from '../../common/helpers/mediaDimensions';
 import renderText from '../../common/helpers/renderText';
 import { preventMessageInputBlurWithBubbling } from '../helpers/preventMessageInputBlur';
@@ -35,13 +35,16 @@ const TopicSeparator = (ownProps: OwnProps) => {
   const lang = useLang();
 
   const isTopicMissing = createMemo(() => !props.topic && props.areTopicsLoaded);
-  const title = createMemo(() => props.topic ? props.topic.title : isTopicMissing() ? props.chatTitle : undefined);
+  const title = createMemo(() => (props.topic ? props.topic.title : isTopicMissing() ? props.chatTitle : undefined));
 
-  createEffect(depsOf(() => [props.chatId, props.topicId, isTopicMissing()] as const), ([chatId2, topicId2, isTopicMissing2]) => {
-    if (isTopicMissing2) {
-      loadTopicById({ chatId: chatId2, topicId: topicId2 });
-    }
-  });
+  createEffect(
+    depsOf(() => [props.chatId, props.topicId, isTopicMissing()] as const),
+    ([chatId2, topicId2, isTopicMissing2]) => {
+      if (isTopicMissing2) {
+        loadTopicById({ chatId: chatId2, topicId: topicId2 });
+      }
+    },
+  );
 
   const handleClick = () => {
     openThread({ chatId: props.chatId, threadId: props.topicId });
@@ -65,13 +68,13 @@ const TopicSeparator = (ownProps: OwnProps) => {
 };
 
 const mapStateToProps = (global: GlobalState, { chatId, topicId }: OwnProps): Complete<StateProps> => {
-    const topicsInfo = selectTopicsInfo(global, chatId);
+  const topicsInfo = selectTopicsInfo(global, chatId);
 
-    return {
-      topic: selectTopic(global, chatId, topicId),
-      chatTitle: selectChat(global, chatId)?.title,
-      areTopicsLoaded: Boolean(topicsInfo?.listedTopicIds && !topicsInfo.isCache),
-    };
+  return {
+    topic: selectTopic(global, chatId, topicId),
+    chatTitle: selectChat(global, chatId)?.title,
+    areTopicsLoaded: Boolean(topicsInfo?.listedTopicIds && !topicsInfo.isCache),
   };
+};
 
 export default TopicSeparator;

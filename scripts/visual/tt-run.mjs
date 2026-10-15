@@ -14,7 +14,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { patches } from './tt-patches.mjs';
+import { extraFiles, patches } from './tt-patches.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 // `reference/` is gitignored, so a git worktree (.worktrees/<name>) does not have it: fall back to the main checkout's.
@@ -41,7 +41,8 @@ function referenceSha() {
 }
 
 function patchesHash() {
-  return JSON.stringify(patches);
+  // the extra files are part of the stamp: a changed scenario recopies the tree
+  return JSON.stringify([patches, extraFiles.map((file) => readFileSync(join(ROOT, file), 'utf8'))]);
 }
 
 function prepare() {
@@ -72,6 +73,12 @@ function prepare() {
     }
     writeFileSync(file, original.replace(patch.find, patch.replace));
     log(`patched ${patch.file} (${patch.name})`);
+  }
+
+  for (const file of extraFiles) {
+    mkdirSync(dirname(join(COPY, file)), { recursive: true });
+    writeFileSync(join(COPY, file), readFileSync(join(ROOT, file), 'utf8'));
+    log(`added ${file}`);
   }
 
   if (!existsSync(join(COPY, 'node_modules')) || refresh) {

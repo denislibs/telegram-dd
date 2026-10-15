@@ -1,10 +1,9 @@
 import { onDestroy } from 'frameact';
 
-import useLastCallback from './useLastCallback';
-
 const DEFAULT_THRESHOLD = 250;
 
-// TODO(codemod): useLongPress: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: the callbacks are plain functions called at event time (they close over accessors, so they are never
+// stale); `useLastCallback` and `useRef` are plain locals of the hook (it runs once).
 function useLongPress({
   onClick,
   onStart,
@@ -16,27 +15,27 @@ function useLongPress({
   onEnd?: NoneToVoidFunction;
   threshold?: number;
 }) {
-  let isLongPressActiveRef = false;
-  let isPressedRef = false;
-  let timerIdRef: number | undefined;
+  let isLongPressActive = false;
+  let isPressed = false;
+  let timerId: number | undefined;
 
   const start = (e: React.MouseEvent | React.TouchEvent) => {
     const canProcessEvent = ('button' in e && e.button === 0) || ('touches' in e && e.touches.length > 0);
-    if (isPressedRef || !canProcessEvent) {
+    if (isPressed || !canProcessEvent) {
       return;
     }
 
-    isPressedRef = true;
-    timerIdRef = window.setTimeout(() => {
+    isPressed = true;
+    timerId = window.setTimeout(() => {
       onStart?.();
-      isLongPressActiveRef = true;
+      isLongPressActive = true;
     }, threshold);
   };
 
   const end = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!isPressedRef) return;
+    if (!isPressed) return;
 
-    if (isLongPressActiveRef) {
+    if (isLongPressActive) {
       onEnd?.();
     } else {
       onClick?.(e);
@@ -46,13 +45,13 @@ function useLongPress({
   };
 
   const cancel = () => {
-    isLongPressActiveRef = false;
-    isPressedRef = false;
-    window.clearTimeout(timerIdRef);
+    isLongPressActive = false;
+    isPressed = false;
+    window.clearTimeout(timerId);
   };
 
   onDestroy(() => {
-    window.clearTimeout(timerIdRef);
+    window.clearTimeout(timerId);
   });
 
   return {

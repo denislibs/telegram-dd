@@ -1,15 +1,18 @@
 import { getActions } from '../../../../global';
 
 import type { ApiMessage, ApiPeer, ApiStory, ApiWebPage } from '../../../../api/types';
+import type { OldLangFn } from '../../../../hooks/useOldLang';
 import type { IAlbum, ThreadId } from '../../../../types';
 import { MAIN_THREAD_ID } from '../../../../api/types';
 import { MediaViewerOrigin } from '../../../../types';
 
 import { getMainUsername, getMessagePhoto, getWebPagePhoto, getWebPageVideo } from '../../../../global/helpers';
 import { getMessageReplyInfo } from '../../../../global/helpers/replies';
+import { type MaybeAccessor, read } from '../../../../util/accessors';
 import { tryParseDeepLink } from '../../../../util/deepLinkParser';
 
-// TODO(codemod): useInnerHandlers: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: a hook runs once. Every reactive field of the options is a `MaybeAccessor` and is read when a handler runs
+// (tt destructured the message at each render and made new handlers).
 export default function useInnerHandlers({
   lang,
   selectMessage,
@@ -32,25 +35,25 @@ export default function useInnerHandlers({
   lastPlaybackTimestamp,
 }: {
   lang: OldLangFn;
-  selectMessage: (e: React.MouseEvent<HTMLDivElement, MouseEvent>, groupedId?: string) => void;
-  message: ApiMessage;
-  webPage?: ApiWebPage;
-  chatId: string;
-  threadId: ThreadId;
-  isInDocumentGroup: boolean;
-  asForwarded?: boolean;
-  isScheduled?: boolean;
-  album?: IAlbum;
-  avatarPeer?: ApiPeer;
-  senderPeer?: ApiPeer;
-  botSender?: ApiPeer;
-  guestFromSender?: ApiPeer;
-  isTranslatingChat?: boolean;
-  story?: ApiStory;
-  isReplyPrivate?: boolean;
-  isRepliesChat?: boolean;
-  isSavedMessages?: boolean;
-  lastPlaybackTimestamp?: number;
+  selectMessage: (e?: React.MouseEvent<HTMLDivElement, MouseEvent>, groupedId?: string) => void;
+  message: MaybeAccessor<ApiMessage>;
+  webPage?: MaybeAccessor<ApiWebPage | undefined>;
+  chatId: MaybeAccessor<string>;
+  threadId: MaybeAccessor<ThreadId>;
+  isInDocumentGroup: MaybeAccessor<boolean>;
+  asForwarded?: MaybeAccessor<boolean | undefined>;
+  isScheduled?: MaybeAccessor<boolean | undefined>;
+  album?: MaybeAccessor<IAlbum | undefined>;
+  avatarPeer?: MaybeAccessor<ApiPeer | undefined>;
+  senderPeer?: MaybeAccessor<ApiPeer | undefined>;
+  botSender?: MaybeAccessor<ApiPeer | undefined>;
+  guestFromSender?: MaybeAccessor<ApiPeer | undefined>;
+  isTranslatingChat?: MaybeAccessor<boolean | undefined>;
+  story?: MaybeAccessor<ApiStory | undefined>;
+  isReplyPrivate?: MaybeAccessor<boolean | undefined>;
+  isRepliesChat?: MaybeAccessor<boolean | undefined>;
+  isSavedMessages?: MaybeAccessor<boolean | undefined>;
+  lastPlaybackTimestamp?: MaybeAccessor<number | undefined>;
 }) {
   const {
     openChat,
@@ -68,39 +71,34 @@ export default function useInnerHandlers({
     searchChatMediaMessages,
   } = getActions();
 
-  const {
-    id: messageId,
-    forwardInfo,
-    groupedId,
-    content: { paidMedia, video },
-  } = message;
-
-  const { replyToMsgId, replyToPeerId, replyToTopId, isQuote, quoteText, quoteOffset } =
-    getMessageReplyInfo(message) || {};
+  const getMessage = () => read(message);
 
   const handleSenderClick = () => {
-    if (!senderPeer) {
+    const senderPeer2 = read(senderPeer);
+    if (!senderPeer2) {
       showNotification({ message: lang('HidAccount') });
 
       return;
     }
 
-    if (asForwarded && forwardInfo?.channelPostId) {
-      focusMessage({ chatId: senderPeer.id, messageId: forwardInfo.channelPostId });
+    const { forwardInfo } = getMessage();
+    if (read(asForwarded) && forwardInfo?.channelPostId) {
+      focusMessage({ chatId: senderPeer2.id, messageId: forwardInfo.channelPostId });
     } else {
-      openChat({ id: senderPeer.id });
+      openChat({ id: senderPeer2.id });
     }
   };
 
   const handleViaBotClick = () => {
-    const username = botSender && getMainUsername(botSender);
+    const botSender2 = read(botSender);
+    const username = botSender2 && getMainUsername(botSender2);
     if (!username) {
       return;
     }
 
     openChatWithDraft({
-      chatId,
-      threadId,
+      chatId: read(chatId),
+      threadId: read(threadId),
       text: {
         text: `@${username} `,
       },
@@ -108,22 +106,27 @@ export default function useInnerHandlers({
   };
 
   const handleGuestForClick = () => {
-    if (!guestFromSender) {
+    const guestFromSender2 = read(guestFromSender);
+    if (!guestFromSender2) {
       return;
     }
 
-    openChat({ id: guestFromSender.id });
+    openChat({ id: guestFromSender2.id });
   };
 
   const handleReplyClick = (): void => {
-    if (!replyToMsgId || isReplyPrivate) {
+    const { replyToMsgId, replyToPeerId, replyToTopId, isQuote, quoteText, quoteOffset } =
+      getMessageReplyInfo(getMessage()) || {};
+
+    if (!replyToMsgId || read(isReplyPrivate)) {
       showNotification({
         message: isQuote ? lang('QuotePrivate') : lang('ReplyPrivate'),
       });
       return;
     }
 
-    if (isRepliesChat && replyToPeerId && replyToTopId) {
+    const isRepliesChat2 = read(isRepliesChat);
+    if (isRepliesChat2 && replyToPeerId && replyToTopId) {
       openThread({
         isComments: true,
         originChannelId: replyToPeerId,
@@ -134,64 +137,77 @@ export default function useInnerHandlers({
     }
 
     focusMessage({
-      chatId: replyToPeerId || chatId,
-      threadId: isRepliesChat ? replyToTopId : threadId, // Open comments from Replies bot, otherwise, keep current thread
+      chatId: replyToPeerId || read(chatId),
+      threadId: isRepliesChat2 ? replyToTopId : read(threadId), // Open comments from Replies bot, otherwise, keep current thread
       messageId: replyToMsgId,
-      replyMessageId: replyToPeerId ? undefined : messageId,
+      replyMessageId: replyToPeerId ? undefined : getMessage().id,
       noForumTopicPanel: !replyToPeerId, // Open topic panel for cross-chat replies
       ...(isQuote && { quote: quoteText?.text, quoteOffset }),
     });
   };
 
   const handleDocumentClick = (): void => {
+    const message2 = getMessage();
     openMediaViewer({
-      chatId,
-      threadId,
-      messageId,
-      origin: message.isEphemeral
+      chatId: read(chatId),
+      threadId: read(threadId),
+      messageId: message2.id,
+      origin: message2.isEphemeral
         ? MediaViewerOrigin.Ephemeral
-        : isScheduled
+        : read(isScheduled)
           ? MediaViewerOrigin.ScheduledInline
           : MediaViewerOrigin.Inline,
     });
   };
 
   const openMediaViewerWithPhotoOrVideo = (withDynamicLoading: boolean): void => {
+    const message2 = getMessage();
+    const {
+      id: messageId,
+      content: { paidMedia, video },
+    } = message2;
+    const chatId2 = read(chatId);
+    const threadId2 = read(threadId);
+    const webPage2 = read(webPage);
+    const isScheduled2 = read(isScheduled);
+
     if (paidMedia && !paidMedia.isBought) return;
-    if (withDynamicLoading && !message.isEphemeral) {
-      searchChatMediaMessages({ chatId, threadId, currentMediaMessageId: messageId });
+    if (withDynamicLoading && !message2.isEphemeral) {
+      searchChatMediaMessages({ chatId: chatId2, threadId: threadId2, currentMediaMessageId: messageId });
     }
 
-    const parsedLink = webPage?.url && tryParseDeepLink(webPage.url);
+    const parsedLink = webPage2?.url && tryParseDeepLink(webPage2.url);
 
-    const videoContent = video || getWebPageVideo(webPage);
+    const videoContent = video || getWebPageVideo(webPage2);
     const webpageTimestamp = parsedLink && 'timestamp' in parsedLink ? parsedLink.timestamp : undefined;
 
     openMediaViewer({
-      chatId,
-      threadId,
+      chatId: chatId2,
+      threadId: threadId2,
       messageId,
-      origin: message.isEphemeral
+      origin: message2.isEphemeral
         ? MediaViewerOrigin.Ephemeral
-        : isScheduled
+        : isScheduled2
           ? MediaViewerOrigin.ScheduledInline
           : MediaViewerOrigin.Inline,
-      timestamp: lastPlaybackTimestamp || videoContent?.timestamp || webpageTimestamp,
-      withDynamicLoading: message.isEphemeral ? false : withDynamicLoading,
+      timestamp: read(lastPlaybackTimestamp) || videoContent?.timestamp || webpageTimestamp,
+      withDynamicLoading: message2.isEphemeral ? false : withDynamicLoading,
     });
   };
   const handlePhotoMediaClick = (): void => {
-    const withDynamicLoading = !message.isEphemeral && !isScheduled && !paidMedia;
+    const message2 = getMessage();
+    const withDynamicLoading = !message2.isEphemeral && !read(isScheduled) && !message2.content.paidMedia;
     openMediaViewerWithPhotoOrVideo(withDynamicLoading);
   };
   const handleVideoMediaClick = () => {
-    const isGif = message.content?.video?.isGif;
-    const withDynamicLoading = !message.isEphemeral && !isGif && !isScheduled && !paidMedia;
+    const message2 = getMessage();
+    const isGif = message2.content?.video?.isGif;
+    const withDynamicLoading = !message2.isEphemeral && !isGif && !read(isScheduled) && !message2.content.paidMedia;
     openMediaViewerWithPhotoOrVideo(withDynamicLoading);
   };
 
   const handleMediaClick = (): void => {
-    const photo = getMessagePhoto(message) || getWebPagePhoto(webPage);
+    const photo = getMessagePhoto(getMessage()) || getWebPagePhoto(read(webPage));
     if (photo) {
       handlePhotoMediaClick();
     }
@@ -203,72 +219,84 @@ export default function useInnerHandlers({
     openAudioPlayer({
       item: {
         type: 'message',
-        chatId,
-        threadId,
-        messageId,
+        chatId: read(chatId),
+        threadId: read(threadId),
+        messageId: getMessage().id,
       },
     });
   };
 
   const handleAlbumMediaClick = (albumMessageId: number, albumIndex?: number): void => {
+    const {
+      id: messageId,
+      content: { paidMedia },
+    } = getMessage();
     if (paidMedia && !paidMedia.isBought) return;
 
-    searchChatMediaMessages({ chatId, threadId, currentMediaMessageId: messageId });
+    const chatId2 = read(chatId);
+    const threadId2 = read(threadId);
+    searchChatMediaMessages({ chatId: chatId2, threadId: threadId2, currentMediaMessageId: messageId });
     openMediaViewer({
-      chatId,
-      threadId,
+      chatId: chatId2,
+      threadId: threadId2,
       messageId: albumMessageId,
       mediaIndex: albumIndex,
-      origin: isScheduled ? MediaViewerOrigin.ScheduledAlbum : MediaViewerOrigin.Album,
+      origin: read(isScheduled) ? MediaViewerOrigin.ScheduledAlbum : MediaViewerOrigin.Album,
       withDynamicLoading: !paidMedia,
     });
   };
 
   const handleReadMedia = (): void => {
-    if (message.isEphemeral) return;
-    markMessagesRead({ chatId, messageIds: [messageId] });
+    const message2 = getMessage();
+    if (message2.isEphemeral) return;
+    markMessagesRead({ chatId: read(chatId), messageIds: [message2.id] });
   };
 
   const handleCancelUpload = () => {
-    cancelUploadMedia({ chatId, messageId });
+    cancelUploadMedia({ chatId: read(chatId), messageId: getMessage().id });
   };
 
   const handleGroupForward = () => {
-    openForwardMenu({ fromChatId: chatId, groupedId });
+    openForwardMenu({ fromChatId: read(chatId), groupedId: getMessage().groupedId });
   };
 
   const handleForward = () => {
-    if (album && album.messages) {
-      const messageIds = album.messages.map(({ id }) => id);
-      openForwardMenu({ fromChatId: chatId, messageIds });
+    const album2 = read(album);
+    if (album2 && album2.messages) {
+      const messageIds = album2.messages.map(({ id }) => id);
+      openForwardMenu({ fromChatId: read(chatId), messageIds });
     } else {
-      openForwardMenu({ fromChatId: chatId, messageIds: [messageId] });
+      openForwardMenu({ fromChatId: read(chatId), messageIds: [getMessage().id] });
     }
   };
 
   const handleFocus = () => {
     focusMessage({
-      chatId,
+      chatId: read(chatId),
       threadId: MAIN_THREAD_ID,
-      messageId,
+      messageId: getMessage().id,
     });
   };
 
   const handleFocusForwarded = () => {
-    const originalChatId = (isSavedMessages && forwardInfo!.savedFromPeerId) || forwardInfo!.fromChatId!;
+    const { forwardInfo, groupedId } = getMessage();
+    const { replyToPeerId, replyToTopId } = getMessageReplyInfo(getMessage()) || {};
+    const chatId2 = read(chatId);
+    const isRepliesChat2 = read(isRepliesChat);
+    const originalChatId = (read(isSavedMessages) && forwardInfo!.savedFromPeerId) || forwardInfo!.fromChatId!;
 
-    if (isInDocumentGroup) {
+    if (read(isInDocumentGroup)) {
       focusMessage({
         chatId: originalChatId,
         groupedId,
-        groupedChatId: chatId,
+        groupedChatId: chatId2,
         messageId: forwardInfo!.fromMessageId!,
       });
       return;
     }
 
     if (replyToPeerId && replyToTopId) {
-      if (isRepliesChat) {
+      if (isRepliesChat2) {
         openThread({
           isComments: true,
           originChannelId: replyToPeerId,
@@ -293,27 +321,32 @@ export default function useInnerHandlers({
   const selectWithGroupedId = (e: React.MouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
 
-    selectMessage(e, groupedId);
+    selectMessage(e, getMessage().groupedId);
   };
 
   const handleTranslationClick = (e: React.MouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
 
-    openChatLanguageModal({ chatId, messageId: !isTranslatingChat ? messageId : undefined });
+    openChatLanguageModal({
+      chatId: read(chatId),
+      messageId: !read(isTranslatingChat) ? getMessage().id : undefined,
+    });
   };
 
   const handleOpenThread = () => {
+    const message2 = getMessage();
     openThread({
-      chatId: message.chatId,
-      threadId: message.id,
+      chatId: message2.chatId,
+      threadId: message2.id,
     });
   };
 
   const handleStoryClick = () => {
-    if (!story) return;
+    const story2 = read(story);
+    if (!story2) return;
     openStoryViewer({
-      peerId: story.peerId,
-      storyId: story.id,
+      peerId: story2.peerId,
+      storyId: story2.id,
       isSingleStory: true,
     });
   };

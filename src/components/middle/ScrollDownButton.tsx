@@ -1,5 +1,3 @@
-import { createMemo } from 'frameact';
-
 import type { IconName } from '../../types/icons';
 
 import buildClassName from '../../util/buildClassName';
@@ -29,11 +27,11 @@ const ScrollDownButton = (props: OwnProps) => {
   const lang = useLang();
 
   let ref!: HTMLDivElement;
-  const contextMenuHandlersResult = createMemo(() => useContextMenuHandlers(() => ref, !props.onReadAll));
-  const isContextMenuOpen = () => contextMenuHandlersResult().isContextMenuOpen;
-  const handleContextMenu = () => contextMenuHandlersResult().handleContextMenu;
-  const handleContextMenuClose = () => contextMenuHandlersResult().handleContextMenuClose;
-  const handleContextMenuHide = () => contextMenuHandlersResult().handleContextMenuHide;
+  const { isContextMenuOpen, handleContextMenu, handleContextMenuClose, handleContextMenuHide } =
+    useContextMenuHandlers(
+      () => ref,
+      () => !props.onReadAll,
+    );
 
   return (
     <div class={buildClassName(styles.root, props.className)} ref={ref}>
@@ -42,17 +40,19 @@ const ScrollDownButton = (props: OwnProps) => {
         round
         className={styles.button}
         onClick={props.onClick}
-        onContextMenu={handleContextMenu()}
+        onContextMenu={handleContextMenu}
         ariaLabel={oldLang(props.ariaLabelLang)}
         iconName={props.icon}
         iconClassName={styles.icon}
       />
-      {Boolean(props.unreadCount) && <div class={styles.unreadCount}>{formatIntegerCompact(lang, props.unreadCount)}</div>}
+      {Boolean(props.unreadCount) && (
+        <div class={styles.unreadCount}>{formatIntegerCompact(lang, props.unreadCount)}</div>
+      )}
       {props.onReadAll && (
         <Menu
           isOpen={isContextMenuOpen()}
-          onClose={handleContextMenuClose()}
-          onCloseAnimationEnd={handleContextMenuHide()}
+          onClose={handleContextMenuClose}
+          onCloseAnimationEnd={handleContextMenuHide}
           autoClose
           positionX="right"
           positionY="bottom"

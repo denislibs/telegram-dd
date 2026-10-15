@@ -1,11 +1,11 @@
-import { createEffect } from 'frameact';
+import { type Accessor, createEffect } from 'frameact';
 import { getActions } from '../../../../global';
-import { depsOf } from '../../../../util/effectDeps';
 
 import type { ApiMessage } from '../../../../api/types';
-import type { Signal } from '../../../../util/signals';
 
 import { isMessageTranslatable } from '../../../../global/helpers/messages';
+import { type MaybeAccessor, read } from '../../../../util/accessors';
+import { depsOf } from '../../../../util/effectDeps';
 import LimitedMap from '../../../../util/primitives/LimitedMap';
 import { throttle } from '../../../../util/schedulers';
 
@@ -25,24 +25,41 @@ type MessageMetadata = {
 
 const CHAT_STATS = new Map<string, LimitedMap<number, MessageMetadata>>();
 
-// TODO(codemod): useDetectChatLanguage: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: a hook runs once. The parameters are `MaybeAccessor`s; `getIsReady` is read in the compute half (a signal
+// here, not a render prop), so the message is processed when the list becomes ready. tt's effect depended on the
+// identity of the message object, which changed with each edit: the translatability is computed in the compute half.
 export default function useDetectChatLanguage(
-  message: ApiMessage,
-  detectedLanguage?: string,
-  isDisabled?: boolean,
-  getIsReady?: Signal<boolean>,
+  message: MaybeAccessor<ApiMessage>,
+  detectedLanguage?: MaybeAccessor<string | undefined>,
+  isDisabled?: MaybeAccessor<boolean | undefined>,
+  getIsReady?: Accessor<boolean>,
 ) {
-  createEffect(depsOf(() => [message, detectedLanguage, isDisabled, getIsReady]), () => {
-    if (isDisabled || (getIsReady && !getIsReady())) return;
+  createEffect(
+    depsOf(() => {
+      const isDisabled2 = read(isDisabled);
+      const isReady = getIsReady ? getIsReady() : true;
+      if (isDisabled2 || !isReady) return [undefined, undefined, undefined, undefined, undefined] as const;
 
-    const isTranslatable = isMessageTranslatable(message, true);
-    processMessageMetadata({
-      chatId: message.chatId,
-      id: message.id,
-      isTranslatable,
-      detectedLanguage,
-    });
-  });
+      const message2 = read(message);
+      return [
+        message2.chatId,
+        message2.id,
+        isMessageTranslatable(message2, true),
+        read(detectedLanguage),
+        true,
+      ] as const;
+    }),
+    ([chatId, id, isTranslatable, detectedLanguage2, isActive]) => {
+      if (!isActive) return;
+
+      processMessageMetadata({
+        chatId,
+        id,
+        isTranslatable,
+        detectedLanguage: detectedLanguage2,
+      });
+    },
+  );
 }
 
 const throttledMakeChatDecision = throttle(makeChatDecision, THROTTLE_DELAY);

@@ -1,11 +1,12 @@
-import { createMeasureEffect } from 'frameact';
+import { createMeasureEffect, createMemo } from 'frameact';
 import { getActions } from '../../../global';
-import { depsOf } from '../../../util/effectDeps';
 
 import type { ActiveEmojiInteraction } from '../../../types';
 
+import { type MaybeAccessor, read } from '../../../util/accessors';
 import { IS_TAURI } from '../../../util/browser/globalEnvironment';
 import buildStyle from '../../../util/buildStyle';
+import { depsOf } from '../../../util/effectDeps';
 import safePlay from '../../../util/safePlay';
 import { REM } from '../helpers/mediaDimensions';
 
@@ -16,38 +17,48 @@ const INTERACTION_BUNCH_TIME = 1000;
 const MS_DIVIDER = 1000;
 const TIME_DEFAULT = 0;
 
-// TODO(codemod): useAnimatedEmoji: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: a hook runs once. The parameters are `MaybeAccessor`s; `ref` is a callback ref for the element (tt returned
+// a ref object) and `getRef` reads the element; `size` and `style` are accessors.
 export default function useAnimatedEmoji(
-  chatId?: string,
-  messageId?: number,
-  soundId?: string,
-  activeEmojiInteractions?: ActiveEmojiInteraction[],
-  isOwn?: boolean,
-  emoji?: string,
+  chatId?: MaybeAccessor<string | undefined>,
+  messageId?: MaybeAccessor<number | undefined>,
+  soundId?: MaybeAccessor<string | undefined>,
+  activeEmojiInteractions?: MaybeAccessor<ActiveEmojiInteraction[] | undefined>,
+  isOwn?: MaybeAccessor<boolean | undefined>,
+  emoji?: MaybeAccessor<string | undefined>,
   preferredSize?: number,
 ) {
   const { interactWithAnimatedEmoji, sendEmojiInteraction, sendWatchingEmojiInteraction } = getActions();
 
-  let ref!: HTMLDivElement;
+  let element: HTMLDivElement | undefined;
+  const ref = (el: HTMLDivElement) => {
+    element = el;
+  };
+  const getRef = () => element;
 
-  let audioRef!: HTMLAudioElement | undefined;
+  let audioRef: HTMLAudioElement | undefined;
 
-  const soundMediaData = useMedia(soundId ? `document${soundId}` : undefined, !soundId);
+  const soundMediaData = useMedia(
+    () => (read(soundId) ? `document${read(soundId)}` : undefined),
+    () => !read(soundId),
+  );
 
-  const size = preferredSize || SIZE;
-  const style = buildStyle(`width: ${size}px`, `height: ${size}px`, emoji && !IS_TAURI && 'cursor: pointer');
+  const size = createMemo(() => preferredSize || SIZE);
+  const style = createMemo(() =>
+    buildStyle(`width: ${size()}px`, `height: ${size()}px`, read(emoji) && !IS_TAURI && 'cursor: pointer'),
+  );
 
   let interactionsRef: number[] | undefined;
   let startedInteractionsRef: number | undefined;
   const sendInteractionBunch = () => {
-    const container = ref;
+    const container = element;
 
     if (!container) return;
 
     sendEmojiInteraction({
-      chatId: chatId!,
-      messageId: messageId!,
-      emoji: emoji!,
+      chatId: read(chatId)!,
+      messageId: read(messageId)!,
+      emoji: read(emoji)!,
       interactions: interactionsRef!,
     });
     startedInteractionsRef = undefined;
@@ -56,13 +67,14 @@ export default function useAnimatedEmoji(
 
   const play = () => {
     const audio = audioRef;
-    if (soundMediaData) {
+    const soundData = soundMediaData();
+    if (soundData) {
       if (audio) {
         audio.pause();
         audio.remove();
       }
       audioRef = new Audio();
-      audioRef.src = soundMediaData;
+      audioRef.src = soundData;
       safePlay(audioRef);
       audioRef.addEventListener(
         'ended',
@@ -77,20 +89,23 @@ export default function useAnimatedEmoji(
   const handleClick = () => {
     play();
 
-    const container = ref;
+    const container = element;
+    const emoji2 = read(emoji);
+    const messageId2 = read(messageId);
+    const chatId2 = read(chatId);
 
-    if (!emoji || !container || !messageId || !chatId) {
+    if (!emoji2 || !container || !messageId2 || !chatId2) {
       return;
     }
 
     const { x, y } = container.getBoundingClientRect();
 
     interactWithAnimatedEmoji({
-      emoji,
+      emoji: emoji2,
       x,
       y,
-      startSize: size,
-      isReversed: !isOwn,
+      startSize: size(),
+      isReversed: !read(isOwn),
     });
 
     if (!interactionsRef) {
@@ -105,34 +120,39 @@ export default function useAnimatedEmoji(
   };
 
   // Set an end anchor for remote activated interaction
-  createMeasureEffect(depsOf(() => [activeEmojiInteractions, chatId, emoji, isOwn, messageId, play, sendWatchingEmojiInteraction, size]), () => {
-    const container = ref;
+  createMeasureEffect(
+    depsOf(
+      () => [read(activeEmojiInteractions), read(chatId), read(emoji), read(isOwn), read(messageId), size()] as const,
+    ),
+    ([activeEmojiInteractions2, chatId2, emoji2, isOwn2, messageId2, size2]) => {
+      const container = element;
 
-    if (!container || !activeEmojiInteractions) return;
+      if (!container || !activeEmojiInteractions2) return;
 
-    activeEmojiInteractions.forEach(({ id, startSize, messageId: interactionMessageId }) => {
-      if (startSize || messageId !== interactionMessageId) {
-        return;
-      }
+      activeEmojiInteractions2.forEach(({ id, startSize, messageId: interactionMessageId }) => {
+        if (startSize || messageId2 !== interactionMessageId) {
+          return;
+        }
 
-      const { x, y } = container.getBoundingClientRect();
+        const { x, y } = container.getBoundingClientRect();
 
-      sendWatchingEmojiInteraction({
-        id,
-        chatId: chatId!,
-        emoticon: emoji!,
-        startSize: size,
-        x,
-        y,
-        isReversed: !isOwn,
+        sendWatchingEmojiInteraction({
+          id,
+          chatId: chatId2!,
+          emoticon: emoji2!,
+          startSize: size2,
+          x,
+          y,
+          isReversed: !isOwn2,
+        });
+        play();
       });
-      play();
-    });
-  });
+    },
+  );
 
   return {
-    // TODO(codemod): "ref" was a ref object passed as a value: pass an accessor (() => ref) or a callback ref
     ref,
+    getRef,
     size,
     style,
     handleClick,
