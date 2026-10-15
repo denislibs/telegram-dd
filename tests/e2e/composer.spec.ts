@@ -133,6 +133,25 @@ test('Enter sends, Shift+Enter makes a new line', async ({ page }) => {
   await expect(page.locator(ITEM)).toHaveCount(before + 1);
 });
 
+test('with the Ctrl+Enter setting, Enter adds a line and Ctrl+Enter sends', async ({ page }) => {
+  await openMessages(page);
+  await openChat(page, 'Carol Short');
+  await page.evaluate(() => {
+    (window as unknown as TestWindow).getActions().setSharedSettingOption({ messageSendKeyCombo: 'ctrl-enter' });
+  });
+  const before = await page.locator(ITEM).count();
+
+  await typeText(page, 'first');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('second');
+  await expect(page.locator(`${INPUT} p`)).toHaveCount(2);
+  await expect(page.locator(ITEM)).toHaveCount(before);
+
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await expect(page.locator(ITEM)).toHaveCount(before + 1);
+  await expect.poll(async () => (await lastMessageOf(page, CAROL)).text).toBe('first\nsecond');
+});
+
 test('reply to a message (Ctrl+ArrowUp), the sent message carries the reply', async ({ page }) => {
   await openMessages(page);
   await openChat(page, 'Carol Short');
