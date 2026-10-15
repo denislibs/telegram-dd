@@ -204,7 +204,7 @@ describe('ActionMessage', () => {
   it('hides the buttons of a request when it expires, without any update of the message', async () => {
     seed();
     const period = 3600;
-    setGlobal({ ...getGlobal(), appConfig: { ...getGlobal().appConfig!, noForwardsRequestExpirePeriod: period } });
+    setGlobal({ ...getGlobal(), appConfig: { ...getGlobal().appConfig, noForwardsRequestExpirePeriod: period } });
     // expires in about a second
     const date = Math.floor(Date.now() / 1000) - period + 1;
     setGlobal(

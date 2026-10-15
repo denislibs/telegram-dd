@@ -5,7 +5,6 @@ import { For, render } from 'frameact/dom';
 import { describe, expect, it, vi } from 'vitest';
 
 import { container as makeContainer, useDomHarness } from '../../../lib/kit/testing/dom';
-
 import useInitialMessageLoading from './useInitialMessageLoading';
 
 const ROW_HEIGHT = 100;

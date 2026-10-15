@@ -81,7 +81,6 @@ import buildClassName from '../../util/buildClassName';
 import { depsOf } from '../../util/effectDeps';
 import { isUserId } from '../../util/entities/ids';
 import { buildCollectionByKey } from '../../util/iteratees';
-import { isLocalMessageId } from '../../util/keys/messageKey';
 import resetScroll from '../../util/resetScroll';
 import { debounce } from '../../util/schedulers';
 import { getServerTime } from '../../util/serverTime';
