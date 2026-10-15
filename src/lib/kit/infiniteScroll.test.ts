@@ -123,6 +123,46 @@ describe('createScrollAnchor', () => {
     expect(root.scrollTop).toBe(160); // anchored on 5 again
   });
 
+  it('noScrollRestore: an update reads no layout of the anchor (no forced reflow), and restoring works again once it is off', async () => {
+    const root = container();
+    fakeLayout(root);
+    const [items, setItems] = createSignal(ids(0, 10));
+    const [never, setNever] = createSignal(true);
+    createRoot(() => {
+      insert(
+        root,
+        createComponent(ForC, {
+          get each() {
+            return items();
+          },
+          children: row,
+        }),
+      );
+      createScrollAnchor({ container: () => root, items, noScrollRestore: never });
+    });
+    await frame();
+    root.scrollTop = 80;
+    const rectReads = vi.spyOn(Object.getPrototypeOf(root) as HTMLElement, 'getBoundingClientRect');
+    try {
+      setItems([-1, ...ids(0, 10)]);
+      await frame();
+      setItems([-2, -1, ...ids(0, 10)]);
+      await frame();
+      expect(rectReads).not.toHaveBeenCalled();
+      expect(root.scrollTop).toBe(80);
+
+      setNever(false);
+      setItems([-3, -2, -1, ...ids(0, 10)]);
+      await frame();
+      setItems([-4, -3, -2, -1, ...ids(0, 10)]);
+      await frame();
+      expect(rectReads).toHaveBeenCalled();
+      expect(root.scrollTop).toBe(160); // two rows prepended, restored by the anchor (item 0) both times
+    } finally {
+      rectReads.mockRestore();
+    }
+  });
+
   it('store list under a non-blocking animation: the parked snapshot, update and restore are released into ONE frame in phase order, even when the animation ends from a mutate task (R1)', async () => {
     const root = container();
     const log: string[] = [];

@@ -59,8 +59,9 @@ type OwnProps = {
 };
 
 const INTERSECTION_THROTTLE = 200;
-/** Rows mounted per frame when the window gains more than that many at once: a page-in of 30 is two frames (12: three
- * frames, fewer long tasks but more layout and paint; measured in docs of the perf review). A 800 px viewport shows ~11. */
+/** Rows mounted per frame when the window gains more than that many at once. A page-in of 30 is two frames; 12 (three
+ * frames) gave fewer long tasks but more layout and paint in the perf:compare scroll scenario. A 800 px viewport shows
+ * ~11 rows. */
 const PROGRESSIVE_CHUNK = 15;
 const RESERVED_HOTKEYS = new Set(['9', '0']);
 
