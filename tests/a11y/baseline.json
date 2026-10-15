@@ -141,5 +141,24 @@
       "target": ".MessageList",
       "reason": "telegram-tt's markup: the message list is a scroll container that is not focusable (MessageList.tsx / MessageList.scss ported as in tt); keyboard scrolling of the list belongs to the accessibility pass"
     }
+  ],
+  "composer: a reply bar and typed text": [
+    {
+      "rule": "aria-command-name",
+      "target": ".embedded-left-icon",
+      "reason": "telegram-tt's markup kept as is: the reply bar's left icon is a `div role=button` without a name (ComposerEmbeddedMessage.tsx, tt); the name belongs to the accessibility pass"
+    }
+  ],
+  "composer: the emoji picker": [
+    {
+      "rule": "color-contrast",
+      "target": "#messageList-emoji-section-0 > .symbol-set-header > .symbol-set-name",
+      "reason": "telegram-tt's markup and theme kept as they are: the grey category name of the emoji picker (`.symbol-set-name`) is under the contrast ratio; the theme colours are tt's"
+    },
+    {
+      "rule": "color-contrast",
+      "target": "#messageList-emoji-section-1 > .symbol-set-header > .symbol-set-name",
+      "reason": "telegram-tt's markup and theme kept as they are: the grey category name of the emoji picker (`.symbol-set-name`) is under the contrast ratio; the theme colours are tt's"
+    }
   ]
 }
