@@ -2038,6 +2038,17 @@ const Message = (ownProps: OwnProps) => {
 
   const additionalInlineButtons = createMemo(() => suggestedPostButtons() || openThreadButtons());
 
+  const hasActionOrCommentBlock = createMemo(() =>
+    Boolean(canShowActionButton() || (withCommentButton() && !isCustomShape())),
+  );
+  const hasInlineOrOutsideBlock = createMemo(() =>
+    Boolean(
+      props.message.inlineButtons ||
+      additionalInlineButtons() ||
+      (reactionsPosition() === 'outside' && !isStoryMention()),
+    ),
+  );
+
   return (
     <div
       ref={(el) => {
@@ -2114,147 +2125,155 @@ const Message = (ownProps: OwnProps) => {
           <Show when={!isInDocumentGroupNotLast() && metaPosition() === 'standalone' && !isStoryMention()}>
             {renderReactionsAndMeta()}
           </Show>
-          {canShowActionButton() && (
-            <div class="message-action-buttons-container">
-              <div class="message-action-buttons-sticky-zone">
-                <div class="message-action-buttons message-action-button-sticky">
-                  {hasSummary() && (
+          {/* Perf (not in tt): these rarely-true blocks of a message are behind one `Show` each (a conditional that is false still
+              costs two memos and a render effect per message) */}
+          <Show when={hasActionOrCommentBlock()}>
+            {canShowActionButton() && (
+              <div class="message-action-buttons-container">
+                <div class="message-action-buttons-sticky-zone">
+                  <div class="message-action-buttons message-action-button-sticky">
+                    {hasSummary() && (
+                      <Button
+                        className="message-action-button action-summary"
+                        color="translucent-white"
+                        round
+                        withSparkleEffect
+                        ariaLabel={isShowingSummary() ? lang('AriaHideSummary') : lang('AriaShowSummary')}
+                        onClick={isShowingSummary() ? hideSummary : showSummary}
+                        iconName={isShowingSummary() ? 'expand' : 'collapse'}
+                      />
+                    )}
+                  </div>
+                </div>
+                <div
+                  class={buildClassName(
+                    'message-action-buttons',
+                    props.isLoadingComments && 'message-action-buttons-shown',
+                  )}
+                >
+                  {withCommentButton() && isCustomShape() && (
+                    <CommentButton
+                      threadInfo={commentsThreadInfo()}
+                      disabled={props.noComments || !commentsThreadInfo()}
+                      isLoading={props.isLoadingComments}
+                      isCustomShape
+                    />
+                  )}
+                  {props.canForward && (
                     <Button
-                      className="message-action-button action-summary"
+                      className="message-action-button"
                       color="translucent-white"
                       round
-                      withSparkleEffect
-                      ariaLabel={isShowingSummary() ? lang('AriaHideSummary') : lang('AriaShowSummary')}
-                      onClick={isShowingSummary() ? hideSummary : showSummary}
-                      iconName={isShowingSummary() ? 'expand' : 'collapse'}
+                      ariaLabel={oldLang('lng_context_forward_msg')}
+                      onClick={props.isLastInDocumentGroup ? handleGroupForward : handleForward}
+                      iconName="share-filled"
+                    />
+                  )}
+                  {canFocus() && (
+                    <Button
+                      className="message-action-button"
+                      color="translucent-white"
+                      round
+                      ariaLabel={lang('FocusMessage')}
+                      onClick={props.isPinnedList ? handleFocus : handleFocusForwarded}
+                      iconName="arrow-right"
                     />
                   )}
                 </div>
               </div>
-              <div
-                class={buildClassName(
-                  'message-action-buttons',
-                  props.isLoadingComments && 'message-action-buttons-shown',
-                )}
-              >
-                {withCommentButton() && isCustomShape() && (
-                  <CommentButton
-                    threadInfo={commentsThreadInfo()}
-                    disabled={props.noComments || !commentsThreadInfo()}
-                    isLoading={props.isLoadingComments}
-                    isCustomShape
-                  />
-                )}
-                {props.canForward && (
-                  <Button
-                    className="message-action-button"
-                    color="translucent-white"
-                    round
-                    ariaLabel={oldLang('lng_context_forward_msg')}
-                    onClick={props.isLastInDocumentGroup ? handleGroupForward : handleForward}
-                    iconName="share-filled"
-                  />
-                )}
-                {canFocus() && (
-                  <Button
-                    className="message-action-button"
-                    color="translucent-white"
-                    round
-                    ariaLabel={lang('FocusMessage')}
-                    onClick={props.isPinnedList ? handleFocus : handleFocusForwarded}
-                    iconName="arrow-right"
-                  />
-                )}
-              </div>
-            </div>
-          )}
-          {withCommentButton() && !isCustomShape() && (
-            <CommentButton
-              threadInfo={commentsThreadInfo()}
-              disabled={props.noComments || !commentsThreadInfo()}
-              isLoading={props.isLoadingComments}
-            />
-          )}
+            )}
+            {withCommentButton() && !isCustomShape() && (
+              <CommentButton
+                threadInfo={commentsThreadInfo()}
+                disabled={props.noComments || !commentsThreadInfo()}
+                isLoading={props.isLoadingComments}
+              />
+            )}
+          </Show>
           {withAppendix() && <MessageAppendix isOwn={isOwn()} />}
           <Show when={withQuickReactionButton() && quickReactionPosition() === 'in-content'}>
             {renderQuickReactionButton()}
           </Show>
         </div>
-        {props.message.inlineButtons && (
-          <InlineButtons
-            inlineButtons={props.message.inlineButtons}
-            isReceipt={Boolean(invoice()?.receiptMessageId)}
-            isEphemeral={props.message.isEphemeral}
-            onClick={handleInlineButtonClick}
-          />
-        )}
-        {additionalInlineButtons() && (
-          <InlineButtons
-            inlineButtons={additionalInlineButtons()!}
-            isEphemeral={props.message.isEphemeral}
-            onClick={handleLocalInlineButtonClick}
-          />
-        )}
-        {reactionsPosition() === 'outside' && !isStoryMention() && (
-          <Reactions
-            message={props.reactionMessage!}
-            threadId={props.threadId}
-            isOutside
-            isCurrentUserPremium={props.isPremium}
-            observeIntersection={props.observeIntersectionForPlaying}
-            noRecentReactors={props.isChannel}
-            tags={props.tags}
-            isAccountFrozen={props.isAccountFrozen}
-          />
-        )}
+        <Show when={hasInlineOrOutsideBlock()}>
+          {props.message.inlineButtons && (
+            <InlineButtons
+              inlineButtons={props.message.inlineButtons}
+              isReceipt={Boolean(invoice()?.receiptMessageId)}
+              isEphemeral={props.message.isEphemeral}
+              onClick={handleInlineButtonClick}
+            />
+          )}
+          {additionalInlineButtons() && (
+            <InlineButtons
+              inlineButtons={additionalInlineButtons()!}
+              isEphemeral={props.message.isEphemeral}
+              onClick={handleLocalInlineButtonClick}
+            />
+          )}
+          {reactionsPosition() === 'outside' && !isStoryMention() && (
+            <Reactions
+              message={props.reactionMessage!}
+              threadId={props.threadId}
+              isOutside
+              isCurrentUserPremium={props.isPremium}
+              observeIntersection={props.observeIntersectionForPlaying}
+              noRecentReactors={props.isChannel}
+              tags={props.tags}
+              isAccountFrozen={props.isAccountFrozen}
+            />
+          )}
+        </Show>
       </div>
-      {contextMenuAnchor() && (
-        <ContextMenuContainer
-          isOpen={isContextMenuOpen()}
-          anchor={contextMenuAnchor()!}
-          targetHref={
-            contextMenuTarget()?.matches('a[href]') ? (contextMenuTarget() as HTMLAnchorElement).href : undefined
-          }
-          isAltKeyPressed={isContextMenuAltKeyPressed()}
-          message={props.message}
-          album={props.album}
-          messageListType={props.messageListType}
-          threadId={props.threadId}
-          onClose={handleContextMenuClose}
-          onCloseAnimationEnd={handleContextMenuHide}
-          repliesThreadInfo={props.repliesThreadInfo}
-          noReplies={props.noReplies}
-          detectedLanguage={detectedLanguage()}
-        />
-      )}
-      {isDeclineDialogOpen() && (
-        <ConfirmDialog
-          isOpen={isDeclineDialogOpen()}
-          onClose={closeDeclineDialog}
-          title={lang('SuggestedPostDecline')}
-          confirmLabel={lang('SuggestedPostDecline')}
-          confirmHandler={handleDeclineConfirm}
-          confirmIsDestructive
-        >
-          <div class="decline-dialog-question">
-            {renderText(
-              lang(
-                'DeclinePostDialogQuestion',
-                {
-                  sender: props.sender ? getPeerFullTitle(oldLang, props.sender) : '',
-                },
-                { withNodes: true, withMarkdown: true },
-              ),
-            )}
-          </div>
-          <InputText
-            placeholder={lang('DeclineReasonPlaceholder')}
-            value={declineReason()}
-            onChange={handleDeclineReasonChange}
-            maxLength={MAX_REASON_LENGTH}
+      <Show when={contextMenuAnchor() || isDeclineDialogOpen()}>
+        {contextMenuAnchor() && (
+          <ContextMenuContainer
+            isOpen={isContextMenuOpen()}
+            anchor={contextMenuAnchor()!}
+            targetHref={
+              contextMenuTarget()?.matches('a[href]') ? (contextMenuTarget() as HTMLAnchorElement).href : undefined
+            }
+            isAltKeyPressed={isContextMenuAltKeyPressed()}
+            message={props.message}
+            album={props.album}
+            messageListType={props.messageListType}
+            threadId={props.threadId}
+            onClose={handleContextMenuClose}
+            onCloseAnimationEnd={handleContextMenuHide}
+            repliesThreadInfo={props.repliesThreadInfo}
+            noReplies={props.noReplies}
+            detectedLanguage={detectedLanguage()}
           />
-        </ConfirmDialog>
-      )}
+        )}
+        {isDeclineDialogOpen() && (
+          <ConfirmDialog
+            isOpen={isDeclineDialogOpen()}
+            onClose={closeDeclineDialog}
+            title={lang('SuggestedPostDecline')}
+            confirmLabel={lang('SuggestedPostDecline')}
+            confirmHandler={handleDeclineConfirm}
+            confirmIsDestructive
+          >
+            <div class="decline-dialog-question">
+              {renderText(
+                lang(
+                  'DeclinePostDialogQuestion',
+                  {
+                    sender: props.sender ? getPeerFullTitle(oldLang, props.sender) : '',
+                  },
+                  { withNodes: true, withMarkdown: true },
+                ),
+              )}
+            </div>
+            <InputText
+              placeholder={lang('DeclineReasonPlaceholder')}
+              value={declineReason()}
+              onChange={handleDeclineReasonChange}
+              maxLength={MAX_REASON_LENGTH}
+            />
+          </ConfirmDialog>
+        )}
+      </Show>
     </div>
   );
 };
