@@ -22,7 +22,7 @@ import CustomEmoji from '../CustomEmoji';
 import FormattedDate from '../FormattedDate';
 import Blockquote from '../quote/Blockquote';
 import SafeLink from '../SafeLink';
-import Spoiler from '../spoiler/Spoiler';
+import Spoiler, { isSpoilerContainerConcealed } from '../spoiler/Spoiler';
 import TonAddressLink from '../TonAddressLink';
 
 interface IOrganizedEntity {
@@ -35,9 +35,11 @@ type RenderTextParams = Parameters<typeof renderText>[2];
 const HQ_EMOJI_THRESHOLD = 64;
 
 // Deviation (untrusted entities): the entities of a message come from the server. More than `MAX_ENTITIES` are ignored
-// (the text between them stays plain), nested entities are rendered up to `MAX_NESTING_DEPTH` levels (a deeper
-// entity is rendered as plain text of its range), and entities with a range outside the text are dropped.
-// Telegram itself allows far fewer entities per message and a few levels of nesting.
+// (the text between them stays plain, but a Spoiler is never one of those that are ignored: see `capEntities`), nested
+// entities are rendered up to `MAX_NESTING_DEPTH` levels (a deeper entity is rendered as the plain text of its range, which
+// stays inside a Spoiler when the entity contains one), and entities with a range outside the text are dropped. Entities
+// that partially overlap are split at the boundary of the one they cross (`splitOverlaps`), so that nothing of a Spoiler is
+// left outside of it. Telegram itself allows far fewer entities per message and a few levels of nesting.
 const MAX_ENTITIES = 2048;
 const MAX_NESTING_DEPTH = 32;
 // A custom emoji id is a 64-bit integer as a decimal string
@@ -152,6 +154,7 @@ export function renderTextWithEntities({
   let deleteLineBreakAfterPre = false;
 
   const organizedEntities = organizeEntities(validEntities);
+  const spoilerCache = new Map<IOrganizedEntity, boolean>();
 
   // Recursive function to render regular and nested entities
   function renderEntity(
@@ -160,6 +163,7 @@ export function renderTextWithEntities({
     organizedEntity: IOrganizedEntity,
     isLastEntity: boolean,
     depth = 0,
+    insideSpoiler = false,
   ) {
     const renderResult: TextPart[] = [];
     const { entity, nestedEntities } = organizedEntity;
@@ -201,6 +205,11 @@ export function renderTextWithEntities({
       deleteLineBreakAfterPre = true;
     }
 
+    // Deviation (security): a Spoiler is concealed by its wrapper only. Whatever renders the text of an entity without its
+    // nested entities (a date, a custom emoji, a code block, the text below the depth cap) would show a Spoiler inside it.
+    const hasSpoilerInside = containsSpoiler(nestedEntities, spoilerCache);
+    const isInsideSpoiler = insideSpoiler || type === ApiMessageEntityTypes.Spoiler;
+
     // Render nested entities, if any
     // Deviation: a depth over `MAX_NESTING_DEPTH` is not rendered
     if (nestedEntities.length && depth < MAX_NESTING_DEPTH) {
@@ -213,38 +222,70 @@ export function renderTextWithEntities({
           nestedEntity,
           nestedEntityIndex === nestedEntities.length - 1,
           depth + 1,
+          isInsideSpoiler,
         );
 
         nestedEntityContent.push(...nestedResult);
         nestedIndex = nestedEntityEndIndex;
       });
+    } else if (hasSpoilerInside && !isInsideSpoiler) {
+      // Deviation (security): the depth cap: the text of the range is flattened, so it stays inside a Spoiler
+      nestedEntityContent.push(
+        shouldRenderAsHtml
+          ? buildSpoilerHtml(entityContent)
+          : renderSpoilerText(entityContent, asPreview ? undefined : containerId),
+      );
     }
 
+    // Deviation (security): a date, a custom emoji and a code block drop their nested entities, a Spoiler among them. The
+    // entity is replaced by its content, which has the Spoiler in it. In a preview that also holds for an entity that is
+    // inside a Spoiler: its text is braille there, and a date or an emoji would show what the range holds.
+    const dropsNestedEntities =
+      type === ApiMessageEntityTypes.CustomEmoji ||
+      type === ApiMessageEntityTypes.FormattedDate ||
+      (type === ApiMessageEntityTypes.Pre && !asPreview);
+    const isContentOnly = dropsNestedEntities && (hasSpoilerInside || (asPreview && insideSpoiler));
+    // Deviation (security): while a Spoiler is concealed, a link or a date under it has no tooltip (the tooltip would show
+    // the hidden address / date), also when the link is around the Spoiler
+    const isConcealed =
+      containerId && !asPreview && (insideSpoiler || hasSpoilerInside)
+        ? isSpoilerContainerConcealed(containerId)
+        : undefined;
+
     // Render the entity itself
-    const newEntity = shouldRenderAsHtml
-      ? processEntityAsHtml(entity, entityContent, nestedEntityContent)
-      : processEntity({
-          entity,
-          entityContent,
-          nestedEntityContent,
+    const newEntity = isContentOnly
+      ? renderContentOnly(
+          nestedEntityContent.length ? nestedEntityContent : entityContent,
+          shouldRenderAsHtml,
           highlight,
-          containerId,
-          asPreview,
-          isProtected,
-          observeIntersectionForLoading,
-          observeIntersectionForPlaying,
-          withTranslucentThumbs,
           emojiSize,
-          sharedCanvasRef,
-          sharedCanvasHqRef,
-          forcePlayback,
-          noCustomEmojiPlayback,
-          isInSelectMode,
-          chatId,
-          messageId,
-          threadId,
-          maxTimestamp,
-        });
+          asPreview,
+        )
+      : shouldRenderAsHtml
+        ? processEntityAsHtml(entity, entityContent, nestedEntityContent)
+        : processEntity({
+            entity,
+            entityContent,
+            nestedEntityContent,
+            highlight,
+            containerId,
+            asPreview,
+            isProtected,
+            observeIntersectionForLoading,
+            observeIntersectionForPlaying,
+            withTranslucentThumbs,
+            emojiSize,
+            sharedCanvasRef,
+            sharedCanvasHqRef,
+            forcePlayback,
+            noCustomEmojiPlayback,
+            isInSelectMode,
+            chatId,
+            messageId,
+            threadId,
+            maxTimestamp,
+            isConcealed,
+          });
 
     if (Array.isArray(newEntity)) {
       renderResult.push(...newEntity);
@@ -404,22 +445,159 @@ export function insertTextEntity(entities: ApiMessageEntity[], newEntity: ApiMes
   return resultEntities.sort((a, b) => a.offset - b.offset || b.length - a.length);
 }
 
-// Drops the entities that cannot be rendered and caps their number (see `MAX_ENTITIES`)
+// Drops the entities that cannot be rendered, splits those that partially overlap and caps their number (see `MAX_ENTITIES`)
 function sanitizeEntities(text: string, entities: ApiMessageEntity[]) {
-  const result: ApiMessageEntity[] = [];
+  const valid: ApiMessageEntity[] = [];
 
   for (const entity of entities) {
-    if (result.length >= MAX_ENTITIES) break;
-
     const { offset, length } = entity;
     if (!Number.isInteger(offset) || !Number.isInteger(length) || offset < 0 || length <= 0 || offset >= text.length) {
       continue;
     }
 
-    result.push(offset + length > text.length ? { ...entity, length: text.length - offset } : entity);
+    valid.push(offset + length > text.length ? { ...entity, length: text.length - offset } : entity);
   }
 
-  return result;
+  // The first cut bounds the work of the split (at most twice the number of entities come out of it)
+  return capEntities(text, splitOverlaps(capEntities(text, valid)));
+}
+
+/**
+ * Deviation (security): keeps at most `MAX_ENTITIES` entities, and a Spoiler is never one that is dropped (it would become plain
+ * text: the cap is a protection from a flood of entities, not a way to show what the sender concealed). Spoilers come first,
+ * then the others in their order. More Spoilers than the cap are merged into fewer, wider ones (the last one reaches the end of
+ * the text): more is concealed, never less.
+ */
+function capEntities(text: string, entities: ApiMessageEntity[]) {
+  if (entities.length <= MAX_ENTITIES) return entities;
+
+  const spoilers = entities.filter((entity) => entity.type === ApiMessageEntityTypes.Spoiler);
+  if (spoilers.length >= MAX_ENTITIES) {
+    const ranges = mergeRanges(spoilers.map(({ offset, length }): [number, number] => [offset, offset + length]));
+    if (ranges.length > MAX_ENTITIES) {
+      ranges.length = MAX_ENTITIES;
+      ranges[MAX_ENTITIES - 1] = [ranges[MAX_ENTITIES - 1][0], text.length];
+    }
+
+    return ranges.map(([start, end]): ApiMessageEntity => ({
+      type: ApiMessageEntityTypes.Spoiler,
+      offset: start,
+      length: end - start,
+    }));
+  }
+
+  const kept = new Set<ApiMessageEntity>(spoilers);
+  for (const entity of entities) {
+    if (kept.size >= MAX_ENTITIES) break;
+    kept.add(entity);
+  }
+
+  return entities.filter((entity) => kept.has(entity));
+}
+
+function mergeRanges(ranges: [number, number][]) {
+  ranges.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+
+  const merged: [number, number][] = [];
+  for (const [start, end] of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && start <= last[1]) {
+      last[1] = Math.max(last[1], end);
+    } else {
+      merged.push([start, end]);
+    }
+  }
+
+  return merged;
+}
+
+/**
+ * Deviation (security): cuts an entity that partially overlaps another (starts inside it and ends after it) at the end of the
+ * other one, and so on for every entity it crosses; the pieces keep the type and the attributes. Entities of a server are
+ * nested or disjoint, and for those nothing changes except the order (by offset, longer first, as `insertTextEntity` keeps it).
+ * tt's tree puts the crossing entity inside the first one and then renders its text after the end of that one again, outside
+ * of it: the tail of a Spoiler that starts inside a bold entity was shown in the clear, after the Spoiler.
+ * The number of pieces is at most twice the number of entities: a piece is made when an entry of the stack is closed.
+ */
+function splitOverlaps(entities: ApiMessageEntity[]) {
+  type Item = { entity: ApiMessageEntity; order: number };
+  const compare = (a: Item, b: Item) =>
+    a.entity.offset - b.entity.offset || b.entity.length - a.entity.length || a.order - b.order;
+
+  const queue: Item[] = entities.map((entity, order) => ({ entity, order })).sort(compare);
+  const result: ApiMessageEntity[] = [];
+  // The ends of the entities that are open, innermost last (they do not grow towards the end)
+  const ends: number[] = [];
+  let position = 0;
+
+  while (position < queue.length) {
+    const item = queue[position++];
+    const { entity } = item;
+    while (ends.length && ends[ends.length - 1] <= entity.offset) ends.pop();
+
+    const end = entity.offset + entity.length;
+    const enclosingEnd = ends.length ? ends[ends.length - 1] : Infinity;
+    if (end <= enclosingEnd) {
+      result.push(entity);
+      ends.push(end);
+      continue;
+    }
+
+    result.push({ ...entity, length: enclosingEnd - entity.offset });
+    ends.push(enclosingEnd);
+
+    // The rest starts where the enclosing entity ends: back to the queue, in its place
+    const rest: Item = { entity: { ...entity, offset: enclosingEnd, length: end - enclosingEnd }, order: item.order };
+    let low = position;
+    let high = queue.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (compare(queue[middle], rest) <= 0) low = middle + 1;
+      else high = middle;
+    }
+    queue.splice(low, 0, rest);
+  }
+
+  return result.sort((a, b) => a.offset - b.offset || b.length - a.length);
+}
+
+function containsSpoiler(nestedEntities: IOrganizedEntity[], cache: Map<IOrganizedEntity, boolean>): boolean {
+  return nestedEntities.some((nested) => {
+    let hasSpoiler = cache.get(nested);
+    if (hasSpoiler === undefined) {
+      hasSpoiler =
+        nested.entity.type === ApiMessageEntityTypes.Spoiler || containsSpoiler(nested.nestedEntities, cache);
+      cache.set(nested, hasSpoiler);
+    }
+
+    return hasSpoiler;
+  });
+}
+
+function buildSpoilerHtml(content: TextPart) {
+  const escaped = (renderText(content, ['escape_html', 'emoji_html', 'br_html']) as string[]).join('');
+  return `<span class="spoiler" data-entity-type="${ApiMessageEntityTypes.Spoiler}">${escaped}</span>`;
+}
+
+function renderSpoilerText(content: TextPart, containerId?: string): TextPart {
+  return <Spoiler containerId={containerId}>{renderMessagePart({ content })}</Spoiler>;
+}
+
+// The content of an entity without the entity: the nested entities and the text around them
+function renderContentOnly(
+  content: TextPart | TextPart[],
+  shouldRenderAsHtml: boolean | undefined,
+  highlight: string | undefined,
+  emojiSize: number | undefined,
+  asPreview: boolean | undefined,
+) {
+  if (shouldRenderAsHtml) {
+    return Array.isArray(content)
+      ? (content as string[]).join('')
+      : (renderText(content, ['escape_html', 'emoji_html', 'br_html']) as string[]).join('');
+  }
+
+  return renderMessagePart({ content, highlight, emojiSize, asPreview });
 }
 
 // Organize entities in a tree-like structure to better represent how the text will be displayed
@@ -523,6 +701,7 @@ function processEntity({
   messageId,
   threadId,
   maxTimestamp,
+  isConcealed,
 }: {
   entity: ApiMessageEntity;
   entityContent: TextPart;
@@ -546,6 +725,7 @@ function processEntity({
   messageId?: number;
   threadId?: ThreadId;
   maxTimestamp?: number;
+  isConcealed?: () => boolean;
 }) {
   const entityText = typeof entityContent === 'string' && entityContent;
   const renderedContent = nestedEntityContent.length ? nestedEntityContent : entityContent;
@@ -614,7 +794,10 @@ function processEntity({
       return <strong data-entity-type={entity.type}>{renderNestedMessagePart()}</strong>;
     case ApiMessageEntityTypes.Blockquote:
       return (
-        <Blockquote canBeCollapsible={entity.canCollapse} isToggleDisabled={typeof isInSelectMode === 'function' ? isInSelectMode() : isInSelectMode}>
+        <Blockquote
+          canBeCollapsible={entity.canCollapse}
+          isToggleDisabled={typeof isInSelectMode === 'function' ? isInSelectMode() : isInSelectMode}
+        >
           {renderNestedMessagePart()}
         </Blockquote>
       );
@@ -707,6 +890,7 @@ function processEntity({
           messageId={messageId}
           threadId={threadId}
           entityType={entity.type}
+          isConcealed={isConcealed}
         >
           {renderNestedMessagePart()}
         </SafeLink>
@@ -759,7 +943,7 @@ function processEntity({
       }
 
       return (
-        <FormattedDate entity={entity} chatId={chatId} messageId={messageId}>
+        <FormattedDate entity={entity} chatId={chatId} messageId={messageId} isConcealed={isConcealed}>
           {renderNestedMessagePart()}
         </FormattedDate>
       );

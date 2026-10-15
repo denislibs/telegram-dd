@@ -421,8 +421,8 @@
       "maxRatio": 0.69
     },
     "src/components/common/spoiler/Spoiler.tsx": {
-      "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",
-      "maxRatio": 0.68
+      "reason": "Component-model rewrite (props getters, effects, callback refs) plus the security deviations of the messages slice: the capture-phase click that only reveals, and the per-container concealed state that removes the link / date tooltips; the DOM and the class contract are tt's.",
+      "maxRatio": 0.85
     },
     "src/components/middle/FloatingActionButtons.tsx": {
       "reason": "Component-model rewrite (props getters, memos for derived values, <Show>/<For> for tt's conditional and list renders, effects split into compute and apply by frame phase, callback refs); the DOM and the class contract are tt's.",

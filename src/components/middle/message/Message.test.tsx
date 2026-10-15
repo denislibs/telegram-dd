@@ -431,7 +431,7 @@ describe('Message (text)', () => {
             results: [{ reaction: { type: 'emoji', emoticon: '👍' }, count: 1 }],
             recentReactions: [],
           },
-        } as Partial<ApiMessage>),
+        }),
       );
       await frames();
 

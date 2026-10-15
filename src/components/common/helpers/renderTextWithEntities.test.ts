@@ -662,6 +662,315 @@ describe('the Spoiler of a message', () => {
   });
 });
 
+// What the sender concealed must not be readable without the click: not in the text around a Spoiler, not in a tooltip, and
+// the click that reveals must not also run what is under the dots (S1-S3 of the messages security review).
+describe('a Spoiler hides what it covers', () => {
+  const click = (target: Element, init: MouseEventInit = {}, type = 'click') => {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, ...init });
+    target.dispatchEvent(event);
+    flushSync();
+    return event;
+  };
+  // The text that is outside of every `.Spoiler`, as a reader sees it
+  const outsideSpoilers = (el: Element) => {
+    const clone = el.cloneNode(true) as Element;
+    clone.querySelectorAll('.Spoiler').forEach((node) => node.remove());
+    return clone.textContent;
+  };
+
+  describe('the first click only reveals', () => {
+    it('does not open a URL under a concealed spoiler, and has no tooltip while it is concealed', async () => {
+      const text = 'see https://evil.example/u now';
+      const el = await mount({
+        text,
+        entities: [entity(T.Spoiler, 'https://evil.example/u', text), entity(T.Url, 'https://evil.example/u', text)],
+        containerId: 'm-url',
+        chatId: '1',
+        messageId: 2,
+      });
+      const link = el.querySelector('a')!;
+      expect(link.hasAttribute('title')).toBe(false);
+
+      const first = click(link);
+      expect(actionCalls).toEqual([]);
+      expect(first.defaultPrevented).toBe(true);
+      expect(el.querySelector('.Spoiler--concealed')).toBeNull();
+      await harness.frame();
+      expect(link.getAttribute('title')).toBe('https://evil.example/u');
+
+      click(link);
+      expect(actionCalls.map(([name]) => name)).toEqual(['openUrl']);
+    });
+
+    it('does not send a bot command under a concealed spoiler', async () => {
+      const text = 'run /ban_all please';
+      const el = await mount({
+        text,
+        entities: [entity(T.Spoiler, '/ban_all', text), entity(T.BotCommand, '/ban_all', text)],
+        containerId: 'm-cmd',
+      });
+
+      click(el.querySelector('a')!);
+      expect(actionCalls).toEqual([]);
+      expect(el.querySelector('.Spoiler--concealed')).toBeNull();
+
+      click(el.querySelector('a')!);
+      expect(actionCalls).toEqual([['sendBotCommand', { command: '/ban_all' }]]);
+    });
+
+    it('stops a middle click on a link under a concealed spoiler, and the keyboard click of a focused one', async () => {
+      const text = 'see https://evil.example/u now';
+      const el = await mount({
+        text,
+        entities: [entity(T.Spoiler, 'https://evil.example/u', text), entity(T.Url, 'https://evil.example/u', text)],
+        containerId: 'm-aux',
+      });
+      const link = el.querySelector('a')!;
+
+      const aux = click(link, { button: 1 }, 'auxclick');
+      expect(aux.defaultPrevented).toBe(true);
+      expect(actionCalls).toEqual([]);
+      expect(el.querySelector('.Spoiler--concealed')).not.toBeNull();
+
+      // Enter on a focused link is a `click` event with no coordinates
+      click(link, { detail: 0 });
+      expect(actionCalls).toEqual([]);
+      expect(el.querySelector('.Spoiler--concealed')).toBeNull();
+    });
+
+    it('has no date tooltip under a concealed spoiler, and a link around the spoiler has no address tooltip', async () => {
+      const text = 'on 2024-05-01 ok https://evil.example/u end';
+      const date = Date.UTC(2024, 4, 1, 12) / 1000;
+      const el = await mount({
+        text,
+        entities: [
+          entity(T.Spoiler, '2024-05-01', text),
+          entity(T.FormattedDate, '2024-05-01', text, { date, shortDate: true }),
+          entity(T.Url, 'https://evil.example/u', text),
+          entity(T.Spoiler, 'evil', text),
+        ],
+        containerId: 'm-title',
+        chatId: '1',
+        messageId: 3,
+      });
+      const anchors = Array.from(el.querySelectorAll('a'));
+      expect(anchors).toHaveLength(2);
+      expect(anchors.map((a) => a.hasAttribute('title'))).toEqual([false, false]);
+
+      click(el.querySelector('.Spoiler')!);
+      await harness.frame();
+      expect(anchors.every((a) => a.getAttribute('title'))).toBe(true);
+    });
+
+    it('does not intercept the click of a preview, which has no container', async () => {
+      const text = 'a secret b';
+      const el = await mount({ text, entities: [entity(T.Spoiler, 'secret', text)], asPreview: true });
+      const listener = vi.fn();
+      addEvent(el, 'click', listener, true);
+
+      click(el.querySelector('.Spoiler')!);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(el.querySelector('.Spoiler--concealed')).not.toBeNull();
+    });
+  });
+
+  describe('the caps never show a Spoiler as plain text', () => {
+    it('keeps a Spoiler that is beyond the cap of the entities', async () => {
+      const count = 2100;
+      const text = `${'ab '.repeat(count)}SECRET123 tail`;
+      const entities = [
+        ...Array.from({ length: count }, (_, i) => bold(i * 3, 2)),
+        entity(T.Spoiler, 'SECRET123', text),
+      ];
+      const el = await mount({ text, entities, containerId: 'm-cap' });
+
+      expect(el.querySelectorAll('.Spoiler--concealed')).toHaveLength(1);
+      expect(outsideSpoilers(el)).not.toContain('SECRET123');
+      expect(readable(el)).toBe(text);
+    });
+
+    it('conceals at least what more Spoilers than the cap conceal', async () => {
+      const count = 3000;
+      const text = 'x '.repeat(count);
+      const entities = Array.from({ length: count }, (_, i) => spoiler(i * 2, 1));
+      const el = await mount({ text, entities, containerId: 'm-many' });
+
+      expect(el.querySelectorAll('.Spoiler--concealed').length).toBeLessThanOrEqual(2048);
+      // every `x` is in a Spoiler, only the spaces between them may be outside
+      expect(outsideSpoilers(el).replace(/\s/g, '')).toBe('');
+      expect(readable(el)).toBe(text);
+    });
+
+    it('keeps a Spoiler below the depth cap, wrapping the flattened text', async () => {
+      const depth = 40;
+      const text = `${'x'.repeat(depth)}SECRET123 tail`;
+      const entities = [
+        ...Array.from({ length: depth }, (_, i) => bold(i, text.length - i)),
+        entity(T.Spoiler, 'SECRET123', text),
+      ];
+      const el = await mount({ text, entities, containerId: 'm-depth' });
+
+      expect(el.querySelectorAll('.Spoiler--concealed').length).toBeGreaterThan(0);
+      expect(outsideSpoilers(el)).not.toContain('SECRET123');
+      expect(readable(el)).toBe(text);
+    });
+
+    it('the wrapped text reveals with the click, like any spoiler of the message', async () => {
+      const depth = 40;
+      const text = `${'x'.repeat(depth)}SECRET123`;
+      const entities = [
+        ...Array.from({ length: depth }, (_, i) => bold(i, text.length - i)),
+        entity(T.Spoiler, 'SECRET123', text),
+      ];
+      const el = await mount({ text, entities, containerId: 'm-depth2' });
+
+      click(el.querySelector('.Spoiler')!);
+
+      expect(el.querySelector('.Spoiler--concealed')).toBeNull();
+    });
+  });
+
+  describe('entities that cross or hold a Spoiler', () => {
+    it('does not print the tail of a Spoiler that starts inside another entity in the clear', async () => {
+      const text = 'aaaaaSECRETCODE12345tail';
+      const el = await mount({ text, entities: [bold(0, 10), spoiler(5, 15)], containerId: 'm-cross' });
+
+      expect(readable(el)).toBe(text);
+      expect(outsideSpoilers(el)).toBe('aaaaatail');
+      expect(el.querySelectorAll('.Spoiler--concealed')).toHaveLength(2);
+      // one click reveals both pieces
+      click(el.querySelector('.Spoiler')!);
+      expect(el.querySelector('.Spoiler--concealed')).toBeNull();
+    });
+
+    it('splits a Spoiler that ends inside another entity the same way', async () => {
+      const text = 'aaaSECRETbbbbtail';
+      const el = await mount({ text, entities: [spoiler(3, 6), bold(6, 6)], containerId: 'm-cross2' });
+
+      expect(readable(el)).toBe(text);
+      expect(outsideSpoilers(el)).toBe('aaabbbbtail'.replace('bbbb', 'bbb' + 'b'));
+      expect(outsideSpoilers(el)).not.toContain('SECRET');
+    });
+
+    it('conceals a date and a custom emoji in the range of a Spoiler in a preview, with no digits of the date', () => {
+      const text = 'meet 2030-01-01 ok';
+      const date = Date.UTC(2030, 0, 1, 12) / 1000;
+      const dateEntity = entity(T.FormattedDate, '2030-01-01', text, { date, shortDate: true });
+      for (const entities of [
+        [dateEntity, spoiler(5, 10)],
+        [spoiler(5, 10), dateEntity],
+        [spoiler(0, 18), dateEntity],
+      ]) {
+        const result = run({ text, entities, asPreview: true });
+        const holder = document.createElement('div');
+        holder.append(
+          ...(result.map((part) => (typeof part === 'string' ? document.createTextNode(part) : part)) as Node[]),
+        );
+
+        expect(holder.textContent, JSON.stringify(entities)).not.toMatch(/\d{2}/);
+        expect(holder.textContent).not.toContain('2030');
+        expect(holder.textContent.length).toBe(text.length);
+      }
+    });
+
+    it('conceals a custom emoji around or inside a Spoiler in a preview', async () => {
+      const text = 'a \u{1F600}\u{1F600}\u{1F600} b';
+      const emoji = {
+        type: T.CustomEmoji,
+        offset: 2,
+        length: 6,
+        documentId: '5368324170671202286',
+      } as ApiMessageEntity;
+      for (const entities of [
+        [emoji, spoiler(2, 6)],
+        [spoiler(2, 6), emoji],
+      ]) {
+        const el = await mount({ text, entities, asPreview: true });
+
+        expect(el.querySelector('.custom-emoji')).toBeNull();
+        expect(el.textContent).not.toContain('\u{1F600}');
+      }
+    });
+
+    it('keeps the Spoiler when a date or a custom emoji holds it in a message', async () => {
+      const text = 'meet 2030-01-01 ok';
+      const date = Date.UTC(2030, 0, 1, 12) / 1000;
+      const el = await mount({
+        text,
+        entities: [entity(T.FormattedDate, '2030-01-01', text, { date, shortDate: true }), spoiler(5, 10)],
+        containerId: 'm-date',
+        chatId: '1',
+        messageId: 4,
+      });
+
+      expect(el.querySelectorAll('.Spoiler--concealed')).toHaveLength(1);
+      expect(outsideSpoilers(el).replace(/\u00A0/g, ' ')).toBe('meet  ok');
+    });
+
+    it('keeps the Spoiler when a custom emoji holds it in a message, and a code block too', async () => {
+      const text = 'a \u{1F600} b SECRET c';
+      const emoji = {
+        type: T.CustomEmoji,
+        offset: 2,
+        length: 2,
+        documentId: '5368324170671202286',
+      } as ApiMessageEntity;
+      const el = await mount({
+        text,
+        entities: [emoji, spoiler(2, 2), entity(T.Spoiler, 'SECRET', text)],
+        containerId: 'm-emoji',
+      });
+      expect(el.querySelector('.custom-emoji')).toBeNull();
+      expect(outsideSpoilers(el)).not.toContain('\u{1F600}');
+
+      const code = 'code SECRET end';
+      const pre = await mount({
+        text: code,
+        entities: [{ type: T.Pre, offset: 0, length: 15 }, entity(T.Spoiler, 'SECRET', code)],
+        containerId: 'm-pre',
+      });
+      expect(pre.querySelector('.CodeBlock')).toBeNull();
+      expect(outsideSpoilers(pre)).not.toContain('SECRET');
+    });
+  });
+
+  it('never leaves a character of a Spoiler outside of it, whatever the entities cross (random)', () => {
+    const text = 'abcdefghijklmnopqrstuvwxyz';
+    const types = [T.Bold, T.Italic, T.Strike, T.Underline, T.Code, T.Spoiler, T.Spoiler];
+    let seed = 987654;
+    const random = (limit: number) => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed % limit;
+    };
+
+    for (let iteration = 0; iteration < 400; iteration++) {
+      const entities = Array.from({ length: 1 + random(6) }, () => ({
+        type: types[random(types.length)],
+        offset: random(26),
+        length: 1 + random(12),
+      })) as ApiMessageEntity[];
+      const concealed = new Set<number>();
+      for (const e of entities) {
+        if (e.type !== T.Spoiler) continue;
+        for (let i = e.offset; i < Math.min(26, e.offset + e.length); i++) concealed.add(i);
+      }
+
+      const el = document.createElement('div');
+      const dispose = render(
+        () => renderTextWithEntities({ text, entities, containerId: `m-random-${iteration}` }),
+        el,
+      );
+      flushSync();
+      const label = JSON.stringify(entities);
+      expect(readable(el), label).toBe(text);
+      const clear = outsideSpoilers(el);
+      for (const index of concealed) expect(clear, `${label} leaks ${text[index]}`).not.toContain(text[index]);
+      dispose();
+    }
+  });
+});
+
 describe('links from the server (untrusted)', () => {
   const SCRIPT_URLS = [
     'javascript:alert(1)',

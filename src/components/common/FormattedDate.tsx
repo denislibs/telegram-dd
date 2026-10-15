@@ -27,6 +27,8 @@ type OwnProps = {
   asPreview?: boolean;
   chatId?: string;
   messageId?: number;
+  // Deviation (security): true while the date is under a concealed spoiler: its tooltip would show the hidden date
+  isConcealed?: () => boolean;
 };
 
 const FormattedDate = (props: OwnProps) => {
@@ -114,7 +116,7 @@ const FormattedDate = (props: OwnProps) => {
         data-entity-type={ApiMessageEntityTypes.FormattedDate}
         data-unix={props.entity.date}
         data-format={getFormattedDateFormatString(props.entity)}
-        title={canonicalDate()}
+        title={props.isConcealed?.() ? undefined : canonicalDate()}
       >
         {formattedDate() ?? props.children}
         <Menu
