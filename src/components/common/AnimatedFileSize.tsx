@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createSignal, onDestroy } from 'frameact';
 import { Show } from 'frameact/dom';
-import { depsOf } from '../../util/effectDeps';
 
+import { depsOf } from '../../util/effectDeps';
 import { formatFileSize } from '../../util/textFormat';
 
 import useLang from '../../hooks/useLang';
@@ -43,24 +43,27 @@ const AnimatedFileSize = (props: OwnProps) => {
     }, 1000 / UPDATES_PER_SECOND);
   };
 
-  createEffect(depsOf(() => [props.progress, props.size] as const), ([progress2, size2]) => {
-    if (progress2 === undefined) {
-      resetAnimation();
-      setCurrentSize(0);
-      return;
-    }
+  createEffect(
+    depsOf(() => [props.progress, props.size] as const),
+    ([progress2, size2]) => {
+      if (progress2 === undefined) {
+        resetAnimation();
+        setCurrentSize(0);
+        return;
+      }
 
-    const currentProgress = size2 * progress2;
-    if (currentProgress > SKIP_AFTER || progress2 === 1) {
-      resetAnimation();
-      setCurrentSize(currentProgress);
-      return;
-    }
+      const currentProgress = size2 * progress2;
+      if (currentProgress > SKIP_AFTER || progress2 === 1) {
+        resetAnimation();
+        setCurrentSize(currentProgress);
+        return;
+      }
 
-    if (timerRef) return;
+      if (timerRef) return;
 
-    animateSize();
-  });
+      animateSize();
+    },
+  );
 
   onDestroy(resetAnimation);
 
@@ -69,16 +72,16 @@ const AnimatedFileSize = (props: OwnProps) => {
 
   return (
     <Show when={!(props.progress === undefined || props.progress === 1)} fallback={totalSizeString()}>
-    <span class={props.className} dir={lang.isRtl ? 'rtl' : undefined}>
-      {lang(
-        'FileTransferProgress',
-        {
-          currentSize: currentSizeString(),
-          totalSize: totalSizeString(),
-        },
-        { withNodes: true },
-      )}
-    </span>
+      <span class={props.className} dir={lang.isRtl ? 'rtl' : undefined}>
+        {lang(
+          'FileTransferProgress',
+          {
+            currentSize: currentSizeString(),
+            totalSize: totalSizeString(),
+          },
+          { withNodes: true },
+        )}
+      </span>
     </Show>
   );
 };

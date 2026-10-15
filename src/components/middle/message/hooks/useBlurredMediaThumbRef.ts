@@ -1,17 +1,25 @@
 import { getMediaThumbUri, type MediaWithThumbs } from '../../../../global/helpers';
+import { type MaybeAccessor, read } from '../../../../util/accessors';
 
 import useOffscreenCanvasBlur from '../../../../hooks/useOffscreenCanvasBlur';
 
 type CanvasBlurReturnType = ReturnType<typeof useOffscreenCanvasBlur>;
 
+// Deviation: the parameters are `MaybeAccessor`s (a hook runs once); it returns the canvas callback ref.
 export default function useBlurredMediaThumbRef(
-  forcedUri: string | undefined,
-  isDisabled: boolean,
+  forcedUri: MaybeAccessor<string | undefined>,
+  isDisabled: MaybeAccessor<boolean | undefined>,
 ): CanvasBlurReturnType;
-export default function useBlurredMediaThumbRef(media: MediaWithThumbs, isDisabled?: boolean): CanvasBlurReturnType;
-// TODO(codemod): useBlurredMediaThumbRef: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
-export default function useBlurredMediaThumbRef(media: MediaWithThumbs | string | undefined, isDisabled?: boolean) {
-  const dataUri = media ? (typeof media === 'string' ? media : getMediaThumbUri(media)) : undefined;
-
-  return useOffscreenCanvasBlur(dataUri, isDisabled);
+export default function useBlurredMediaThumbRef(
+  media: MaybeAccessor<MediaWithThumbs>,
+  isDisabled?: MaybeAccessor<boolean | undefined>,
+): CanvasBlurReturnType;
+export default function useBlurredMediaThumbRef(
+  media: MaybeAccessor<MediaWithThumbs | string | undefined>,
+  isDisabled?: MaybeAccessor<boolean | undefined>,
+) {
+  return useOffscreenCanvasBlur(() => {
+    const media2 = read(media);
+    return media2 ? (typeof media2 === 'string' ? media2 : getMediaThumbUri(media2)) : undefined;
+  }, isDisabled);
 }

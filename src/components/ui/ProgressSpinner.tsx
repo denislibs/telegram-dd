@@ -1,12 +1,11 @@
 import { createEffect, createMemo, requestMutation } from 'frameact';
 import { mergeProps } from 'frameact/dom';
-import { depsOf } from '../../util/effectDeps';
 
 import { animate, timingFunctions } from '../../util/animation';
 import buildClassName from '../../util/buildClassName';
+import { depsOf } from '../../util/effectDeps';
 
 import useDynamicColorListener from '../../hooks/stickers/useDynamicColorListener';
-import { useStateRef } from '../../hooks/useStateRef';
 import useDevicePixelRatio from '../../hooks/window/useDevicePixelRatio';
 
 import Icon from '../common/icons/Icon';
@@ -39,61 +38,84 @@ const GROW_DURATION = 600; // 0.6 s
 const ROTATE_DURATION = 2000; // 2 s
 
 const ProgressSpinner = (rawProps: OwnProps) => {
-  const props = mergeProps({ progress: 0, size: 'l' }, rawProps) as OwnProps & Required<Pick<OwnProps, 'progress' | 'size'>>;
+  const props = mergeProps({ progress: 0, size: 'l' }, rawProps) as OwnProps &
+    Required<Pick<OwnProps, 'progress' | 'size'>>;
   let canvasRef!: HTMLCanvasElement;
   const width = createMemo(() => SIZES[props.size]);
-  // TODO(codemod): useStateRef: a handler reads the current value through the accessor; replace ref.current with the accessor call
-  const progressRef = useStateRef(props.progress);
+  // Deviation: `useStateRef` -> a plain variable that an effect keeps current; the drawing loop reads it on every frame.
+  let progressRef = props.progress;
+  createEffect(
+    () => props.progress,
+    (progress) => {
+      progressRef = progress;
+    },
+  );
 
   const dpr = useDevicePixelRatio();
 
-  const color = useDynamicColorListener(() => canvasRef, undefined, () => !props.withColor);
+  const color = useDynamicColorListener(
+    () => canvasRef,
+    undefined,
+    () => !props.withColor,
+  );
 
-  createEffect(depsOf(() => [progressRef, props.size, width(), dpr, props.rotationOffset, color] as const), ([, size2, width2, , rotationOffset2]) => {
-    let isFirst = true;
-    let growFrom = MIN_PROGRESS;
-    let growStartedAt: number | undefined;
-    let prevProgress: number | undefined;
+  createEffect(
+    depsOf(() => [props.size, width(), dpr(), props.rotationOffset, color()] as const),
+    ([size2, width2, dpr2, rotationOffset2, color2]) => {
+      let isFirst = true;
+      let growFrom = MIN_PROGRESS;
+      let growStartedAt: number | undefined;
+      let prevProgress: number | undefined;
+      // Deviation: tt ended the loop when its ref was cleared on unmount; here the effect's cleanup ends it (also when
+      // size, ratio or colour change and a new loop starts).
+      let isCancelled = false;
 
-    animate(() => {
-      if (!canvasRef) {
-        return false;
-      }
+      animate(() => {
+        if (isCancelled || !canvasRef) {
+          return false;
+        }
 
-      if (progressRef.current !== prevProgress) {
-        growFrom = Math.min(Math.max(MIN_PROGRESS, prevProgress || 0), MAX_PROGRESS);
-        growStartedAt = Date.now();
-        prevProgress = progressRef.current;
-      }
+        if (progressRef !== prevProgress) {
+          growFrom = Math.min(Math.max(MIN_PROGRESS, prevProgress || 0), MAX_PROGRESS);
+          growStartedAt = Date.now();
+          prevProgress = progressRef;
+        }
 
-      const targetProgress = Math.min(Math.max(MIN_PROGRESS, progressRef.current), MAX_PROGRESS);
-      const t = Math.min(1, (Date.now() - growStartedAt!) / GROW_DURATION);
-      const animationFactor = timingFunctions.easeOutQuad(t);
-      const currentProgress = growFrom + (targetProgress - growFrom) * animationFactor;
+        const targetProgress = Math.min(Math.max(MIN_PROGRESS, progressRef), MAX_PROGRESS);
+        const t = Math.min(1, (Date.now() - growStartedAt!) / GROW_DURATION);
+        const animationFactor = timingFunctions.easeOutQuad(t);
+        const currentProgress = growFrom + (targetProgress - growFrom) * animationFactor;
 
-      drawSpinnerArc(
-        canvasRef,
-        width2 * dpr,
-        (size2 === 'xl' ? STROKE_WIDTH_XL : STROKE_WIDTH) * dpr,
-        color ?? 'white',
-        currentProgress,
-        dpr,
-        isFirst,
-        rotationOffset2,
-      );
+        drawSpinnerArc(
+          canvasRef,
+          width2 * dpr2,
+          (size2 === 'xl' ? STROKE_WIDTH_XL : STROKE_WIDTH) * dpr2,
+          color2 ?? 'white',
+          currentProgress,
+          dpr2,
+          isFirst,
+          rotationOffset2,
+        );
 
-      isFirst = false;
+        isFirst = false;
 
-      return currentProgress < 1;
-    }, requestMutation);
-  });
+        return currentProgress < 1;
+      }, requestMutation);
 
-  const className = createMemo(() => buildClassName(
-    `ProgressSpinner size-${props.size}`,
-    props.transparent && 'transparent',
-    props.square && 'square',
-    props.noCross && 'no-cross',
-  ));
+      return () => {
+        isCancelled = true;
+      };
+    },
+  );
+
+  const className = createMemo(() =>
+    buildClassName(
+      `ProgressSpinner size-${props.size}`,
+      props.transparent && 'transparent',
+      props.square && 'square',
+      props.noCross && 'no-cross',
+    ),
+  );
 
   return (
     <div class={className()} onClick={(e) => props.onClick?.(e)}>

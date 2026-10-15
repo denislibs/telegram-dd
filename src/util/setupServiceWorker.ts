@@ -4,9 +4,6 @@ import { DEBUG, DEBUG_MORE, IS_TEST } from '../config';
 // eslint-disable-next-line import-x/default
 import serviceWorkerUrl from '../serviceWorker/service.worker.ts?worker&url';
 import { IS_ANDROID, IS_IOS, IS_SERVICE_WORKER_SUPPORTED } from './browser/windowEnvironment';
-import { formatShareText } from './deeplink';
-import { validateFiles } from './files';
-import { notifyClientReady, playNotifySoundDebounced } from './notifications';
 
 type WorkerAction = {
   type: string;
@@ -31,23 +28,15 @@ function handleWorkerMessage(e: MessageEvent) {
     case 'focusMessage':
       dispatch.focusMessage?.(payload as any);
       break;
-    case 'playNotificationSound':
-      playNotifySoundDebounced(action.payload.id);
-      break;
-    case 'share':
-      dispatch.openChatWithDraft({
-        text: formatShareText(payload.url, payload.text, payload.title),
-        files: validateFiles(payload.files),
-      });
-      break;
+    // Deviation: the 'playNotificationSound' and 'share' messages come from the push and share handlers of tt's service
+    // worker, which are not ported (PWA milestone). TODO(port): restore them with `pushNotification.ts` / `share.ts`.
   }
 }
 
 function subscribeToWorker() {
   navigator.serviceWorker.removeEventListener('message', handleWorkerMessage);
   navigator.serviceWorker.addEventListener('message', handleWorkerMessage);
-  // Notify web worker that client is ready to receive messages
-  notifyClientReady();
+  // TODO(port): `notifyClientReady()` (PWA milestone: the push handler waits for it)
 }
 
 if (IS_SERVICE_WORKER_SUPPORTED) {

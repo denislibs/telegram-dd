@@ -1,13 +1,13 @@
-import { createEffect, createSignal } from 'frameact';
-import { depsOf } from '../util/effectDeps';
+import { createEffect, createMemo, createSignal, untrack } from 'frameact';
 
 import { ApiMediaFormat } from '../api/types';
 
 import { selectIsSynced } from '../global/selectors';
+import { type MaybeAccessor, read } from '../util/accessors';
 import { IS_PROGRESSIVE_SUPPORTED } from '../util/browser/windowEnvironment';
+import { depsOf } from '../util/effectDeps';
 import * as mediaLoader from '../util/mediaLoader';
 import useSelector from './data/useSelector';
-import useForceUpdate from './useForceUpdate';
 import useThrottledCallback from './useThrottledCallback';
 import useUniqueId from './useUniqueId';
 
@@ -15,83 +15,112 @@ const STREAMING_PROGRESS = 0.75;
 const STREAMING_TIMEOUT = 1500;
 const PROGRESS_THROTTLE = 500;
 
-// TODO(codemod): useMediaWithLoadProgress: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: the parameters are `MaybeAccessor`s and the hook returns accessors. `useForceUpdate` is a version signal that the
+// `mediaData` memo reads, so the loader's memory cache is read again once the fetch resolved (as in `useMedia`).
 export default function useMediaWithLoadProgress(
-  mediaHash: string | undefined,
-  noLoad = false,
-  mediaFormat = ApiMediaFormat.BlobUrl,
-  delay?: number | false,
-  isHtmlAllowed = false,
+  mediaHash: MaybeAccessor<string | undefined>,
+  noLoad: MaybeAccessor<boolean> = false,
+  mediaFormat: MaybeAccessor<ApiMediaFormat | undefined> = ApiMediaFormat.BlobUrl,
+  delay?: MaybeAccessor<number | false | undefined>,
+  isHtmlAllowed: MaybeAccessor<boolean> = false,
 ) {
-  const isStreaming = IS_PROGRESSIVE_SUPPORTED && mediaFormat === ApiMediaFormat.Progressive;
-  const mediaData = mediaHash
-    ? isStreaming && !noLoad
-      ? mediaLoader.getProgressiveUrl(mediaHash)
-      : mediaLoader.getFromMemory(mediaHash)
-    : undefined;
+  const format = () => read(mediaFormat) ?? ApiMediaFormat.BlobUrl;
+  const isStreaming = () => IS_PROGRESSIVE_SUPPORTED && format() === ApiMediaFormat.Progressive;
 
-  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
-  const forceUpdate = useForceUpdate();
+  const [version, setVersion] = createSignal(0);
+  const forceUpdate = () => setVersion((current) => current + 1);
+
+  const mediaData = createMemo(() => {
+    version();
+
+    const hash = read(mediaHash);
+    if (!hash) return undefined;
+
+    return isStreaming() && !read(noLoad) ? mediaLoader.getProgressiveUrl(hash) : mediaLoader.getFromMemory(hash);
+  });
+
   const isSynced = useSelector(selectIsSynced);
   const id = useUniqueId();
-  const [loadProgress, setLoadProgress] = createSignal(mediaData && !isStreaming ? 1 : 0);
+  const [loadProgress, setLoadProgress] = createSignal(untrack(mediaData) && !untrack(isStreaming) ? 1 : 0);
   let startedAtRef: number | undefined;
 
   const handleProgress = useThrottledCallback(
     (progress: number) => {
-      if (startedAtRef && id && (!delay || Date.now() - startedAtRef > delay)) {
+      const delay2 = read(delay);
+      if (startedAtRef && id && (!delay2 || Date.now() - startedAtRef > delay2)) {
         setLoadProgress(progress);
       }
     },
-    [delay, id],
+    [],
     PROGRESS_THROTTLE,
     true,
   );
 
-  createEffect(depsOf(() => [noLoad, mediaHash, mediaData, mediaFormat, isStreaming, delay, handleProgress, isHtmlAllowed, id, isSynced()] as const), ([, , , , , , , , , isSynced2]) => {
-    if (!noLoad && mediaHash) {
-      if (!mediaData) {
-        setLoadProgress(0);
+  createEffect(
+    depsOf(
+      () =>
+        [
+          read(noLoad),
+          read(mediaHash),
+          mediaData(),
+          format(),
+          isStreaming(),
+          read(delay),
+          read(isHtmlAllowed),
+          isSynced(),
+        ] as const,
+    ),
+    ([noLoad2, mediaHash2, mediaData2, mediaFormat2, isStreaming2, delay2, isHtmlAllowed2]) => {
+      if (!noLoad2 && mediaHash2) {
+        if (!mediaData2) {
+          setLoadProgress(0);
 
-        if (startedAtRef) {
-          mediaLoader.cancelProgress(handleProgress);
-        }
-
-        startedAtRef = Date.now();
-
-        mediaLoader.fetch(mediaHash, mediaFormat, isHtmlAllowed, handleProgress, id).then(() => {
-          const spentTime = Date.now() - startedAtRef!;
-          startedAtRef = undefined;
-
-          if (!delay || spentTime >= delay) {
-            forceUpdate();
-          } else {
-            setTimeout(forceUpdate, delay - spentTime);
+          if (startedAtRef) {
+            mediaLoader.cancelProgress(handleProgress);
           }
-        });
-      } else if (isStreaming) {
-        setTimeout(() => {
-          setLoadProgress(STREAMING_PROGRESS);
-        }, STREAMING_TIMEOUT);
-      }
-    }
-  });
 
-  createEffect(depsOf(() => [handleProgress, noLoad]), () => {
-    if (noLoad && startedAtRef) {
-      mediaLoader.cancelProgress(handleProgress);
-      setLoadProgress(0);
-      startedAtRef = undefined;
-    }
-  });
+          startedAtRef = Date.now();
 
-  createEffect(depsOf(() => [id, mediaHash]), () => {
-    return () => {
-      if (mediaHash) {
-        mediaLoader.removeCallback(mediaHash, id);
+          mediaLoader.fetch(mediaHash2, mediaFormat2, isHtmlAllowed2, handleProgress, id).then(() => {
+            const spentTime = Date.now() - startedAtRef!;
+            startedAtRef = undefined;
+
+            if (!delay2 || spentTime >= delay2) {
+              forceUpdate();
+            } else {
+              setTimeout(forceUpdate, delay2 - spentTime);
+            }
+          });
+        } else if (isStreaming2) {
+          setTimeout(() => {
+            setLoadProgress(STREAMING_PROGRESS);
+          }, STREAMING_TIMEOUT);
+        }
       }
-    };
-  });
+    },
+  );
+
+  createEffect(
+    () => read(noLoad),
+    (noLoad2) => {
+      if (noLoad2 && startedAtRef) {
+        mediaLoader.cancelProgress(handleProgress);
+        setLoadProgress(0);
+        startedAtRef = undefined;
+      }
+    },
+  );
+
+  createEffect(
+    () => read(mediaHash),
+    (mediaHash2) => {
+      return () => {
+        if (mediaHash2) {
+          mediaLoader.removeCallback(mediaHash2, id);
+        }
+      };
+    },
+  );
 
   return { mediaData, loadProgress };
 }

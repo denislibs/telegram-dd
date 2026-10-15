@@ -61,6 +61,7 @@ import LeftColumn from '../left/LeftColumn';
 import MessageListHistoryHandler from '../middle/MessageListHistoryHandler';
 import MiddleColumn from '../middle/MiddleColumn';
 import RightColumn from '../right/RightColumn';
+import DownloadManager from './DownloadManager';
 import SafeLinkModal from './SafeLinkModal';
 
 import './Main.scss';
@@ -617,7 +618,8 @@ const Main = (ownProps: OwnProps) => {
       />
       <RightColumn isMobile={props.isMobile} />
       {/* TODO(port): MediaViewer, StoryViewer, recipient pickers, Dialogs, AudioPlayer, ModalContainer, HistoryCalendar,
-          sticker set / custom emoji set / premium / payment modals, calls, GameModal, DownloadManager, visual effects */}
+          sticker set / custom emoji set / premium / payment modals, calls, GameModal, visual effects */}
+      <DownloadManager />
       <SafeLinkModal url={props.safeLinkModalUrl} />
       <UnreadCount isForAppBadge />
       <MessageListHistoryHandler />

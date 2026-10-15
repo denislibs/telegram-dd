@@ -1,18 +1,19 @@
-import { createEffect, createSignal } from 'frameact';
+import { type Accessor, createEffect, createSignal } from 'frameact';
 import { getActions } from '../../global';
-import { depsOf } from '../../util/effectDeps';
 
+import { type MaybeAccessor, read } from '../../util/accessors';
 import { IS_MOBILE } from '../../util/browser/windowEnvironment';
-import useLastCallback from '../useLastCallback';
+import { depsOf } from '../../util/effectDeps';
 import useOldLang from '../useOldLang';
 
 const NOTIFICATION_DURATION = 8000;
 
-// TODO(codemod): useUnsupportedMedia: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: `ref` is an accessor of the video element (a signal: the element is created conditionally) and the
+// listeners are attached by an effect keyed on it; `isDisabled` is a `MaybeAccessor`.
 export default function useUnsupportedMedia(
-  ref: (el: HTMLVideoElement) => void,
+  ref: Accessor<HTMLVideoElement | undefined>,
   shouldDisableNotification?: boolean,
-  isDisabled?: boolean,
+  isDisabled?: MaybeAccessor<boolean | undefined>,
 ) {
   const { showNotification } = getActions();
   const lang = useOldLang();
@@ -47,22 +48,24 @@ export default function useUnsupportedMedia(
     }
   };
 
-  createEffect(depsOf(() => [isDisabled, ref]), () => {
-    if (isDisabled) return undefined;
+  createEffect(
+    depsOf(() => [read(isDisabled), ref()] as const),
+    ([isDisabled2, current]) => {
+      if (isDisabled2) return undefined;
 
-    const { current } = ref;
-    if (!current) {
-      return undefined;
-    }
+      if (!current) {
+        return undefined;
+      }
 
-    current.addEventListener('error', onError);
-    current.addEventListener('canplay', onCanPlay);
+      current.addEventListener('error', onError);
+      current.addEventListener('canplay', onCanPlay);
 
-    return () => {
-      current.removeEventListener('error', onError);
-      current.removeEventListener('canplay', onCanPlay);
-    };
-  });
+      return () => {
+        current.removeEventListener('error', onError);
+        current.removeEventListener('canplay', onCanPlay);
+      };
+    },
+  );
 
   return isUnsupported;
 }
