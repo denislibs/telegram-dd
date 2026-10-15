@@ -552,9 +552,7 @@ describe('MessageListContent', () => {
       const observer = new MutationObserver((list) => {
         for (const record of list) {
           const row =
-            (record.target as Element).closest?.('.Message') ??
-            record.target.parentElement?.closest('.Message') ??
-            null;
+            (record.target as Element).closest?.('.Message') ?? record.target.parentElement?.closest('.Message');
           records.push({ id: row?.id ?? '', type: record.type, name: record.attributeName });
         }
       });
