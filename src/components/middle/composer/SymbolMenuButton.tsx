@@ -1,7 +1,6 @@
 import { createEffect, createMemo, createSignal } from 'frameact';
 import { mergeProps } from 'frameact/dom';
 import { getActions } from '../../../global';
-import { depsOf } from '../../../util/effectDeps';
 
 import type { ApiSticker, ApiVideo } from '../../../api/types';
 import type { IAnchorPosition, ThreadId } from '../../../types';
@@ -69,20 +68,17 @@ const SymbolMenuButton = (rawProps: OwnProps) => {
 
   const isMenuOpen = createMemo(() => props.isSymbolMenuOpen || Boolean(props.isSymbolMenuForced));
   const [handleMouseEnter, handleMouseLeave, markMouseInside] = useMouseInside(
-    () => isMenuOpen(),
-    props.closeSymbolMenu,
+    isMenuOpen,
+    () => props.closeSymbolMenu(),
     undefined,
     () => props.isMobile,
   );
 
-  createEffect(
-    depsOf(() => [isMenuOpen(), markMouseInside] as const),
-    ([isMenuOpen2, markMouseInside2]) => {
-      if (isMenuOpen2) {
-        markMouseInside2();
-      }
-    },
-  );
+  createEffect(isMenuOpen, (isMenuOpen2) => {
+    if (isMenuOpen2) {
+      markMouseInside();
+    }
+  });
 
   const symbolMenuButtonClassName = createMemo(() =>
     buildClassName(
@@ -120,9 +116,12 @@ const SymbolMenuButton = (rawProps: OwnProps) => {
   };
 
   const getTriggerElement = () => triggerRef;
-  const getRootElement = () => triggerRef?.closest('.custom-scroll, .no-scrollbar');
-  const getMenuElement = () => document.querySelector('#portals .SymbolMenu .bubble');
+  const getRootElement = () => triggerRef?.closest<HTMLElement>('.custom-scroll, .no-scrollbar');
+  const getMenuElement = () => document.querySelector<HTMLElement>('#portals .SymbolMenu .bubble');
   const getLayout = () => ({ withPortal: true });
+  // tt's `useLastCallback` returned untyped functions, so `undefined` passed for the dynamic options of the menu position
+  // type-checked there; the union type of `MenuPositionOptions` needs the cast here.
+  const ifAttachmentModal = <T,>(value: T) => (props.isAttachmentModal ? value : (undefined as T));
 
   return (
     <>
@@ -148,10 +147,10 @@ const SymbolMenuButton = (rawProps: OwnProps) => {
         canSendPlainText={props.canSendPlainText}
         className={buildClassName(props.className, props.forceDarkTheme && 'component-theme-dark')}
         anchor={props.isAttachmentModal ? contextMenuAnchor() : undefined}
-        getTriggerElement={props.isAttachmentModal ? getTriggerElement : undefined}
-        getRootElement={props.isAttachmentModal ? getRootElement : undefined}
-        getMenuElement={props.isAttachmentModal ? getMenuElement : undefined}
-        getLayout={props.isAttachmentModal ? getLayout : undefined}
+        getTriggerElement={ifAttachmentModal(getTriggerElement)}
+        getRootElement={ifAttachmentModal(getRootElement)}
+        getMenuElement={ifAttachmentModal(getMenuElement)}
+        getLayout={ifAttachmentModal(getLayout)}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       />

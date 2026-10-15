@@ -1,6 +1,5 @@
-import { createMemo } from 'frameact';
-
 import { InputRule, mergeAttributes, Node as TiptapNode, wrappingInputRule } from '@tiptap/core';
+import { createMemo } from 'frameact';
 
 import { NodeViewContent, type TeactNodeViewComponentProps, TeactNodeViewRenderer } from '../../../../util/tiptap';
 import { BLOCKQUOTE_COLLAPSED_ATTR, CAPTION_NODE_NAME } from '../../../../util/tiptap/constants';
@@ -35,10 +34,12 @@ function RichEditorBlockquoteView(props: TeactNodeViewComponentProps) {
   const className = createMemo(() =>
     typeof props.HTMLAttributes.class === 'string' ? props.HTMLAttributes.class : undefined,
   );
-  let canCollapse = true;
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  props.node.forEach((child) => {
-    if (child.type.name !== 'paragraph' && child.type.name !== CAPTION_NODE_NAME) canCollapse = false;
+  const canCollapse = createMemo(() => {
+    let result = true;
+    props.node.forEach((child) => {
+      if (child.type.name !== 'paragraph' && child.type.name !== CAPTION_NODE_NAME) result = false;
+    });
+    return result;
   });
   const isCollapsed = createMemo(() => Boolean(props.node.attrs[BLOCKQUOTE_COLLAPSED_ATTR]));
   const hasEmptyCaption = createMemo(
@@ -52,7 +53,7 @@ function RichEditorBlockquoteView(props: TeactNodeViewComponentProps) {
   return (
     <Blockquote
       className={className()}
-      canBeCollapsible={canCollapse}
+      canBeCollapsible={canCollapse()}
       noInitialCollapse={!isCollapsed()}
       recalculationKey={props.node}
       ignoredLines={hasEmptyCaption() ? 1 : undefined}

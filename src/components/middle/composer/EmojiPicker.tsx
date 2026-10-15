@@ -1,18 +1,22 @@
 import {
+  type Accessor,
   createEffect,
   createMeasureEffect,
   createMemo,
   createMutationEffect,
   createSignal,
+  frozenWhile,
+  onDestroy,
   onMount,
   requestMeasure,
+  untrack,
 } from 'frameact';
-import { For } from 'frameact/dom';
-import { getActions, getGlobal, withGlobal } from '../../../global';
-import { depsOf } from '../../../util/effectDeps';
-import type { GlobalState } from '../../../global/types';
+import { For, Show } from 'frameact/dom';
+import { getActions, useGlobal, withGlobal } from '../../../global';
 
 import type { ApiEmojiGroup, ApiSticker, ApiStickerSet } from '../../../api/types';
+import type { GlobalState } from '../../../global/types';
+import type { TransitionSlide } from '../../../lib/kit';
 import type { StickerSetOrReactionsSetOrRecent } from '../../../types';
 import type { IconName } from '../../../types/icons';
 import type { EmojiData } from '../../../util/emoji/emoji';
@@ -37,6 +41,7 @@ import { selectSharedSettings } from '../../../global/selectors/sharedState';
 import animateHorizontalScroll from '../../../util/animateHorizontalScroll';
 import { IS_TOUCH_ENV } from '../../../util/browser/windowEnvironment';
 import buildClassName from '../../../util/buildClassName';
+import { depsOf } from '../../../util/effectDeps';
 import { ensureEmojiData } from '../../../util/emoji/emojiSearch';
 import { pickTruthy, unique, uniqueByField } from '../../../util/iteratees';
 import { MEMO_EMPTY_ARRAY } from '../../../util/memo';
@@ -48,11 +53,10 @@ import useAppLayout from '../../../hooks/useAppLayout';
 import useHorizontalScroll from '../../../hooks/useHorizontalScroll';
 import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
 import useOldLang from '../../../hooks/useOldLang';
-import usePrevDuringAnimation from '../../../hooks/usePrevDuringAnimation';
 import useScrolledState from '../../../hooks/useScrolledState';
 import { useStickerPickerObservers } from '../../common/hooks/useStickerPickerObservers';
 import useAsyncRendering from '../../right/hooks/useAsyncRendering';
-import useEmojiSearch from './hooks/useEmojiSearch';
+import useEmojiSearch, { type EmojiQueryResults } from './hooks/useEmojiSearch';
 
 import EmojiSearchResults from '../../common/EmojiSearchResults';
 import Icon from '../../common/icons/Icon';
@@ -120,73 +124,127 @@ const INTERSECTION_THROTTLE = 200;
 const LOAD_MORE_THRESHOLD = 500;
 const DEFAULT_ID_PREFIX = 'emoji-picker';
 
+type TextResults = {
+  key: string;
+  natives?: Emoji[];
+  localCustom?: ApiSticker[];
+  packSets?: ApiStickerSet[];
+  globalStickers?: ApiSticker[];
+};
+
+// Deviation: tt's `usePrevDuringAnimation` is deleted (the framework table maps it to `frozenWhile` / `currentOrPrev`,
+// which do not know the "hold for `duration` ms after the value became empty" rule); `MiddleColumn` has the same helper.
+// While `source` is empty and a value was present before it, that value is held for `duration` ms.
+function createValueHeldWhileEmpty<T>(source: Accessor<T | undefined>, duration: number): Accessor<T | undefined> {
+  const [expiry, bumpExpiry] = createSignal(0);
+  let timer: number | undefined;
+  let held: T | undefined;
+  let phase: 'idle' | 'holding' | 'expired' = 'idle';
+
+  onDestroy(() => {
+    window.clearTimeout(timer);
+  });
+
+  return createMemo(() => {
+    expiry();
+    const current = source();
+
+    // eslint-disable-next-line no-null/no-null
+    if (current !== undefined && current !== null) {
+      window.clearTimeout(timer);
+      timer = undefined;
+      phase = 'idle';
+      held = current;
+      return current;
+    }
+
+    // eslint-disable-next-line no-null/no-null
+    if (phase === 'idle' && held !== undefined && held !== null) {
+      phase = 'holding';
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        phase = 'expired';
+        bumpExpiry((value) => value + 1);
+      }, duration);
+    }
+
+    return phase === 'holding' ? held : current;
+  });
+}
+
 const EmojiPicker = (ownProps: OwnProps) => {
   const props = withGlobal(ownProps, mapStateToProps);
   const { loadStickers } = getActions();
+  const global = useGlobal();
 
-  let containerRef!: HTMLDivElement;
-  let headerRef!: HTMLDivElement;
+  // The elements are created inside a `Transition` slide, long after this body ran. The hooks that read them when they
+  // apply (the intersection observers) get these accessors; `useHorizontalScroll` reads its ref in the first compute,
+  // so it gets a signal that the slide fills in `onMount` (a write from the ref callback would dirty the measure effect
+  // of the hook from the mutate phase, where slides are created).
+  let containerEl: HTMLDivElement | undefined;
+  let headerEl: HTMLDivElement | undefined;
+  const getContainer = () => containerEl;
+  const getHeader = () => headerEl;
+  const [headerRef, setHeaderRef] = createSignal<HTMLDivElement | undefined>(undefined);
 
   const [categories, setCategories] = createSignal<EmojiCategoryData[] | undefined>(undefined);
   const [emojis, setEmojis] = createSignal<EmojiData['emojis'] | undefined>(undefined);
   const { isMobile } = useAppLayout();
   const { handleScroll: handleContentScroll, isAtBeginning: shouldHideTopBorder } = useScrolledState();
 
-  const emojiSearchResult = createMemo(() =>
-    useEmojiSearch({
-      allEmojis: () => emojis(),
-      baseEmojiKeywords: () => props.baseEmojiKeywords,
-      emojiKeywords: () => props.emojiKeywords,
-      noQueryCustomResults: true,
-    }),
-  );
-  const query = () => emojiSearchResult().query;
-  const hasQuery = () => emojiSearchResult().hasQuery;
-  const activeGroup = () => emojiSearchResult().activeGroup;
-  const displayGroup = () => emojiSearchResult().displayGroup;
-  const isSearchActive = () => emojiSearchResult().isSearchActive;
-  const nativeResults = () => emojiSearchResult().nativeResults;
-  const customResults = () => emojiSearchResult().customResults;
-  const customResultIds = () => emojiSearchResult().customResultIds;
-  const queryResults = () => emojiSearchResult().queryResults;
-  const setQuery = () => emojiSearchResult().setQuery;
-  const selectGroup = () => emojiSearchResult().selectGroup;
-  const searchMore = () => emojiSearchResult().searchMore;
-  const markSearchFocused = () => emojiSearchResult().markSearchFocused;
-  const unmarkSearchFocused = () => emojiSearchResult().unmarkSearchFocused;
+  const {
+    query,
+    hasQuery,
+    activeGroup,
+    displayGroup,
+    isSearchActive,
+    nativeResults,
+    customResults,
+    customResultIds,
+    queryResults,
+    setQuery,
+    selectGroup,
+    searchMore,
+    markSearchFocused,
+    unmarkSearchFocused,
+  } = useEmojiSearch({
+    allEmojis: emojis,
+    baseEmojiKeywords: () => props.baseEmojiKeywords,
+    emojiKeywords: () => props.emojiKeywords,
+    noQueryCustomResults: true,
+  });
 
   const trimmedQuery = createMemo(() => query().trim().toLowerCase());
 
-  let textResultsRef:
-    | {
-        key: string;
-        natives?: Emoji[];
-        localCustom?: ApiSticker[];
-        packSets?: ApiStickerSet[];
-        globalStickers?: ApiSticker[];
-      }
-    | undefined;
-  const currentQueryResults = createMemo(() => (queryResults()?.key === trimmedQuery() ? queryResults() : undefined));
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (hasQuery() && (nativeResults() !== undefined || currentQueryResults())) {
-    textResultsRef = {
-      key: trimmedQuery(),
-      natives: nativeResults(),
-      localCustom: nativeResults()
-        ? uniqueByField(
-            selectCustomEmojiForEmojis(
-              getGlobal(),
-              nativeResults().map(({ native }) => native),
-            ),
-            'id',
-          )
-        : undefined,
-      // Full sets loaded on demand (e.g. for covers) land in `stickerSetsById`, so prefer them over search snapshots
-      packSets: currentQueryResults()?.packSets?.map((set) => props.stickerSetsById[set.id] || set),
-      globalStickers: currentQueryResults()?.globalStickers,
-    };
-  }
-  const textResults = createMemo(() => (hasQuery() ? textResultsRef : undefined));
+  let textResultsRef: TextResults | undefined;
+  const currentQueryResults = createMemo((): EmojiQueryResults | undefined => {
+    const queryResults2 = queryResults();
+    return queryResults2?.key === trimmedQuery() ? queryResults2 : undefined;
+  });
+  // Deviation: tt kept the last results in a ref that the render updated; here a memo updates it when its inputs change.
+  const textResults = createMemo(() => {
+    if (hasQuery() && (nativeResults() !== undefined || currentQueryResults())) {
+      const nativeResults2 = nativeResults();
+      textResultsRef = {
+        key: trimmedQuery(),
+        natives: nativeResults2,
+        localCustom: nativeResults2
+          ? uniqueByField(
+              selectCustomEmojiForEmojis(
+                global,
+                nativeResults2.map(({ native }) => native),
+              ),
+              'id',
+            )
+          : undefined,
+        // Full sets loaded on demand (e.g. for covers) land in `stickerSetsById`, so prefer them over search snapshots
+        packSets: currentQueryResults()?.packSets?.map((set) => props.stickerSetsById[set.id] || set),
+        globalStickers: currentQueryResults()?.globalStickers,
+      };
+    }
+
+    return hasQuery() ? textResultsRef : undefined;
+  });
   const isShowingResults = createMemo(() => (displayGroup() ? true : Boolean(textResults())));
   const isSearchLoading = createMemo(() => hasQuery() && !currentQueryResults());
 
@@ -194,15 +252,19 @@ const EmojiPicker = (ownProps: OwnProps) => {
   const [isLocalSectionCollapsed, setIsLocalSectionCollapsed] = createSignal(false);
   const [isGlobalSectionCollapsed, setIsGlobalSectionCollapsed] = createSignal(false);
 
-  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
+  // Deviation: tt reset the flags with `useSyncEffect` (during the render in which the query changed); this is a tickEnd
+  // effect.
   createEffect(
     () => trimmedQuery(),
-    (trimmedQuery2) => {
+    () => {
       setIsLocalSectionCollapsed(false);
       setIsGlobalSectionCollapsed(false);
     },
   );
-  const openedSet = createMemo(() => openedPack() && (props.stickerSetsById[openedPack().id] || openedPack()));
+  const openedSet = createMemo(() => {
+    const openedPack2 = openedPack();
+    return openedPack2 && (props.stickerSetsById[openedPack2.id] || openedPack2);
+  });
 
   const contentActiveKey = useTransitionActiveKey(() => [
     isShowingResults(),
@@ -212,46 +274,38 @@ const EmojiPicker = (ownProps: OwnProps) => {
   ]);
 
   const prefix = createMemo(() => `${props.idPrefix === undefined ? DEFAULT_ID_PREFIX : props.idPrefix}-emoji-section`);
-  const stickerPickerObserversResult = createMemo(() =>
-    useStickerPickerObservers(
-      () => containerRef,
-      () => headerRef,
-      () => prefix(),
-      () => props.isHidden,
-    ),
-  );
-  const activeSetIndex = () => stickerPickerObserversResult().activeSetIndex;
-  const observeIntersectionForSet = () => stickerPickerObserversResult().observeIntersectionForSet;
-  const observeIntersectionForPlayingItems = () => stickerPickerObserversResult().observeIntersectionForPlayingItems;
-  const observeIntersectionForShowingItems = () => stickerPickerObserversResult().observeIntersectionForShowingItems;
-  const observeIntersectionForCovers = () => stickerPickerObserversResult().observeIntersectionForCovers;
-  const selectSection = () => stickerPickerObserversResult().selectStickerSet;
+  const {
+    activeSetIndex,
+    observeIntersectionForSet,
+    observeIntersectionForPlayingItems,
+    observeIntersectionForShowingItems,
+    observeIntersectionForCovers,
+    selectStickerSet: selectSection,
+  } = useStickerPickerObservers(getContainer, getHeader, prefix, () => props.isHidden);
 
   const { observe: observeIntersectionForResults } = useIntersectionObserver({
-    rootRef: () => containerRef,
+    rootRef: getContainer,
     throttleMs: INTERSECTION_THROTTLE,
   });
 
   createMutationEffect(
     depsOf(() => [isShowingResults(), displayGroup(), textResults()?.key, openedSet()?.id] as const),
-    ([isShowingResults2, displayGroup2]) => {
-      if (containerRef) {
-        resetScroll(containerRef, 0);
+    () => {
+      if (containerEl) {
+        resetScroll(containerEl, 0);
       }
     },
   );
 
-  // TODO(codemod): usePrevDuringAnimation: frozenWhile(source, isAnimating) or currentOrPrev
-  const canLoadAndPlay = usePrevDuringAnimation(props.loadAndPlay || undefined, SLIDE_TRANSITION_DURATION);
+  const canLoadAndPlay = createValueHeldWhileEmpty(() => props.loadAndPlay || undefined, SLIDE_TRANSITION_DURATION);
 
   const canRenderContents = useAsyncRendering([], MENU_TRANSITION_DURATION);
-  const shouldRenderContent = createMemo(() => emojis() && canRenderContents);
+  const shouldRenderContent = createMemo(() => Boolean(emojis() && canRenderContents()));
 
-  useHorizontalScroll(() => headerRef, isMobile || !shouldRenderContent());
+  useHorizontalScroll(headerRef, () => isMobile() || !shouldRenderContent());
 
   const oldLang = useOldLang();
 
-  // TODO(codemod): dependency on a container (customEmojisById, stickerSetsById) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
   const customSets = createMemo(() => {
     const defaultSets: StickerSetOrReactionsSetOrRecent[] = [];
 
@@ -284,7 +338,8 @@ const EmojiPicker = (ownProps: OwnProps) => {
   });
 
   const sections = createMemo((): EmojiSection[] => {
-    if (!categories()) {
+    const categories2 = categories();
+    if (!categories2) {
       return MEMO_EMPTY_ARRAY;
     }
 
@@ -298,7 +353,7 @@ const EmojiPicker = (ownProps: OwnProps) => {
       });
     }
 
-    categories().forEach((category, index) => {
+    categories2.forEach((category, index) => {
       list.push({ type: 'category', category, title: oldLang(`Emoji${index + 1}`) });
     });
 
@@ -316,17 +371,18 @@ const EmojiPicker = (ownProps: OwnProps) => {
   );
 
   const pillCategories = createMemo((): PillCategory[] => {
-    if (!categories()) {
+    const categories2 = categories();
+    if (!categories2) {
       return MEMO_EMPTY_ARRAY;
     }
 
-    return categories().map(({ id, name }) => ({ id, name, icon: ICONS_BY_CATEGORY[id] || 'smile' }));
+    return categories2.map(({ id, name }) => ({ id, name, icon: ICONS_BY_CATEGORY[id] || 'smile' }));
   });
 
   createMeasureEffect(
     depsOf(() => [activeSetIndex(), isPillActive(), shouldRenderContent()] as const),
-    ([activeSetIndex2, isPillActive2]) => {
-      if (!shouldRenderContent()) {
+    ([activeSetIndex2, isPillActive2, shouldRenderContent2]) => {
+      if (!shouldRenderContent2) {
         return;
       }
 
@@ -336,7 +392,7 @@ const EmojiPicker = (ownProps: OwnProps) => {
       }
 
       requestMeasure(() => {
-        const header = headerRef;
+        const header = headerEl;
         if (!header) {
           return;
         }
@@ -355,7 +411,6 @@ const EmojiPicker = (ownProps: OwnProps) => {
         const newLeft = targetLeftInContent - (headerRect.width - targetWidth) / 2;
         animateHorizontalScroll(header, newLeft);
       });
-      // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps
     },
   );
 
@@ -382,11 +437,11 @@ const EmojiPicker = (ownProps: OwnProps) => {
   };
 
   const handlePillCategorySelect = (index: number) => {
-    selectSection()(firstCategoryIndex() + index);
+    selectSection(firstCategoryIndex() + index);
   };
 
   const handleRecentSelect = () => {
-    selectSection()(0);
+    selectSection(0);
   };
 
   const handlePackSelect = (set: ApiStickerSet) => {
@@ -411,112 +466,131 @@ const EmojiPicker = (ownProps: OwnProps) => {
 
   const handleQueryChange = (value: string) => {
     setOpenedPack(undefined);
-    setQuery()(value);
+    setQuery(value);
   };
 
   const handleGroupSelect = (group?: ApiEmojiGroup) => {
     setOpenedPack(undefined);
-    selectGroup()(group);
+    selectGroup(group);
   };
 
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+  const handleScroll = (e: Event) => {
     handleContentScroll(e);
 
     if (!textResults() || openedSet() || isGlobalSectionCollapsed()) {
       return;
     }
 
-    const container = e.currentTarget;
+    const container = e.currentTarget as HTMLDivElement;
     if (container.scrollHeight - container.scrollTop - container.clientHeight < LOAD_MORE_THRESHOLD) {
-      searchMore()();
+      searchMore();
     }
   };
 
-  function renderCover(section: EmojiSection, index: number) {
-    if (section.type !== 'set' || section.set.id === RECENT_SYMBOL_SET_ID) {
-      return undefined;
-    }
-
-    const { set } = section;
-    const firstSticker = set.stickers?.[0];
-    const buttonClassName = buildClassName(
-      'symbol-set-button',
-      'EmojiPicker-header-cover',
-      index === activeSetIndex() && 'activated',
-    );
-
-    const isLockedSet =
-      !props.isCurrentUserPremium && !props.isSavedMessages && !section.isChatEmojiSet && selectIsSetPremium(set);
-    const lockBadge = isLockedSet && <Icon name="lock" className="EmojiPicker-cover-lock" />;
+  function renderCover(section: Accessor<EmojiSection>, index: Accessor<number>) {
+    const coverSection = createMemo(() => {
+      const section2 = section();
+      return section2.type === 'set' && section2.set.id !== RECENT_SYMBOL_SET_ID ? section2 : undefined;
+    });
 
     return (
-      <Button
-        className={buttonClassName}
-        ariaLabel={set.title}
-        round
-        color="translucent"
+      <Show when={coverSection()}>
+        {(coverSection2) => {
+          const set = () => coverSection2().set;
+          const firstSticker = () => set().stickers?.[0];
+          const buttonClassName = () =>
+            buildClassName(
+              'symbol-set-button',
+              'EmojiPicker-header-cover',
+              index() === activeSetIndex() && 'activated',
+            );
 
-        onClick={() => selectSection()(index)}
-      >
-        {set.hasThumbnail || !firstSticker ? (
-          <StickerSetCover
-            stickerSet={set as ApiStickerSet}
-            size={COVER_SIZE}
-            noPlay={!props.canAnimate || !canLoadAndPlay}
-            forcePlayback
-            observeIntersection={observeIntersectionForCovers()}
-          />
-        ) : (
-          <StickerButton
-            sticker={firstSticker}
-            size={COVER_SIZE}
-            title={set.title}
-            className="EmojiPicker-cover-icon"
-            noPlay={!props.canAnimate || !canLoadAndPlay}
-            observeIntersection={observeIntersectionForCovers()}
-            noContextMenu
-            isCurrentUserPremium
-            withTranslucentThumb={props.isTranslucent}
-            clickArg={index}
-            forcePlayback
-          />
-        )}
-        {lockBadge}
-      </Button>
+          const isLockedSet = () =>
+            !props.isCurrentUserPremium &&
+            !props.isSavedMessages &&
+            !coverSection2().isChatEmojiSet &&
+            selectIsSetPremium(set());
+
+          return (
+            <Button
+              className={buttonClassName()}
+              ariaLabel={set().title}
+              round
+              color="translucent"
+              onClick={() => selectSection(index())}
+            >
+              {set().hasThumbnail || !firstSticker() ? (
+                <StickerSetCover
+                  stickerSet={set() as ApiStickerSet}
+                  size={COVER_SIZE}
+                  noPlay={!props.canAnimate || !canLoadAndPlay()}
+                  forcePlayback
+                  observeIntersection={observeIntersectionForCovers}
+                />
+              ) : (
+                <StickerButton
+                  sticker={firstSticker()!}
+                  size={COVER_SIZE}
+                  title={set().title}
+                  className="EmojiPicker-cover-icon"
+                  noPlay={!props.canAnimate || !canLoadAndPlay()}
+                  observeIntersection={observeIntersectionForCovers}
+                  noContextMenu
+                  isCurrentUserPremium
+                  withTranslucentThumb={props.isTranslucent}
+                  clickArg={index()}
+                  forcePlayback
+                />
+              )}
+              {isLockedSet() && <Icon name="lock" className="EmojiPicker-cover-lock" />}
+            </Button>
+          );
+        }}
+      </Show>
     );
   }
 
   function renderBrowseContent() {
     return (
       <div>
-        <For each={sections()} keyed={(section) => section.set.id}>
+        <For
+          each={sections()}
+          keyed={(section) => (section.type === 'category' ? `category-${section.category.id}` : section.set.id)}
+        >
           {(section, index) => {
-            if (section().type === 'category') {
+            const isNearActive = () => activeSetIndex() >= index() - 1 && activeSetIndex() <= index() + 1;
+
+            // The key of the row contains the type, so a row never changes its type.
+            if (untrack(section).type === 'category') {
+              const categorySection = () => section() as Extract<EmojiSection, { type: 'category' }>;
+
               return (
                 <EmojiCategory
-                  category={section().category}
+                  category={categorySection().category}
                   sectionId={`${prefix()}-${index()}`}
-                  title={section().title}
+                  title={categorySection().title}
                   allEmojis={emojis()!}
-                  observeIntersection={observeIntersectionForSet()}
-                  shouldRender={activeSetIndex() >= index() - 1 && activeSetIndex() <= index() + 1}
+                  observeIntersection={observeIntersectionForSet}
+                  shouldRender={isNearActive()}
                   onEmojiSelect={handleEmojiSelect}
                 />
               );
             }
 
+            const setSection = () => section() as Extract<EmojiSection, { type: 'set' }>;
+
             return (
               <StickerSet
-                stickerSet={section().set}
-                loadAndPlay={Boolean(props.canAnimate && canLoadAndPlay)}
+                stickerSet={setSection().set}
+                loadAndPlay={Boolean(props.canAnimate && canLoadAndPlay())}
                 index={index()}
                 idPrefix={prefix()}
-                observeIntersection={observeIntersectionForSet()}
-                observeIntersectionForPlayingItems={observeIntersectionForPlayingItems()}
-                observeIntersectionForShowingItems={observeIntersectionForShowingItems()}
-                isNearActive={activeSetIndex() >= index() - 1 && activeSetIndex() <= index() + 1}
+                observeIntersection={observeIntersectionForSet}
+                observeIntersectionForPlayingItems={observeIntersectionForPlayingItems}
+                observeIntersectionForShowingItems={observeIntersectionForShowingItems}
+                isNearActive={isNearActive()}
                 isSavedMessages={props.isSavedMessages}
-                isChatEmojiSet={section().isChatEmojiSet}
+                isChatEmojiSet={setSection().isChatEmojiSet}
                 isCurrentUserPremium={props.isCurrentUserPremium}
                 isTranslucent={props.isTranslucent}
                 onStickerSelect={handleCustomEmojiSelect}
@@ -529,13 +603,15 @@ const EmojiPicker = (ownProps: OwnProps) => {
     );
   }
 
-  function renderOpenedPack() {
+  function renderOpenedPack(isFrozen: Accessor<boolean>) {
+    const stickerSet = frozenWhile(openedSet, isFrozen);
+
     return (
       <InlineStickerSetView
-        stickerSet={openedSet()!}
+        stickerSet={stickerSet()!}
         stickerSize={EMOJI_SIZE_PICKER}
         observeIntersection={observeIntersectionForResults}
-        noPlay={!props.canAnimate || !canLoadAndPlay}
+        noPlay={!props.canAnimate || !canLoadAndPlay()}
         isSavedMessages={props.isSavedMessages}
         isCurrentUserPremium={props.isCurrentUserPremium}
         isTranslucent={props.isTranslucent}
@@ -544,14 +620,18 @@ const EmojiPicker = (ownProps: OwnProps) => {
     );
   }
 
-  function renderSearchResults() {
-    if (displayGroup()) {
+  function renderSearchResults(isFrozen: Accessor<boolean>) {
+    if (untrack(displayGroup)) {
+      const frozenNativeResults = frozenWhile(nativeResults, isFrozen);
+      const frozenCustomResults = frozenWhile(customResults, isFrozen);
+      const frozenCustomResultIds = frozenWhile(customResultIds, isFrozen);
+
       return (
         <div>
           <EmojiSearchResults
-            nativeResults={nativeResults()}
-            customResults={customResults()}
-            customResultIds={customResultIds()}
+            nativeResults={frozenNativeResults()}
+            customResults={frozenCustomResults()}
+            customResultIds={frozenCustomResultIds()}
             isCurrentUserPremium={props.isCurrentUserPremium}
             isSavedMessages={props.isSavedMessages}
             observeIntersection={observeIntersectionForResults}
@@ -562,13 +642,15 @@ const EmojiPicker = (ownProps: OwnProps) => {
       );
     }
 
+    const frozenTextResults = frozenWhile(textResults, isFrozen);
+
     return (
       <div>
         <EmojiSearchResults
-          nativeResults={textResults()!.natives}
-          customResults={textResults()!.localCustom}
-          packSets={textResults()!.packSets}
-          globalResults={textResults()!.globalStickers}
+          nativeResults={frozenTextResults()?.natives}
+          customResults={frozenTextResults()?.localCustom}
+          packSets={frozenTextResults()?.packSets}
+          globalResults={frozenTextResults()?.globalStickers}
           withSections
           isCurrentUserPremium={props.isCurrentUserPremium}
           isSavedMessages={props.isSavedMessages}
@@ -585,72 +667,91 @@ const EmojiPicker = (ownProps: OwnProps) => {
     );
   }
 
+  // Deviation: each `<Transition>` slide renders the content that was current when its key became active and freezes
+  // the data it shows while it is not the active slide (teact's Transition kept the last children of an inactive key).
+  function renderContent(slide: TransitionSlide) {
+    const isFrozen = () => !slide.isActive();
+
+    return untrack(() => {
+      if (openedSet()) return renderOpenedPack(isFrozen);
+      if (isShowingResults()) return renderSearchResults(isFrozen);
+      return renderBrowseContent();
+    });
+  }
+
   const containerClassName = createMemo(() => buildClassName('EmojiPicker', props.className));
-  const headerClassName = buildClassName(
-    'EmojiPicker-header',
-    'no-scrollbar',
-    !shouldHideTopBorder && 'with-top-border',
+  const headerClassName = createMemo(() =>
+    buildClassName('EmojiPicker-header', 'no-scrollbar', !shouldHideTopBorder() && 'with-top-border'),
   );
 
-  return (
-    // TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6)
-    <Transition className={containerClassName()} activeKey={shouldRenderContent() ? 1 : 0} name="fade" shouldCleanup>
-      {!shouldRenderContent() ? (
-        <Loading />
-      ) : (
-        <div class={buildClassName('EmojiPicker-inner', isSearchActive() && 'is-search-active')}>
-          <div ref={headerRef} class={headerClassName} dir={oldLang.isRtl ? 'rtl' : undefined}>
-            <div class="EmojiPicker-header-items">
-              {Boolean(props.recentEmojis?.length) && (
-                <Button
-                  className={buildClassName(
-                    'symbol-set-button',
-                    'EmojiPicker-header-recent',
-                    activeSetIndex() === 0 && 'activated',
-                  )}
-                  round
-                  faded
-                  color="translucent"
-                  onClick={handleRecentSelect}
-                  ariaLabel={oldLang('RecentStickers')}
-                  iconName="clock"
-                />
-              )}
-              <EmojiCategoryPill
-                categories={pillCategories()}
-                className="EmojiPicker-header-pill"
-                activeCategoryIndex={isPillActive() ? activeSetIndex() - firstCategoryIndex() : undefined}
-                isActive={isPillActive()}
-                onCategorySelect={handlePillCategorySelect}
+  function renderInner() {
+    onMount(() => {
+      setHeaderRef(headerEl);
+    });
+
+    return (
+      <div class={buildClassName('EmojiPicker-inner', isSearchActive() && 'is-search-active')}>
+        <div ref={headerEl} class={headerClassName()} dir={oldLang.isRtl ? 'rtl' : undefined}>
+          <div class="EmojiPicker-header-items">
+            {Boolean(props.recentEmojis?.length) && (
+              <Button
+                className={buildClassName(
+                  'symbol-set-button',
+                  'EmojiPicker-header-recent',
+                  activeSetIndex() === 0 && 'activated',
+                )}
+                round
+                faded
+                color="translucent"
+                onClick={handleRecentSelect}
+                ariaLabel={oldLang('RecentStickers')}
+                iconName="clock"
               />
-              {sections().map(renderCover)}
-            </div>
-          </div>
-          <div
-            ref={containerRef}
-            onScroll={handleScroll}
-            class={buildClassName('EmojiPicker-main', IS_TOUCH_ENV ? 'no-scrollbar' : 'custom-scroll')}
-          >
-            <EmojiSearch
-              value={query()}
-              groups={props.emojiGroups}
-              activeGroup={activeGroup()}
-              isLoading={isSearchLoading()}
-              hasBackButton={Boolean(openedSet())}
-              onChange={handleQueryChange}
-              onGroupSelect={handleGroupSelect}
-              onBackClick={handlePackBackClick}
-              onFocus={markSearchFocused()}
-              onBlur={unmarkSearchFocused()}
+            )}
+            <EmojiCategoryPill
+              categories={pillCategories()}
+              className="EmojiPicker-header-pill"
+              activeCategoryIndex={isPillActive() ? activeSetIndex() - firstCategoryIndex() : undefined}
+              isActive={isPillActive()}
+              onCategorySelect={handlePillCategorySelect}
             />
-            {/* TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6) */}
-            <Transition name="zoomFade" activeKey={contentActiveKey} className="EmojiPicker-content-transition">
-              {openedSet() ? renderOpenedPack() : isShowingResults() ? renderSearchResults() : renderBrowseContent()}
-            </Transition>
+            <For
+              each={sections()}
+              keyed={(section) => (section.type === 'category' ? `category-${section.category.id}` : section.set.id)}
+            >
+              {renderCover}
+            </For>
           </div>
-          {openedSet() && <StickerSetToggleButton stickerSet={openedSet()} />}
         </div>
-      )}
+        <div
+          ref={containerEl}
+          onScroll={handleScroll}
+          class={buildClassName('EmojiPicker-main', IS_TOUCH_ENV ? 'no-scrollbar' : 'custom-scroll')}
+        >
+          <EmojiSearch
+            value={query()}
+            groups={props.emojiGroups}
+            activeGroup={activeGroup()}
+            isLoading={isSearchLoading()}
+            hasBackButton={Boolean(openedSet())}
+            onChange={handleQueryChange}
+            onGroupSelect={handleGroupSelect}
+            onBackClick={handlePackBackClick}
+            onFocus={markSearchFocused}
+            onBlur={unmarkSearchFocused}
+          />
+          <Transition name="zoomFade" activeKey={contentActiveKey()} className="EmojiPicker-content-transition">
+            {renderContent}
+          </Transition>
+        </div>
+        <Show when={openedSet()}>{(openedSet2) => <StickerSetToggleButton stickerSet={openedSet2()} />}</Show>
+      </div>
+    );
+  }
+
+  return (
+    <Transition className={containerClassName()} activeKey={shouldRenderContent() ? 1 : 0} name="fade" shouldCleanup>
+      {(outerSlide) => (outerSlide.key === 0 ? <Loading /> : renderInner())}
     </Transition>
   );
 };

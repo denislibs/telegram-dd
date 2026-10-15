@@ -1,6 +1,6 @@
 import type { Editor } from '@tiptap/core';
 import { createEffect, createMemo, createSignal } from 'frameact';
-import { depsOf } from '../../../util/effectDeps';
+import { Show } from 'frameact/dom';
 
 import type { IconName } from '../../../types/icons';
 import type { RichEditorFormatterState } from '../../common/tooltips/types';
@@ -8,6 +8,7 @@ import type { RichEditorFormatterState } from '../../common/tooltips/types';
 import { normalizeButtonText } from '../../../global/helpers/buttons';
 import { formatLinkUrl } from '../../../util/browser/url';
 import buildClassName from '../../../util/buildClassName';
+import { depsOf } from '../../../util/effectDeps';
 import stopEvent from '../../../util/stopEvent';
 import { EMPTY_RICH_BUTTON } from '../../../util/tiptap/richButton';
 import { isRichEditorBlockquoteActive } from './richEditorFormatting';
@@ -77,15 +78,32 @@ const TextFormatter = (props: OwnProps) => {
   const [isLinkControlOpen, openLinkControl, closeLinkControl] = useFlag();
   const [isDatePickerOpen, openDatePicker, closeDatePicker] = useFlag();
   const [linkUrl, setLinkUrl] = createSignal('');
-  const [selectedDateAt, setSelectedDateAt] = createSignal((() => roundDateToMinute(new Date()).getTime())());
+  const [selectedDateAt, setSelectedDateAt] = createSignal(roundDateToMinute(new Date()).getTime());
 
   const lang = useLang();
-  const getSelectedEditorTextStateResult = createMemo(() =>
-    getSelectedEditorTextState(props.editor, props.range, Boolean(props.isRichInputExpanded)),
+
+  // Deviation: tt recomputed the selection state on every render of the component. Here it is a memo over the props and
+  // a version of the editor that is bumped by each transaction (a toggled mark or an edit under the same range).
+  const [editorVersion, setEditorVersion] = createSignal(0);
+  createEffect(
+    () => props.editor,
+    (editor2) => {
+      const handleTransaction = () => setEditorVersion((version) => version + 1);
+      editor2.on('transaction', handleTransaction);
+      return () => editor2.off('transaction', handleTransaction);
+    },
   );
+
+  const getSelectedEditorTextStateResult = createMemo(() => {
+    editorVersion();
+    return getSelectedEditorTextState(props.editor, props.range, Boolean(props.isRichInputExpanded));
+  });
   const selectedTextFormats = () => getSelectedEditorTextStateResult().formats;
   const hasSelectedTextFormatting = () => getSelectedEditorTextStateResult().hasFormatting;
-  const selectedLinkHref = createMemo(() => getSelectedLinkHref(props.editor, props.range));
+  const selectedLinkHref = createMemo(() => {
+    editorVersion();
+    return getSelectedLinkHref(props.editor, props.range);
+  });
 
   createEffect(
     () => isLinkControlOpen(),
@@ -181,13 +199,15 @@ const TextFormatter = (props: OwnProps) => {
       return;
     }
 
+    // The href as it was before the commands below (tt read the value of the render).
+    const href = selectedLinkHref();
     const commandChain = props.editor.chain();
-    if (selectedLinkHref() !== undefined) {
+    if (href !== undefined) {
       commandChain.extendMarkRange('link');
     }
     commandChain.setFormatterSelectionHighlight(true).run();
-    if (selectedLinkHref() !== undefined) {
-      setLinkUrl(selectedLinkHref());
+    if (href !== undefined) {
+      setLinkUrl(href);
     }
     openLinkControl();
   };
@@ -246,12 +266,12 @@ const TextFormatter = (props: OwnProps) => {
     props.onClose();
   };
 
-  // TODO(codemod): dependency on a container (controlRequest) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)
+  // `controlRequest` is a plain value of the formatter state (a new object per request), compared by identity as in tt.
   createEffect(
-    depsOf(() => [props.controlRequest, handleOpenDatePicker, handleOpenLinkControl] as const),
-    ([controlRequest2, , handleOpenLinkControl2]) => {
+    () => props.controlRequest,
+    (controlRequest2) => {
       if (controlRequest2?.control === 'link') {
-        handleOpenLinkControl2();
+        handleOpenLinkControl();
       } else if (controlRequest2?.control === 'date') {
         handleOpenDatePicker();
       }
@@ -318,36 +338,34 @@ const TextFormatter = (props: OwnProps) => {
           iconName="link"
           onClick={handleOpenLinkControl}
         />
-        {props.capabilities === 'full' && props.isRichInputExpanded && (
-          <>
-            <FormatButton ariaLabel={lang('RichButtonInline')} iconName="button" onClick={handleInsertButton} />
-            <div class={styles.divider} />
-            <FormatButton
-              ariaLabel={lang('FormattingMarkedAria')}
-              className={buildClassName(styles.markButton, getFormatButtonClassName('marked'))}
-              iconName="mark"
-              hasPremiumBadge
-              isDisabled={isFormatButtonDisabled('marked')}
-              onClick={() => handleToggleEditorMark('marked')}
-            />
-            <FormatButton
-              ariaLabel={lang('FormattingSubscriptAria')}
-              className={getFormatButtonClassName('subscript')}
-              iconName="subscript"
-              hasPremiumBadge
-              isDisabled={isFormatButtonDisabled('subscript')}
-              onClick={() => handleToggleEditorMark('subscript')}
-            />
-            <FormatButton
-              ariaLabel={lang('FormattingSuperscriptAria')}
-              className={getFormatButtonClassName('superscript')}
-              iconName="superscript"
-              hasPremiumBadge
-              isDisabled={isFormatButtonDisabled('superscript')}
-              onClick={() => handleToggleEditorMark('superscript')}
-            />
-          </>
-        )}
+        <Show when={props.capabilities === 'full' && props.isRichInputExpanded}>
+          <FormatButton ariaLabel={lang('RichButtonInline')} iconName="button" onClick={handleInsertButton} />
+          <div class={styles.divider} />
+          <FormatButton
+            ariaLabel={lang('FormattingMarkedAria')}
+            className={buildClassName(styles.markButton, getFormatButtonClassName('marked'))}
+            iconName="mark"
+            hasPremiumBadge
+            isDisabled={isFormatButtonDisabled('marked')}
+            onClick={() => handleToggleEditorMark('marked')}
+          />
+          <FormatButton
+            ariaLabel={lang('FormattingSubscriptAria')}
+            className={getFormatButtonClassName('subscript')}
+            iconName="subscript"
+            hasPremiumBadge
+            isDisabled={isFormatButtonDisabled('subscript')}
+            onClick={() => handleToggleEditorMark('subscript')}
+          />
+          <FormatButton
+            ariaLabel={lang('FormattingSuperscriptAria')}
+            className={getFormatButtonClassName('superscript')}
+            iconName="superscript"
+            hasPremiumBadge
+            isDisabled={isFormatButtonDisabled('superscript')}
+            onClick={() => handleToggleEditorMark('superscript')}
+          />
+        </Show>
         <div class={styles.divider} />
         <FormatButton
           ariaLabel={lang('FormattingClearAria')}
@@ -358,7 +376,7 @@ const TextFormatter = (props: OwnProps) => {
       </div>
       <div
         class={buildClassName(styles.linkControl, styles.inputPopup)}
-        aria-hidden={!isLinkControlOpen()}
+        aria-hidden={isLinkControlOpen() ? 'false' : 'true'}
         inert={!isLinkControlOpen()}
       >
         <TextFormatterInput

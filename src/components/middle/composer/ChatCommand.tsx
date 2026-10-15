@@ -29,10 +29,10 @@ const ChatCommand = <T,>(props: OwnProps<T>) => {
     props.onClick(props.clickArg);
   };
 
+  // Deviation: tt's `key={command}` on the ListItem remounted it when the command changed. The rows of the tooltip are
+  // keyed by command already (bot commands) or by quick reply id (a renamed shortcut updates the row in place).
   return (
-    // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{(key) => …}</Show> (the callback MUST take an argument, a zero-argument child is a plain child and never remounts; a falsy key such as 0 renders nothing: use when={{ id: key }})
     <ListItem
-      key={props.command}
       className={buildClassName('BotCommand chat-item-clickable scroll-item', props.withAvatar && 'with-avatar')}
       multiline
       onClick={handleClick}

@@ -11,8 +11,8 @@ import type { Selection } from '@tiptap/pm/state';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { CellSelection } from '@tiptap/pm/tables';
 import type { EditorView } from '@tiptap/pm/view';
-
 import { requestMutation } from 'frameact';
+
 import buildClassName from '../../../../util/buildClassName';
 import {
   TABLE_CELL_HIGHLIGHT_ATTR,

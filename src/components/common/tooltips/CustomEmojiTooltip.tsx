@@ -1,5 +1,5 @@
-import { createMemo, frozenWhile } from 'frameact';
-import { For, Show, splitProps } from 'frameact/dom';
+import { createMemo, createSignal, frozenWhile } from 'frameact';
+import { For, Show } from 'frameact/dom';
 import { getActions } from '../../../global';
 
 import type { ApiSticker } from '../../../api/types';
@@ -29,31 +29,25 @@ export type OwnProps = {
 
 const INTERSECTION_THROTTLE = 200;
 
-const CustomEmojiTooltip = (p: OwnProps) => {
-  const [, props] = splitProps(p, ['isOpen']);
-  const frozen = frozenWhile(
-    () => props,
-    () => !p.isOpen,
-  );
-  const addRecentCustomEmoji = () => frozen().addRecentCustomEmoji;
-  const onCustomEmojiSelect = () => frozen().onCustomEmojiSelect;
-  const customEmoji = () => frozen().customEmoji;
-  const isSavedMessages = () => frozen().isSavedMessages;
-  const isCurrentUserPremium = () => frozen().isCurrentUserPremium;
-  const noPlay = () => frozen().noPlay;
+const CustomEmojiTooltip = (props: OwnProps) => {
+  const isClosing = () => !props.isOpen;
+  const addRecentCustomEmoji = frozenWhile(() => props.addRecentCustomEmoji, isClosing);
+  const onCustomEmojiSelect = frozenWhile(() => props.onCustomEmojiSelect, isClosing);
+  const customEmoji = frozenWhile(() => props.customEmoji, isClosing);
+  const isSavedMessages = frozenWhile(() => props.isSavedMessages, isClosing);
+  const isCurrentUserPremium = frozenWhile(() => props.isCurrentUserPremium, isClosing);
+  const noPlay = frozenWhile(() => props.noPlay, isClosing);
 
   const { clearCustomEmojiForEmoji } = getActions();
 
-  let containerRef!: HTMLDivElement;
+  // Deviation: the container lives inside a `<Show>`, so its element is a signal (the hooks below read it when they run).
+  const [containerEl, setContainerEl] = createSignal<HTMLDivElement | undefined>(undefined);
   const hasCustomEmoji = createMemo(() => Boolean(customEmoji()?.length));
 
-  useHorizontalScroll(
-    () => containerRef,
-    () => !p.isOpen || !hasCustomEmoji(),
-  );
+  useHorizontalScroll(containerEl, () => !props.isOpen || !hasCustomEmoji());
 
   const { observe: observeIntersection } = useIntersectionObserver({
-    rootRef: () => containerRef,
+    rootRef: containerEl,
     throttleMs: INTERSECTION_THROTTLE,
   });
 
@@ -69,8 +63,8 @@ const CustomEmojiTooltip = (p: OwnProps) => {
 
   return (
     <Show when={hasCustomEmoji()}>
-      <RichEditorTooltipPanel isOpen={p.isOpen}>
-        <div ref={containerRef} class={className}>
+      <RichEditorTooltipPanel isOpen={props.isOpen}>
+        <div ref={setContainerEl} class={className}>
           <For each={customEmoji()} keyed={(sticker) => sticker.id}>
             {(sticker) => (
               <StickerButton

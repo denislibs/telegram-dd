@@ -1,11 +1,12 @@
 import { createEffect, createMeasureEffect, createMemo, requestMutation } from 'frameact';
-import { depsOf } from '../../../util/effectDeps';
+import { Show } from 'frameact/dom';
 
 import type { IconName } from '../../../types/icons';
 
 import { IS_TAURI } from '../../../util/browser/globalEnvironment';
 import buildClassName from '../../../util/buildClassName';
 import captureEscKeyListener from '../../../util/captureEscKeyListener';
+import { depsOf } from '../../../util/effectDeps';
 
 import useLang from '../../../hooks/useLang';
 import useScrollableHint from '../../../hooks/useScrollableHint';
@@ -33,15 +34,12 @@ type OwnProps = {
 };
 
 const TextFormatterInput = (props: OwnProps) => {
-  let inputRef!: HTMLInputElement;
+  let inputRef: HTMLInputElement | undefined;
   const lang = useLang();
-  const scrollableHintResult = createMemo(() =>
-    useScrollableHint(() => inputRef, {
-      isDisabled: () => !props.isActive,
-      shouldSkipOverflowCheck: true,
-    }),
-  );
-  const updateScrollableHint = () => scrollableHintResult().updateScrollableHint;
+  const { updateScrollableHint } = useScrollableHint(() => inputRef, {
+    isDisabled: () => !props.isActive,
+    shouldSkipOverflowCheck: true,
+  });
 
   const canSubmit = createMemo(() => props.canSubmitEmpty || Boolean(props.value.trim().length));
 
@@ -52,9 +50,12 @@ const TextFormatterInput = (props: OwnProps) => {
         return undefined;
       }
 
+      // Deviation: `focus()` is a layout read, so it runs in the measure phase; only the selection is a mutation.
+      const input = inputRef;
+      if (!input) return undefined;
+
+      input.focus();
       requestMutation(() => {
-        const input = inputRef!;
-        input.focus();
         input.setSelectionRange(input.value.length, input.value.length);
       });
     },
@@ -67,7 +68,7 @@ const TextFormatterInput = (props: OwnProps) => {
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     props.onChange(e.currentTarget.value);
-    updateScrollableHint()(e.currentTarget);
+    updateScrollableHint(e.currentTarget);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -89,20 +90,20 @@ const TextFormatterInput = (props: OwnProps) => {
 
   return (
     <div class={buildClassName(styles.buttons, styles.inputControl)} data-text-formatter>
-      {props.leadingButtonIconName && props.leadingButtonAriaLabel && props.onLeadingButtonClick && (
-        <>
-          <Button
-            color="translucent"
-            ariaLabel={props.leadingButtonAriaLabel}
-            onClick={props.onLeadingButtonClick}
-            iconName={props.leadingButtonIconName}
-          />
-          <div class={styles.divider} />
-        </>
-      )}
+      <Show when={props.leadingButtonIconName && props.leadingButtonAriaLabel && props.onLeadingButtonClick}>
+        <Button
+          color="translucent"
+          ariaLabel={props.leadingButtonAriaLabel}
+          onClick={() => props.onLeadingButtonClick?.()}
+          iconName={props.leadingButtonIconName}
+        />
+        <div class={styles.divider} />
+      </Show>
       <div class={styles.inputWrapper}>
         <input
-          ref={inputRef}
+          ref={(el) => {
+            inputRef = el;
+          }}
           class={buildClassName(styles.inputField, 'custom-scroll-x', 'no-scrollbar')}
           type="text"
           use:value={() => props.value}

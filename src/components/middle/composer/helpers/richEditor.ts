@@ -120,8 +120,9 @@ type RichEditorOrderedListUpdate =
 
 type CreateRichEditorParams = {
   element: HTMLDivElement;
-  sharedCanvasRef?: (el: HTMLCanvasElement) => void;
-  sharedCanvasHqRef?: (el: HTMLCanvasElement) => void;
+  // Deviation: tt passed `ElementRef<HTMLCanvasElement>`; a ref object is an accessor over the element here.
+  sharedCanvasRef?: () => HTMLCanvasElement | undefined;
+  sharedCanvasHqRef?: () => HTMLCanvasElement | undefined;
   content: TiptapJsonContent;
   getIsRichInputExpanded: () => boolean;
   getCanInsertMedia: (type: RichEditorMediaItem['type']) => boolean;
@@ -238,8 +239,9 @@ export function __createRichEditor({
             getCanInsertMedia('video') &&
             getCanInsertMedia('document') &&
             getCanInsertMedia('audio'))
-        )
+        ) {
           return true;
+        }
 
         const previousCounts = getRestrictedMediaCounts(state.doc, getCanInsertMedia);
         const nextCounts = getRestrictedMediaCounts(transaction.doc, getCanInsertMedia);
@@ -1288,7 +1290,8 @@ const RichEditorListItem = ListItem.extend({
 
   renderMarkdown(node, helpers, context) {
     if (!node.attrs?.[LIST_ITEM_CHECKBOX_ATTR]) {
-      return renderListItemMarkdown(node, helpers, context);
+      // Deviation: `.call(this, ...)` only satisfies the `this` type of tiptap 3.32 (tt called it bare); the original does not use `this`.
+      return renderListItemMarkdown.call(this, node, helpers, context);
     }
 
     return renderNestedMarkdownContent(

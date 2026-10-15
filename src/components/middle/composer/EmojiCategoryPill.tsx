@@ -1,11 +1,11 @@
-import { createMeasureEffect, requestMeasure } from 'frameact';
+import { createMeasureEffect, createSignal, onMount, requestMeasure } from 'frameact';
 import { For } from 'frameact/dom';
-import { depsOf } from '../../../util/effectDeps';
 
 import type { IconName } from '../../../types/icons';
 
 import animateHorizontalScroll from '../../../util/animateHorizontalScroll';
 import buildClassName from '../../../util/buildClassName';
+import { depsOf } from '../../../util/effectDeps';
 import { REM } from '../../common/helpers/mediaDimensions';
 
 import useHorizontalScroll from '../../../hooks/useHorizontalScroll';
@@ -31,15 +31,22 @@ type OwnProps = {
 const BUTTON_WIDTH = 2.25 * REM;
 
 const EmojiCategoryPill = (props: OwnProps) => {
-  let stripRef!: HTMLDivElement;
+  let stripEl!: HTMLDivElement;
+  // Deviation: `useHorizontalScroll` reads its ref in the first compute, before the element exists, so the element is
+  // handed over as a signal once it is attached (a write from the ref callback would dirty the hook's measure effect
+  // from the mutate phase).
+  const [stripRef, setStripRef] = createSignal<HTMLDivElement | undefined>(undefined);
+  onMount(() => {
+    setStripRef(stripEl);
+  });
 
-  useHorizontalScroll(() => stripRef, undefined, true, true);
+  useHorizontalScroll(stripRef, undefined, true, true);
 
   createMeasureEffect(
     depsOf(() => [props.isActive, props.activeCategoryIndex] as const),
     ([isActive2, activeCategoryIndex2]) => {
       requestMeasure(() => {
-        const strip = stripRef;
+        const strip = stripRef();
         if (!strip) {
           return;
         }
@@ -61,7 +68,7 @@ const EmojiCategoryPill = (props: OwnProps) => {
 
   return (
     <div class={buildClassName(styles.root, props.className, props.isActive && styles.expanded)}>
-      <div ref={stripRef} class={buildClassName(styles.strip, 'no-scrollbar')}>
+      <div ref={stripEl} class={buildClassName(styles.strip, 'no-scrollbar')}>
         <For each={props.categories} keyed={(category) => category.id}>
           {(category, index) => (
             <Button

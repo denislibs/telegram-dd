@@ -1,15 +1,16 @@
 import type { Editor } from '@tiptap/core';
 import { Node } from '@tiptap/core';
 import { TextSelection } from '@tiptap/pm/state';
-import { useEffect } from '../../../lib/teact/teact';
+import { createEffect, createMemo, requestMutation } from 'frameact';
+import { Show } from 'frameact/dom';
 import { getGlobal } from '../../../global';
 
 import type { ApiPeer } from '../../../api/types';
 import type { TeactNodeViewComponentProps } from '../TeactNodeViewRenderer';
 
 import { TME_LINK_PREFIX } from '../../../config';
-import { requestMutation } from '../../../lib/fasterdom/fasterdom';
 import { selectPeer, selectPeerByUsername, selectUser } from '../../../global/selectors';
+import { depsOf } from '../../effectDeps';
 import {
   buildRichMarkdownNodeInputRule,
   buildRichMarkdownTokenizer,
@@ -122,43 +123,49 @@ export function buildMentionMarkdownAttrs(markdown: RichMarkdownLink) {
   return attrs ? { ...attrs, label: markdown.label } : undefined;
 }
 
-function EditableMention({ node, contentDOMElement }: TeactNodeViewComponentProps) {
-  const peer = getMentionPeer(node.attrs);
-  const isEmpty = !node.textContent;
-  const hasUserReference = Boolean(node.attrs.userId || node.attrs.username);
-  const isReadOnly = hasUserReference && !peer;
+function EditableMention(props: TeactNodeViewComponentProps) {
+  const peer = createMemo(() => getMentionPeer(props.node.attrs));
+  const isEmpty = createMemo(() => !props.node.textContent);
+  const hasUserReference = createMemo(() => Boolean(props.node.attrs.userId || props.node.attrs.username));
+  const isReadOnly = createMemo(() => hasUserReference() && !peer());
 
-  useMentionChrome(contentDOMElement, isEmpty);
+  useMentionChrome(() => props.contentDOMElement, isEmpty);
 
   return (
     <>
-      {peer && (
-        <span className={styles.mentionAvatar} contentEditable={false}>
-          <Avatar size={MENTION_AVATAR_SIZE} peer={peer} />
-        </span>
-      )}
-      <NodeViewContent as="span" className={styles.mentionContent} contentEditable={isReadOnly ? false : undefined} />
+      <Show when={peer()}>
+        {(currentPeer) => (
+          // Deviation: `contenteditable` is an attribute with a string value; `contentEditable={false}` writes no attribute.
+          <span class={styles.mentionAvatar} contenteditable="false">
+            <Avatar size={MENTION_AVATAR_SIZE} peer={currentPeer()} />
+          </span>
+        )}
+      </Show>
+      <NodeViewContent as="span" className={styles.mentionContent} contentEditable={isReadOnly() ? false : undefined} />
     </>
   );
 }
 
-function useMentionChrome(contentDOMElement: HTMLElement | undefined, isEmpty: boolean) {
-  useEffect(() => {
-    const mentionElement = getMentionElement(contentDOMElement);
-    if (!mentionElement) {
-      return undefined;
-    }
+function useMentionChrome(contentDOMElement: () => HTMLElement | undefined, isEmpty: () => boolean) {
+  createEffect(
+    depsOf(() => [contentDOMElement(), isEmpty()] as const),
+    ([element, isEmpty2]) => {
+      const mentionElement = getMentionElement(element);
+      if (!mentionElement) {
+        return undefined;
+      }
 
-    requestMutation(() => {
-      mentionElement.classList.toggle(styles.mentionEmpty, isEmpty);
-    });
-
-    return () => {
       requestMutation(() => {
-        mentionElement.classList.remove(styles.mentionEmpty);
+        mentionElement.classList.toggle(styles.mentionEmpty, isEmpty2);
       });
-    };
-  }, [contentDOMElement, isEmpty]);
+
+      return () => {
+        requestMutation(() => {
+          mentionElement.classList.remove(styles.mentionEmpty);
+        });
+      };
+    },
+  );
 }
 
 function getMentionElement(contentDOMElement: HTMLElement | undefined) {

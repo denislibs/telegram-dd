@@ -19,6 +19,7 @@ import createMockedTypePeer from './mockUtils/createMockedTypePeer';
 import createMockedUser from './mockUtils/createMockedUser';
 import getDocumentIdFromLocation from './mockUtils/getDocumentIdFromLocation';
 import getIdFromInputPeer from './mockUtils/getIdFromInputPeer';
+import handleComposerRequest, { PASS } from './mockUtils/composerRequests';
 import { downloadFile } from './downloadFile';
 
 import MockSender from './MockSender';
@@ -121,6 +122,12 @@ class TelegramClient {
       if (a !== 'pass') {
         return a;
       }
+    }
+
+    // Deviation: the composer's requests (send, edit, draft, typing); tt's mock answers none of them
+    const composerResult = handleComposerRequest(this, request);
+    if (composerResult !== PASS) {
+      return composerResult;
     }
 
     if (this.mockData.appConfig && request instanceof Api.help.GetAppConfig) {

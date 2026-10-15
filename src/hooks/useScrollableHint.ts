@@ -1,8 +1,8 @@
-import { createMutationEffect, requestMeasure, requestMutation } from 'frameact';
+import { createMutationEffect, createSignal, onMount, requestMeasure, requestMutation } from 'frameact';
 import { addExtraClass, removeExtraClass, setExtraStyles } from 'frameact/dom';
-import { depsOf } from '../util/effectDeps';
 
-import useLastCallback from './useLastCallback';
+import { type MaybeAccessor, read } from '../util/accessors';
+import { depsOf } from '../util/effectDeps';
 import useResizeObserver from './useResizeObserver';
 import useThrottledCallback from './useThrottledCallback';
 
@@ -14,9 +14,9 @@ type ScrollableHintState = {
 };
 
 type Options = {
-  threshold?: number;
-  isDisabled?: boolean;
-  shouldSkipOverflowCheck?: boolean;
+  threshold?: MaybeAccessor<number | undefined>;
+  isDisabled?: MaybeAccessor<boolean | undefined>;
+  shouldSkipOverflowCheck?: MaybeAccessor<boolean | undefined>;
 };
 
 const DEFAULT_THRESHOLD = 1;
@@ -25,49 +25,57 @@ const HINT_MASK_SIZE = 'var(--scrollable-hint-mask-size)';
 const SCROLLABLE_HINT_CLASS_NAME = 'with-scrollable-hint';
 const SCROLLABLE_OVERFLOW_VALUES = new Set(['auto', 'overlay', 'scroll']);
 
-// TODO(codemod): useScrollableHint: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: a hook runs once. `containerRef` is an accessor of the element (`() => scroller`) and the options are values or
+// accessors. The container is read once the component is mounted (a `let` element ref is assigned when the JSX is created,
+// after this hook ran; tt read `ref.current` in a layout effect after the commit).
 export default function useScrollableHint(
-  containerRef: (el: HTMLElement) => void,
-  { threshold = DEFAULT_THRESHOLD, isDisabled = false, shouldSkipOverflowCheck }: Options = {},
+  containerRef: MaybeAccessor<HTMLElement | undefined>,
+  { threshold, isDisabled = false, shouldSkipOverflowCheck }: Options = {},
 ) {
+  const [isMounted, setIsMounted] = createSignal(false);
+  onMount(() => {
+    setIsMounted(true);
+  });
+
+  const getThreshold = () => read(threshold) ?? DEFAULT_THRESHOLD;
+
   const applyScrollableHintThrottled = useThrottledCallback(
     (element: HTMLElement) => {
       requestMeasure(() => {
-        const state = measureScrollableHint(element, threshold, shouldSkipOverflowCheck);
+        const state = measureScrollableHint(element, getThreshold(), read(shouldSkipOverflowCheck));
 
         requestMutation(() => {
           applyScrollableHint(element, state);
         });
       });
     },
-    [shouldSkipOverflowCheck, threshold],
+    [],
     UPDATE_THROTTLE,
   );
 
-  const updateScrollableHint = (element = containerRef.current) => {
-    if (!element || isDisabled) {
+  const updateScrollableHint = (element = read(containerRef)) => {
+    if (!element || read(isDisabled)) {
       return;
     }
 
     applyScrollableHintThrottled(element);
   };
 
-  const handleScroll = (event: Event | React.UIEvent<HTMLElement>) => {
-    const element = event.currentTarget instanceof HTMLElement ? event.currentTarget : containerRef.current;
+  const handleScroll = (event: Event) => {
+    const element = event.currentTarget instanceof HTMLElement ? event.currentTarget : read(containerRef);
     updateScrollableHint(element);
   };
 
   useResizeObserver(containerRef, () => updateScrollableHint(), isDisabled);
 
   createMutationEffect(
-    depsOf(() => [containerRef, handleScroll, isDisabled, threshold, updateScrollableHint]),
-    () => {
-      const element = containerRef.current;
+    depsOf(() => [isMounted() ? read(containerRef) : undefined, read(isDisabled), getThreshold()] as const),
+    ([element, isDisabled2]) => {
       if (!element) {
         return undefined;
       }
 
-      if (isDisabled) {
+      if (isDisabled2) {
         requestMutation(() => clearScrollableHint(element));
         return undefined;
       }

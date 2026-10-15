@@ -1,4 +1,4 @@
-import { createMutationEffect, requestForcedReflow, requestMutation } from 'frameact';
+import { createMutationEffect, onMount, requestForcedReflow, requestMutation } from 'frameact';
 
 import buildClassName from '../../util/buildClassName';
 import { waitForTransitionEnd } from '../../util/cssAnimationEndListeners';
@@ -20,27 +20,29 @@ const CLEANUP_FALLBACK_MS = TRANSITION_DURATION + 100;
 
 const CollapsibleSection = (props: OwnProps) => {
   let contentRef!: HTMLDivElement;
-  let isFirstRunRef = true;
   let cancelCleanupRef: NoneToVoidFunction | undefined;
+
+  // Deviation: the first apply of a mutation effect runs when the component is created, before the element exists, so
+  // tt's "first run" branch (a section that is collapsed from the start gets its height at once) is `onMount`.
+  onMount(() => {
+    const content = contentRef;
+    if (props.isCollapsed) {
+      requestMutation(() => {
+        content.style.height = '0px';
+      });
+    }
+  });
 
   createMutationEffect(
     () => props.isCollapsed,
-    (isCollapsed2) => {
+    (isCollapsed2, prev) => {
       const content = contentRef;
       if (!content) return;
 
       cancelCleanupRef?.();
       cancelCleanupRef = undefined;
 
-      if (isFirstRunRef) {
-        isFirstRunRef = false;
-        if (isCollapsed2) {
-          requestMutation(() => {
-            content.style.height = '0px';
-          });
-        }
-        return;
-      }
+      if (prev === undefined) return;
 
       if (isCollapsed2) {
         requestForcedReflow(() => {
@@ -93,9 +95,10 @@ const CollapsibleSection = (props: OwnProps) => {
       <div
         role="button"
         tabIndex={0}
-        aria-expanded={!props.isCollapsed}
+        // Deviation: ARIA states are strings; a boolean `false` attribute is removed by frameact (teact rendered "false").
+        aria-expanded={props.isCollapsed ? 'false' : 'true'}
         class={styles.header}
-        onClick={(e) => props.onToggle?.(e)}
+        onClick={() => props.onToggle()}
         onKeyDown={handleKeyDown}
       >
         <p class={styles.title}>{props.title}</p>
@@ -103,7 +106,7 @@ const CollapsibleSection = (props: OwnProps) => {
       </div>
       <div
         ref={contentRef}
-        aria-hidden={props.isCollapsed}
+        aria-hidden={props.isCollapsed ? 'true' : 'false'}
         class={buildClassName(styles.content, props.isCollapsed && styles.contentCollapsed)}
       >
         {props.children}

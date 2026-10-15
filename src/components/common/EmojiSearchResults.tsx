@@ -1,8 +1,9 @@
-import { createMemo } from 'frameact';
+import { type Accessor, createMemo } from 'frameact';
 import { For, Show } from 'frameact/dom';
 import { getActions, getGlobal } from '../../global';
 
 import type { ApiSticker, ApiStickerSet } from '../../api/types';
+import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 
 import { EMOJI_SIZE_PICKER } from '../../config';
 import buildClassName from '../../util/buildClassName';
@@ -101,26 +102,33 @@ const EmojiSearchResults = (props: OwnProps) => {
     () => hasLocalResults() || Boolean(props.packSets?.length || dedupedGlobalResults()?.length),
   );
 
-  function renderCustomStickers(stickers: ApiSticker[]) {
-    return stickers.map((sticker) => (
-      <StickerButton
-        sticker={sticker}
-        size={EMOJI_SIZE_PICKER}
-        observeIntersection={props.observeIntersection}
-        onClick={props.onCustomEmojiSelect}
-        clickArg={sticker}
-        isSavedMessages={props.isSavedMessages}
-        isCurrentUserPremium={props.isCurrentUserPremium}
-      />
-    ));
+  function renderCustomStickers(stickers: Accessor<ApiSticker[] | undefined>) {
+    return (
+      <For each={stickers()} keyed={(sticker) => sticker.id}>
+        {(sticker) => (
+          <StickerButton
+            sticker={sticker()}
+            size={EMOJI_SIZE_PICKER}
+            observeIntersection={props.observeIntersection}
+            onClick={props.onCustomEmojiSelect}
+            clickArg={sticker()}
+            isSavedMessages={props.isSavedMessages}
+            isCurrentUserPremium={props.isCurrentUserPremium}
+          />
+        )}
+      </For>
+    );
   }
 
   function renderLocalGrid() {
     return (
       <div class={buildClassName('symbol-set-container', 'shown', styles.grid)} dir={oldLang.isRtl ? 'rtl' : undefined}>
-        {props.customResults && renderCustomStickers(props.customResults)}
-        {props.onEmojiSelect &&
-          props.nativeResults?.map((emoji) => <EmojiButton emoji={emoji} onClick={props.onEmojiSelect} />)}
+        {renderCustomStickers(() => props.customResults)}
+        <Show when={props.onEmojiSelect}>
+          <For each={props.nativeResults}>
+            {(emoji) => <EmojiButton emoji={emoji} onClick={props.onEmojiSelect!} />}
+          </For>
+        </Show>
         <For each={serverResultIds()} keyed={(documentId) => documentId}>
           {(documentId) => (
             <div
@@ -146,27 +154,26 @@ const EmojiSearchResults = (props: OwnProps) => {
     );
   }
 
-  function renderFoundPack(set: ApiStickerSet) {
-    const firstSticker = set.covers?.[0] || set.stickers?.[0];
+  function renderFoundPack(set: Accessor<ApiStickerSet>) {
+    const firstSticker = () => set().covers?.[0] || set().stickers?.[0];
 
     return (
       <Button
         className={pickerStyles.foundPack}
         color="translucent"
-        ariaLabel={set.title}
-
-        onClick={() => props.onPackSelect?.(set)}
+        ariaLabel={set().title}
+        onClick={() => props.onPackSelect?.(set())}
       >
-        {set.hasThumbnail || !firstSticker ? (
+        {set().hasThumbnail || !firstSticker() ? (
           <StickerSetCover
-            stickerSet={set}
+            stickerSet={set()}
             size={FOUND_PACK_COVER_SIZE}
             observeIntersection={props.observeIntersection}
             forcePlayback
           />
         ) : (
           <StickerButton
-            sticker={firstSticker}
+            sticker={firstSticker()!}
             size={FOUND_PACK_COVER_SIZE}
             className={pickerStyles.foundPackCover}
             observeIntersection={props.observeIntersection}
@@ -176,7 +183,7 @@ const EmojiSearchResults = (props: OwnProps) => {
             forcePlayback
           />
         )}
-        <span class={pickerStyles.foundPackTitle}>{set.title}</span>
+        <span class={pickerStyles.foundPackTitle}>{set().title}</span>
       </Button>
     );
   }
@@ -185,32 +192,38 @@ const EmojiSearchResults = (props: OwnProps) => {
     <Show when={hasResults()} fallback={<div class={styles.noResults}>{lang('NoEmojiFound')}</div>}>
       <Show when={props.withSections} fallback={renderLocalGrid()}>
         <div>
-          {Boolean(props.packSets?.length) && <FoundPacksRow>{props.packSets.map(renderFoundPack)}</FoundPacksRow>}
-          {hasLocalResults() && (
+          <Show when={props.packSets?.length}>
+            <FoundPacksRow>
+              <For each={props.packSets} keyed={(set) => set.id}>
+                {renderFoundPack}
+              </For>
+            </FoundPacksRow>
+          </Show>
+          <Show when={hasLocalResults()}>
             <CollapsibleSection
               className={pickerStyles.resultSection}
               title={lang('StickerSearchResult')}
               isCollapsed={Boolean(props.isLocalSectionCollapsed)}
-              onToggle={props.onLocalSectionToggle!}
+              onToggle={() => props.onLocalSectionToggle?.()}
             >
               {renderLocalGrid()}
             </CollapsibleSection>
-          )}
-          {Boolean(dedupedGlobalResults()?.length) && (
+          </Show>
+          <Show when={dedupedGlobalResults()?.length}>
             <CollapsibleSection
               className={pickerStyles.resultSection}
               title={lang('StickerSearchGlobalResult')}
               isCollapsed={Boolean(props.isGlobalSectionCollapsed)}
-              onToggle={props.onGlobalSectionToggle!}
+              onToggle={() => props.onGlobalSectionToggle?.()}
             >
               <div
                 class={buildClassName('symbol-set-container', 'shown', styles.grid)}
                 dir={oldLang.isRtl ? 'rtl' : undefined}
               >
-                {renderCustomStickers(dedupedGlobalResults())}
+                {renderCustomStickers(dedupedGlobalResults)}
               </div>
             </CollapsibleSection>
-          )}
+          </Show>
         </div>
       </Show>
     </Show>

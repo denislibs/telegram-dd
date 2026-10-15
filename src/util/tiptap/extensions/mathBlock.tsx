@@ -3,19 +3,18 @@ import {
 } from '@tiptap/core';
 import { NodeSelection, Selection } from '@tiptap/pm/state';
 import {
-  useEffect, useRef, useState,
-} from '../../../lib/teact/teact';
+  createEffect, createMemo, createSignal, requestMeasure,
+} from 'frameact';
+import { Show } from 'frameact/dom';
 
 import type { IAnchorPosition } from '../../../types';
 import type { TeactNodeViewComponentProps } from '../TeactNodeViewRenderer';
 
-import { requestMeasure } from '../../../lib/fasterdom/fasterdom';
 import buildClassName from '../../buildClassName';
 import { MATH_BLOCK_NODE_NAME, MATH_INLINE_NODE_NAME } from '../constants';
 import { escapeRichMarkdownHtml, RE_RICH_MARKDOWN_INLINE_MATH } from '../richMarkdown';
 
 import useLang from '../../../hooks/useLang';
-import useLastCallback from '../../../hooks/useLastCallback';
 
 import Latex from '../../../components/iv/Latex';
 import Portal from '../../../components/ui/Portal';
@@ -175,46 +174,49 @@ export const MathInlineNode = MathNode.extend({
   },
 });
 
-function EditableMath({
-  editor, node, selected, getPos,
-}: TeactNodeViewComponentProps) {
-  const isInline = node.type.name === MATH_INLINE_NODE_NAME;
-  const mathRef = useRef<HTMLSpanElement>();
-  const editorRef = useRef<HTMLDivElement>();
-  const nodePosition = getPos();
-  const isMathNodeSelected = selected
-    && typeof nodePosition === 'number'
-    && editor.state.selection instanceof NodeSelection
-    && editor.state.selection.from === nodePosition;
-  const [isEditorOpen, setIsEditorOpen] = useState(isMathNodeSelected);
-  const [editorAnchor, setEditorAnchor] = useState<IAnchorPosition>();
+function EditableMath(props: TeactNodeViewComponentProps) {
+  let mathRef!: HTMLSpanElement;
+  let editorRef: HTMLDivElement | undefined;
   const lang = useLang();
 
-  const source = typeof node.attrs.source === 'string' ? node.attrs.source : '';
-  const hasSource = Boolean(source.trim());
-  const canToggleDisplayMode = Boolean(buildDisplayModeTransaction(editor, node, getPos));
+  const isInline = () => props.node.type.name === MATH_INLINE_NODE_NAME;
+  // Deviation: tt re-evaluated this on every render. The node view props are getters over one signal that is written by
+  // every `updateProps`, so reading `props.node` / `props.selected` here re-runs the memo exactly when tt re-rendered.
+  const isMathNodeSelected = createMemo(() => {
+    void props.node;
+    const nodePosition = props.getPos();
+    return props.selected
+      && typeof nodePosition === 'number'
+      && props.editor.state.selection instanceof NodeSelection
+      && props.editor.state.selection.from === nodePosition;
+  });
+  const [isEditorOpen, setIsEditorOpen] = createSignal(isMathNodeSelected());
+  const [editorAnchor, setEditorAnchor] = createSignal<IAnchorPosition | undefined>(undefined);
 
-  const updateEditorAnchor = useLastCallback(() => {
+  const source = createMemo(() => (typeof props.node.attrs.source === 'string' ? props.node.attrs.source : ''));
+  const hasSource = createMemo(() => Boolean(source().trim()));
+  const canToggleDisplayMode = createMemo(() => Boolean(buildDisplayModeTransaction(props.editor, props.node, props.getPos)));
+
+  function updateEditorAnchor() {
     requestMeasure(() => {
-      const math = mathRef.current;
-      if (!math) {
+      if (!mathRef) {
         return;
       }
 
-      const rect = math.getBoundingClientRect();
+      const rect = mathRef.getBoundingClientRect();
       setEditorAnchor({
         x: rect.left + rect.width / 2,
         y: rect.top,
       });
     });
+  }
+
+  createEffect(isMathNodeSelected, (isSelected) => {
+    setIsEditorOpen(isSelected);
   });
 
-  useEffect(() => {
-    setIsEditorOpen(isMathNodeSelected);
-  }, [isMathNodeSelected]);
-
-  useEffect(() => {
-    if (!isEditorOpen) {
+  createEffect(isEditorOpen, (isOpen) => {
+    if (!isOpen) {
       setEditorAnchor(undefined);
       return undefined;
     }
@@ -227,16 +229,16 @@ function EditableMath({
       window.removeEventListener('resize', updateEditorAnchor);
       document.removeEventListener('scroll', updateEditorAnchor, true);
     };
-  }, [isEditorOpen, updateEditorAnchor]);
+  });
 
-  useEffect(() => {
-    if (!isEditorOpen) {
+  createEffect(isEditorOpen, (isOpen) => {
+    if (!isOpen) {
       return undefined;
     }
 
     function handleDocumentMouseDown(e: MouseEvent) {
       const target = e.target as Node;
-      if (mathRef.current?.contains(target) || editorRef.current?.contains(target)) {
+      if (mathRef?.contains(target) || editorRef?.contains(target)) {
         return;
       }
 
@@ -245,112 +247,115 @@ function EditableMath({
 
     document.addEventListener('mousedown', handleDocumentMouseDown);
     return () => document.removeEventListener('mousedown', handleDocumentMouseDown);
-  }, [isEditorOpen]);
+  });
 
   function handleMathMouseDown() {
     setIsEditorOpen(true);
   }
 
-  const handleSourceChange = useLastCallback((value: string) => {
-    const position = getPos();
+  function handleSourceChange(value: string) {
+    const position = props.getPos();
     if (typeof position !== 'number') {
       return;
     }
 
-    const currentNode = editor.state.doc.nodeAt(position);
-    if (currentNode?.type !== node.type) {
+    const currentNode = props.editor.state.doc.nodeAt(position);
+    if (currentNode?.type !== props.node.type) {
       return;
     }
 
-    const transaction = editor.state.tr.setNodeMarkup(position, undefined, {
+    const transaction = props.editor.state.tr.setNodeMarkup(position, undefined, {
       ...currentNode.attrs,
       source: value,
     });
     transaction.setSelection(NodeSelection.create(transaction.doc, position));
-    editor.view.dispatch(transaction);
-  });
+    props.editor.view.dispatch(transaction);
+  }
 
-  const deleteMath = useLastCallback(() => {
-    const position = getPos();
+  function deleteMath() {
+    const position = props.getPos();
     if (typeof position !== 'number') {
       return;
     }
 
-    editor.chain().focus().deleteRange({
+    props.editor.chain().focus().deleteRange({
       from: position,
-      to: position + node.nodeSize,
+      to: position + props.node.nodeSize,
     }).run();
-  });
+  }
 
-  const toggleDisplayMode = useLastCallback(() => {
-    const transaction = buildDisplayModeTransaction(editor, node, getPos);
+  function toggleDisplayMode() {
+    const transaction = buildDisplayModeTransaction(props.editor, props.node, props.getPos);
     if (!transaction) {
       return;
     }
 
-    editor.view.dispatch(transaction);
-    editor.commands.focus();
-  });
+    props.editor.view.dispatch(transaction);
+    props.editor.commands.focus();
+  }
 
-  function handleEditorMouseDown(e: React.MouseEvent<HTMLDivElement>) {
+  function handleEditorMouseDown(e: MouseEvent) {
     e.stopPropagation();
   }
 
-  const closeEditor = useLastCallback(() => {
+  function closeEditor() {
     setIsEditorOpen(false);
-    editor.commands.focus();
-  });
+    props.editor.commands.focus();
+  }
 
-  const submitEditor = useLastCallback(() => {
+  function submitEditor() {
     setIsEditorOpen(false);
 
-    const position = getPos();
+    const position = props.getPos();
     if (typeof position !== 'number') {
       return;
     }
 
-    const nextSelection = Selection.near(editor.state.doc.resolve(position + node.nodeSize));
-    editor.view.dispatch(editor.state.tr.setSelection(nextSelection));
-    editor.commands.focus();
-  });
+    const nextSelection = Selection.near(props.editor.state.doc.resolve(position + props.node.nodeSize));
+    props.editor.view.dispatch(props.editor.state.tr.setSelection(nextSelection));
+    props.editor.commands.focus();
+  }
 
-  const editorStyle = editorAnchor
-    ? `left: ${editorAnchor.x}px; top: ${editorAnchor.y}px;`
-    : undefined;
+  const editorStyle = () => {
+    const anchor = editorAnchor();
+    return anchor ? `left: ${anchor.x}px; top: ${anchor.y}px;` : undefined;
+  };
 
   return (
     <>
       <span
         ref={mathRef}
-        className={buildClassName(isInline ? styles.mathInline : styles.mathBlock, selected && styles.mathSelected)}
-        contentEditable={false}
+        class={buildClassName(isInline() ? styles.mathInline : styles.mathBlock, props.selected && styles.mathSelected)}
+        // Deviation: `contenteditable` is an attribute with a string value; `contentEditable={false}` writes no attribute.
+        contenteditable="false"
         onMouseDown={handleMathMouseDown}
       >
-        {hasSource ? (
-          <Latex source={source} isBlock={isInline ? undefined : true} />
-        ) : (
-          <span className={styles.mathPlaceholder}>{lang('RichEditorFormulaPrompt')}</span>
-        )}
+        <Show
+          when={hasSource()}
+          fallback={<span class={styles.mathPlaceholder}>{lang('RichEditorFormulaPrompt')}</span>}
+        >
+          <Latex source={source()} isBlock={isInline() ? undefined : true} />
+        </Show>
       </span>
-      {isEditorOpen && editorAnchor && (
+      <Show when={isEditorOpen() && editorAnchor()}>
         <Portal>
           <div
             ref={editorRef}
-            className={buildClassName(textFormatterStyles.inputPopup, styles.mathEditor)}
-            style={editorStyle}
-            contentEditable={false}
+            class={buildClassName(textFormatterStyles.inputPopup, styles.mathEditor)}
+            style={editorStyle()}
+            contenteditable="false"
             onMouseDown={handleEditorMouseDown}
           >
             <TextFormatterInput
-              value={source}
+              value={source()}
               placeholder={lang('RichEditorFormulaPrompt')}
               ariaLabel={lang('RichEditorFormula')}
               isActive
-              leadingButtonIconName={canToggleDisplayMode
-                ? (!isInline ? 'table-merge-horizontal' : 'table-split-horizontal')
+              leadingButtonIconName={canToggleDisplayMode()
+                ? (!isInline() ? 'table-merge-horizontal' : 'table-split-horizontal')
                 : undefined}
-              leadingButtonAriaLabel={canToggleDisplayMode
-                ? lang(isInline ? 'RichEditorFormulaToBlock' : 'RichEditorFormulaToInline')
+              leadingButtonAriaLabel={canToggleDisplayMode()
+                ? lang(isInline() ? 'RichEditorFormulaToBlock' : 'RichEditorFormulaToInline')
                 : undefined}
               shouldSpellCheck={false}
               dir="ltr"
@@ -358,11 +363,11 @@ function EditableMath({
               onSubmit={submitEditor}
               onEscape={closeEditor}
               onDeleteEmpty={deleteMath}
-              onLeadingButtonClick={canToggleDisplayMode ? toggleDisplayMode : undefined}
+              onLeadingButtonClick={canToggleDisplayMode() ? toggleDisplayMode : undefined}
             />
           </div>
         </Portal>
-      )}
+      </Show>
     </>
   );
 }

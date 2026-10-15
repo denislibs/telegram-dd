@@ -1,4 +1,5 @@
-import { createEffect, createMemo, createSignal } from 'frameact';
+import { createEffect, createMemo, createMutationEffect, createSignal } from 'frameact';
+import { Show } from 'frameact/dom';
 
 import type { IAnchorPosition } from '../../../../types';
 
@@ -21,7 +22,7 @@ const CODE_BLOCK_TEXT_SEPARATOR = '\n';
 
 const EditableCodeBlock = (props: TeactNodeViewComponentProps) => {
   let triggerRef!: HTMLButtonElement;
-  let menuRef!: HTMLDivElement;
+  let menuRef: HTMLDivElement | undefined;
   const [isMenuOpen, openMenu, closeMenu] = useFlag();
   const [menuAnchor, setMenuAnchor] = createSignal<IAnchorPosition | undefined>(undefined);
   const lang = useLang();
@@ -29,24 +30,36 @@ const EditableCodeBlock = (props: TeactNodeViewComponentProps) => {
   const language = createMemo(() =>
     typeof props.node.attrs.language === 'string' ? props.node.attrs.language : undefined,
   );
-  const languageLabel = createMemo(() =>
-    language() ? getPrettyCodeLanguageName(language()) : lang('RichEditorCodeLanguageAuto'),
-  );
+  const languageLabel = createMemo(() => {
+    const currentLanguage = language();
+    return currentLanguage ? getPrettyCodeLanguageName(currentLanguage) : lang('RichEditorCodeLanguageAuto');
+  });
   const isCodeBlockEmpty = createMemo(() => !props.node.textContent);
   const codeBlockClassName = createMemo(() =>
     buildClassName(styles.codeBlock, typeof props.HTMLAttributes.class === 'string' && props.HTMLAttributes.class),
   );
 
+  // Deviation: tt's ref callback re-ran on every render and also refreshed the class name of the ProseMirror content
+  // element. The ref runs once here (the element is still detached), the class name is a mutation effect. The content
+  // element belongs to ProseMirror, so frameact only moves it into the wrapper and sets its class.
   function handleCodeBlockWrapperRef(element?: HTMLDivElement) {
     if (!element || !props.contentDOMElement) {
       return;
     }
 
-    props.contentDOMElement.className = codeBlockClassName();
     if (props.contentDOMElement.parentElement !== element) {
       element.prepend(props.contentDOMElement);
     }
   }
+
+  createMutationEffect(
+    () => codeBlockClassName(),
+    (className) => {
+      if (props.contentDOMElement) {
+        props.contentDOMElement.className = className;
+      }
+    },
+  );
 
   createEffect(
     () => language(),
@@ -156,7 +169,7 @@ const EditableCodeBlock = (props: TeactNodeViewComponentProps) => {
         ref={triggerRef}
         type="button"
         class={buildClassName(styles.languageButton, 'no-selection')}
-        contentEditable={false}
+        contenteditable="false"
         tabIndex={-1}
         aria-label={lang('Language')}
         onMouseDown={handleTriggerMouseDown}
@@ -166,14 +179,16 @@ const EditableCodeBlock = (props: TeactNodeViewComponentProps) => {
         <Icon name="dropdown-arrows" className={styles.languageIcon} />
       </button>
       <div ref={handleCodeBlockWrapperRef} class={styles.codeBlockWrapper}>
-        {isCodeBlockEmpty() && (
-          <div class={styles.placeholder} contentEditable={false} aria-hidden>
+        <Show when={isCodeBlockEmpty()}>
+          <div class={styles.placeholder} contenteditable="false" aria-hidden="true">
             {lang('RichEditorBlockPlaceholder')}
           </div>
-        )}
+        </Show>
       </div>
       <Menu
-        ref={menuRef}
+        ref={(el) => {
+          menuRef = el;
+        }}
         isOpen={isMenuOpen()}
         anchor={menuAnchor()}
         ariaLabel={lang('Language')}

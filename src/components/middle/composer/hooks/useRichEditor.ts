@@ -1,11 +1,11 @@
 import type { Editor, JSONContent as TiptapJsonContent } from '@tiptap/core';
-import { createEffect, createMemo, createSignal, onDestroy } from 'frameact';
-import { depsOf } from '../../../../util/effectDeps';
+import { createEffect, createSignal, onDestroy } from 'frameact';
 
 import type { ApiInputRichMessage } from '../../../../api/types';
 import type { RichEditorMediaAttrs, RichEditorMediaItem } from '../../../../util/tiptap/richMedia';
 import type { RichEditor, RichEditorRoot } from '../richEditorTypes';
 
+import { type MaybeAccessor, read } from '../../../../util/accessors';
 import { Bundles, loadBundle } from '../../../../util/moduleLoader';
 import { MEDIA_NODE_NAME } from '../../../../util/tiptap/constants';
 import {
@@ -34,39 +34,52 @@ type EditorBundle = {
   getRichEditorCanUndo: (editor: Editor) => boolean;
 };
 
-// TODO(codemod): useRichEditor: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// The hook runs once and returns one `RichEditor` object: the state fields (`editor`, `isReady`, `value`, `canUndo`,
+// `canRedo`, `hasUnresolvedMedia`) are getters over signals, so reading them in JSX, a memo or an effect is reactive;
+// the functions are plain functions. The `canSend*` parameters are plain booleans or accessors.
 export default function useRichEditor(
-  canSendPhotos?: boolean,
-  canSendVideos?: boolean,
-  canSendDocuments?: boolean,
-  canSendAudios?: boolean,
-) {
+  canSendPhotos?: MaybeAccessor<boolean | undefined>,
+  canSendVideos?: MaybeAccessor<boolean | undefined>,
+  canSendDocuments?: MaybeAccessor<boolean | undefined>,
+  canSendAudios?: MaybeAccessor<boolean | undefined>,
+): RichEditor {
   let valueRef = EMPTY_RICH_MESSAGE;
   let metadataRef: Pick<ApiInputRichMessage, 'isRtl' | 'shouldDisableAutoLink'> = {};
-  let ownedUploadIdsRef = new Set<string>();
+  const ownedUploadIdsRef = new Set<string>();
   let editorRef: Editor | undefined;
   let editorBundleRef: EditorBundle | undefined;
-  let isEditorEmptyRef: (editor: Editor) => boolean | undefined;
+  let isEditorEmptyRef: ((editor: Editor) => boolean) | undefined;
   let rootRef: RichEditorRoot | undefined;
   const [currentValue, setCurrentValue] = createSignal(EMPTY_RICH_MESSAGE);
   const [root, setRoot] = createSignal<RichEditorRoot | undefined>(undefined);
+  const [editor, setEditor] = createSignal<Editor | undefined>(undefined);
   const [isReady, setIsReady] = createSignal(false);
   const [hasUnresolvedMedia, setHasUnresolvedMedia] = createSignal(false);
-  const canUndo = Boolean(editorRef && editorBundleRef?.getRichEditorCanUndo(editorRef));
-  const canRedo = Boolean(editorRef && editorBundleRef?.getRichEditorCanRedo(editorRef));
+  // Deviation: tt recomputed `canUndo` / `canRedo` from the editor on every render of the host (and the host rendered
+  // on each document change). Nothing re-renders here, so they are signals refreshed on every editor transaction
+  // (a document change, a selection move, an undo / redo) and on creation / destruction of the editor.
+  const [canUndo, setCanUndo] = createSignal(false);
+  const [canRedo, setCanRedo] = createSignal(false);
 
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  valueRef = currentValue();
+  // Deviation: tt had `valueRef.current = currentValue` on each render; every `setCurrentValue` call below is paired
+  // with the `valueRef` assignment already, so the sync statement is not needed.
+
+  const refreshHistoryState = () => {
+    setCanUndo(Boolean(editorRef && editorBundleRef?.getRichEditorCanUndo(editorRef)));
+    setCanRedo(Boolean(editorRef && editorBundleRef?.getRichEditorCanRedo(editorRef)));
+  };
 
   const getCanInsertMedia = (type: RichEditorMediaItem['type']) =>
     Boolean(
-      type === 'document'
-        ? canSendDocuments
-        : type === 'audio'
-          ? canSendAudios
-          : type === 'photo'
-            ? canSendPhotos
-            : canSendVideos,
+      read(
+        type === 'document'
+          ? canSendDocuments
+          : type === 'audio'
+            ? canSendAudios
+            : type === 'photo'
+              ? canSendPhotos
+              : canSendVideos,
+      ),
     );
 
   const clearMediaUploads = () => {
@@ -88,13 +101,21 @@ export default function useRichEditor(
     };
   };
 
+  const resetEditor = () => {
+    editorRef?.destroy();
+    editorRef = undefined;
+    setEditor(undefined);
+    setIsReady(false);
+    refreshHistoryState();
+  };
+
+  // The editor lives as long as the registered root: it is created after the editor bundle is loaded and destroyed
+  // in the cleanup (the root changed or the host is gone). ProseMirror owns the root element's children.
   createEffect(
-    depsOf(() => [getCanInsertMedia, root()] as const),
-    ([, root2]) => {
+    () => root(),
+    (root2) => {
       if (!root2) {
-        editorRef?.destroy();
-        editorRef = undefined;
-        setIsReady(false);
+        resetEditor();
         return undefined;
       }
 
@@ -107,7 +128,7 @@ export default function useRichEditor(
         const { createRichEditor, isRichEditorEmpty } = editorBundle;
         editorBundleRef = editorBundle;
         isEditorEmptyRef = isRichEditorEmpty;
-        const editor = createRichEditor({
+        const newEditor = createRichEditor({
           element: currentRoot.element,
           sharedCanvasRef: currentRoot.sharedCanvasRef,
           sharedCanvasHqRef: currentRoot.sharedCanvasHqRef,
@@ -130,32 +151,47 @@ export default function useRichEditor(
           onMediaFiles: currentRoot.onMediaFiles,
         });
         if (isDestroyed) {
-          editor.destroy();
+          newEditor.destroy();
           return;
         }
 
-        editorRef = editor;
+        editorRef = newEditor;
+        // Listeners are dropped by `destroy()`
+        newEditor.on('transaction', refreshHistoryState);
+        setEditor(newEditor);
+        refreshHistoryState();
         setIsReady(true);
-        currentRoot.onReady(editor.view.dom);
+        currentRoot.onReady(newEditor.view.dom);
       }
 
       void initEditor();
 
       return () => {
         isDestroyed = true;
-        editorRef?.destroy();
-        editorRef = undefined;
-        setIsReady(false);
+        resetEditor();
       };
     },
   );
 
-  return createMemo<RichEditor>(() => ({
-    editor: editorRef,
-    isReady: isReady(),
-    value: currentValue(),
-    canUndo,
-    canRedo,
+  return {
+    get editor() {
+      return editor();
+    },
+    get isReady() {
+      return isReady();
+    },
+    get value() {
+      return currentValue();
+    },
+    get canUndo() {
+      return canUndo();
+    },
+    get canRedo() {
+      return canRedo();
+    },
+    get hasUnresolvedMedia() {
+      return hasUnresolvedMedia();
+    },
     deleteCharacterBeforeSelection: () => deleteEditorCharacterBeforeSelection(editorRef),
     focus: () => {
       editorRef?.commands.focus();
@@ -173,14 +209,13 @@ export default function useRichEditor(
       return valueRef;
     },
     hasCollapsedSelection: () => hasEditorCollapsedSelection(editorRef),
-    hasUnresolvedMedia: hasUnresolvedMedia(),
     isEmpty: () => {
-      const editor = editorRef;
-      if (!editor) {
+      const currentEditor = editorRef;
+      if (!currentEditor) {
         return !valueRef.blocks.length;
       }
 
-      return isEditorEmptyRef ? isEditorEmptyRef(editor) : !valueRef.blocks.length;
+      return isEditorEmptyRef ? isEditorEmptyRef(currentEditor) : !valueRef.blocks.length;
     },
     insertContent: (content, shouldPrepend) => insertEditorContent(editorRef, content, shouldPrepend),
     insertMedia: (items, position, shouldAppend) => insertRichEditorMedia(editorRef, items, position, shouldAppend),
@@ -220,7 +255,7 @@ export default function useRichEditor(
     undo: () => {
       editorRef?.chain().focus().undo().run();
     },
-  }));
+  };
 }
 
 function insertRichEditorMedia(

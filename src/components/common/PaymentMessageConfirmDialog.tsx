@@ -16,7 +16,8 @@ type OwnProps = {
   messagePriceInStars: number;
   messagesCount: number;
   shouldAutoApprove: boolean;
-  setAutoApprove: StateHookSetter<boolean>;
+  // Deviation: `StateHookSetter<boolean>` (teact) -> a plain callback; a signal setter fits.
+  setAutoApprove: (value: boolean) => void;
   confirmHandler: NoneToVoidFunction;
 };
 

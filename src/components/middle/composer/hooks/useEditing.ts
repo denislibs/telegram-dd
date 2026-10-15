@@ -1,6 +1,5 @@
-import { createEffect, createMemo, createSignal, requestMeasure, requestNextMutation } from 'frameact';
+import { type Accessor, createEffect, createSignal, requestMeasure, requestNextMutation } from 'frameact';
 import { getActions } from '../../../../global';
-import { depsOf } from '../../../../util/effectDeps';
 
 import type { ApiDraft, ApiInputRichMessage, ApiMessage } from '../../../../api/types';
 import type { EditingDraft, MessageListType, ThreadId } from '../../../../types';
@@ -8,6 +7,8 @@ import { ApiMessageEntityTypes } from '../../../../api/types';
 
 import { EDITABLE_INPUT_CSS_SELECTOR } from '../../../../config';
 import { hasMessageMedia } from '../../../../global/helpers';
+import { type MaybeAccessor, read } from '../../../../util/accessors';
+import { depsOf } from '../../../../util/effectDeps';
 import focusEditableElement from '../../../../util/focusEditableElement';
 import { buildRichMessageFromFormatted, getRichInputAsFormatted } from '../../../ui/textInput/richText';
 
@@ -17,30 +18,33 @@ import useBeforeUnload from '../../../../hooks/window/useBeforeUnload';
 
 const URL_ENTITIES = new Set<string>([ApiMessageEntityTypes.TextUrl, ApiMessageEntityTypes.Url]);
 const DEBOUNCE_MS = 300;
+const NO_OP = () => undefined;
 
-// TODO(codemod): useEditing: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: a hook runs once. The parameters that can change (`richMessage`, `editedMessage`, `chatId`, `threadId`, `type`,
+// `draft`, `editingDraft`) are values or accessors (`read`), the callbacks are plain functions (they read accessors when called),
+// and `shouldForceShowEditing` is returned as an accessor.
 const useEditing = (
-  richMessage: ApiInputRichMessage | undefined,
+  richMessage: MaybeAccessor<ApiInputRichMessage | undefined>,
   replaceRichMessage: (richMessage?: ApiInputRichMessage) => void,
-  editedMessage: ApiMessage | undefined,
+  editedMessage: MaybeAccessor<ApiMessage | undefined>,
   resetComposer: (shouldPreserveInput?: boolean, shouldSkipCollapseLatch?: boolean) => void,
   validateTextLength: (text: string) => boolean,
-  chatId: string,
-  threadId: ThreadId,
-  type: MessageListType,
-  draft?: ApiDraft,
-  editingDraft?: EditingDraft,
-): [VoidFunction, VoidFunction, boolean] => {
+  chatId: MaybeAccessor<string>,
+  threadId: MaybeAccessor<ThreadId>,
+  type: MaybeAccessor<MessageListType>,
+  draft?: MaybeAccessor<ApiDraft | undefined>,
+  editingDraft?: MaybeAccessor<EditingDraft | undefined>,
+): [VoidFunction, VoidFunction, Accessor<boolean>] => {
   const { editMessage, setEditingDraft, toggleMessageWebPage, openDeleteMessageModal } = getActions();
   const [shouldForceShowEditing, setShouldForceShowEditing] = createSignal(false);
 
-  const replyingToId = draft?.replyInfo?.replyToMsgId;
+  const getReplyingToId = () => read(draft)?.replyInfo?.replyToMsgId;
 
   createEffect(
-    depsOf(() => [editedMessage, replyingToId, editingDraft, replaceRichMessage]),
-    (_deps, prev) => {
+    depsOf(() => [read(editedMessage), getReplyingToId(), read(editingDraft)] as const),
+    ([editedMessage2, replyingToId, editingDraft2], prev) => {
       const [prevEditedMessage, prevReplyingToId] = prev ?? [];
-      if (!editedMessage) {
+      if (!editedMessage2) {
         return;
       }
 
@@ -50,17 +54,17 @@ const useEditing = (
         return;
       }
 
-      if (prevEditedMessage?.id === editedMessage.id && replyingToId === prevReplyingToId) {
+      if (prevEditedMessage?.id === editedMessage2.id && replyingToId === prevReplyingToId) {
         return;
       }
 
       const restoredRichMessage =
-        editingDraft?.richMessage ||
-        (editingDraft?.text?.length ? buildRichMessageFromFormatted(editingDraft) : undefined);
+        editingDraft2?.richMessage ||
+        (editingDraft2?.text?.length ? buildRichMessageFromFormatted(editingDraft2) : undefined);
       const nextRichMessage =
         !prevEditedMessage && restoredRichMessage
           ? restoredRichMessage
-          : editedMessage.content.richMessage || buildRichMessageFromFormatted(editedMessage.content.text);
+          : editedMessage2.content.richMessage || buildRichMessageFromFormatted(editedMessage2.content.text);
 
       replaceRichMessage(nextRichMessage);
       setShouldForceShowEditing(true);
@@ -75,19 +79,19 @@ const useEditing = (
   );
 
   createEffect(
-    depsOf(() => [chatId, threadId, editedMessage]),
-    () => {
-      if (!editedMessage) {
+    depsOf(() => [read(chatId), read(threadId), read(editedMessage)] as const),
+    ([chatId2, threadId2, editedMessage2]) => {
+      if (!editedMessage2) {
         return;
       }
 
       const shouldSetNoWebPage =
-        !('webPage' in editedMessage.content) &&
-        editedMessage.content.text?.entities?.some((entity) => URL_ENTITIES.has(entity.type));
+        !('webPage' in editedMessage2.content) &&
+        editedMessage2.content.text?.entities?.some((entity) => URL_ENTITIES.has(entity.type));
 
       toggleMessageWebPage({
-        chatId,
-        threadId,
+        chatId: chatId2,
+        threadId: threadId2,
         noWebPage: shouldSetNoWebPage,
       });
     },
@@ -98,45 +102,58 @@ const useEditing = (
       chatId: scopedChatId,
       threadId: scopedThreadId,
       type: scopedType,
-      draft: buildEditingDraft(richMessage),
+      draft: buildEditingDraft(read(richMessage)),
     });
   };
 
   createEffect(
-    depsOf(() => [chatId, editedMessage, threadId, type]),
-    () => (editedMessage ? () => saveEditingDraft(chatId, threadId, type) : undefined),
+    depsOf(() => [read(chatId), read(editedMessage), read(threadId), read(type)] as const),
+    ([chatId2, editedMessage2, threadId2, type2]) =>
+      editedMessage2 ? () => saveEditingDraft(chatId2, threadId2, type2) : undefined,
   );
 
+  // Deviation: tt's async `useDerivedSignal(detectLinkDebounced, [...], true)` is an effect that runs the debounced
+  // resolver into a signal (the resolver reads the current values when the debounce fires, as in tt).
   const detectLinkDebounced = useDebouncedResolver(
     () => {
-      if (!editedMessage) return false;
+      const editedMessage2 = read(editedMessage);
+      if (!editedMessage2) return false;
 
-      const edited = richMessage ? getRichInputAsFormatted(richMessage) : undefined;
+      const richMessage2 = read(richMessage);
+      const edited = richMessage2 ? getRichInputAsFormatted(richMessage2) : undefined;
       return (
-        !('webPage' in editedMessage.content) &&
-        editedMessage.content.text?.entities?.some((entity) => URL_ENTITIES.has(entity.type)) &&
+        !('webPage' in editedMessage2.content) &&
+        editedMessage2.content.text?.entities?.some((entity) => URL_ENTITIES.has(entity.type)) &&
         !edited?.entities?.some((entity) => URL_ENTITIES.has(entity.type))
       );
     },
-    [editedMessage, richMessage],
+    [],
     DEBOUNCE_MS,
     true,
   );
 
-  const getShouldResetNoWebPageDebounced = createMemo(detectLinkDebounced);
+  const [getShouldResetNoWebPageDebounced, setShouldResetNoWebPageDebounced] = createSignal<boolean | undefined>(
+    undefined,
+  );
 
   createEffect(
-    depsOf(() => [editedMessage, chatId, threadId, getShouldResetNoWebPageDebounced()]),
-    (_deps, prev) => {
+    depsOf(() => [read(editedMessage), read(richMessage)] as const),
+    () => detectLinkDebounced(setShouldResetNoWebPageDebounced),
+  );
+
+  // As in tt, the debounced signal is a dependency: the effect also re-runs when its value changes.
+  createEffect(
+    depsOf(() => [read(editedMessage), read(chatId), read(threadId), getShouldResetNoWebPageDebounced()] as const),
+    ([editedMessage2, chatId2, threadId2, shouldReset], prev) => {
       const [prevEditedMessage] = prev ?? [];
-      if (!editedMessage || prevEditedMessage?.id !== editedMessage.id) {
+      if (!editedMessage2 || prevEditedMessage?.id !== editedMessage2.id) {
         return;
       }
 
-      if (getShouldResetNoWebPageDebounced()()) {
+      if (shouldReset) {
         toggleMessageWebPage({
-          chatId,
-          threadId,
+          chatId: chatId2,
+          threadId: threadId2,
           noWebPage: false,
         });
       }
@@ -144,11 +161,12 @@ const useEditing = (
   );
 
   const restoreNewDraftAfterEditing = () => {
-    if (!draft) return;
+    const draft2 = read(draft);
+    if (!draft2) return;
 
     // Run one frame after editing draft reset
     requestMeasure(() => {
-      replaceRichMessage(draft.richMessage || buildRichMessageFromFormatted(draft.text));
+      replaceRichMessage(draft2.richMessage || buildRichMessageFromFormatted(draft2.text));
 
       // Wait one more frame until new editor content is rendered
       requestNextMutation(() => {
@@ -162,22 +180,27 @@ const useEditing = (
 
   const handleEditCancel = () => {
     resetComposer(false, true);
-    setEditingDraft({ chatId, threadId, type, draft: undefined });
+    setEditingDraft({ chatId: read(chatId), threadId: read(threadId), type: read(type), draft: undefined });
     restoreNewDraftAfterEditing();
   };
 
   const handleEditComplete = () => {
-    const { text, entities } = richMessage ? getRichInputAsFormatted(richMessage) || { text: '' } : { text: '' };
+    const richMessage2 = read(richMessage);
+    const editedMessage2 = read(editedMessage);
+    const chatId2 = read(chatId);
+    const threadId2 = read(threadId);
+    const type2 = read(type);
+    const { text, entities } = richMessage2 ? getRichInputAsFormatted(richMessage2) || { text: '' } : { text: '' };
 
-    if (!editedMessage) {
+    if (!editedMessage2) {
       return;
     }
 
-    if (!text && !hasMessageMedia(editedMessage)) {
+    if (!text && !hasMessageMedia(editedMessage2)) {
       openDeleteMessageModal({
-        chatId,
-        messageIds: [editedMessage.id],
-        isSchedule: type === 'scheduled',
+        chatId: chatId2,
+        messageIds: [editedMessage2.id],
+        isSchedule: type2 === 'scheduled',
       });
       return;
     }
@@ -187,28 +210,29 @@ const useEditing = (
     }
 
     editMessage({
-      messageList: { chatId, threadId, type },
+      messageList: { chatId: chatId2, threadId: threadId2, type: type2 },
       text,
       entities,
     });
 
     resetComposer(false, true);
-    setEditingDraft({ chatId, threadId, type, draft: undefined });
+    setEditingDraft({ chatId: chatId2, threadId: threadId2, type: type2, draft: undefined });
     restoreNewDraftAfterEditing();
   };
 
   const handleBlur = () => {
-    if (!editedMessage) return;
+    if (!read(editedMessage)) return;
 
     setEditingDraft({
-      chatId,
-      threadId,
-      type,
-      draft: buildEditingDraft(richMessage),
+      chatId: read(chatId),
+      threadId: read(threadId),
+      type: read(type),
+      draft: buildEditingDraft(read(richMessage)),
     });
   };
 
-  useBackgroundMode(handleBlur);
+  // Deviation: the focus callback is required (`useBackgroundMode` of this port), tt passed none.
+  useBackgroundMode(handleBlur, NO_OP);
   useBeforeUnload(handleBlur);
 
   return [handleEditComplete, handleEditCancel, shouldForceShowEditing];

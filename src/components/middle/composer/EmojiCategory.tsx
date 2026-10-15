@@ -1,8 +1,10 @@
 import { createMemo } from 'frameact';
-import { createMediaTransition } from '../../../lib/kit';
+import { For, Show } from 'frameact/dom';
+
+import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 
 import { EMOJI_SIZE_PICKER } from '../../../config';
-import buildClassName from '../../../util/buildClassName';
+import { createMediaTransition } from '../../../lib/kit';
 import windowSize from '../../../util/windowSize';
 import { REM } from '../../common/helpers/mediaDimensions';
 
@@ -35,53 +37,64 @@ const EmojiCategory = (props: OwnProps) => {
     () => ref,
     () => props.observeIntersection,
   );
-  const shouldRenderContent = createMemo(() => props.shouldRender || isIntersecting);
+  const shouldRenderContent = createMemo(() => props.shouldRender || isIntersecting());
 
-  // TODO(codemod): useMediaTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element
-  const transitionClassNames = createMemo(() =>
-    createMediaTransition({ hasMediaData: () => Boolean(shouldRenderContent()) }),
-  );
+  // Deviation: the transition classes are written through the element ref (`t.ref`), not a class string.
+  const transition = createMediaTransition({ hasMediaData: shouldRenderContent });
 
   const lang = useOldLang();
   const { isMobile } = useAppLayout();
 
-  const emojisPerRow = isMobile
-    ? Math.floor(
-        (windowSize.get().width - MOBILE_CONTAINER_PADDING + EMOJI_MARGIN) / (EMOJI_SIZE_PICKER + EMOJI_MARGIN),
-      )
-    : EMOJIS_PER_ROW_ON_DESKTOP;
+  const emojisPerRow = createMemo(() =>
+    isMobile()
+      ? Math.floor(
+          (windowSize.get().width - MOBILE_CONTAINER_PADDING + EMOJI_MARGIN) / (EMOJI_SIZE_PICKER + EMOJI_MARGIN),
+        )
+      : EMOJIS_PER_ROW_ON_DESKTOP,
+  );
   const height = createMemo(
     () =>
-      Math.ceil(props.category.emojis.length / emojisPerRow) *
-      (EMOJI_SIZE_PICKER + (isMobile ? EMOJI_VERTICAL_MARGIN_MOBILE : EMOJI_VERTICAL_MARGIN)),
+      Math.ceil(props.category.emojis.length / emojisPerRow()) *
+      (EMOJI_SIZE_PICKER + (isMobile() ? EMOJI_VERTICAL_MARGIN_MOBILE : EMOJI_VERTICAL_MARGIN)),
   );
 
+  // Deviation: no `key={category.id}` on the root; the parent lists categories with `<For keyed>`, so a category is
+  // a component instance of its own.
   return (
-    // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{(key) => …}</Show> (the callback MUST take an argument, a zero-argument child is a plain child and never remounts; a falsy key such as 0 renders nothing: use when={{ id: key }})
-    <div ref={ref} key={props.category.id} id={props.sectionId} class="symbol-set">
+    <div ref={ref} id={props.sectionId} class="symbol-set">
       <div class="symbol-set-header">
         <p class="symbol-set-name" dir="auto">
           {props.title}
         </p>
       </div>
       <div
-        class={buildClassName('symbol-set-container', transitionClassNames())}
+        ref={transition.ref}
+        class="symbol-set-container"
         style={`height: ${height()}px;`}
         dir={lang.isRtl ? 'rtl' : undefined}
       >
-        {shouldRenderContent() &&
-          props.category.emojis.map((name) => {
-            const emoji = props.allEmojis[name];
-            // Recent emojis may contain emoticons that are no longer in the list
-            if (!emoji) {
-              return undefined;
-            }
-            // Some emojis have multiple skins and are represented as an Object with emojis for all skins.
-            // For now, we select only the first emoji with 'neutral' skin.
-            const displayedEmoji = 'id' in emoji ? emoji : emoji[1];
+        <Show when={shouldRenderContent()}>
+          <For each={props.category.emojis} keyed={(name) => name}>
+            {(name) => {
+              const displayedEmoji = createMemo(() => {
+                const emoji = props.allEmojis[name()];
+                // Recent emojis may contain emoticons that are no longer in the list
+                if (!emoji) {
+                  return undefined;
+                }
+                // Some emojis have multiple skins and are represented as an Object with emojis for all skins.
+                // For now, we select only the first emoji with 'neutral' skin.
+                return 'id' in emoji ? emoji : emoji[1];
+              });
 
-            return <EmojiButton emoji={displayedEmoji} onClick={props.onEmojiSelect} />;
-          })}
+              return (
+                <Show when={displayedEmoji()}>
+                  {(emoji) => <EmojiButton emoji={emoji()} onClick={props.onEmojiSelect} />}
+                </Show>
+              );
+            }}
+          </For>
+        </Show>
       </div>
     </div>
   );

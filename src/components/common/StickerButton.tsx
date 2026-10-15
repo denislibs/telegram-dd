@@ -1,8 +1,9 @@
-import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
-import { createMemo, onMount } from 'frameact';
+import { type Accessor, createEffect, createMemo } from 'frameact';
+import type { JSX } from 'frameact/jsx-runtime';
 import { getActions } from '../../global';
 
 import type { ApiBotInlineMediaResult, ApiSticker } from '../../api/types';
+import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 
 import { IS_TOUCH_ENV } from '../../util/browser/windowEnvironment';
 import buildClassName from '../../util/buildClassName';
@@ -35,7 +36,8 @@ type OwnProps<T> = {
   isSelected?: boolean;
   isCurrentUserPremium?: boolean;
   shouldIgnorePremium?: boolean;
-  sharedCanvasRef?: (el: HTMLCanvasElement) => void;
+  // Deviation: an accessor of the shared canvas (tt: an ElementRef), as `StickerView` and `CustomEmoji` take it.
+  sharedCanvasRef?: Accessor<HTMLCanvasElement | undefined>;
   withTranslucentThumb?: boolean;
   forcePlayback?: boolean;
   isEffectEmoji?: boolean;
@@ -87,7 +89,7 @@ const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult |
     () => props.observeIntersection,
   );
   const shouldLoad = isIntersecting;
-  const shouldPlay = createMemo(() => isIntersecting && !props.noPlay);
+  const shouldPlay = createMemo(() => isIntersecting() && !props.noPlay);
 
   const isIntesectingForShowing = useIsIntersecting(
     () => ref,
@@ -102,21 +104,24 @@ const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult |
     handleContextMenuClose,
     handleContextMenuHide,
   } = useContextMenuHandlers(() => ref);
-  const shouldRenderContextMenu = createMemo(() => Boolean(!props.noContextMenu && contextMenuAnchor));
+  const shouldRenderContextMenu = createMemo(() => Boolean(!props.noContextMenu && contextMenuAnchor()));
 
   const getTriggerElement = () => ref;
-  const getRootElement = () => ref!.closest('.custom-scroll, .no-scrollbar');
+  const getRootElement = () => ref.closest<HTMLElement>('.custom-scroll, .no-scrollbar');
   const getMenuElement = () => {
-    return props.isStatusPicker ? menuRef : ref!.querySelector('.sticker-context-menu .bubble');
+    return props.isStatusPicker ? menuRef : ref.querySelector<HTMLElement>('.sticker-context-menu .bubble');
   };
   const getLayout = () => ({ withPortal: props.isStatusPicker, shouldAvoidNegativePosition: true });
 
-  onMount(() => {
-    if (!isIntersecting) handleContextMenuClose();
-  });
+  createEffect(
+    () => isIntersecting(),
+    (isIntersecting2) => {
+      if (!isIntersecting2) handleContextMenuClose();
+    },
+  );
 
   const handleClick = () => {
-    if (isContextMenuOpen) return;
+    if (isContextMenuOpen()) return;
     if (isLocked()) {
       const initialSection = props.isEffectEmoji ? 'effects' : isCustomEmoji() ? 'animated_emoji' : 'premium_stickers';
       showNotification({
@@ -137,7 +142,7 @@ const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult |
     handleBeforeContextMenu(e);
   };
 
-  const handleRemoveClick = (e: ReactMouseEvent<HTMLButtonElement, MouseEvent>) => {
+  const handleRemoveClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     e.preventDefault();
 
@@ -195,7 +200,7 @@ const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult |
   const contextMenuItems = createMemo(() => {
     if (!shouldRenderContextMenu() || props.noContextMenu || (isCustomEmoji() && !props.isStatusPicker)) return [];
 
-    const items: ReactNode[] = [];
+    const items: JSX.Element[] = [];
 
     if (isCustomEmoji()) {
       contentForStatusMenuContext.forEach((item) => {
@@ -267,11 +272,9 @@ const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult |
       onClick={handleClick}
       onContextMenu={handleContextMenu}
     >
-      {isIntesectingForShowing ? (
+      {isIntesectingForShowing() ? (
         <StickerView
-          containerRef={(el) => {
-            ref = el;
-          }}
+          containerRef={() => ref}
           sticker={props.sticker}
           isSmall
           size={props.size}
@@ -283,11 +286,11 @@ const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult |
           withSharedAnimation
           sharedCanvasRef={props.sharedCanvasRef}
           withTranslucentThumb={props.withTranslucentThumb}
-          customColor={customColor}
+          customColor={customColor()}
           forceAlways={props.forcePlayback}
         />
       ) : (
-        isIntersecting &&
+        isIntersecting() &&
         props.sticker.thumbnail?.dataUri && (
           <img src={props.sticker.thumbnail.dataUri} class="sticker-media" alt="" draggable={false} />
         )
@@ -314,9 +317,11 @@ const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult |
       )}
       {Boolean(contextMenuItems().length) && (
         <Menu
-          ref={menuRef}
-          isOpen={isContextMenuOpen}
-          anchor={contextMenuAnchor}
+          ref={(el) => {
+            menuRef = el;
+          }}
+          isOpen={isContextMenuOpen()}
+          anchor={contextMenuAnchor()}
           getTriggerElement={getTriggerElement}
           getRootElement={getRootElement}
           getMenuElement={getMenuElement}

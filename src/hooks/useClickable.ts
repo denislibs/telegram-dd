@@ -1,14 +1,22 @@
-import useLastCallback from './useLastCallback';
+import type { Accessor } from 'frameact';
+import type { JSX } from 'frameact/jsx-runtime';
+
+import type { MaybeAccessor } from '../util/accessors';
+
+import { read } from '../util/accessors';
 
 type UseClickableOptions = {
-  disabled?: boolean;
-  role?: React.AriaRole;
-  withA11y?: boolean;
-  tabIndex?: number;
+  disabled?: MaybeAccessor<boolean | undefined>;
+  role?: MaybeAccessor<React.AriaRole>;
+  withA11y?: MaybeAccessor<boolean>;
+  tabIndex?: MaybeAccessor<number>;
 };
 
+// Deviation: `React.HTMLAttributes` -> the JSX attributes of the runtime. The result is an object with getters (spread
+// it onto an element: the spread reads every getter in a tracked pass) so that a change of `onPress` / the options
+// reaches the element.
 type ClickableProps<T extends HTMLElement> = Partial<
-  Pick<React.HTMLAttributes<T>, 'onClick' | 'onKeyDown' | 'onKeyUp' | 'role' | 'tabIndex' | 'aria-disabled'>
+  Pick<JSX.HTMLAttributes<T>, 'onClick' | 'onKeyDown' | 'onKeyUp' | 'role' | 'tabIndex' | 'aria-disabled'>
 >;
 
 // WAI-ARIA keyboard activation patterns per role
@@ -31,54 +39,72 @@ const ROLES_WITH_SPACE_ACTIVATION = new Set<React.AriaRole>([
   'treeitem',
 ]);
 
-// TODO(codemod): useClickable: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: `onPress` is an accessor of the handler (the handler and its presence can change); the options are
+// `MaybeAccessor`s.
 export default function useClickable<T extends HTMLElement>(
-  onPress?: (e: React.MouseEvent<T>) => void,
-  { disabled, role = 'button', withA11y = true, tabIndex = 0 }: UseClickableOptions = {},
+  onPress: Accessor<((e: React.MouseEvent<T>) => void) | undefined>,
+  options: UseClickableOptions = {},
 ): ClickableProps<T> {
-  let shouldHandleSyntheticClickRef = false;
-  const withListeners = Boolean(onPress) && !disabled;
+  let shouldHandleSyntheticClick = false;
+
+  const isDisabled = () => read(options.disabled);
+  const getRole = () => read(options.role) ?? 'button';
+  const withA11y = () => read(options.withA11y) ?? true;
+  const withListeners = () => Boolean(onPress()) && !isDisabled();
 
   const handlePress = (e: React.MouseEvent<T>) => {
-    const nativeEvent = e.nativeEvent as (MouseEvent & { pointerId?: number }) | undefined;
-    const isSyntheticClick = e.detail === 0 || nativeEvent?.pointerId === -1; // Some mouse clicks produce two events
+    // Deviation: the runtime delivers the native event (tt reads `e.nativeEvent`).
+    const isSyntheticClick = e.detail === 0 || (e as MouseEvent & { pointerId?: number }).pointerId === -1; // Some mouse clicks produce two events
 
-    if (isSyntheticClick && !shouldHandleSyntheticClickRef) return;
+    if (isSyntheticClick && !shouldHandleSyntheticClick) return;
 
-    shouldHandleSyntheticClickRef = false;
-    onPress?.(e);
+    shouldHandleSyntheticClick = false;
+    onPress()?.(e);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<T>) => {
     // A key pressed on a nested button must press that button, not the element around it
     if (e.target !== e.currentTarget) return;
 
-    if (e.key === 'Enter' && ROLES_WITH_ENTER_ACTIVATION.has(role)) {
+    if (e.key === 'Enter' && ROLES_WITH_ENTER_ACTIVATION.has(getRole())) {
       e.preventDefault();
-      shouldHandleSyntheticClickRef = true;
+      shouldHandleSyntheticClick = true;
       e.currentTarget.click();
       return;
     }
 
-    if (e.key === ' ' && ROLES_WITH_SPACE_ACTIVATION.has(role)) {
+    if (e.key === ' ' && ROLES_WITH_SPACE_ACTIVATION.has(getRole())) {
       e.preventDefault();
     }
   };
 
   const handleKeyUp = (e: React.KeyboardEvent<T>) => {
-    if (e.target !== e.currentTarget || e.key !== ' ' || !ROLES_WITH_SPACE_ACTIVATION.has(role)) return;
+    if (e.target !== e.currentTarget || e.key !== ' ' || !ROLES_WITH_SPACE_ACTIVATION.has(getRole())) return;
 
     e.preventDefault();
-    shouldHandleSyntheticClickRef = true;
+    shouldHandleSyntheticClick = true;
     e.currentTarget.click();
   };
 
   return {
-    onClick: withListeners ? handlePress : undefined,
-    onKeyDown: withListeners ? handleKeyDown : undefined,
-    onKeyUp: withListeners ? handleKeyUp : undefined,
-    role: onPress && withA11y ? role : undefined,
-    tabIndex: onPress && withA11y ? (disabled ? -1 : tabIndex) : undefined,
-    'aria-disabled': onPress && withA11y && disabled ? true : undefined,
+    get onClick() {
+      return withListeners() ? handlePress : undefined;
+    },
+    get onKeyDown() {
+      return withListeners() ? handleKeyDown : undefined;
+    },
+    get onKeyUp() {
+      return withListeners() ? handleKeyUp : undefined;
+    },
+    get role() {
+      return onPress() && withA11y() ? getRole() : undefined;
+    },
+    get tabIndex() {
+      return onPress() && withA11y() ? (isDisabled() ? -1 : (read(options.tabIndex) ?? 0)) : undefined;
+    },
+    get 'aria-disabled'() {
+      // Deviation: a string (frameact writes `aria-*={true}` as an empty attribute).
+      return onPress() && withA11y() && isDisabled() ? 'true' : undefined;
+    },
   };
 }

@@ -1,5 +1,5 @@
-import { createMemo, frozenWhile } from 'frameact';
-import { For, Show, splitProps } from 'frameact/dom';
+import { createMemo, createSignal, frozenWhile } from 'frameact';
+import { For, Show } from 'frameact/dom';
 
 import type { ApiSticker } from '../../../api/types';
 
@@ -26,45 +26,46 @@ export type OwnProps = {
 
 const INTERSECTION_THROTTLE = 200;
 
-const EmojiTooltip = (p: OwnProps) => {
-  const [, props] = splitProps(p, ['isOpen']);
-  const frozen = frozenWhile(
-    () => props,
-    () => !p.isOpen,
-  );
-  const selectedIndex = () => frozen().selectedIndex;
-  const emojis = () => frozen().emojis;
-  const customEmojis = () => frozen().customEmojis;
-  const onEmojiSelect = () => frozen().onEmojiSelect;
-  const onCustomEmojiSelect = () => frozen().onCustomEmojiSelect;
+const EmojiTooltip = (props: OwnProps) => {
+  const isClosing = () => !props.isOpen;
+  const selectedIndex = frozenWhile(() => props.selectedIndex, isClosing);
+  const emojis = frozenWhile(() => props.emojis, isClosing);
+  const customEmojis = frozenWhile(() => props.customEmojis, isClosing);
+  const onEmojiSelect = frozenWhile(() => props.onEmojiSelect, isClosing);
+  const onCustomEmojiSelect = frozenWhile(() => props.onCustomEmojiSelect, isClosing);
 
-  let containerRef!: HTMLDivElement;
+  // Deviation: the container lives inside a `<Show>`, so its element is a signal (the hooks below read it when they run).
+  const [containerEl, setContainerEl] = createSignal<HTMLDivElement | undefined>(undefined);
   const listEmojis = createMemo<(Emoji | ApiSticker)[]>(() => [...emojis(), ...customEmojis()]);
   const hasEmojis = createMemo(() => Boolean(listEmojis().length));
 
-  useHorizontalScroll(
-    () => containerRef,
-    () => !p.isOpen || !hasEmojis(),
-  );
+  useHorizontalScroll(containerEl, () => !props.isOpen || !hasEmojis());
 
   const { observe: observeIntersection } = useIntersectionObserver({
-    rootRef: () => containerRef,
+    rootRef: containerEl,
     throttleMs: INTERSECTION_THROTTLE,
   });
 
   return (
     <Show when={hasEmojis()}>
-      <RichEditorTooltipPanel isOpen={p.isOpen}>
-        <div ref={containerRef} class={buildClassName(sharedStyles.root, styles.root, 'composer-tooltip no-scrollbar')}>
+      <RichEditorTooltipPanel isOpen={props.isOpen}>
+        <div
+          ref={setContainerEl}
+          class={buildClassName(sharedStyles.root, styles.root, 'composer-tooltip no-scrollbar')}
+        >
           <For each={listEmojis()}>
             {(emoji, index) =>
               'native' in emoji ? (
-                <EmojiButton emoji={emoji} focus={selectedIndex() === index()} onClick={onEmojiSelect()} />
+                <EmojiButton
+                  emoji={emoji}
+                  focus={selectedIndex() === index()}
+                  onClick={(text) => onEmojiSelect()(text)}
+                />
               ) : (
                 <CustomEmojiButton
                   emoji={emoji}
                   focus={selectedIndex() === index()}
-                  onClick={onCustomEmojiSelect()}
+                  onClick={(customEmoji) => onCustomEmojiSelect()(customEmoji)}
                   observeIntersection={observeIntersection}
                 />
               )

@@ -1,6 +1,7 @@
 import { type Editor, posToDOMRect, type Range as TiptapRange } from '@tiptap/core';
 import { TextSelection } from '@tiptap/pm/state';
 import { exitSuggestion } from '@tiptap/suggestion';
+import { requestMeasure, requestMutation } from 'frameact';
 
 import type { OwnProps as RichEditorTooltipContainerProps } from '../../RichEditorTooltipContainer';
 import type {
@@ -11,7 +12,6 @@ import type {
   RichEditorTooltipSurface,
 } from '../../types';
 
-import { requestMeasure, requestMutation } from 'frameact';
 import captureKeyboardListeners from '../../../../../util/captureKeyboardListeners';
 import cycleRestrict from '../../../../../util/cycleRestrict';
 import TeactRenderer from '../../../../../util/tiptap/TeactRenderer';

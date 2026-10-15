@@ -2,8 +2,9 @@ import { createMemo } from 'frameact';
 
 import useLang from '../../hooks/useLang';
 
+// Deviation: the `@gili/*` alias of tt's tsconfig does not exist here: a relative path.
+import Modal, { ModalCloseButton, ModalFooterActions, ModalHeader, ModalTitle } from '../gili/modal/Modal';
 import Button from '../ui/Button';
-import Modal, { ModalCloseButton, ModalFooterActions, ModalHeader, ModalTitle } from '@gili/modal/Modal';
 
 type OwnProps = {
   isOpen: boolean;
@@ -17,17 +18,17 @@ const RemoveFormattingModal = (props: OwnProps) => {
   const lang = useLang();
   const title = createMemo(() => lang('RemoveRichFormattingTitle'));
 
-  const header = createMemo(() => (
-    <ModalHeader>
-      <ModalCloseButton />
-      <ModalTitle>{title()}</ModalTitle>
-    </ModalHeader>
-  ));
-
   return (
     <Modal
       isOpen={props.isOpen}
-      header={header()}
+      // Deviation: the header is passed as JSX (tt memoized it): the modal creates it once inside its context provider,
+      // where `ModalTitle` / `ModalCloseButton` find the modal context; a memo of this component would create it outside.
+      header={
+        <ModalHeader>
+          <ModalCloseButton />
+          <ModalTitle>{title()}</ModalTitle>
+        </ModalHeader>
+      }
       width="slim"
       height="auto"
       ariaLabel={title()}

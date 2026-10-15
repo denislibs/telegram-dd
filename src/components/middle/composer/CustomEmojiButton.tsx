@@ -1,6 +1,7 @@
 import { createMemo } from 'frameact';
 
 import type { ApiSticker } from '../../../api/types';
+import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 
 import buildClassName from '../../../util/buildClassName';
 
@@ -18,7 +19,7 @@ type OwnProps = {
 };
 
 const CustomEmojiButton = (props: OwnProps) => {
-  const handleClick = (e: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
+  const handleClick = (e: MouseEvent) => {
     // Preventing safari from losing focus on Composer MessageInput
     e.preventDefault();
 

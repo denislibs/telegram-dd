@@ -1,4 +1,5 @@
 import {
+  type Accessor,
   createContext,
   createEffect,
   createMemo,
@@ -7,18 +8,18 @@ import {
   frozenWhile,
   onMount,
   requestMutation,
+  useContext,
 } from 'frameact';
-import { mergeProps, Show } from 'frameact/dom';
+import { children, mergeProps, Show } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
-import { depsOf } from '../../../util/effectDeps';
 
 import buildClassName from '../../../util/buildClassName';
 import captureKeyboardListeners from '../../../util/captureKeyboardListeners';
 import { waitForAnimationEnd } from '../../../util/cssAnimationEndListeners';
 import { disableDirectTextInput, enableDirectTextInput } from '../../../util/directInputManager';
+import { depsOf } from '../../../util/effectDeps';
 import { countOpenModal } from '../../../util/openModals';
 
-import useContext from '../../../hooks/data/useContext';
 import useHistoryBack from '../../../hooks/useHistoryBack';
 import useLang from '../../../hooks/useLang';
 import useUniqueId from '../../../hooks/useUniqueId';
@@ -106,6 +107,8 @@ const HEIGHT_CLASS_NAME: Record<ModalHeight, string> = {
   fullscreen: styles.heightFullscreen,
 };
 
+// Deviation: tt's `useContext` hook (hooks/data/useContext.ts) is frameact's `useContext`; the provided value is an
+// object with getters (the provider reads its value once), so `hasSubtitle` stays reactive for the consumers.
 function useModalContext() {
   return useContext(ModalContext);
 }
@@ -131,6 +134,55 @@ function addBodyDialogClass() {
   };
 }
 
+type FrozenModalProps = Pick<
+  ModalProps,
+  | 'dialogClassName'
+  | 'contentClassName'
+  | 'noBackdrop'
+  | 'noScrollable'
+  | 'noContentInlinePadding'
+  | 'ariaLabel'
+  | 'noContainment'
+> &
+  Required<Pick<ModalProps, 'width' | 'height'>>;
+
+// Deviation: tt rendered the panel inline. It is its own component so that the header and the sticky footer (which
+// contain `ModalTitle` / `ModalSubtitle`, readers of the modal context) are created inside the context provider; the
+// props of the modal are read where the JSX of a prop is created, once (`children`), not once per read.
+const ModalPanel = (p: {
+  modalProps: ModalProps;
+  frozenProps: Accessor<FrozenModalProps>;
+  panelRef: (el: HTMLDivElement) => void;
+}) => {
+  const header = children(() => p.modalProps.header);
+  const stickyFooter = children(() => p.modalProps.stickyFooter);
+  const shouldShowHeader = createMemo(() => header.toArray().length > 0);
+  const shouldShowStickyFooter = createMemo(() => stickyFooter.toArray().length > 0);
+
+  return (
+    <div ref={p.panelRef} class={styles.panel}>
+      <Show when={shouldShowHeader()}>
+        <div class={styles.headerSlot}>{header() as JSX.Element}</div>
+      </Show>
+
+      <Surface
+        scrollable={!p.frozenProps().noScrollable}
+        noPadding={p.frozenProps().noContentInlinePadding}
+        className={buildClassName(
+          styles.content,
+          shouldShowHeader() && styles.withHeader,
+          p.frozenProps().contentClassName,
+        )}
+      >
+        <div class={styles.body}>{p.modalProps.children}</div>
+      </Surface>
+      <Show when={shouldShowStickyFooter()}>
+        <div class={styles.stickyFooter}>{stickyFooter() as JSX.Element}</div>
+      </Show>
+    </div>
+  );
+};
+
 const Modal = (rawProps: ModalProps) => {
   const props = mergeProps({ width: 'regular', height: 'regular' }, rawProps) as ModalProps &
     Required<Pick<ModalProps, 'width' | 'height'>>;
@@ -140,19 +192,21 @@ const Modal = (rawProps: ModalProps) => {
   const [hasTitle, setHasTitle] = createSignal(false);
   const [hasSubtitle, setHasSubtitle] = createSignal(false);
 
-  let dialogRef!: HTMLDialogElement;
-  let panelRef!: HTMLDivElement;
+  // Deviation: the dialog is created by the `<Show>` below after `shouldRender` flips, so the effects that need the
+  // element wait for it through a signal (a plain `let` assigned at creation could be read before it exists).
+  const [dialogElement, setDialogElement] = createSignal<HTMLDialogElement | undefined>(undefined);
+  let panelRef: HTMLDivElement | undefined;
   let closeAnimationCleanupRef: NoneToVoidFunction | undefined;
 
   const uniqueId = useUniqueId();
   const titleId = `modal-title-${uniqueId}`;
   const subtitleId = `modal-subtitle-${uniqueId}`;
 
+  // Deviation: `useFrozenProps` froze every prop. The node props (`header`, `children`, `stickyFooter`) are live JSX that
+  // is created once and stays mounted while the modal closes, so they cannot be held back; the scalar props are frozen.
+  // TODO(port): callers whose content vanishes with its data on close must keep it with `currentOrPrev`.
   const frozenProps = frozenWhile(
     () => ({
-      header: props.header,
-      children: props.children,
-      stickyFooter: props.stickyFooter,
       dialogClassName: props.dialogClassName,
       contentClassName: props.contentClassName,
       width: props.width,
@@ -165,8 +219,6 @@ const Modal = (rawProps: ModalProps) => {
     }),
     () => !props.isOpen,
   );
-
-  const shouldShowHeader = createMemo(() => Boolean(frozenProps().header));
 
   const cleanupCloseAnimation = () => {
     closeAnimationCleanupRef?.();
@@ -207,14 +259,16 @@ const Modal = (rawProps: ModalProps) => {
     setHasSubtitle(isPresent);
   };
 
-  const contextValue = createMemo<ModalContextType>(() => ({
+  const contextValue: ModalContextType = {
     onClose: handleRequestClose,
     titleId,
     subtitleId,
-    hasSubtitle: hasSubtitle(),
+    get hasSubtitle() {
+      return hasSubtitle();
+    },
     registerTitle,
     registerSubtitle,
-  }));
+  };
 
   createEffect(
     depsOf(() => [hasEverOpened(), props.isOpen] as const),
@@ -282,36 +336,33 @@ const Modal = (rawProps: ModalProps) => {
     },
   );
 
-  createMutationEffect(
-    () => shouldRender(),
-    (shouldRender2) => {
-      if (!shouldRender2) {
-        return undefined;
+  // The element signal may still hold a dialog that the `<Show>` removed: only a connected one counts.
+  const liveDialog = () => {
+    const element = dialogElement();
+    return shouldRender() && element?.isConnected ? element : undefined;
+  };
+
+  createMutationEffect(liveDialog, (dialog) => {
+    if (!dialog) {
+      return undefined;
+    }
+
+    if (!dialog.open) {
+      dialog.showModal();
+    }
+
+    return () => {
+      cleanupCloseAnimation();
+
+      if (dialog.open) {
+        dialog.close();
       }
-
-      const dialogElement = dialogRef;
-
-      if (!dialogElement) {
-        return undefined;
-      }
-
-      if (!dialogElement.open) {
-        dialogElement.showModal();
-      }
-
-      return () => {
-        cleanupCloseAnimation();
-
-        if (dialogElement.open) {
-          dialogElement.close();
-        }
-      };
-    },
-  );
+    };
+  });
 
   createEffect(
-    depsOf(() => [handleEsc, shouldRender()] as const),
-    ([, shouldRender2]) => {
+    () => shouldRender(),
+    (shouldRender2) => {
       if (!shouldRender2) {
         return undefined;
       }
@@ -345,15 +396,9 @@ const Modal = (rawProps: ModalProps) => {
   );
 
   createEffect(
-    depsOf(() => [isClosing(), props.isOpen, props.noLightDismiss, shouldRender()] as const),
-    ([isClosing2, isOpen2, noLightDismiss2, shouldRender2]) => {
-      if (!shouldRender2) {
-        return undefined;
-      }
-
-      const dialogElement = dialogRef;
-
-      if (!dialogElement) {
+    depsOf(() => [isClosing(), props.isOpen, props.noLightDismiss, liveDialog()] as const),
+    ([isClosing2, isOpen2, noLightDismiss2, dialog]) => {
+      if (!dialog) {
         return undefined;
       }
 
@@ -367,10 +412,10 @@ const Modal = (rawProps: ModalProps) => {
         handleRequestClose();
       };
 
-      dialogElement.addEventListener('cancel', handleCancel);
+      dialog.addEventListener('cancel', handleCancel);
 
       return () => {
-        dialogElement.removeEventListener('cancel', handleCancel);
+        dialog.removeEventListener('cancel', handleCancel);
       };
     },
   );
@@ -389,11 +434,11 @@ const Modal = (rawProps: ModalProps) => {
   };
 
   return (
-    <Show when={!(!shouldRender() && !(props.keepMounted && hasEverOpened()))}>
+    <Show when={shouldRender() || (props.keepMounted && hasEverOpened())}>
       <Portal>
-        <ModalContext.Provider value={contextValue()}>
+        <ModalContext.Provider value={contextValue}>
           <dialog
-            ref={dialogRef}
+            ref={setDialogElement}
             class={buildClassName(
               styles.dialog,
               WIDTH_CLASS_NAME[frozenProps().width],
@@ -410,24 +455,13 @@ const Modal = (rawProps: ModalProps) => {
             aria-describedby={hasSubtitle() ? subtitleId : undefined}
             onClick={handleDialogClick}
           >
-            <div ref={panelRef} class={styles.panel}>
-              {shouldShowHeader() && <div class={styles.headerSlot}>{frozenProps().header}</div>}
-
-              <Surface
-                scrollable={!frozenProps().noScrollable}
-                noPadding={frozenProps().noContentInlinePadding}
-                className={buildClassName(
-                  styles.content,
-                  shouldShowHeader() && styles.withHeader,
-                  frozenProps().contentClassName,
-                )}
-              >
-                <div class={styles.body}>{frozenProps().children}</div>
-              </Surface>
-              {Boolean(frozenProps().stickyFooter) && (
-                <div class={styles.stickyFooter}>{frozenProps().stickyFooter}</div>
-              )}
-            </div>
+            <ModalPanel
+              modalProps={props}
+              frozenProps={frozenProps}
+              panelRef={(el) => {
+                panelRef = el;
+              }}
+            />
           </dialog>
         </ModalContext.Provider>
       </Portal>

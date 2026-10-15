@@ -1,10 +1,9 @@
-import { createContext, createMemo } from 'frameact';
+import { createContext, createMemo, useContext } from 'frameact';
 import { Show } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
 
 import buildClassName from '../../../util/buildClassName';
 
-import useContext from '../../../hooks/data/useContext';
 import useClickable from '../../../hooks/useClickable';
 
 import RippleEffect from '../../ui/RippleEffect';
@@ -19,6 +18,8 @@ export type InteractiveContextType = {
 
 export const InteractiveContext = createContext<InteractiveContextType | undefined>(undefined);
 
+// Deviation: tt's `useContext` hook (hooks/data/useContext.ts) is frameact's `useContext`. A provider passes an object
+// with getters, so a consumer reads `interactive?.isLoading` where it is used (JSX, memo) and stays reactive.
 export function useInteractiveContext() {
   return useContext(InteractiveContext);
 }
@@ -35,15 +36,22 @@ type OwnProps = {
 };
 
 const Interactive = (props: OwnProps) => {
-  const contextValue = createMemo(() => ({
-    isDisabled: Boolean(props.disabled),
-    isLoading: Boolean(props.loading),
-    isLabel: Boolean(props.asLabel),
-  }));
+  // Deviation: the context value is one object with getters (the provider reads its value once).
+  const contextValue: InteractiveContextType = {
+    get isDisabled() {
+      return Boolean(props.disabled);
+    },
+    get isLoading() {
+      return Boolean(props.loading);
+    },
+    get isLabel() {
+      return Boolean(props.asLabel);
+    },
+  };
 
   const isNonInteractive = createMemo(() => props.disabled || props.loading);
-  const clickableProps = useClickable(props.onClick, {
-    disabled: () => isNonInteractive(),
+  const clickableProps = useClickable<HTMLElement>(() => props.onClick, {
+    disabled: isNonInteractive,
     withA11y: () => !props.asLabel,
   });
 
@@ -57,7 +65,8 @@ const Interactive = (props: OwnProps) => {
     ),
   );
 
-  const content = (
+  // Deviation: a function, not a constant: the label and the div branch are separate, and a JSX constant is one node.
+  const content = () => (
     <>
       {props.children}
       {props.ripple && !isNonInteractive() && <RippleEffect />}
@@ -68,16 +77,16 @@ const Interactive = (props: OwnProps) => {
     <Show
       when={!props.asLabel}
       fallback={
-        <InteractiveContext.Provider value={contextValue()}>
+        <InteractiveContext.Provider value={contextValue}>
           <label class={blockClassName()} {...clickableProps}>
-            {content}
+            {content()}
           </label>
         </InteractiveContext.Provider>
       }
     >
-      <InteractiveContext.Provider value={contextValue()}>
+      <InteractiveContext.Provider value={contextValue}>
         <div class={blockClassName()} {...clickableProps}>
-          {content}
+          {content()}
         </div>
       </InteractiveContext.Provider>
     </Show>

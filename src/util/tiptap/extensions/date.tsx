@@ -2,6 +2,8 @@ import {
   getMarkRange, Mark, mergeAttributes, Node,
 } from '@tiptap/core';
 import { Plugin } from '@tiptap/pm/state';
+import { createMemo } from 'frameact';
+import { Show } from 'frameact/dom';
 
 import type { ApiMessageEntityFormattedDate } from '../../../api/types';
 import type { FormattedDateEntityOptions } from '../../dates/formattedDate';
@@ -18,8 +20,6 @@ import {
   parseRichMarkdownNode,
   type RichMarkdownLink,
 } from '../richMarkdown';
-
-import useLastCallback from '../../../hooks/useLastCallback';
 
 import FormattedDate from '../../../components/common/FormattedDate';
 import TeactNodeViewRenderer from '../TeactNodeViewRenderer';
@@ -221,15 +221,16 @@ export function buildFormattedDateMarkdownAttrs(markdown: RichMarkdownLink) {
   return buildFormattedDateAttrs(date, markdown.label, format);
 }
 
-function FormattedDateView({ node, extension, getPos }: TeactNodeViewComponentProps) {
-  const date = parseDate(node.attrs.date);
-  const label = typeof node.attrs.label === 'string' ? node.attrs.label : '';
-  const options = buildFormattedDateOptions(node.attrs);
+function FormattedDateView(props: TeactNodeViewComponentProps) {
+  const date = createMemo(() => parseDate(props.node.attrs.date));
+  const label = createMemo(() => (typeof props.node.attrs.label === 'string' ? props.node.attrs.label : ''));
+  const options = createMemo(() => buildFormattedDateOptions(props.node.attrs));
 
-  const handleClick = useLastCallback((e: React.MouseEvent<HTMLSpanElement>) => {
-    const position = getPos();
-    const { onClick } = extension.options as DateExtensionOptions;
-    if (date === undefined || typeof position !== 'number' || !onClick) {
+  function handleClick(e: MouseEvent) {
+    const position = props.getPos();
+    const { onClick } = props.extension.options as DateExtensionOptions;
+    const currentDate = date();
+    if (currentDate === undefined || typeof position !== 'number' || !onClick) {
       return;
     }
 
@@ -237,23 +238,29 @@ function FormattedDateView({ node, extension, getPos }: TeactNodeViewComponentPr
     e.stopPropagation();
     onClick({
       type: 'formattedDate',
-      date,
-      options,
-      range: { from: position, to: position + node.nodeSize },
+      date: currentDate,
+      options: options(),
+      range: { from: position, to: position + props.node.nodeSize },
     });
+  }
+
+  const entity = createMemo((): ApiMessageEntityFormattedDate | undefined => {
+    const currentDate = date();
+    return currentDate === undefined ? undefined : {
+      type: ApiMessageEntityTypes.FormattedDate,
+      offset: 0,
+      length: label().length,
+      date: currentDate,
+      ...options(),
+    };
   });
 
-  const entity: ApiMessageEntityFormattedDate | undefined = date === undefined ? undefined : {
-    type: ApiMessageEntityTypes.FormattedDate,
-    offset: 0,
-    length: label.length,
-    date,
-    ...options,
-  };
-
   return (
-    <span contentEditable={false} onClick={handleClick}>
-      {entity ? <FormattedDate entity={entity} asPreview>{label}</FormattedDate> : label}
+    // Deviation: `contenteditable` is an attribute with a string value; `contentEditable={false}` writes no attribute.
+    <span contenteditable="false" onClick={handleClick}>
+      <Show when={entity()} fallback={label()}>
+        {(currentEntity) => <FormattedDate entity={currentEntity()} asPreview>{label()}</FormattedDate>}
+      </Show>
     </span>
   );
 }

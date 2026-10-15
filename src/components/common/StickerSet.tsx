@@ -1,10 +1,10 @@
-import { createEffect, createMemo, createSignal, onMount } from 'frameact';
-import { getActions, getGlobal, withGlobal } from '../../global';
-import { createMediaTransition } from '../../lib/kit';
-import { depsOf } from '../../util/effectDeps';
-import type { GlobalState } from '../../global/types';
+import { type Accessor, createEffect, createMemo, createSignal, onMount } from 'frameact';
+import { For, Show } from 'frameact/dom';
+import { getActions, useGlobal, withGlobal } from '../../global';
 
 import type { ApiAvailableReaction, ApiEmojiStatusType, ApiReactionWithPaid, ApiSticker } from '../../api/types';
+import type { GlobalState } from '../../global/types';
+import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 import type { StickerSetOrReactionsSetOrRecent } from '../../types';
 
 import {
@@ -19,9 +19,11 @@ import {
   RECENT_SYMBOL_SET_ID,
   STICKER_SIZE_PICKER,
 } from '../../config';
+import { createMediaTransition } from '../../lib/kit';
 import { getReactionKey } from '../../global/helpers';
 import { selectIsAlwaysHighPriorityEmoji, selectIsSetPremium } from '../../global/selectors';
 import buildClassName from '../../util/buildClassName';
+import { depsOf } from '../../util/effectDeps';
 
 import useAppLayout from '../../hooks/useAppLayout';
 import useFlag from '../../hooks/useFlag';
@@ -94,33 +96,36 @@ const StickerSet = (ownProps: OwnProps) => {
     loadStickers,
   } = getActions();
 
+  const global = useGlobal();
+
   let ref!: HTMLDivElement;
 
   let sharedCanvasRef!: HTMLCanvasElement;
   let sharedCanvasHqRef!: HTMLCanvasElement;
+  // Deviation: tt passed the ref objects `sharedCanvasRef` / `sharedCanvasHqRef` down; here the children get accessors.
+  const getSharedCanvas = () => sharedCanvasRef;
+  const getSharedCanvasHq = () => sharedCanvasHqRef;
 
   const lang = useOldLang();
-  const { width: windowWidth } = useWindowSize();
+  const windowSize = useWindowSize();
   const [isConfirmModalOpen, openConfirmModal, closeConfirmModal] = useFlag();
   const { isMobile } = useAppLayout();
 
-  const [itemsPerRow, setItemsPerRow] = createSignal((() => getItemsPerRowFallback(windowWidth))());
+  const [itemsPerRow, setItemsPerRow] = createSignal(getItemsPerRowFallback(windowSize().width));
 
   const isIntersecting = useIsIntersecting(
     () => ref,
     () => props.observeIntersection ?? props.observeIntersectionForShowingItems,
   );
-  // TODO(codemod): useMediaTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element
-  const transitionClassNames = createMemo(() =>
-    createMediaTransition({ hasMediaData: () => Boolean(isIntersecting || props.isNearActive) }),
-  );
+  // Deviation: the transition classes are written through the element ref (`t.ref`), not a class string.
+  const transition = createMediaTransition({ hasMediaData: () => Boolean(isIntersecting() || props.isNearActive) });
 
   // `isNearActive` is set in advance during animation, but it is not reliable for short sets
-  const shouldRender = createMemo(() => props.isNearActive || isIntersecting);
+  const shouldRender = createMemo(() => props.isNearActive || isIntersecting());
 
-  const stickerMarginPx = isMobile ? 8 : 4;
-  const emojiMarginPx = isMobile ? 8 : 10;
-  const emojiVerticalMarginPx = isMobile ? 8 : 4;
+  const stickerMarginPx = createMemo(() => (isMobile() ? 8 : 4));
+  const emojiMarginPx = createMemo(() => (isMobile() ? 8 : 10));
+  const emojiVerticalMarginPx = createMemo(() => (isMobile() ? 8 : 4));
   const isRecent = createMemo(() => props.stickerSet.id === RECENT_SYMBOL_SET_ID);
   const isStatusCollectible = createMemo(() => props.stickerSet.id === COLLECTIBLE_STATUS_SET_ID);
   const isFavorite = createMemo(() => props.stickerSet.id === FAVORITE_SYMBOL_SET_ID);
@@ -176,12 +181,12 @@ const StickerSet = (ownProps: OwnProps) => {
   };
 
   const itemSize = createMemo(() => (isEmoji() ? EMOJI_SIZE_PICKER : STICKER_SIZE_PICKER));
-  const margin = createMemo(() => (isEmoji() ? emojiMarginPx : stickerMarginPx));
-  const verticalMargin = createMemo(() => (isEmoji() ? emojiVerticalMarginPx : stickerMarginPx));
+  const margin = createMemo(() => (isEmoji() ? emojiMarginPx() : stickerMarginPx()));
+  const verticalMargin = createMemo(() => (isEmoji() ? emojiVerticalMarginPx() : stickerMarginPx()));
 
   const calculateItemsPerRow = (width: number) => {
     if (!width) {
-      return getItemsPerRowFallback(windowWidth);
+      return getItemsPerRowFallback(windowSize().width);
     }
 
     return Math.floor((width + margin()) / (itemSize() + margin()));
@@ -199,8 +204,8 @@ const StickerSet = (ownProps: OwnProps) => {
   });
 
   createEffect(
-    depsOf(() => [shouldRender(), loadStickers, props.stickerSet] as const),
-    ([shouldRender2, , stickerSet2]) => {
+    depsOf(() => [shouldRender(), props.stickerSet] as const),
+    ([shouldRender2, stickerSet2]) => {
       if (shouldRender2 && !stickerSet2.stickers?.length && !stickerSet2.reactions?.length && stickerSet2.accessHash) {
         loadStickers({
           stickerSetInfo: {
@@ -269,11 +274,54 @@ const StickerSet = (ownProps: OwnProps) => {
     return lang('Add');
   });
 
+  function renderStickerButton(sticker: Accessor<ApiSticker>, index: Accessor<number>) {
+    const isHqEmoji = () =>
+      (isRecent() || isFavorite()) && selectIsAlwaysHighPriorityEmoji(global, sticker().stickerSetInfo);
+    const reactionId = () => (sticker().isCustomEmoji ? sticker().id : sticker().emoji);
+    const isSelected = () => {
+      const reactionId2 = reactionId();
+      return reactionId2 ? props.selectedReactionIds?.includes(reactionId2) : undefined;
+    };
+
+    return (
+      <StickerButton
+        sticker={sticker()}
+        size={itemSize()}
+        observeIntersection={props.observeIntersectionForPlayingItems}
+        observeIntersectionForShowing={props.observeIntersectionForShowingItems}
+        noPlay={!props.loadAndPlay}
+        isSavedMessages={props.isSavedMessages}
+        isStatusPicker={props.isStatusPicker}
+        canViewSet
+        noContextMenu={props.noContextMenus}
+        isCurrentUserPremium={props.isCurrentUserPremium}
+        shouldIgnorePremium={props.isChatEmojiSet}
+        sharedCanvasRef={() =>
+          (canCut() && index() >= itemsBeforeCutout()) || isHqEmoji() ? getSharedCanvasHq() : getSharedCanvas()
+        }
+        withTranslucentThumb={props.isTranslucent}
+        onClick={props.onStickerSelect}
+        clickArg={sticker()}
+        noIcons={isEmoji() && !isRecent()}
+        isSelected={isSelected()}
+        onUnfaveClick={isFavorite() && favoriteStickerIdsSet()?.has(sticker().id) ? props.onStickerUnfave : undefined}
+        onFaveClick={!favoriteStickerIdsSet()?.has(sticker().id) ? props.onStickerFave : undefined}
+        onRemoveRecentClick={isRecent() ? props.onStickerRemoveRecent : undefined}
+        onDismiss={props.onDismiss}
+        forcePlayback={props.forcePlayback}
+        isEffectEmoji={props.stickerSet.id === EFFECT_EMOJIS_SET_ID}
+        noShowPremium={
+          props.isCurrentUserPremium &&
+          (props.stickerSet.id === EFFECT_STICKERS_SET_ID || props.stickerSet.id === EFFECT_EMOJIS_SET_ID)
+        }
+      />
+    );
+  }
+
+  // Deviation: no `key={stickerSet.id}` on the root; the parents list sets keyed by id (a changed id is another instance).
   return (
-    // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{(key) => …}</Show> (the callback MUST take an argument, a zero-argument child is a plain child and never remounts; a falsy key such as 0 renders nothing: use when={{ id: key }})
     <div
       ref={ref}
-      key={props.stickerSet.id}
       id={`${props.idPrefix}-${props.index}`}
       class={buildClassName('symbol-set', isLocked() && 'symbol-set-locked')}
     >
@@ -307,9 +355,9 @@ const StickerSet = (ownProps: OwnProps) => {
         </div>
       )}
       <div
+        ref={transition.ref}
         class={buildClassName(
           'symbol-set-container shared-canvas-container',
-          transitionClassNames(),
           props.stickerSet.id === EFFECT_EMOJIS_SET_ID && 'effect-emojis',
         )}
         style={`height: ${height()}px;`}
@@ -333,91 +381,52 @@ const StickerSet = (ownProps: OwnProps) => {
             iconName="star"
           />
         )}
-        {shouldRender() &&
-          props.stickerSet.reactions?.map((reaction) => {
-            const reactionId = getReactionKey(reaction);
-            const isSelected = reactionId ? props.selectedReactionIds?.includes(reactionId) : undefined;
+        <Show when={shouldRender()}>
+          <For
+            each={props.stickerSet.reactions}
+            keyed={(reaction) => `${props.stickerSet.id}_${getReactionKey(reaction)}`}
+          >
+            {(reaction) => {
+              const reactionId = () => getReactionKey(reaction());
+              const isSelected = () => {
+                const reactionId2 = reactionId();
+                return reactionId2 ? props.selectedReactionIds?.includes(reactionId2) : undefined;
+              };
 
-            return (
-              // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{(key) => …}</Show> (the callback MUST take an argument, a zero-argument child is a plain child and never remounts; a falsy key such as 0 renders nothing: use when={{ id: key }})
-              <ReactionEmoji
-                key={`${props.stickerSet.id}_${reactionId}`}
-                reaction={reaction}
-                isSelected={isSelected}
-                loadAndPlay={props.loadAndPlay}
-                availableReactions={props.availableReactions}
-                observeIntersection={props.observeIntersectionForPlayingItems}
-                onClick={props.onReactionSelect!}
-                onContextMenu={props.onReactionContext}
-                sharedCanvasRef={(el) => {
-                  sharedCanvasRef = el;
-                }}
-                sharedCanvasHqRef={(el) => {
-                  sharedCanvasHqRef = el;
-                }}
-                forcePlayback={props.forcePlayback}
-              />
-            );
-          })}
-        {/* TODO(codemod): "sharedCanvasRef" was a ref object passed as a value: pass an accessor (() => sharedCanvasRef) or a callback ref */}
-        {shouldRender() &&
-          props.stickerSet.stickers
-            ?.slice(0, isCut() ? itemsBeforeCutout() : props.stickerSet.stickers.length)
-            .map((sticker, i) => {
-              const isHqEmoji =
-                (isRecent() || isFavorite()) && selectIsAlwaysHighPriorityEmoji(getGlobal(), sticker.stickerSetInfo);
-              const canvasRef =
-                (canCut() && i >= itemsBeforeCutout()) || isHqEmoji ? sharedCanvasHqRef : sharedCanvasRef;
-              const reactionId = sticker.isCustomEmoji ? sticker.id : sticker.emoji;
-              const isSelected = reactionId ? props.selectedReactionIds?.includes(reactionId) : undefined;
-
-              const withSparkles =
-                props.stickerSet.id === COLLECTIBLE_STATUS_SET_ID || collectibleEmojiIdsSet()?.has(sticker.id);
-
-              const component = (
-                <StickerButton
-                  sticker={sticker}
-                  size={itemSize()}
+              return (
+                <ReactionEmoji
+                  reaction={reaction()}
+                  isSelected={isSelected()}
+                  loadAndPlay={props.loadAndPlay}
+                  availableReactions={props.availableReactions}
                   observeIntersection={props.observeIntersectionForPlayingItems}
-                  observeIntersectionForShowing={props.observeIntersectionForShowingItems}
-                  noPlay={!props.loadAndPlay}
-                  isSavedMessages={props.isSavedMessages}
-                  isStatusPicker={props.isStatusPicker}
-                  canViewSet
-                  noContextMenu={props.noContextMenus}
-                  isCurrentUserPremium={props.isCurrentUserPremium}
-                  shouldIgnorePremium={props.isChatEmojiSet}
-                  sharedCanvasRef={canvasRef}
-                  withTranslucentThumb={props.isTranslucent}
-                  onClick={props.onStickerSelect}
-                  clickArg={sticker}
-                  noIcons={isEmoji() && !isRecent()}
-                  isSelected={isSelected}
-                  onUnfaveClick={
-                    isFavorite() && favoriteStickerIdsSet()?.has(sticker.id) ? props.onStickerUnfave : undefined
-                  }
-                  onFaveClick={!favoriteStickerIdsSet()?.has(sticker.id) ? props.onStickerFave : undefined}
-                  onRemoveRecentClick={isRecent() ? props.onStickerRemoveRecent : undefined}
-                  onDismiss={props.onDismiss}
+                  onClick={props.onReactionSelect!}
+                  onContextMenu={props.onReactionContext}
+                  sharedCanvasRef={getSharedCanvas}
+                  sharedCanvasHqRef={getSharedCanvasHq}
                   forcePlayback={props.forcePlayback}
-                  isEffectEmoji={props.stickerSet.id === EFFECT_EMOJIS_SET_ID}
-                  noShowPremium={
-                    props.isCurrentUserPremium &&
-                    (props.stickerSet.id === EFFECT_STICKERS_SET_ID || props.stickerSet.id === EFFECT_EMOJIS_SET_ID)
-                  }
                 />
               );
+            }}
+          </For>
+          <For
+            each={props.stickerSet.stickers?.slice(0, isCut() ? itemsBeforeCutout() : props.stickerSet.stickers.length)}
+            keyed={(sticker) => sticker.id}
+          >
+            {(sticker, index) => {
+              const withSparkles = () =>
+                props.stickerSet.id === COLLECTIBLE_STATUS_SET_ID || collectibleEmojiIdsSet()?.has(sticker().id);
 
-              if (withSparkles) {
-                return (
+              return (
+                <Show when={withSparkles()} fallback={renderStickerButton(sticker, index)}>
                   <GiftEffectWrapper className="gift-effect-wrapper" withSparkles>
-                    {component}
+                    {renderStickerButton(sticker, index)}
                   </GiftEffectWrapper>
-                );
-              }
-
-              return component;
-            })}
+                </Show>
+              );
+            }}
+          </For>
+        </Show>
         {isCut() && totalItemsCount() > itemsBeforeCutout() && (
           <Button className="StickerButton custom-emoji set-expand" round color="translucent" onClick={expand}>
             +{totalItemsCount() - itemsBeforeCutout()}

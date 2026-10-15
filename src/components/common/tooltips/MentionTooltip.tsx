@@ -1,5 +1,5 @@
-import { createMeasureEffect, frozenWhile } from 'frameact';
-import { For, Show, splitProps } from 'frameact/dom';
+import { createEffect, frameForcedReflow, frozenWhile } from 'frameact';
+import { For, Show } from 'frameact/dom';
 import { getGlobal } from '../../../global';
 
 import type { ApiUser } from '../../../api/types';
@@ -20,15 +20,11 @@ export type OwnProps = {
   filteredUsers?: ApiUser[];
 };
 
-const MentionTooltip = (p: OwnProps) => {
-  const [, props] = splitProps(p, ['isOpen']);
-  const frozen = frozenWhile(
-    () => props,
-    () => !p.isOpen,
-  );
-  const selectedIndex = () => frozen().selectedIndex;
-  const onInsertUserName = () => frozen().onInsertUserName;
-  const filteredUsers = () => frozen().filteredUsers;
+const MentionTooltip = (props: OwnProps) => {
+  const isClosing = () => !props.isOpen;
+  const selectedIndex = frozenWhile(() => props.selectedIndex, isClosing);
+  const onInsertUserName = frozenWhile(() => props.onInsertUserName, isClosing);
+  const filteredUsers = frozenWhile(() => props.filteredUsers, isClosing);
 
   let containerRef!: HTMLDivElement;
 
@@ -43,35 +39,38 @@ const MentionTooltip = (p: OwnProps) => {
     onInsertUserName()(user, forceFocus);
   };
 
-  const handleClick = (e: React.MouseEvent, id: string) => {
+  const handleClick = (e: MouseEvent, id: string) => {
     e.preventDefault();
 
     handleUserSelect(id);
   };
 
-  createMeasureEffect(
+  // Deviation: a forced-reflow effect (tt: useEffect). The `focus` class of the items is written in the mutate phase of
+  // the same frame, and `scrollIntoView` is a layout read: it has to run after that write.
+  createEffect(
     () => selectedIndex(),
-    (selectedIndex2) => {
+    () => {
       containerRef?.querySelector<HTMLElement>('.focus')?.scrollIntoView({ block: 'nearest' });
     },
+    frameForcedReflow,
   );
 
   return (
     <Show when={filteredUsers()?.length}>
-      <RichEditorTooltipPanel isOpen={p.isOpen}>
+      <RichEditorTooltipPanel isOpen={props.isOpen}>
         <div
           ref={containerRef}
           class={buildClassName(sharedStyles.root, styles.root, 'composer-tooltip custom-scroll')}
         >
-          <For each={filteredUsers()}>
-            {({ id }, index) => (
+          <For each={filteredUsers()} keyed={(user) => user.id}>
+            {(user, index) => (
               <ListItem
                 className="chat-item-clickable scroll-item smaller-icon"
                 onClick={handleClick}
-                clickArg={id}
+                clickArg={user().id}
                 focus={selectedIndex() === index()}
               >
-                <PrivateChatInfo userId={id} avatarSize="small" withUsername noUserStatus />
+                <PrivateChatInfo userId={user().id} avatarSize="small" withUsername noUserStatus />
               </ListItem>
             )}
           </For>

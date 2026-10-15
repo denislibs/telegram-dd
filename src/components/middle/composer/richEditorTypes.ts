@@ -22,8 +22,9 @@ export type RichEditorMediaEditHandler = (uploadId: string) => void;
 
 export type RichEditorRoot = {
   element: HTMLDivElement;
-  sharedCanvasRef?: (el: HTMLCanvasElement) => void;
-  sharedCanvasHqRef?: (el: HTMLCanvasElement) => void;
+  // Deviation: tt had `ElementRef<HTMLCanvasElement>`; an accessor over the canvas element here.
+  sharedCanvasRef?: () => HTMLCanvasElement | undefined;
+  sharedCanvasHqRef?: () => HTMLCanvasElement | undefined;
   tooltips?: RichEditorTooltipsConfig;
   getIsRichInputExpanded: () => boolean;
   onReady: (source: HTMLElement) => void;

@@ -1,20 +1,22 @@
-import { createEffect, createMemo, createSignal } from 'frameact';
+import { createEffect, createSignal } from 'frameact';
 import { getActions, getGlobal } from '../../../../global';
-import { depsOf } from '../../../../util/effectDeps';
 
 import { PAID_MESSAGES_PURPOSE } from '../../../../config';
 import { selectTabState } from '../../../../global/selectors';
+import { type MaybeAccessor, read } from '../../../../util/accessors';
+import { depsOf } from '../../../../util/effectDeps';
 
-// TODO(codemod): usePaidMessageConfirmation: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: a hook runs once; the parameters that can change are values or accessors (`read`), and the state it returns
+// (`shouldAutoApprove`) is an accessor. `shouldPaidMessageAutoApprove` is read from the global when needed (tt read it at
+// each render).
 export default function usePaidMessageConfirmation(
-  dialogKey: string,
-  starsForAllMessages: number,
-  isStarsBalanceModeOpen: boolean,
-  starsBalance: number,
-  shouldDelayConfirmHandler?: boolean,
+  dialogKey: MaybeAccessor<string>,
+  starsForAllMessages: MaybeAccessor<number>,
+  isStarsBalanceModeOpen: MaybeAccessor<boolean>,
+  starsBalance: MaybeAccessor<number>,
+  shouldDelayConfirmHandler?: MaybeAccessor<boolean | undefined>,
 ) {
-  const source = createMemo(() => getGlobal().settings.byKey);
-  const shouldPaidMessageAutoApprove = () => source().shouldPaidMessageAutoApprove;
+  const shouldPaidMessageAutoApprove = () => getGlobal().settings.byKey.shouldPaidMessageAutoApprove;
 
   const [shouldAutoApprove, setShouldAutoApprove] = createSignal(Boolean(shouldPaidMessageAutoApprove()));
   const [isWaitingStarsTopup, setIsWaitingStarsTopup] = createSignal(false);
@@ -25,11 +27,11 @@ export default function usePaidMessageConfirmation(
   };
 
   createEffect(
-    () => dialogKey,
-    () => {
+    () => read(dialogKey),
+    (dialogKey2) => {
       return () => {
         const { paymentMessageConfirmDialogKey } = selectTabState(getGlobal());
-        if (paymentMessageConfirmDialogKey === dialogKey) {
+        if (paymentMessageConfirmDialogKey === dialogKey2) {
           getActions().closePaymentMessageConfirmDialogOpen();
         }
       };
@@ -37,12 +39,15 @@ export default function usePaidMessageConfirmation(
   );
 
   createEffect(
-    depsOf(() => [isWaitingStarsTopup(), isStarsBalanceModeOpen, starsBalance, starsForAllMessages] as const),
-    ([isWaitingStarsTopup2]) => {
-      if (isWaitingStarsTopup2 && !isStarsBalanceModeOpen) {
+    depsOf(
+      () =>
+        [isWaitingStarsTopup(), read(isStarsBalanceModeOpen), read(starsBalance), read(starsForAllMessages)] as const,
+    ),
+    ([isWaitingStarsTopup2, isStarsBalanceModeOpen2, starsBalance2, starsForAllMessages2]) => {
+      if (isWaitingStarsTopup2 && !isStarsBalanceModeOpen2) {
         setIsWaitingStarsTopup(false);
 
-        if (starsBalance > starsForAllMessages) {
+        if (starsBalance2 > starsForAllMessages2) {
           confirmPaymentHandlerRef?.();
         }
       }
@@ -52,7 +57,7 @@ export default function usePaidMessageConfirmation(
   const handleStarsTopup = () => {
     getActions().openStarsBalanceModal({
       topup: {
-        balanceNeeded: starsForAllMessages,
+        balanceNeeded: read(starsForAllMessages),
         purpose: PAID_MESSAGES_PURPOSE,
       },
     });
@@ -60,9 +65,9 @@ export default function usePaidMessageConfirmation(
   };
 
   const dialogHandler = () => {
-    if (starsForAllMessages > starsBalance) {
+    if (read(starsForAllMessages) > read(starsBalance)) {
       handleStarsTopup();
-    } else if (shouldDelayConfirmHandler) {
+    } else if (read(shouldDelayConfirmHandler)) {
       setTimeout(() => {
         confirmPaymentHandlerRef?.();
       }, 250);
@@ -75,14 +80,14 @@ export default function usePaidMessageConfirmation(
   };
 
   const handleWithConfirmation = <T extends (...args: any[]) => void>(handler: T, ...args: Parameters<T>) => {
-    if (starsForAllMessages) {
+    if (read(starsForAllMessages)) {
       confirmPaymentHandlerRef = () => handler(...args);
       if (!shouldPaidMessageAutoApprove()) {
-        getActions().openPaymentMessageConfirmDialogOpen({ dialogKey });
+        getActions().openPaymentMessageConfirmDialogOpen({ dialogKey: read(dialogKey) });
         return;
       }
 
-      if (starsForAllMessages > starsBalance) {
+      if (read(starsForAllMessages) > read(starsBalance)) {
         handleStarsTopup();
         return;
       }

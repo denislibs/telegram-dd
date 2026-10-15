@@ -1,15 +1,18 @@
 import { findChildren } from '@tiptap/core';
 import {
   createEffect,
+  createMeasureEffect,
   createMemo,
   createMutationEffect,
   createSignal,
+  onMount,
   requestForcedReflow,
+  requestMeasure,
   requestMutation,
 } from 'frameact';
+import { Show } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
 import { getActions, withGlobal } from '../../../global';
-import { depsOf } from '../../../util/effectDeps';
 
 import type { ApiFormattedText, ApiInputDraftReplyInfo, ApiInputRichMessage } from '../../../api/types';
 import type { GlobalState, SharedSettings } from '../../../global/types';
@@ -28,6 +31,7 @@ import { IS_ANDROID, IS_IOS, IS_TOUCH_ENV } from '../../../util/browser/windowEn
 import buildClassName from '../../../util/buildClassName';
 import captureKeyboardListeners, { hasActiveHandler } from '../../../util/captureKeyboardListeners';
 import { getIsDirectTextInputDisabled } from '../../../util/directInputManager';
+import { depsOf } from '../../../util/effectDeps';
 import focusEditableElement from '../../../util/focusEditableElement';
 import { CODE_HIGHLIGHTING_CHANGED_META, subscribeToCodeLanguageLoad } from '../../../util/highlightCode';
 import { debounce, fastRaf, throttleWith } from '../../../util/schedulers';
@@ -46,7 +50,6 @@ import useFlag from '../../../hooks/useFlag';
 import useLang from '../../../hooks/useLang';
 import useOldLang from '../../../hooks/useOldLang';
 import useScrollableHint from '../../../hooks/useScrollableHint';
-import { useStateRef } from '../../../hooks/useStateRef';
 
 import AnimatedCounter from '../../common/AnimatedCounter';
 import CalendarModal from '../../common/CalendarModal.async';
@@ -92,7 +95,8 @@ export type OwnProps = {
   onMediaEdit?: RichEditorMediaEditHandler;
   onMediaFiles?: RichEditorMediaFilesHandler;
   onSend: () => void;
-  onScroll?: (event: React.UIEvent<HTMLElement>) => void;
+  // Deviation: a native event (the JSX event types of frameact), nothing in the client passes it.
+  onScroll?: (event: Event) => void;
   onFocus?: NoneToVoidFunction;
   onBlur?: NoneToVoidFunction;
 };
@@ -127,39 +131,37 @@ const MessageInput = (ownProps: OwnProps) => {
   const props = withGlobal(ownProps, mapStateToProps);
   const { editLastMessage, replyToNextMessage, showAllowedMessageTypesNotification, openPremiumModal } = getActions();
 
-  let inputRef!: HTMLDivElement;
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (props.ref) {
-    // TODO(codemod): "inputRef" was a ref object and is reassigned here (a forwarded ref?): use a callback ref
-    inputRef = props.ref;
-  }
+  // The editable element is rendered empty (ProseMirror owns its children and, once the editor is registered, its
+  // attributes): see `syncEditorElementAttributes`. It is never re-created.
+  let inputRef: HTMLDivElement | undefined;
 
-  let cloneRef!: HTMLDivElement;
-  let scrollerCloneRef!: HTMLDivElement;
-  let sharedCanvasRef!: HTMLCanvasElement;
-  let sharedCanvasHqRef!: HTMLCanvasElement;
-  let scrollerRef!: HTMLDivElement;
+  let cloneRef: HTMLDivElement | undefined;
+  let scrollerCloneRef: HTMLDivElement | undefined;
+  let sharedCanvasRef: HTMLCanvasElement | undefined;
+  let sharedCanvasHqRef: HTMLCanvasElement | undefined;
+  let scrollerRef: HTMLDivElement | undefined;
   let updateRafRef: number | undefined;
 
   const oldLang = useOldLang();
   const lang = useLang();
-  // TODO(codemod): useStateRef: a handler reads the current value through the accessor; replace ref.current with the accessor call
-  const onBlurRef = useStateRef(props.onBlur);
-  // TODO(codemod): useStateRef: a handler reads the current value through the accessor; replace ref.current with the accessor call
-  const onFocusRef = useStateRef(props.onFocus);
   let isContextMenuOpenRef = false;
   let isTextFormatterDisabledRef = IS_ANDROID;
   const [dateEditTarget, setDateEditTarget] = createSignal<RichEditorDateClickTarget | undefined>(undefined);
   const [isDateEditorOpen, openDateEditor, closeDateEditor] = useFlag();
   const { isMobile } = useAppLayout();
-  const isMobileDevice = isMobile && (IS_IOS || IS_ANDROID);
+  const isMobileDevice = () => isMobile() && (IS_IOS || IS_ANDROID);
   const richValue = createMemo(() => props.richEditor.value);
-  // TODO(codemod): useStateRef: a handler reads the current value through the accessor; replace ref.current with the accessor call
-  const richValueRef = useStateRef(richValue());
   const isRichEditorReady = createMemo(() => props.richEditor.isReady);
   const isInputEmpty = createMemo(() =>
     isRichEditorReady() ? props.richEditor.isEmpty() : !richValue().blocks.length,
   );
+
+  // Effects that need the element run after the component is mounted (the element exists once the JSX is created, after
+  // the effects of the body were created; a mutation effect applies synchronously at creation).
+  const [isMounted, setIsMounted] = createSignal(false);
+  onMount(() => {
+    setIsMounted(true);
+  });
 
   const maxInputHeight = createMemo(() =>
     props.isAttachmentModalInput
@@ -194,7 +196,6 @@ const MessageInput = (ownProps: OwnProps) => {
   );
   const isRichEditorEditable = createMemo(() => isRichEditorReady() && !isCollapsedRichOnlyPreview());
   useScrollableHint(() => scrollerRef, { isDisabled: () => !props.isRichInputExpanded });
-  const registerRichEditorRoot = createMemo(() => props.richEditor.registerRoot);
   const isMainInputLocked = createMemo(() => !props.isAttachmentModalInput && !props.canSendPlainText);
   const editor = createMemo(() => props.richEditor.editor);
   const getTooltipContext = () => ({
@@ -205,7 +206,6 @@ const MessageInput = (ownProps: OwnProps) => {
   });
   const getIsRootFormatterEnabled = () =>
     Boolean(props.tooltips?.formatter?.isEnabled() && isRichEditorEditable() && !isCollapsedRichOnlyPreview());
-  // TODO(codemod): dependency on a container (tooltips) keeps its identity while its content changes: the memo must read the fields it needs (store contract §12.7)
   const rootTooltips = createMemo(() =>
     props.tooltips
       ? {
@@ -227,9 +227,19 @@ const MessageInput = (ownProps: OwnProps) => {
 
     return props.maxLength - getRichInputLength(richValue());
   });
-  const canShowLengthIndicator = createMemo(
-    () => remainingLength() !== undefined && remainingLength() < MAX_REMAINING_LENGTH_TO_SHOW,
-  );
+  const canShowLengthIndicator = createMemo(() => {
+    const remainingLength2 = remainingLength();
+    return remainingLength2 !== undefined && remainingLength2 < MAX_REMAINING_LENGTH_TO_SHOW;
+  });
+
+  const dateTarget = createMemo(() => {
+    const target = dateEditTarget();
+    return target?.type === 'date' ? target : undefined;
+  });
+  const formattedDateTarget = createMemo(() => {
+    const target = dateEditTarget();
+    return target?.type === 'formattedDate' ? target : undefined;
+  });
 
   const handleDateClick = (target: RichEditorDateClickTarget) => {
     setDateEditTarget(target);
@@ -245,25 +255,27 @@ const MessageInput = (ownProps: OwnProps) => {
   };
 
   const handleDateMarkSubmit = (date: Date) => {
-    if (!editor() || dateEditTarget()?.type !== 'date') {
+    const dateEditTarget2 = dateEditTarget();
+    if (!editor() || dateEditTarget2?.type !== 'date') {
       return;
     }
 
-    editor()
+    editor()!
       .chain()
       .focus()
-      .setTextSelection(dateEditTarget().range)
+      .setTextSelection(dateEditTarget2.range)
       .setMark('date', { date: Math.round(date.getTime() / 1000) })
       .run();
     closeDateEditor();
   };
 
   const handleFormattedDateSubmit = (text: ApiFormattedText) => {
-    if (dateEditTarget()?.type !== 'formattedDate') {
+    const dateEditTarget2 = dateEditTarget();
+    if (dateEditTarget2?.type !== 'formattedDate') {
       return;
     }
 
-    props.richEditor.replaceRange(dateEditTarget().range, { type: 'formattedText', text });
+    props.richEditor.replaceRange(dateEditTarget2.range, { type: 'formattedText', text });
     closeDateEditor();
   };
 
@@ -361,13 +373,17 @@ const MessageInput = (ownProps: OwnProps) => {
   };
 
   const getIsRichInputExpanded = () => Boolean(isMainInput() && props.isRichInputExpanded);
-  const handleMediaEdit = (uploadId) => {
+  const handleMediaEdit: RichEditorMediaEditHandler = (uploadId) => {
     props.onMediaEdit?.(uploadId);
   };
-  const handleMediaFiles = (files, position, shouldAppend) => {
+  const handleMediaFiles: RichEditorMediaFilesHandler = (files, position, shouldAppend) => {
     props.onMediaFiles?.(files, position, shouldAppend);
   };
 
+  // Deviation: tt rendered the attributes of the input through JSX (`id`, `className`, `contentEditable`, `tabIndex`,
+  // `aria-*`) and wrote them again here once the editor was attached. The element is rendered here without them (it is
+  // ProseMirror's), so this function is the only writer: it is called when the element is created, by the effect below
+  // and by the effects that tt already had. `role`, `dir` and `spellcheck` are static and stay in the JSX.
   const syncEditorElementAttributes = (input: HTMLElement) => {
     input.id = props.editableInputId || EDITABLE_INPUT_ID;
     input.className = buildClassName(className(), 'ProseMirror');
@@ -389,14 +405,42 @@ const MessageInput = (ownProps: OwnProps) => {
     }
 
     if (placeholderAriaLabel()) {
-      input.setAttribute('aria-label', placeholderAriaLabel());
+      input.setAttribute('aria-label', placeholderAriaLabel()!);
+    } else {
+      input.removeAttribute('aria-label');
+    }
+
+    // Deviation: `aria-disabled` was a JSX attribute in tt.
+    if (!isRichEditorReady()) {
+      input.setAttribute('aria-disabled', 'true');
+    } else {
+      input.removeAttribute('aria-disabled');
+    }
+  };
+
+  // The input when the editor cannot be rendered (a locked chat): the attributes tt's JSX gave it. It is not a ProseMirror
+  // root then.
+  const syncPlainInputAttributes = (input: HTMLElement) => {
+    input.id = props.editableInputId || EDITABLE_INPUT_ID;
+    input.className = className();
+    input.setAttribute('contenteditable', 'false');
+    input.setAttribute('tabindex', isCollapsedRichOnlyPreview() ? '-1' : '0');
+    input.removeAttribute('aria-disabled');
+    if (isCollapsedRichOnlyPreview()) {
+      input.setAttribute('aria-readonly', 'true');
+    } else {
+      input.removeAttribute('aria-readonly');
+    }
+
+    if (placeholderAriaLabel()) {
+      input.setAttribute('aria-label', placeholderAriaLabel()!);
     } else {
       input.removeAttribute('aria-label');
     }
   };
 
   createMutationEffect(
-    depsOf(() => [props.isAttachmentModalInput, updateInputHeight] as const),
+    depsOf(() => [props.isAttachmentModalInput] as const),
     ([isAttachmentModalInput2]) => {
       if (!isAttachmentModalInput2) return;
       updateInputHeight(false);
@@ -404,7 +448,7 @@ const MessageInput = (ownProps: OwnProps) => {
   );
 
   createMutationEffect(
-    depsOf(() => [props.isRichInputExpanded, updateInputHeight] as const),
+    depsOf(() => [props.isRichInputExpanded] as const),
     ([isRichInputExpanded2]) => {
       if (isRichInputExpanded2) {
         return;
@@ -415,38 +459,8 @@ const MessageInput = (ownProps: OwnProps) => {
   );
 
   createEffect(
-    depsOf(
-      () =>
-        [
-          canRenderRichEditor(),
-          getIsRichInputExpanded,
-          handleDateClick,
-          handleEditorReady,
-          handleEditorUpdate,
-          handleMediaEdit,
-          handleMediaFiles,
-          props.isActive,
-          registerRichEditorRoot(),
-          richValueRef,
-          rootTooltips(),
-          syncCloneWithSource,
-          syncEditorElementAttributes,
-          updateInputHeight,
-        ] as const,
-    ),
-    ([
-      canRenderRichEditor2,
-      getIsRichInputExpanded2,
-      ,
-      ,
-      ,
-      ,
-      ,
-      isActive2,
-      registerRichEditorRoot2,
-      ,
-      rootTooltips2,
-    ]) => {
+    depsOf(() => [canRenderRichEditor(), props.isActive, props.richEditor.registerRoot, rootTooltips()] as const),
+    ([canRenderRichEditor2, isActive2, registerRichEditorRoot, rootTooltips2]) => {
       const input = inputRef;
       if (!input) {
         return undefined;
@@ -462,14 +476,12 @@ const MessageInput = (ownProps: OwnProps) => {
       }
 
       syncEditorElementAttributes(input);
-      const unregisterRichEditorRoot = registerRichEditorRoot2({
+      const unregisterRichEditorRoot = registerRichEditorRoot({
         element: input,
-        // TODO(codemod): "sharedCanvasRef" was a ref object passed as a value: pass an accessor (() => sharedCanvasRef) or a callback ref
-        sharedCanvasRef,
-        // TODO(codemod): "sharedCanvasHqRef" was a ref object passed as a value: pass an accessor (() => sharedCanvasHqRef) or a callback ref
-        sharedCanvasHqRef,
+        sharedCanvasRef: () => sharedCanvasRef,
+        sharedCanvasHqRef: () => sharedCanvasHqRef,
         tooltips: rootTooltips2,
-        getIsRichInputExpanded: getIsRichInputExpanded2,
+        getIsRichInputExpanded,
         onReady: handleEditorReady,
         onUpdate: handleEditorUpdate,
         onDateClick: handleDateClick,
@@ -494,11 +506,11 @@ const MessageInput = (ownProps: OwnProps) => {
           props.isActive,
           isCollapsedRichOnlyPreview(),
           isMainInput(),
+          // Not used by the apply, but the editor mode (and its element attributes) follow it.
           props.isRichInputExpanded,
-          syncEditorElementAttributes,
         ] as const,
     ),
-    ([editor2, isActive2, isCollapsedRichOnlyPreview2, isMainInput2, isRichInputExpanded2]) => {
+    ([editor2, isActive2, isCollapsedRichOnlyPreview2, isMainInput2]) => {
       if (!editor2 || editor2.isDestroyed || !isMainInput2 || !isActive2) {
         return;
       }
@@ -512,42 +524,32 @@ const MessageInput = (ownProps: OwnProps) => {
   );
 
   const refreshCodeBlockHighlighting = () => {
-    if (!editor() || editor().isDestroyed) {
+    const editor2 = editor();
+    if (!editor2 || editor2.isDestroyed) {
       return;
     }
 
-    if (!findChildren(editor().state.doc, (node) => node.type.name === 'codeBlock').length) {
+    if (!findChildren(editor2.state.doc, (node) => node.type.name === 'codeBlock').length) {
       return;
     }
 
-    editor().view.dispatch(
-      editor().state.tr.setMeta(CODE_HIGHLIGHTING_CHANGED_META, true).setMeta('addToHistory', false),
+    editor2.view.dispatch(
+      editor2.state.tr.setMeta(CODE_HIGHLIGHTING_CHANGED_META, true).setMeta('addToHistory', false),
     );
-    syncCloneWithSource(editor().view.dom);
+    syncCloneWithSource(editor2.view.dom);
     updateInputHeight();
   };
 
-  createEffect(
-    () => refreshCodeBlockHighlighting,
-    (refreshCodeBlockHighlighting2) => {
-      return subscribeToCodeLanguageLoad(throttleWith(requestMutation, refreshCodeBlockHighlighting2));
-    },
-  );
+  onMount(() => subscribeToCodeLanguageLoad(throttleWith(requestMutation, refreshCodeBlockHighlighting)));
 
   createMutationEffect(
-    depsOf(
-      () =>
-        [
-          editor(),
-          props.isActive,
-          isInputEmpty(),
-          isRichEditorReady(),
-          richValue(),
-          syncCloneWithSource,
-          updateInputHeight,
-        ] as const,
-    ),
-    ([editor2, isActive2, isInputEmpty2, isRichEditorReady2, richValue2]) => {
+    depsOf(() => [editor(), props.isActive, isInputEmpty(), isRichEditorReady(), richValue(), isMounted()] as const),
+    ([editor2, isActive2, isInputEmpty2, isRichEditorReady2, , isMounted2]) => {
+      // Deviation: waits for the element (see `isMounted`); tt's layout effect ran after the commit.
+      if (!isMounted2) {
+        return;
+      }
+
       if (!isActive2 && inputRef) {
         inputRef.blur();
         updateInputHeight(true);
@@ -562,6 +564,7 @@ const MessageInput = (ownProps: OwnProps) => {
     },
   );
 
+  // The first run is the creation of the element (the `ref` callback below).
   createMutationEffect(
     depsOf(
       () =>
@@ -572,30 +575,24 @@ const MessageInput = (ownProps: OwnProps) => {
           isCollapsedRichOnlyPreview(),
           props.isNeedPremium,
           isRichEditorEditable(),
+          isRichEditorReady(),
           placeholderAriaLabel(),
-          syncEditorElementAttributes,
         ] as const,
     ),
-    ([
-      canRenderRichEditor2,
-      className2,
-      editableInputId2,
-      isCollapsedRichOnlyPreview2,
-      isNeedPremium2,
-      isRichEditorEditable2,
-      placeholderAriaLabel2,
-    ]) => {
-      if (!inputRef || !canRenderRichEditor2) {
+    ([canRenderRichEditor2]) => {
+      if (!inputRef) {
         return;
       }
 
-      syncEditorElementAttributes(inputRef);
+      // Deviation: tt skipped this effect without an editor, its JSX attributes applied then.
+      if (canRenderRichEditor2) {
+        syncEditorElementAttributes(inputRef);
+      } else {
+        syncPlainInputAttributes(inputRef);
+      }
     },
   );
 
-  let chatIdRef = props.chatId;
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  chatIdRef = props.chatId;
   const focusInput = () => {
     if (
       !inputRef ||
@@ -629,8 +626,9 @@ const MessageInput = (ownProps: OwnProps) => {
     }
 
     isContextMenuOpenRef = true;
-    if (editor() && !editor().isDestroyed) {
-      refreshRichEditorTooltips(editor());
+    const editor2 = editor();
+    if (editor2 && !editor2.isDestroyed) {
+      refreshRichEditorTooltips(editor2);
     }
 
     function handleCloseContextMenu(e2: KeyboardEvent | MouseEvent) {
@@ -640,8 +638,8 @@ const MessageInput = (ownProps: OwnProps) => {
 
       setTimeout(() => {
         isContextMenuOpenRef = false;
-        if (editor() && !editor().isDestroyed) {
-          refreshRichEditorTooltips(editor());
+        if (editor2 && !editor2.isDestroyed) {
+          refreshRichEditorTooltips(editor2);
         }
       }, CONTEXT_MENU_CLOSE_DELAY_MS);
 
@@ -657,7 +655,7 @@ const MessageInput = (ownProps: OwnProps) => {
     const isEnterKey = e.key === 'Enter';
     const isSubmitModifierPressed = e.ctrlKey || e.metaKey;
 
-    if (!isEnterKey || e.shiftKey || isMobileDevice) {
+    if (!isEnterKey || e.shiftKey || isMobileDevice()) {
       return false;
     }
 
@@ -676,7 +674,8 @@ const MessageInput = (ownProps: OwnProps) => {
     props.onSend();
   };
 
-  function handleKeyDownCapture(e: React.KeyboardEvent<HTMLDivElement>) {
+  // Deviation: a native capture listener on the wrapper (`oncapture:keydown`), tt used React's `onKeyDownCapture`.
+  function handleKeyDownCapture(e: KeyboardEvent) {
     if (!(e.target instanceof Node) || !inputRef?.contains(e.target)) {
       return;
     }
@@ -710,7 +709,8 @@ const MessageInput = (ownProps: OwnProps) => {
   }
 
   function handleAndroidContextMenu(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
-    if (!editor() || editor().isDestroyed || editor().state.selection.empty) {
+    const editor2 = editor();
+    if (!editor2 || editor2.isDestroyed || editor2.state.selection.empty) {
       return;
     }
 
@@ -720,7 +720,7 @@ const MessageInput = (ownProps: OwnProps) => {
       e.preventDefault();
       e.stopPropagation();
     }
-    refreshRichEditorTooltips(editor());
+    refreshRichEditorTooltips(editor2);
   }
 
   function handleClick() {
@@ -740,16 +740,16 @@ const MessageInput = (ownProps: OwnProps) => {
     syncCloneWithSource(editor()?.view.dom);
   }
 
-  // TODO(codemod): dependency on a container (replyInfo) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)
-  createEffect(
-    depsOf(() => [props.chatId, focusInput, props.replyInfo, props.canAutoFocus, isRichEditorReady()] as const),
-    ([chatId2, focusInput2, replyInfo2, canAutoFocus2, isRichEditorReady2]) => {
+  // Deviation: a measure effect, as `focus()` is a layout read (tt: `useEffect`, also a measure-phase effect).
+  createMeasureEffect(
+    depsOf(() => [props.chatId, props.replyInfo, props.canAutoFocus, isRichEditorReady()] as const),
+    ([, , canAutoFocus2]) => {
       if (IS_TOUCH_ENV) {
         return;
       }
 
       if (canAutoFocus2) {
-        focusInput2();
+        focusInput();
       }
     },
   );
@@ -762,7 +762,7 @@ const MessageInput = (ownProps: OwnProps) => {
           props.chatId,
           props.editableInputId,
           isCollapsedRichOnlyPreview(),
-          isMobileDevice,
+          isMobileDevice(),
           props.isActive,
           props.isSelectModeActive,
           props.noFocusInterception,
@@ -773,7 +773,7 @@ const MessageInput = (ownProps: OwnProps) => {
       chatId2,
       editableInputId2,
       isCollapsedRichOnlyPreview2,
-      ,
+      isMobileDevice2,
       isActive2,
       isSelectModeActive2,
       noFocusInterception2,
@@ -781,7 +781,7 @@ const MessageInput = (ownProps: OwnProps) => {
       if (
         !chatId2 ||
         (editableInputId2 !== EDITABLE_INPUT_ID && editableInputId2 !== EDITABLE_INPUT_MODAL_ID) ||
-        isMobileDevice ||
+        isMobileDevice2 ||
         isSelectModeActive2
       ) {
         return undefined;
@@ -838,34 +838,32 @@ const MessageInput = (ownProps: OwnProps) => {
     },
   );
 
-  createEffect(
-    () => focusInput,
-    (focusInput2) => {
-      const captureFirstTab = debounce(
-        (e: KeyboardEvent) => {
-          if (e.key === 'Tab' && !getIsDirectTextInputDisabled()) {
-            e.preventDefault();
-            requestMutation(focusInput2);
-          }
-        },
-        TAB_INDEX_PRIORITY_TIMEOUT,
-        true,
-        false,
-      );
-
-      function handleTab(e: KeyboardEvent) {
-        const target = e.target as HTMLElement | undefined;
-        if (target?.closest?.(CONTENT_EDITABLE_SELECTOR)) {
-          return false;
+  onMount(() => {
+    const captureFirstTab = debounce(
+      (e: KeyboardEvent) => {
+        if (e.key === 'Tab' && !getIsDirectTextInputDisabled()) {
+          e.preventDefault();
+          // Deviation: `focus()` is a layout read, tt's `requestMutation` would be a phase violation.
+          requestMeasure(focusInput);
         }
+      },
+      TAB_INDEX_PRIORITY_TIMEOUT,
+      true,
+      false,
+    );
 
-        captureFirstTab(e);
-        return undefined;
+    function handleTab(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | undefined;
+      if (target?.closest?.(CONTENT_EDITABLE_SELECTOR)) {
+        return false;
       }
 
-      return captureKeyboardListeners({ onTab: handleTab });
-    },
-  );
+      captureFirstTab(e);
+      return undefined;
+    }
+
+    return captureKeyboardListeners({ onTab: handleTab });
+  });
 
   createEffect(
     () => props.shouldSuppressFocus,
@@ -889,10 +887,12 @@ const MessageInput = (ownProps: OwnProps) => {
   return (
     <div
       id={props.id}
-      onClick={props.shouldSuppressFocus ? props.onSuppressedFocus : undefined}
+      onClick={() => {
+        if (props.shouldSuppressFocus) props.onSuppressedFocus?.();
+      }}
       dir={lang.isRtl ? 'rtl' : undefined}
     >
-      {hasUnsupportedRichContent() && (
+      <Show when={hasUnsupportedRichContent()}>
         <div class={tiptapStyles.unsupported}>
           <span>{lang('PageContentUnsupported')}</span>
           <Button
@@ -905,16 +905,26 @@ const MessageInput = (ownProps: OwnProps) => {
             {lang('Delete')}
           </Button>
         </div>
-      )}
+      </Show>
       <div class="shared-canvas-container">
-        {canRenderRichEditor() && (
-          <>
-            <canvas ref={sharedCanvasRef} class="shared-canvas" />
-            <canvas ref={sharedCanvasHqRef} class="shared-canvas" />
-          </>
-        )}
+        <Show when={canRenderRichEditor()}>
+          <canvas
+            ref={(el) => {
+              sharedCanvasRef = el;
+            }}
+            class="shared-canvas"
+          />
+          <canvas
+            ref={(el) => {
+              sharedCanvasHqRef = el;
+            }}
+            class="shared-canvas"
+          />
+        </Show>
         <div
-          ref={scrollerRef}
+          ref={(el) => {
+            scrollerRef = el;
+          }}
           class={buildClassName(
             'custom-scroll',
             SCROLLER_CLASS,
@@ -922,32 +932,40 @@ const MessageInput = (ownProps: OwnProps) => {
             isCollapsedRichOnlyPreview() && 'rich-only-preview',
           )}
           onScroll={(e) => props.onScroll?.(e)}
-          onClick={
-            isCollapsedRichOnlyPreview() ? props.onRichInputExpand : isMainInputLocked() ? handleClick : undefined
-          }
+          onClick={() => {
+            if (isCollapsedRichOnlyPreview()) props.onRichInputExpand?.();
+            else if (isMainInputLocked()) handleClick();
+          }}
         >
-          <div class={inputScrollerContentClass()} data-stricterdom-ignore onKeyDownCapture={handleKeyDownCapture}>
+          <div class={inputScrollerContentClass()} data-stricterdom-ignore oncapture:keydown={handleKeyDownCapture}>
             <div
-              ref={inputRef}
-              id={props.editableInputId || EDITABLE_INPUT_ID}
-              class={className()}
-              contentEditable={canRenderRichEditor() && isRichEditorEditable()}
+              ref={(el) => {
+                inputRef = el;
+                props.ref?.(el);
+                if (canRenderRichEditor()) {
+                  syncEditorElementAttributes(el);
+                } else {
+                  syncPlainInputAttributes(el);
+                }
+              }}
               role="textbox"
-              aria-disabled={canRenderRichEditor() && !isRichEditorReady()}
-              aria-readonly={isCollapsedRichOnlyPreview() || undefined}
               dir="auto"
               spellcheck={IS_TAURI ? false : undefined}
-              tabIndex={isCollapsedRichOnlyPreview() ? -1 : 0}
-              onClick={isCollapsedRichOnlyPreview() ? undefined : focusInput}
-              onDoubleClick={DEBUG ? handleDebugDoubleClick : undefined}
+              onClick={() => {
+                if (!isCollapsedRichOnlyPreview()) focusInput();
+              }}
+              onDblClick={DEBUG ? handleDebugDoubleClick : undefined}
               onKeyDown={handleKeyDown}
               onMouseDown={handleMouseDown}
               onContextMenu={IS_ANDROID ? handleAndroidContextMenu : undefined}
-              aria-label={placeholderAriaLabel()}
-              onFocus={!props.isNeedPremium ? onFocusRef.current : undefined}
-              onBlur={!props.isNeedPremium ? onBlurRef.current : undefined}
+              onFocus={() => {
+                if (!props.isNeedPremium) props.onFocus?.();
+              }}
+              onBlur={() => {
+                if (!props.isNeedPremium) props.onBlur?.();
+              }}
             />
-            {!props.forcedPlaceholder && (
+            <Show when={!props.forcedPlaceholder}>
               <span
                 class={buildClassName(
                   'placeholder-text',
@@ -956,61 +974,77 @@ const MessageInput = (ownProps: OwnProps) => {
                 )}
                 dir="auto"
               >
-                {isMainInputLocked() && <Icon name="lock-filled" className="placeholder-icon" />}
+                <Show when={isMainInputLocked()}>
+                  <Icon name="lock-filled" className="placeholder-icon" />
+                </Show>
                 {props.placeholder}
-                {props.isStoryInput && props.isNeedPremium && (
+                <Show when={props.isStoryInput && props.isNeedPremium}>
                   <Button className="unlock-button" size="tiny" color="adaptive" onClick={handleOpenPremiumModal}>
                     {oldLang('StoryRepliesLockedButton')}
                   </Button>
-                )}
+                </Show>
               </span>
-            )}
+            </Show>
           </div>
         </div>
       </div>
       <div
-        ref={scrollerCloneRef}
+        ref={(el) => {
+          scrollerCloneRef = el;
+        }}
         aria-hidden
         class={buildClassName('custom-scroll', SCROLLER_CLASS, 'clone', props.isNeedPremium && 'is-need-premium')}
       >
         <div class={inputScrollerContentClass()} data-stricterdom-ignore>
-          <div ref={cloneRef} class={buildClassName(className(), 'clone', tiptapStyles.clone)} dir="auto" />
+          <div
+            ref={(el) => {
+              cloneRef = el;
+            }}
+            class={buildClassName(className(), 'clone', tiptapStyles.clone)}
+            dir="auto"
+          />
         </div>
       </div>
-      {canShowLengthIndicator() && (
-        <div class={buildClassName('max-length-indicator', remainingLength() < 0 && 'color-danger')} dir="auto">
-          <AnimatedCounter text={remainingLength().toString()} />
+      <Show when={canShowLengthIndicator()}>
+        <div class={buildClassName('max-length-indicator', remainingLength()! < 0 && 'color-danger')} dir="auto">
+          <AnimatedCounter text={remainingLength()!.toString()} />
         </div>
-      )}
-      {isMainInput() && canRenderRichEditor() && (
+      </Show>
+      <Show when={isMainInput() && canRenderRichEditor()}>
         <RichEditorToolbar
           editor={editor()}
           isEnabled={props.isRichInputExpanded}
           onOpenAiEditor={props.onOpenAiEditor}
         />
-      )}
-      {dateEditTarget()?.type === 'date' && (
-        <CalendarModal
-          isOpen={isDateEditorOpen()}
-          selectedAt={dateEditTarget().date * 1000}
-          withTimePicker
-          submitButtonLabel={lang('Save')}
-          onClose={handleCloseDateEditor}
-          onCloseAnimationEnd={handleDateEditorAnimationEnd}
-          onSubmit={handleDateMarkSubmit}
-        />
-      )}
-      {dateEditTarget()?.type === 'formattedDate' && (
-        <FormattedDateModal
-          isOpen={isDateEditorOpen()}
-          initialDate={dateEditTarget().date}
-          initialOptions={dateEditTarget().options}
-          onClose={handleCloseDateEditor}
-          onCloseAnimationEnd={handleDateEditorAnimationEnd}
-          onSubmit={handleFormattedDateSubmit}
-        />
-      )}
-      {props.forcedPlaceholder && <span class="forced-placeholder">{renderText(props.forcedPlaceholder)}</span>}
+      </Show>
+      <Show when={dateTarget()} keyed>
+        {(target) => (
+          <CalendarModal
+            isOpen={isDateEditorOpen()}
+            selectedAt={target.date * 1000}
+            withTimePicker
+            submitButtonLabel={lang('Save')}
+            onClose={handleCloseDateEditor}
+            onCloseAnimationEnd={handleDateEditorAnimationEnd}
+            onSubmit={handleDateMarkSubmit}
+          />
+        )}
+      </Show>
+      <Show when={formattedDateTarget()} keyed>
+        {(target) => (
+          <FormattedDateModal
+            isOpen={isDateEditorOpen()}
+            initialDate={target.date}
+            initialOptions={target.options}
+            onClose={handleCloseDateEditor}
+            onCloseAnimationEnd={handleDateEditorAnimationEnd}
+            onSubmit={handleFormattedDateSubmit}
+          />
+        )}
+      </Show>
+      <Show when={props.forcedPlaceholder}>
+        <span class="forced-placeholder">{renderText(props.forcedPlaceholder)}</span>
+      </Show>
     </div>
   );
 };

@@ -13,7 +13,7 @@ type OwnProps = {
 };
 
 const EmojiButton = (props: OwnProps) => {
-  const handleClick = (e: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
+  const handleClick = (e: MouseEvent) => {
     // Preventing safari from losing focus on Composer MessageInput
     e.preventDefault();
 

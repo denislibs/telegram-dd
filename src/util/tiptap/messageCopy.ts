@@ -9,6 +9,7 @@ import { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import type { ClipboardTextContent } from '../../types/messageCopy';
 
 import { __buildRichEditorSchemaExtensions } from '../../components/middle/composer/helpers/richEditor';
+import { ensureProtocol, isValidProtocol } from '../browser/url';
 import {
   buildBotApiHtmlSerializer,
   extendBotApiMarkdownHtml,
@@ -47,17 +48,33 @@ export function serializeMessageCopyTiptapJson(doc: TiptapJsonContent): Clipboar
   };
 }
 
+// Deviation (security): the entity URL of a text link comes from the sender and tt copies it as it is, so
+// `<a href="javascript:...">` reached the clipboard HTML and `[text](javascript:...)` the markdown. The message view
+// shows such a link as `ensureProtocol(url)`; the copy does the same and drops the link (keeping its text) when the
+// result is not an address of an allowed scheme.
+const SAFE_COPY_LINK_PROTOCOLS = ['http', 'https', 'tg', 'ton', 'mailto', 'tel'];
+
+function sanitizeCopyLinkMarks(marks: TiptapJsonContent['marks']): TiptapJsonContent['marks'] {
+  return marks?.flatMap((mark) => {
+    if (mark.type !== 'link') return [mark];
+
+    const href = typeof mark.attrs?.href === 'string' ? ensureProtocol(mark.attrs.href.trim()) : undefined;
+    return href && isValidProtocol(href, SAFE_COPY_LINK_PROTOCOLS) ? [{ ...mark, attrs: { ...mark.attrs, href } }] : [];
+  });
+}
+
 function normalizeMessageCopyJson(node: TiptapJsonContent): TiptapJsonContent {
   if (node.type === 'emoji') {
     return {
       type: 'text',
       text: String(node.attrs?.emoji || node.attrs?.alt || '\u{FFFC}'),
-      marks: node.marks,
+      marks: sanitizeCopyLinkMarks(node.marks),
     };
   }
 
   return {
     ...node,
+    ...(node.marks && { marks: sanitizeCopyLinkMarks(node.marks) }),
     content: node.content?.map(normalizeMessageCopyJson),
   };
 }

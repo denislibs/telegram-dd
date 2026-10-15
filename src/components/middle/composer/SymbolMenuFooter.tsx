@@ -62,7 +62,7 @@ const SymbolMenuFooter = (props: OwnProps) => {
       {props.activeTab === SymbolMenuTabs.Emoji && (
         <Button
           className="symbol-delete-button"
-          onClick={props.onRemoveSymbol}
+          onClick={() => props.onRemoveSymbol()}
           ariaLabel="Remove Symbol"
           round
           faded

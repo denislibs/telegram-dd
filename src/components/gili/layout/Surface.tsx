@@ -1,20 +1,24 @@
 import { createMemo } from 'frameact';
 import { splitProps } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import buildClassName from '../../../util/buildClassName';
 
 import styles from './Surface.module.scss';
 
-type OwnProps = React.HTMLAttributes<HTMLDivElement> & {
+// Deviation: `React.HTMLAttributes` -> the JSX attributes of the runtime; `class` is not an own prop (`className` is).
+type OwnProps = Omit<JSX.HTMLAttributes<HTMLDivElement>, 'ref' | 'children' | 'class'> & {
   ref?: (el: HTMLDivElement) => void;
+  className?: string;
   scrollable?: boolean;
   noPadding?: boolean;
-  children: React.ReactNode;
+  children: JSX.Element;
 };
 
-type BreakoutProps = React.HTMLAttributes<HTMLDivElement> & {
+type BreakoutProps = Omit<JSX.HTMLAttributes<HTMLDivElement>, 'ref' | 'children' | 'class'> & {
   ref?: (el: HTMLDivElement) => void;
-  children: React.ReactNode;
+  className?: string;
+  children: JSX.Element;
 };
 
 const Surface = (props: OwnProps) => {

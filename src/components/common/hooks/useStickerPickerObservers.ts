@@ -1,6 +1,6 @@
 import { createEffect, createSignal } from 'frameact';
-import { depsOf } from '../../../util/effectDeps';
 
+import { type MaybeAccessor, read } from '../../../util/accessors';
 import animateScroll, { isAnimatingScroll } from '../../../util/animateScroll';
 import { REM } from '../helpers/mediaDimensions';
 
@@ -15,14 +15,15 @@ const SCROLL_MAX_DISTANCE_WHEN_CLOSE = 200;
 const SCROLL_MAX_DISTANCE_WHEN_FAR = 80;
 const FOCUS_MARGIN = 0.5 * REM;
 
-// TODO(codemod): useStickerPickerObservers: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: the refs are accessors of the elements, `idPrefix` and `isHidden` are `MaybeAccessor`s, `activeSetIndex` is an
+// accessor (the observe functions and `selectStickerSet` are plain functions, as in tt).
 export function useStickerPickerObservers(
-  containerRef: (el: HTMLDivElement) => void,
-  headerRef: (el: HTMLDivElement) => void,
-  idPrefix: string,
-  isHidden?: boolean,
+  containerRef: MaybeAccessor<HTMLDivElement | undefined>,
+  headerRef: MaybeAccessor<HTMLDivElement | undefined>,
+  idPrefix: MaybeAccessor<string>,
+  isHidden?: MaybeAccessor<boolean | undefined>,
 ) {
-  let stickerSetIntersectionsRef: boolean[] = [];
+  const stickerSetIntersectionsRef: boolean[] = [];
 
   const [activeSetIndex, setActiveSetIndex] = createSignal<number>(0);
 
@@ -39,11 +40,11 @@ export function useStickerPickerObservers(
       const stickerSetIntersections = stickerSetIntersectionsRef;
 
       entries.forEach((entry) => {
-        const index = Number(entry.target.id.replace(`${idPrefix}-`, ''));
+        const index = Number(entry.target.id.replace(`${read(idPrefix)}-`, ''));
         stickerSetIntersections[index] = entry.isIntersecting;
       });
 
-      if (isAnimatingScroll(containerRef.current)) {
+      if (isAnimatingScroll(read(containerRef))) {
         return;
       }
 
@@ -81,11 +82,12 @@ export function useStickerPickerObservers(
     margin: COVERS_INTERSECTION_MARGIN,
   });
 
-  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
+  // Deviation: tt's `useSyncEffect` froze the observers during the render; this is a tickEnd effect, which still runs
+  // before the first observe (the observing effects of the children are created after it).
   createEffect(
-    depsOf(() => [freezeForSet, freezeForShowingItems, isHidden, unfreezeForSet, unfreezeForShowingItems]),
-    () => {
-      if (isHidden) {
+    () => read(isHidden),
+    (isHidden2) => {
+      if (isHidden2) {
         freezeForSet();
         freezeForShowingItems();
       } else {
@@ -103,21 +105,21 @@ export function useStickerPickerObservers(
   );
 
   const selectStickerSet = (index: number) => {
-    setActiveSetIndex((currentIndex) => {
-      const stickerSetEl = document.getElementById(`${idPrefix}-${index}`)!;
-      const isClose = Math.abs(currentIndex - index) === 1;
+    // Deviation: tt ran the scroll inside the state updater; a setter with side effects is not a good fit for a signal.
+    const currentIndex = activeSetIndex();
+    const stickerSetEl = document.getElementById(`${read(idPrefix)}-${index}`)!;
+    const isClose = Math.abs(currentIndex - index) === 1;
 
-      animateScroll({
-        container: containerRef.current!,
-        element: stickerSetEl,
-        position: 'start',
-        margin: FOCUS_MARGIN,
-        maxDistance: isClose ? SCROLL_MAX_DISTANCE_WHEN_CLOSE : SCROLL_MAX_DISTANCE_WHEN_FAR,
-        noHeavyAnimation: true,
-      });
-
-      return index;
+    animateScroll({
+      container: read(containerRef)!,
+      element: stickerSetEl,
+      position: 'start',
+      margin: FOCUS_MARGIN,
+      maxDistance: isClose ? SCROLL_MAX_DISTANCE_WHEN_CLOSE : SCROLL_MAX_DISTANCE_WHEN_FAR,
+      noHeavyAnimation: true,
     });
+
+    setActiveSetIndex(index);
   };
 
   return {

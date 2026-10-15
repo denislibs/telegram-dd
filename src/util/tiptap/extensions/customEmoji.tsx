@@ -1,5 +1,6 @@
 import { Node } from '@tiptap/core';
-import type { ElementRef } from '../../../lib/teact/teact';
+import { createMemo } from 'frameact';
+import { Show } from 'frameact/dom';
 
 import type { TeactNodeViewComponentProps } from '../TeactNodeViewRenderer';
 
@@ -22,8 +23,8 @@ const DOCUMENT_ID_BITS = 64;
 const RE_DOCUMENT_ID = /^-?\d+$/;
 
 export type CustomEmojiNodeOptions = {
-  sharedCanvasRef?: ElementRef<HTMLCanvasElement>;
-  sharedCanvasHqRef?: ElementRef<HTMLCanvasElement>;
+  sharedCanvasRef?: () => HTMLCanvasElement | undefined;
+  sharedCanvasHqRef?: () => HTMLCanvasElement | undefined;
 };
 
 export const CustomEmojiNode = Node.create<CustomEmojiNodeOptions>({
@@ -131,22 +132,25 @@ export function buildCustomEmojiMarkdownAttrs(markdown: RichMarkdownLink) {
   };
 }
 
-function CustomEmojiView({ extension, node }: TeactNodeViewComponentProps) {
-  const documentId = typeof node.attrs.documentId === 'string' ? node.attrs.documentId : undefined;
-  if (!documentId) {
-    return undefined;
-  }
+function CustomEmojiView(props: TeactNodeViewComponentProps) {
+  const documentId = createMemo(() => (
+    typeof props.node.attrs.documentId === 'string' ? props.node.attrs.documentId : undefined
+  ));
 
-  const { sharedCanvasRef, sharedCanvasHqRef } = extension.options as CustomEmojiNodeOptions;
+  const { sharedCanvasRef, sharedCanvasHqRef } = props.extension.options as CustomEmojiNodeOptions;
 
   return (
-    <CustomEmoji
-      documentId={documentId}
-      className={buildClassName(styles.emoji, styles.customEmoji)}
-      sharedCanvasRef={sharedCanvasRef}
-      sharedCanvasHqRef={sharedCanvasHqRef}
-      isSelectable
-      withSharedAnimation
-    />
+    <Show when={documentId()}>
+      {(currentDocumentId) => (
+        <CustomEmoji
+          documentId={currentDocumentId()}
+          className={buildClassName(styles.emoji, styles.customEmoji)}
+          sharedCanvasRef={sharedCanvasRef}
+          sharedCanvasHqRef={sharedCanvasHqRef}
+          isSelectable
+          withSharedAnimation
+        />
+      )}
+    </Show>
   );
 }

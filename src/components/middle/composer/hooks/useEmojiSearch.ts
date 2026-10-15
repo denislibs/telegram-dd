@@ -1,11 +1,13 @@
-import { createEffect, createMemo, createSignal, onMount } from 'frameact';
+import { createEffect, createMemo, createSignal, untrack } from 'frameact';
+import { unwrap } from 'frameact/store';
 import { getActions, getGlobal } from '../../../../global';
-import { depsOf } from '../../../../util/effectDeps';
 
 import type { ApiEmojiGroup, ApiSticker, ApiStickerSet } from '../../../../api/types';
 
 import { selectCustomEmojiForEmojis } from '../../../../global/selectors';
 import { selectSharedSettings } from '../../../../global/selectors/sharedState';
+import { type MaybeAccessor, read } from '../../../../util/accessors';
+import { depsOf } from '../../../../util/effectDeps';
 import { ensureEmojiData, prepareEmojiLibraryMemo, searchEmojiLibraryMemo } from '../../../../util/emoji/emojiSearch';
 import { buildCollectionByKey, uniqueByField } from '../../../../util/iteratees';
 import { throttle } from '../../../../util/schedulers';
@@ -14,7 +16,7 @@ import { callApi } from '../../../../api/gramjs';
 
 import useFlag from '../../../../hooks/useFlag';
 
-type EmojiQueryResults = {
+export type EmojiQueryResults = {
   key: string;
   intent: string;
   emoticon?: string;
@@ -32,7 +34,8 @@ const EMOJI_SEARCH_LIMIT = 40;
 const SEARCH_THROTTLE = 500;
 const VARIATION_SELECTOR = '\uFE0F';
 
-// TODO(codemod): useEmojiSearch: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: the options are `MaybeAccessor`s and the reactive results are accessors (a hook runs once), the actions
+// are plain functions. `displayGroup` is a memo that holds the group of the last finished load (tt kept it in a ref).
 export default function useEmojiSearch({
   allEmojis,
   baseEmojiKeywords,
@@ -42,13 +45,13 @@ export default function useEmojiSearch({
   noNativeResults,
   noQueryCustomResults,
 }: {
-  allEmojis?: Record<string, Emoji>;
-  baseEmojiKeywords?: Record<string, string[]>;
-  emojiKeywords?: Record<string, string[]>;
-  localStickers?: ApiSticker[];
-  isLocalOnly?: boolean;
-  noNativeResults?: boolean;
-  noQueryCustomResults?: boolean;
+  allEmojis?: MaybeAccessor<Record<string, Emoji> | undefined>;
+  baseEmojiKeywords?: MaybeAccessor<Record<string, string[]> | undefined>;
+  emojiKeywords?: MaybeAccessor<Record<string, string[]> | undefined>;
+  localStickers?: MaybeAccessor<ApiSticker[] | undefined>;
+  isLocalOnly?: MaybeAccessor<boolean | undefined>;
+  noNativeResults?: MaybeAccessor<boolean | undefined>;
+  noQueryCustomResults?: MaybeAccessor<boolean | undefined>;
 }) {
   const [query, setQuery] = createSignal('');
   const [activeGroup, setActiveGroup] = createSignal<ApiEmojiGroup | undefined>(undefined);
@@ -60,59 +63,79 @@ export default function useEmojiSearch({
   let searchIntentRef: string | undefined;
   let activeGroupTitleRef: string | undefined;
   let loadingMoreIntentRef: string | undefined;
-  let runThrottledSearchRef: (cb: NoneToVoidFunction) => void | undefined;
-  runThrottledSearchRef ??= throttle((cb: NoneToVoidFunction) => cb(), SEARCH_THROTTLE, false);
+  const runThrottledSearch = throttle((cb: NoneToVoidFunction) => cb(), SEARCH_THROTTLE, false);
 
-  const effectiveEmojis = createMemo(() => allEmojis || loadedEmojis());
+  const effectiveEmojis = createMemo(() => read(allEmojis) || loadedEmojis());
 
   const preparedQuery = createMemo(() => query().trim().toLowerCase());
   const hasQuery = createMemo(() => Boolean(preparedQuery()));
   const isSearchActive = createMemo(() => isFocused() || hasQuery() || Boolean(activeGroup()));
 
-  onMount(() => {
-    if (!isSearchActive() || effectiveEmojis()) {
-      return;
-    }
+  createEffect(
+    depsOf(() => [isSearchActive(), effectiveEmojis()] as const),
+    ([isSearchActive2, effectiveEmojis2]) => {
+      if (!isSearchActive2 || effectiveEmojis2) {
+        return;
+      }
 
-    ensureEmojiData()
-      .then((data) => setLoadedEmojis(data.emojis))
-      .catch(() => undefined);
-  });
+      ensureEmojiData()
+        .then((data) => setLoadedEmojis(data.emojis))
+        .catch(() => undefined);
+    },
+  );
 
   const isGroupLoading = createMemo(
-    () => Boolean(activeGroup()) && !isLocalOnly && groupResults()?.groupTitle !== activeGroup().title,
+    () => Boolean(activeGroup()) && !read(isLocalOnly) && groupResults()?.groupTitle !== activeGroup()!.title,
   );
   let displayResultsRef: { group: ApiEmojiGroup; customIds?: string[] } | undefined;
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (!activeGroup()) {
-    displayResultsRef = undefined;
-  } else if (!isGroupLoading()) {
-    displayResultsRef = {
-      group: activeGroup(),
-      customIds: !isLocalOnly ? groupResults()?.customEmojiIds : undefined,
-    };
-  }
-  const displayGroup = displayResultsRef?.group;
+  const displayResults = createMemo(() => {
+    const group = activeGroup();
+    if (!group) {
+      displayResultsRef = undefined;
+    } else if (!isGroupLoading()) {
+      displayResultsRef = {
+        group,
+        customIds: !read(isLocalOnly) ? groupResults()?.customEmojiIds : undefined,
+      };
+    }
+    return displayResultsRef;
+  });
+  const displayGroup = createMemo(() => displayResults()?.group);
 
-  const isShowingResults = createMemo(() => hasQuery() || Boolean(displayGroup));
+  const isShowingResults = createMemo(() => hasQuery() || Boolean(displayGroup()));
 
   const emojisByNative = createMemo(() => {
-    return effectiveEmojis() && buildCollectionByKey(Object.values(effectiveEmojis()), 'native');
+    const effectiveEmojis2 = effectiveEmojis();
+    return effectiveEmojis2 && buildCollectionByKey(Object.values(effectiveEmojis2), 'native');
   });
 
   const matchedNatives = createMemo(() => {
-    if (!effectiveEmojis()) {
+    const effectiveEmojis2 = effectiveEmojis();
+    if (!effectiveEmojis2) {
       return undefined;
     }
 
-    if (preparedQuery()) {
-      const library = prepareEmojiLibraryMemo(effectiveEmojis(), baseEmojiKeywords, emojiKeywords);
-      return searchEmojiLibraryMemo(library, preparedQuery(), EMOJI_SEARCH_LIMIT);
+    const preparedQuery2 = preparedQuery();
+    if (preparedQuery2) {
+      // Deviation: the keyword maps come from the store; `memoized` recomputes for a proxy argument, and building the
+      // library through proxies would track every keyword, so the raw objects are used (they are loaded once, as a whole).
+      const baseEmojiKeywords2 = read(baseEmojiKeywords);
+      const emojiKeywords2 = read(emojiKeywords);
+      return untrack(() => {
+        const library = prepareEmojiLibraryMemo(
+          effectiveEmojis2,
+          baseEmojiKeywords2 && unwrap(baseEmojiKeywords2),
+          emojiKeywords2 && unwrap(emojiKeywords2),
+        );
+        return searchEmojiLibraryMemo(library, preparedQuery2, EMOJI_SEARCH_LIMIT);
+      });
     }
 
-    if (displayGroup && emojisByNative()) {
-      return displayGroup.emoticons
-        .map((emoticon) => emojisByNative()[emoticon] || emojisByNative()[emoticon.replace(VARIATION_SELECTOR, '')])
+    const displayGroup2 = displayGroup();
+    const emojisByNative2 = emojisByNative();
+    if (displayGroup2 && emojisByNative2) {
+      return displayGroup2.emoticons
+        .map((emoticon) => emojisByNative2[emoticon] || emojisByNative2[emoticon.replace(VARIATION_SELECTOR, '')])
         .filter(Boolean);
     }
 
@@ -128,31 +151,31 @@ export default function useEmojiSearch({
   );
 
   createEffect(
-    depsOf(() => [isLocalOnly, preparedQuery(), emoticon()] as const),
-    ([, , emoticon2]) => {
-      if (isLocalOnly) {
+    depsOf(() => [read(isLocalOnly), preparedQuery(), emoticon()] as const),
+    ([isLocalOnly2, preparedQuery2, emoticon2]) => {
+      if (isLocalOnly2) {
         return;
       }
 
-      if (!preparedQuery()) {
+      if (!preparedQuery2) {
         searchIntentRef = undefined;
         setQueryResults(undefined);
         return;
       }
 
-      const intent = `${preparedQuery()}\u0000${emoticon2 || ''}`;
+      const intent = `${preparedQuery2}\u0000${emoticon2 || ''}`;
       searchIntentRef = intent;
 
-      runThrottledSearchRef!(async () => {
+      runThrottledSearch(async () => {
         if (searchIntentRef !== intent) {
           return;
         }
 
         const langCode = selectSharedSettings(getGlobal()).language;
         const [setsResult, globalResult] = await Promise.all([
-          callApi('searchEmojiStickerSets', { query: preparedQuery() }),
+          callApi('searchEmojiStickerSets', { query: preparedQuery2 }),
           callApi('searchStickersGlobal', {
-            query: preparedQuery(),
+            query: preparedQuery2,
             emoticon: emoticon2,
             langCode,
             isEmoji: true,
@@ -172,13 +195,13 @@ export default function useEmojiSearch({
           }
 
           const addedSet = global.stickers.setsById[id];
-          if (addedSet?.title && searchWords(addedSet.title, preparedQuery())) {
+          if (addedSet?.title && searchWords(addedSet.title, preparedQuery2)) {
             packSets.unshift(addedSet);
           }
         });
 
         setQueryResults({
-          key: preparedQuery(),
+          key: preparedQuery2,
           intent,
           emoticon: emoticon2,
           packSets,
@@ -192,7 +215,7 @@ export default function useEmojiSearch({
   const searchMore = () => {
     const results = queryResults();
     if (
-      isLocalOnly ||
+      read(isLocalOnly) ||
       !results ||
       results.intent !== searchIntentRef ||
       results.globalNextOffset === undefined ||
@@ -242,36 +265,43 @@ export default function useEmojiSearch({
   };
 
   const customResults = createMemo(() => {
-    const searchedNatives = preparedQuery() ? matchedNatives()?.map((emoji) => emoji.native) : displayGroup?.emoticons;
+    const preparedQuery2 = preparedQuery();
+    const displayGroup2 = displayGroup();
+    const searchedNatives = preparedQuery2 ? matchedNatives()?.map((emoji) => emoji.native) : displayGroup2?.emoticons;
     if (!searchedNatives?.length) {
       return undefined;
     }
 
-    if (isLocalOnly) {
+    if (read(isLocalOnly)) {
       const nativesSet = new Set(searchedNatives.map((native) => native.replace(VARIATION_SELECTOR, '')));
       return uniqueByField(
-        (localStickers || []).filter(({ emoji }) => emoji && nativesSet.has(emoji.replace(VARIATION_SELECTOR, ''))),
+        (read(localStickers) || []).filter(
+          ({ emoji }) => emoji && nativesSet.has(emoji.replace(VARIATION_SELECTOR, '')),
+        ),
         'id',
       );
     }
 
-    if (preparedQuery() && noQueryCustomResults) {
+    if (preparedQuery2 && read(noQueryCustomResults)) {
       return undefined;
     }
 
-    // TODO(codemod): getGlobal() in a memo / JSX is a one-time read: use useGlobal() (store contract §12.4)
+    // Deviation: `getGlobal()` (not tracked), as in tt: the memo depends on the same values as tt's `useMemo`; the
+    // global is read when they change, and a tracked read would subscribe to every pack of every added set.
     return uniqueByField(selectCustomEmojiForEmojis(getGlobal(), searchedNatives), 'id');
   });
 
-  const customResultIds = createMemo(() => (!hasQuery() && !isLocalOnly ? displayResultsRef?.customIds : undefined));
+  const customResultIds = createMemo(() =>
+    !hasQuery() && !read(isLocalOnly) ? displayResults()?.customIds : undefined,
+  );
 
-  const nativeResults = createMemo(() => (noNativeResults ? undefined : matchedNatives()));
+  const nativeResults = createMemo(() => (read(noNativeResults) ? undefined : matchedNatives()));
 
   const selectGroup = (group?: ApiEmojiGroup) => {
     setActiveGroup(group);
     activeGroupTitleRef = group?.title;
 
-    if (isLocalOnly || !group) {
+    if (read(isLocalOnly) || !group) {
       return;
     }
 
@@ -300,14 +330,14 @@ export default function useEmojiSearch({
 
   return {
     query,
-    hasQuery: hasQuery(),
+    hasQuery,
     activeGroup,
     displayGroup,
-    isSearchActive: isSearchActive(),
-    isShowingResults: isShowingResults(),
-    nativeResults: nativeResults(),
+    isSearchActive,
+    isShowingResults,
+    nativeResults,
     customResults,
-    customResultIds: customResultIds(),
+    customResultIds,
     queryResults,
     setQuery: handleQueryChange,
     selectGroup,

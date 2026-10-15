@@ -9,9 +9,9 @@ import type {
 import { isNodeViewSelected, NodeView } from '@tiptap/core';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import type { Decoration, DecorationSource } from '@tiptap/pm/view';
-import type { FC } from '../../lib/teact/teact';
-
-import { requestMutation } from '../../lib/fasterdom/fasterdom';
+import { requestMutation } from 'frameact';
+import { createComponent } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import { TeactNodeViewContext } from './TeactNodeViewContext';
 import TeactRenderer from './TeactRenderer';
@@ -20,7 +20,7 @@ export type TeactNodeViewComponentProps = NodeViewProps & {
   contentDOMElement?: HTMLElement;
 };
 
-export type TeactNodeViewComponent = FC<TeactNodeViewComponentProps>;
+export type TeactNodeViewComponent = (props: TeactNodeViewComponentProps) => JSX.Element;
 
 export type TeactNodeViewRendererOptions = Partial<NodeViewRendererOptions> & {
   as?: string;
@@ -53,16 +53,22 @@ const selectedStates = new WeakMap<TeactNodeView, boolean>();
 const selectionUpdateHandlers = new WeakMap<TeactNodeView, TeactNodeViewEventHandler>();
 const transactionHandlers = new WeakMap<TeactNodeView, TeactNodeViewEventHandler>();
 
-const TeactNodeViewRoot = ({
-  Component,
-  componentProps,
-  contentDOMElement,
-}: TeactNodeViewRootProps) => {
-  const contextValue = { contentDOMElement };
+// Deviation: the root is a plain component over getter props (see TeactRenderer). The node view component gets getter
+// props too (`props.node`, `props.selected` ... read the latest values of the renderer's signal), and `contentDOMElement`
+// never changes for a node view, so the context value is created once.
+// The root props are read once, in the body: `Component` and the key set of `componentProps` never change, and reading
+// them inside the children (a tracked memo) would re-create the whole node view component on every `updateProps`.
+const TeactNodeViewRoot = (props: TeactNodeViewRootProps) => {
+  const Component = props.Component;
+  const contextValue = { contentDOMElement: props.contentDOMElement };
+  const componentProps = {} as TeactNodeViewComponentProps;
+  (Object.keys(props.componentProps) as (keyof TeactNodeViewComponentProps)[]).forEach((key) => {
+    Object.defineProperty(componentProps, key, { get: () => props.componentProps[key], enumerable: true });
+  });
 
   return (
     <TeactNodeViewContext.Provider value={contextValue}>
-      <Component {...componentProps} />
+      {createComponent(Component, componentProps)}
     </TeactNodeViewContext.Provider>
   );
 };

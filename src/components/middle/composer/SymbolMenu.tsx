@@ -1,19 +1,20 @@
 import { createEffect, createMemo, createMutationEffect, createSignal, requestMutation } from 'frameact';
-import { splitProps } from 'frameact/dom';
+import { Show, splitProps } from 'frameact/dom';
 import { getActions, withGlobal } from '../../../global';
-import { createShowTransition } from '../../../lib/kit';
-import { depsOf } from '../../../util/effectDeps';
-import type { GlobalState } from '../../../global/types';
 
 import type { ApiSticker, ApiVideo } from '../../../api/types';
 import type { GlobalActions } from '../../../global';
+import type { GlobalState } from '../../../global/types';
+import type { TransitionSlide } from '../../../lib/kit';
 import type { AnimationLevel, ThreadId } from '../../../types';
 import type { MenuPositionOptions } from '../../ui/Menu';
 
+import { createShowTransition } from '../../../lib/kit';
 import { selectIsContextMenuTranslucent, selectTabState } from '../../../global/selectors';
 import { selectSharedSettings } from '../../../global/selectors/sharedState';
 import { IS_TOUCH_ENV } from '../../../util/browser/windowEnvironment';
 import buildClassName from '../../../util/buildClassName';
+import { depsOf } from '../../../util/effectDeps';
 import { resolveTransitionName } from '../../../util/resolveTransitionName';
 
 import useAppLayout from '../../../hooks/useAppLayout';
@@ -107,20 +108,24 @@ const SymbolMenu = (ownProps: OwnProps) => {
   const [recentCustomEmojis, setRecentCustomEmojis] = createSignal<string[]>([]);
   const { isMobile } = useAppLayout();
 
-  // TODO(codemod): useShowTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element (transitionClassNames/hasOpenClass are gone)
-  const { shouldRender, transitionClassNames } = createShowTransition({
+  // Deviation: the transition classes of the mobile menu are written through the element ref (`t.ref`).
+  const transition = createShowTransition({
     isOpen: () => props.isOpen,
-    onCloseAnimationEnd: props.onClose,
-    noMountTransition: false,
+    onCloseAnimationEnd: () => props.onClose(),
     className: false,
   });
 
   const lang = useOldLang();
 
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (!isActivated && props.isOpen) {
-    isActivated = true;
-  }
+  // Deviation: tt set the module flag during the render; here it is read through a memo (the flag stays set for every
+  // later instance, as in tt).
+  const shouldRenderTabs = createMemo(() => {
+    if (!isActivated && props.isOpen) {
+      isActivated = true;
+    }
+
+    return isActivated;
+  });
 
   createEffect(
     () => props.onLoad,
@@ -149,9 +154,9 @@ const SymbolMenu = (ownProps: OwnProps) => {
   );
 
   createMutationEffect(
-    depsOf(() => [props.isAttachmentModal, isMobile, props.isOpen] as const),
-    ([isAttachmentModal2, , isOpen2]) => {
-      if (!isMobile || !isOpen2 || isAttachmentModal2) {
+    depsOf(() => [props.isAttachmentModal, isMobile(), props.isOpen] as const),
+    ([isAttachmentModal2, isMobile2, isOpen2]) => {
+      if (!isMobile2 || !isOpen2 || isAttachmentModal2) {
         return undefined;
       }
 
@@ -170,18 +175,16 @@ const SymbolMenu = (ownProps: OwnProps) => {
     },
   );
 
-  let recentEmojisRef = recentEmojis();
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  recentEmojisRef = recentEmojis();
-  // TODO(codemod): dependency on a container (addRecentEmoji) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)
   createEffect(
     depsOf(() => [props.isOpen, props.addRecentEmoji] as const),
     ([isOpen2, addRecentEmoji2]) => {
-      if (!recentEmojisRef.length || isOpen2) {
+      // The list is read when the menu closes (tt kept the latest list in a ref).
+      const recentEmojis2 = recentEmojis();
+      if (!recentEmojis2.length || isOpen2) {
         return;
       }
 
-      recentEmojisRef.forEach((name) => {
+      recentEmojis2.forEach((name) => {
         addRecentEmoji2({ emoji: name });
       });
 
@@ -195,18 +198,15 @@ const SymbolMenu = (ownProps: OwnProps) => {
     props.onEmojiSelect(emoji);
   };
 
-  let recentCustomEmojisRef = recentCustomEmojis();
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  recentCustomEmojisRef = recentCustomEmojis();
-  // TODO(codemod): dependency on a container (addRecentCustomEmoji) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)
   createEffect(
     depsOf(() => [props.isOpen, props.addRecentCustomEmoji] as const),
     ([isOpen2, addRecentCustomEmoji2]) => {
-      if (!recentCustomEmojisRef.length || isOpen2) {
+      const recentCustomEmojis2 = recentCustomEmojis();
+      if (!recentCustomEmojis2.length || isOpen2) {
         return;
       }
 
-      recentCustomEmojisRef.forEach((documentId) => {
+      recentCustomEmojis2.forEach((documentId) => {
         addRecentCustomEmoji2({
           documentId,
         });
@@ -231,17 +231,19 @@ const SymbolMenu = (ownProps: OwnProps) => {
     props.onStickerSelect?.(sticker, isSilent, shouldSchedule, true, canUpdateStickerSetsOrder);
   };
 
-  function renderContent(isActive: boolean, isFrom: boolean) {
-    switch (activeTab()) {
+  // Deviation: a slide renders the tab of its own key (tt called this with the state of the render in which the key was
+  // active, i.e. the same thing).
+  function renderContent(slide: TransitionSlide) {
+    switch (slide.key as SymbolMenuTabs) {
       case SymbolMenuTabs.Emoji:
         return (
           <EmojiPicker
             className="picker-tab"
-            isHidden={!props.isOpen || !isActive}
+            isHidden={!props.isOpen || !slide.isActive()}
             idPrefix={props.idPrefix}
-            loadAndPlay={props.isOpen && (isActive || isFrom)}
+            loadAndPlay={props.isOpen && (slide.isActive() || slide.isFrom())}
             chatId={props.chatId}
-            isTranslucent={!isMobile && props.isBackgroundTranslucent}
+            isTranslucent={!isMobile() && props.isBackgroundTranslucent}
             onEmojiSelect={handleEmojiSelect}
             onCustomEmojiSelect={handleCustomEmojiSelect}
           />
@@ -250,14 +252,14 @@ const SymbolMenu = (ownProps: OwnProps) => {
         return (
           <StickerPicker
             className="picker-tab"
-            isHidden={!props.isOpen || !isActive}
-            loadAndPlay={props.canSendStickers ? props.isOpen && (isActive || isFrom) : false}
+            isHidden={!props.isOpen || !slide.isActive()}
+            loadAndPlay={props.canSendStickers ? props.isOpen && (slide.isActive() || slide.isFrom()) : false}
             idPrefix={props.idPrefix}
             canSendStickers={props.canSendStickers}
             noContextMenus={!props.isMessageComposer}
             chatId={props.chatId}
             threadId={props.threadId}
-            isTranslucent={!isMobile && props.isBackgroundTranslucent}
+            isTranslucent={!isMobile() && props.isBackgroundTranslucent}
             onStickerSelect={handleStickerSelect}
           />
         );
@@ -265,7 +267,7 @@ const SymbolMenu = (ownProps: OwnProps) => {
         return (
           <GifPicker
             className="picker-tab"
-            loadAndPlay={props.canSendGifs ? props.isOpen && (isActive || isFrom) : false}
+            loadAndPlay={props.canSendGifs ? props.isOpen && (slide.isActive() || slide.isFrom()) : false}
             canSendGifs={props.canSendGifs}
             onGifSelect={props.onGifSelect}
             onGifAddCaption={props.onGifAddCaption}
@@ -276,15 +278,15 @@ const SymbolMenu = (ownProps: OwnProps) => {
     return undefined;
   }
 
-  function stopPropagation(event: any) {
+  function stopPropagation(event: Event) {
     event.stopPropagation();
   }
 
-  const content = (
+  // Deviation: a function (tt had a constant): the content is rendered in one of two places, mobile or the menu.
+  const renderMenuContent = () => (
     <>
       <div class="SymbolMenu-main" onClick={stopPropagation}>
-        {isActivated && (
-          // TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6)
+        <Show when={shouldRenderTabs()}>
           <Transition
             name={resolveTransitionName('slide', props.animationLevel)}
             activeKey={activeTab()}
@@ -292,9 +294,9 @@ const SymbolMenu = (ownProps: OwnProps) => {
           >
             {renderContent}
           </Transition>
-        )}
+        </Show>
       </div>
-      {isMobile && (
+      <Show when={isMobile()}>
         <Button
           round
           faded
@@ -302,64 +304,65 @@ const SymbolMenu = (ownProps: OwnProps) => {
           ariaLabel={lang('Close')}
           className="symbol-close-button"
           size="tiny"
-          onClick={props.onClose}
+          onClick={() => props.onClose()}
           iconName="close"
         />
-      )}
+      </Show>
       <SymbolMenuFooter
         activeTab={activeTab()}
-        onSwitchTab={setActiveTab}
-        onRemoveSymbol={props.onRemoveSymbol}
+        onSwitchTab={(tab) => setActiveTab(tab)}
+        onRemoveSymbol={() => props.onRemoveSymbol()}
         isAttachmentModal={props.isAttachmentModal}
         canSendPlainText={props.canSendPlainText}
       />
     </>
   );
 
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (isMobile) {
-    if (!shouldRender()) {
-      return undefined;
-    }
-
-    const mobileClassName = buildClassName(
+  const mobileClassName = createMemo(() =>
+    buildClassName(
       'SymbolMenu mobile-menu',
-      transitionClassNames,
       props.isLeftColumnShown && 'left-column-open',
       props.isAttachmentModal && 'in-attachment-modal',
       props.isMessageComposer && 'in-middle-column',
-    );
-
-    if (props.isAttachmentModal) {
-      return <div class={mobileClassName}>{content}</div>;
-    }
-
-    return (
-      <Portal>
-        <div class={mobileClassName}>{content}</div>
-      </Portal>
-    );
-  }
+    ),
+  );
 
   const positionOptions = createMemo<MenuPositionOptions>(() =>
     props.isAttachmentModal ? menuPositionOptions : { positionX: 'right', positionY: 'bottom' },
   );
 
+  const renderMobileMenu = () => (
+    <div ref={transition.ref} class={mobileClassName()}>
+      {renderMenuContent()}
+    </div>
+  );
+
   return (
-    <Menu
-      isOpen={props.isOpen}
-      onClose={props.onClose}
-      withPortal={props.isAttachmentModal}
-      className={buildClassName('SymbolMenu', props.className)}
-      onCloseAnimationEnd={props.onClose}
-      onMouseEnter={!IS_TOUCH_ENV ? props.onMouseEnter : undefined}
-      onMouseLeave={!IS_TOUCH_ENV ? props.onMouseLeave : undefined}
-      noCloseOnBackdrop={!IS_TOUCH_ENV}
-      noCompact
-      {...positionOptions()}
+    <Show
+      when={isMobile()}
+      fallback={
+        <Menu
+          isOpen={props.isOpen}
+          onClose={() => props.onClose()}
+          withPortal={props.isAttachmentModal}
+          className={buildClassName('SymbolMenu', props.className)}
+          onCloseAnimationEnd={() => props.onClose()}
+          onMouseEnter={!IS_TOUCH_ENV ? props.onMouseEnter : undefined}
+          onMouseLeave={!IS_TOUCH_ENV ? props.onMouseLeave : undefined}
+          noCloseOnBackdrop={!IS_TOUCH_ENV}
+          noCompact
+          {...positionOptions()}
+        >
+          {renderMenuContent()}
+        </Menu>
+      }
     >
-      {content}
-    </Menu>
+      <Show when={transition.shouldRender()}>
+        <Show when={!props.isAttachmentModal} fallback={renderMobileMenu()}>
+          <Portal>{renderMobileMenu()}</Portal>
+        </Show>
+      </Show>
+    </Show>
   );
 };
 

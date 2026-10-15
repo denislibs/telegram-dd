@@ -1,12 +1,13 @@
 import type { Editor } from '@tiptap/core';
 import { NodeSelection } from '@tiptap/pm/state';
 import { createEffect, createMemo, createSignal } from 'frameact';
-import { depsOf } from '../../../util/effectDeps';
+import { For } from 'frameact/dom';
 
 import type { RichEditorListState, RichHeadingLevel, RichListType, RichOrderedListType } from './helpers/richEditor';
 
 import { areDeepEqual } from '../../../util/areDeepEqual';
 import { formatLinkUrl } from '../../../util/browser/url';
+import { depsOf } from '../../../util/effectDeps';
 import { FOOTER_NODE_NAME, MATH_BLOCK_NODE_NAME, MATH_INLINE_NODE_NAME } from '../../../util/tiptap/constants';
 import { BUTTON_ROW_NODE_NAME, EMPTY_BUTTON_ROW } from '../../../util/tiptap/richButton';
 import {
@@ -367,7 +368,7 @@ const RichEditorToolbar = (props: OwnProps) => {
   );
 
   return (
-    <div class="rich-editor-toolbar-viewport" aria-hidden={!props.isEnabled} inert={!props.isEnabled}>
+    <div class="rich-editor-toolbar-viewport" aria-hidden={props.isEnabled ? 'false' : 'true'} inert={!props.isEnabled}>
       <div class="rich-editor-toolbar">
         <Button
           color="translucent"
@@ -381,14 +382,15 @@ const RichEditorToolbar = (props: OwnProps) => {
           positionX="left"
           positionY="bottom"
           withPortal
-          trigger={({ onTrigger, isOpen }) => (
+          // Deviation: the trigger is a component of reactive props (`isOpen` changes while it lives), not destructured.
+          trigger={(triggerProps) => (
             <Button
               color="translucent"
-              className={isOpen ? 'active' : undefined}
+              className={triggerProps.isOpen ? 'active' : undefined}
               iconName="add"
               ariaLabel={lang('RichEditorBlockMenu')}
               disabled={!canOpenBlockMenu()}
-              onClick={onTrigger}
+              onClick={triggerProps.onTrigger}
             />
           )}
         >
@@ -397,8 +399,8 @@ const RichEditorToolbar = (props: OwnProps) => {
             hasIconPremiumBadge
             disabled={!canOpenHeadingMenu()}
             submenu={
-              <>
-                {RICH_HEADING_LEVELS.map((level) => (
+              <For each={RICH_HEADING_LEVELS}>
+                {(level) => (
                   <MenuItem
                     icon={`heading-${level}`}
                     disabled={!availability().canToggleHeadingByLevel[level]}
@@ -406,8 +408,8 @@ const RichEditorToolbar = (props: OwnProps) => {
                   >
                     {lang('RichEditorHeadingLevel', { level })}
                   </MenuItem>
-                ))}
-              </>
+                )}
+              </For>
             }
           >
             {lang('RichEditorHeading')}
@@ -461,42 +463,46 @@ const RichEditorToolbar = (props: OwnProps) => {
           positionX="left"
           positionY="bottom"
           withPortal
-          trigger={({ onTrigger, isOpen }) => (
+          trigger={(triggerProps) => (
             <Button
               color="translucent"
-              className={isOpen ? 'active' : undefined}
+              className={triggerProps.isOpen ? 'active' : undefined}
               iconName="bullet-list"
               ariaLabel={lang('RichEditorListMenu')}
               iconHasPremiumBadge
               disabled={!canOpenListMenu()}
-              onClick={onTrigger}
+              onClick={triggerProps.onTrigger}
             />
           )}
         >
-          {LIST_INSERT_OPTIONS.map((option) => (
-            <MenuItem
-              icon={option.icon}
-              hasIconPremiumBadge
-              disabled={!availability()[option.availability]}
-              onClick={() => handleInsertList(option.type, option.isChecklist)}
-            >
-              {lang(option.label)}
-            </MenuItem>
-          ))}
+          <For each={LIST_INSERT_OPTIONS}>
+            {(option) => (
+              <MenuItem
+                icon={option.icon}
+                hasIconPremiumBadge
+                disabled={!availability()[option.availability]}
+                onClick={() => handleInsertList(option.type, option.isChecklist)}
+              >
+                {lang(option.label)}
+              </MenuItem>
+            )}
+          </For>
           <MenuSeparator />
           <NestedMenuItem
             icon="settings"
             disabled={!currentList()}
             submenu={
               <>
-                {LIST_TYPE_OPTIONS.map((option) => (
-                  <MenuItem
-                    icon={currentList()?.type === option.type ? 'check' : option.icon}
-                    onClick={() => handleSetCurrentListType(option.type)}
-                  >
-                    {lang(option.label)}
-                  </MenuItem>
-                ))}
+                <For each={LIST_TYPE_OPTIONS}>
+                  {(option) => (
+                    <MenuItem
+                      icon={currentList()?.type === option.type ? 'check' : option.icon}
+                      onClick={() => handleSetCurrentListType(option.type)}
+                    >
+                      {lang(option.label)}
+                    </MenuItem>
+                  )}
+                </For>
                 <MenuSeparator />
                 <MenuItem
                   icon={currentList()?.isChecklist ? 'check' : 'task-list'}
@@ -508,16 +514,16 @@ const RichEditorToolbar = (props: OwnProps) => {
                   icon="sort-by-number"
                   disabled={currentList()?.type !== 'orderedList'}
                   submenu={
-                    <>
-                      {RICH_ORDERED_LIST_TYPES.map((type) => (
+                    <For each={RICH_ORDERED_LIST_TYPES}>
+                      {(type) => (
                         <MenuItem
                           icon={(currentList()?.orderType ?? '1') === type ? 'check' : 'numbered-list'}
                           onClick={() => handleSetCurrentOrderedListType(type)}
                         >
                           {lang(ORDERED_LIST_TYPE_LABELS[type])}
                         </MenuItem>
-                      ))}
-                    </>
+                      )}
+                    </For>
                   }
                 >
                   {lang('RichEditorListNumberingType')}

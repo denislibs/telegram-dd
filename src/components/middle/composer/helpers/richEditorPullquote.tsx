@@ -1,6 +1,5 @@
-import { createMemo } from 'frameact';
-
 import { mergeAttributes, Node as TiptapNode } from '@tiptap/core';
+import { createMemo } from 'frameact';
 
 import { NodeViewContent, type TeactNodeViewComponentProps, TeactNodeViewRenderer } from '../../../../util/tiptap';
 import { CAPTION_NODE_NAME } from '../../../../util/tiptap/constants';

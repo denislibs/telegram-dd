@@ -1,13 +1,14 @@
 import { createEffect } from 'frameact';
 import { getActions } from '../../../../global';
-import { depsOf } from '../../../../util/effectDeps';
 
 import type { ApiAttachment, ApiFormattedText, ApiMessage } from '../../../../api/types';
 import type { RichEditorMediaFilesHandler } from '../richEditorTypes';
 
 import { EDITABLE_INPUT_ID, EDITABLE_INPUT_MODAL_ID, EDITABLE_STORY_INPUT_ID } from '../../../../config';
 import { canReplaceMessageMedia, isUploadingFileSticker } from '../../../../global/helpers';
+import { type MaybeAccessor, read } from '../../../../util/accessors';
 import { revokeAttachmentUrls } from '../../../../util/attachments';
+import { depsOf } from '../../../../util/effectDeps';
 import buildAttachment from '../helpers/buildAttachment';
 import getFilesFromDataTransferItems from '../helpers/getFilesFromDataTransferItems';
 
@@ -18,15 +19,17 @@ const CLOSEST_CONTENT_EDITABLE_SELECTOR = 'div[contenteditable]';
 
 type ClipboardFilePasteTarget = 'attachmentModal' | 'richMedia' | 'none';
 
-// TODO(codemod): useClipboardPaste: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: a hook runs once. `isActive`, `editedMessage`, `shouldUpdateAttachmentCompression` and `shouldSkipFilePaste`
+// may be accessors; the listener is registered by an effect that snapshots them (as tt's closure did on each render), the
+// callbacks are plain functions (they read accessors when called), and `lang` reads the language signal.
 const useClipboardPaste = (
-  isActive: boolean,
+  isActive: MaybeAccessor<boolean>,
   insertTextAndUpdateCursor: (text: ApiFormattedText) => void,
   setAttachments: (attachments: ApiAttachment[] | ((current: ApiAttachment[]) => ApiAttachment[])) => void,
-  editedMessage: ApiMessage | undefined,
+  editedMessage: MaybeAccessor<ApiMessage | undefined>,
   resolveFilePasteTarget: () => ClipboardFilePasteTarget,
-  shouldUpdateAttachmentCompression?: boolean,
-  shouldSkipFilePaste?: boolean,
+  shouldUpdateAttachmentCompression?: MaybeAccessor<boolean | undefined>,
+  shouldSkipFilePaste?: MaybeAccessor<boolean | undefined>,
   onRichMediaFiles?: RichEditorMediaFilesHandler,
   getRichMediaPosition?: () => number | undefined,
 ) => {
@@ -34,20 +37,17 @@ const useClipboardPaste = (
   const lang = useLang();
 
   createEffect(
-    depsOf(() => [
-      insertTextAndUpdateCursor,
-      editedMessage,
-      setAttachments,
-      isActive,
-      lang,
-      resolveFilePasteTarget,
-      shouldUpdateAttachmentCompression,
-      shouldSkipFilePaste,
-      onRichMediaFiles,
-      getRichMediaPosition,
-    ]),
-    () => {
-      if (!isActive) {
+    depsOf(
+      () =>
+        [
+          read(isActive),
+          read(editedMessage),
+          read(shouldUpdateAttachmentCompression),
+          read(shouldSkipFilePaste),
+        ] as const,
+    ),
+    ([isActive2, editedMessage2, shouldUpdateAttachmentCompression2, shouldSkipFilePaste2]) => {
+      if (!isActive2) {
         return undefined;
       }
 
@@ -89,23 +89,23 @@ const useClipboardPaste = (
           return;
         }
 
-        if (editedMessage) {
+        if (editedMessage2) {
           files = files.slice(0, 1);
         }
 
         const pastedText = e.clipboardData.getData('text');
         const textToPaste: ApiFormattedText | undefined = pastedText ? { text: pastedText } : undefined;
         const hasText = textToPaste && textToPaste.text;
-        let shouldSetAttachments = files?.length && !shouldSkipFilePaste;
+        let shouldSetAttachments = files?.length && !shouldSkipFilePaste2;
 
         const newAttachments = files ? await Promise.all(files.map((file) => buildAttachment(file.name, file))) : [];
         const canReplace =
-          (editedMessage && newAttachments?.length && canReplaceMessageMedia(editedMessage, newAttachments[0])) ||
+          (editedMessage2 && newAttachments?.length && canReplaceMessageMedia(editedMessage2, newAttachments[0])) ||
           Boolean(hasText);
         const isUploadingDocumentSticker = isUploadingFileSticker(newAttachments[0]);
-        const isInAlbum = editedMessage && editedMessage?.groupedId;
+        const isInAlbum = editedMessage2 && editedMessage2?.groupedId;
 
-        if (editedMessage && newAttachments?.length > 1) {
+        if (editedMessage2 && newAttachments?.length > 1) {
           newAttachments.forEach((attachment) => revokeAttachmentUrls(attachment));
           showNotification({
             message: lang('MediaReplaceInvalidError', undefined, { pluralValue: newAttachments.length }),
@@ -113,7 +113,7 @@ const useClipboardPaste = (
           return;
         }
 
-        if (editedMessage && isUploadingDocumentSticker) {
+        if (editedMessage2 && isUploadingDocumentSticker) {
           newAttachments.forEach((attachment) => revokeAttachmentUrls(attachment));
           showNotification({ message: lang('MediaReplaceInvalidError', undefined, { pluralValue: 1 }) });
           return;
@@ -131,11 +131,11 @@ const useClipboardPaste = (
         }
 
         if (shouldSetAttachments) {
-          if (shouldUpdateAttachmentCompression) {
+          if (shouldUpdateAttachmentCompression2) {
             updateShouldSaveAttachmentsCompression({ shouldSave: true });
             applyDefaultAttachmentsCompression();
           }
-          setAttachments(editedMessage ? newAttachments : (attachments) => attachments.concat(newAttachments));
+          setAttachments(editedMessage2 ? newAttachments : (attachments) => attachments.concat(newAttachments));
         } else {
           newAttachments.forEach((attachment) => revokeAttachmentUrls(attachment));
         }

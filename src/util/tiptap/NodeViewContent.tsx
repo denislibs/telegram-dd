@@ -1,4 +1,5 @@
-import type { TeactNode } from '../../lib/teact/teact';
+import { Dynamic } from 'frameact/dom';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import { useTeactNodeViewContext } from './TeactNodeViewContext';
 
@@ -7,21 +8,16 @@ type OwnProps = {
   className?: string;
   placeholder?: string;
   contentEditable?: boolean;
-  children?: TeactNode;
+  children?: JSX.Element;
 };
 
 const DEFAULT_ELEMENT_TAG = 'div';
 
-const NodeViewContent = ({
-  as = DEFAULT_ELEMENT_TAG,
-  className,
-  placeholder,
-  contentEditable,
-  children,
-}: OwnProps) => {
+const NodeViewContent = (props: OwnProps) => {
   const { contentDOMElement } = useTeactNodeViewContext();
-  const Element = as;
 
+  // Deviation: the ProseMirror content element is moved into this element once it is attached (tt did the same from a
+  // ref callback); frameact never touches nodes it did not create.
   function handleElementRef(element?: HTMLElement) {
     if (!element || !contentDOMElement || contentDOMElement.parentElement === element) {
       return;
@@ -31,15 +27,18 @@ const NodeViewContent = ({
   }
 
   return (
-    <Element
-      className={className}
-      contentEditable={contentEditable}
+    <Dynamic
+      component={props.as ?? DEFAULT_ELEMENT_TAG}
+      class={props.className}
+      // Deviation: `contenteditable` is an attribute with a string value, and frameact removes an attribute set to
+      // `false` (it would not be written at all), so the boolean prop is turned into the string here.
+      contenteditable={props.contentEditable === undefined ? undefined : String(props.contentEditable)}
       ref={handleElementRef}
       data-node-view-content=""
-      data-placeholder={placeholder}
+      data-placeholder={props.placeholder}
     >
-      {children}
-    </Element>
+      {props.children}
+    </Dynamic>
   );
 };
 

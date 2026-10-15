@@ -1,6 +1,6 @@
-import { createMeasureEffect, createMemo, frozenWhile } from 'frameact';
-import { For, Show, splitProps } from 'frameact/dom';
-import { getGlobal } from '../../../global';
+import { createEffect, createMemo, frameForcedReflow, frozenWhile } from 'frameact';
+import { For, Show } from 'frameact/dom';
+import { useGlobal } from '../../../global';
 
 import type { ApiBotCommand, ApiMessage, ApiQuickReply, ApiUser } from '../../../api/types';
 
@@ -28,19 +28,17 @@ type QuickReplyWithDescription = {
   description: string;
 };
 
-const ChatCommandTooltip = (p: OwnProps) => {
-  const [, props] = splitProps(p, ['isOpen']);
-  const frozen = frozenWhile(
-    () => props,
-    () => !p.isOpen,
-  );
-  const selectedIndex = () => frozen().selectedIndex;
-  const botCommands = () => frozen().botCommands;
-  const quickReplies = () => frozen().quickReplies;
-  const quickReplyMessages = () => frozen().quickReplyMessages;
-  const self = () => frozen().self;
-  const onCommandSelect = () => frozen().onCommandSelect;
-  const onQuickReplySelect = () => frozen().onQuickReplySelect;
+const ChatCommandTooltip = (props: OwnProps) => {
+  const isClosing = () => !props.isOpen;
+  const selectedIndex = frozenWhile(() => props.selectedIndex, isClosing);
+  const botCommands = frozenWhile(() => props.botCommands, isClosing);
+  const quickReplies = frozenWhile(() => props.quickReplies, isClosing);
+  const quickReplyMessages = frozenWhile(() => props.quickReplyMessages, isClosing);
+  const self = frozenWhile(() => props.self, isClosing);
+  const onCommandSelect = frozenWhile(() => props.onCommandSelect, isClosing);
+  const onQuickReplySelect = frozenWhile(() => props.onQuickReplySelect, isClosing);
+
+  const global = useGlobal();
 
   let containerRef!: HTMLDivElement;
 
@@ -48,9 +46,11 @@ const ChatCommandTooltip = (p: OwnProps) => {
   const handleSendQuickReply = (quickReply: ApiQuickReply) => onQuickReplySelect()(quickReply);
 
   const quickRepliesWithDescription = createMemo(() => {
-    if (!quickReplies()?.length || !quickReplyMessages()) return undefined;
-    return quickReplies().map((reply) => {
-      const message = quickReplyMessages()[reply.topMessageId];
+    const replies = quickReplies();
+    const messages = quickReplyMessages();
+    if (!replies?.length || !messages) return undefined;
+    return replies.map((reply) => {
+      const message = messages[reply.topMessageId];
       return {
         quickReply: reply,
         command: reply.shortcut,
@@ -61,16 +61,19 @@ const ChatCommandTooltip = (p: OwnProps) => {
 
   const isEmpty = createMemo(() => !botCommands()?.length && !quickReplies()?.length);
 
-  createMeasureEffect(
+  // Deviation: a forced-reflow effect (tt: useEffect). The `focus` class of the items is written in the mutate phase of
+  // the same frame, and `scrollIntoView` is a layout read: it has to run after that write.
+  createEffect(
     () => selectedIndex(),
-    (selectedIndex2) => {
+    () => {
       containerRef?.querySelector<HTMLElement>('.focus')?.scrollIntoView({ block: 'nearest' });
     },
+    frameForcedReflow,
   );
 
   return (
     <Show when={!isEmpty()}>
-      <RichEditorTooltipPanel isOpen={p.isOpen}>
+      <RichEditorTooltipPanel isOpen={props.isOpen}>
         <div ref={containerRef} class={buildClassName(sharedStyles.root, 'composer-tooltip custom-scroll')}>
           <For each={quickRepliesWithDescription()} keyed={(reply) => `quickReply_${reply.quickReply.id}`}>
             {(reply, index) => (
@@ -87,13 +90,14 @@ const ChatCommandTooltip = (p: OwnProps) => {
           </For>
           <For each={botCommands()} keyed={(command) => `${command.botId}_${command.command}`}>
             {(command, index) => (
-              // TODO(codemod): getGlobal() in a memo / JSX is a one-time read: use useGlobal() (store contract §12.4)
               <ChatCommand
                 command={command().command}
                 description={command().description}
                 isEphemeral={command().isEphemeral}
                 // No need for expensive global updates on users and chats, so we avoid them
-                peer={getGlobal().users.byId[command().botId]}
+                // Deviation: tt read `getGlobal()` on every render; this reads one leaf of the tracked global, so the avatar
+                // follows the bot user when it is loaded later.
+                peer={global.users.byId[command().botId]}
                 withAvatar
                 clickArg={command()}
                 onClick={handleSendCommand}

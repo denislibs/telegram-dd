@@ -1,12 +1,12 @@
-import { createEffect, createMeasureEffect, createMemo, requestMeasure, requestMutation } from 'frameact';
-import { For, toggleExtraClass } from 'frameact/dom';
-import { depsOf } from '../../../util/effectDeps';
+import { createEffect, createMeasureEffect, createMemo, createSignal, requestMeasure, requestMutation } from 'frameact';
+import { For, Show, toggleExtraClass } from 'frameact/dom';
 
 import type { ApiEmojiGroup } from '../../../api/types';
 
 import animateHorizontalScroll from '../../../util/animateHorizontalScroll';
 import buildClassName from '../../../util/buildClassName';
 import captureEscKeyListener from '../../../util/captureEscKeyListener';
+import { depsOf } from '../../../util/effectDeps';
 
 import useFlag from '../../../hooks/useFlag';
 import useHorizontalScroll from '../../../hooks/useHorizontalScroll';
@@ -38,7 +38,9 @@ const CHIP_ICON_SIZE = 26;
 
 const EmojiSearch = (props: OwnProps) => {
   let inputRef!: HTMLInputElement;
-  let chipsRef!: HTMLDivElement;
+  // Deviation: the chips container is rendered conditionally and `useHorizontalScroll` reads its ref in the first compute,
+  // so the element is a signal. It is written from a measure task: the container can be created in the mutate phase.
+  const [chipsRef, setChipsRef] = createSignal<HTMLDivElement | undefined>(undefined);
 
   const lang = useLang();
 
@@ -49,11 +51,7 @@ const EmojiSearch = (props: OwnProps) => {
   const hasChips = createMemo(() => Boolean(props.groups?.length));
   const isActive = createMemo(() => Boolean(props.value || props.activeGroup || isFocused()));
 
-  useHorizontalScroll(
-    () => chipsRef,
-    () => !hasChips(),
-    true,
-  );
+  useHorizontalScroll(chipsRef, () => !hasChips(), true);
 
   createEffect(
     depsOf(() => [isActive(), props.onChange, props.onGroupSelect] as const),
@@ -74,7 +72,7 @@ const EmojiSearch = (props: OwnProps) => {
     () => props.activeGroup,
     (activeGroup2) => {
       requestMeasure(() => {
-        const chips = chipsRef;
+        const chips = chipsRef();
         if (!chips) {
           return;
         }
@@ -138,8 +136,8 @@ const EmojiSearch = (props: OwnProps) => {
     requestMutation(() => inputRef?.focus());
   };
 
-  const handleChipsScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const chips = e.currentTarget;
+  const handleChipsScroll = (e: Event) => {
+    const chips = e.currentTarget as HTMLDivElement;
     const shouldMaskStart = Math.abs(chips.scrollLeft) > 1;
     requestMutation(() => {
       toggleExtraClass(chips, styles.chipsMaskStart, shouldMaskStart);
@@ -197,9 +195,9 @@ const EmojiSearch = (props: OwnProps) => {
         tabIndex={props.value ? undefined : -1}
         onClick={handleClearClick}
       />
-      {hasChips() && (
+      <Show when={hasChips()}>
         <div
-          ref={chipsRef}
+          ref={(el) => requestMeasure(() => setChipsRef(el))}
           class={buildClassName(
             styles.chips,
             'no-scrollbar',
@@ -232,7 +230,7 @@ const EmojiSearch = (props: OwnProps) => {
             )}
           </For>
         </div>
-      )}
+      </Show>
     </div>
   );
 };

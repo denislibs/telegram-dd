@@ -1,8 +1,9 @@
 import { createMemo } from 'frameact';
-import { For } from 'frameact/dom';
+import { For, Show } from 'frameact/dom';
 import { getActions } from '../../global';
 
 import type { ApiSticker, ApiStickerSet } from '../../api/types';
+import type { ObserveFn } from '../../hooks/useIntersectionObserver';
 
 import { selectStickerSet } from '../../global/selectors';
 import renderText from './helpers/renderText';
@@ -36,7 +37,7 @@ const InlineStickerSetView = (props: OwnProps) => {
       <div class={styles.header}>
         <p class={styles.title}>{renderText(props.stickerSet.title, ['emoji', 'links'])}</p>
       </div>
-      {props.stickerSet.stickers?.length ? (
+      <Show when={props.stickerSet.stickers?.length} fallback={<Loading />}>
         <div class={styles.grid} style={`--inline-set-item-size: ${props.stickerSize / 16}rem`}>
           <For each={props.stickerSet.stickers} keyed={(sticker) => sticker.id}>
             {(sticker) => (
@@ -56,9 +57,7 @@ const InlineStickerSetView = (props: OwnProps) => {
             )}
           </For>
         </div>
-      ) : (
-        <Loading />
-      )}
+      </Show>
     </div>
   );
 };
@@ -68,7 +67,7 @@ export default InlineStickerSetView;
 export function StickerSetToggleButton(props: { stickerSet: ApiStickerSet }) {
   const { toggleStickerSet } = getActions();
 
-  let buttonRef!: HTMLButtonElement;
+  let buttonRef: HTMLButtonElement | undefined;
   let labelRef!: HTMLSpanElement;
 
   const lang = useLang();
@@ -77,13 +76,13 @@ export function StickerSetToggleButton(props: { stickerSet: ApiStickerSet }) {
 
   const isAdded = createMemo(() => Boolean(!props.stickerSet.isArchived && props.stickerSet.installedDate));
   const suffix = createMemo(() => (props.stickerSet.isEmoji ? 'Emoji' : 'Sticker'));
-  const label = createMemo(() =>
+  const getLabel = (isAdded2: boolean) =>
     lang(
-      isAdded() ? `StickerPackRemove${suffix()}Count` : `StickerPackAdd${suffix()}Count`,
+      isAdded2 ? `StickerPackRemove${suffix()}Count` : `StickerPackAdd${suffix()}Count`,
       { count: props.stickerSet.count },
       { pluralValue: props.stickerSet.count },
-    ),
-  );
+    );
+  const label = createMemo(() => getLabel(isAdded()));
 
   useContentWidth(
     () => buttonRef,
@@ -97,7 +96,9 @@ export function StickerSetToggleButton(props: { stickerSet: ApiStickerSet }) {
 
   return (
     <Button
-      ref={buttonRef}
+      ref={(el) => {
+        buttonRef = el as HTMLButtonElement;
+      }}
       className={styles.toggleButton}
       size="tiny"
       color={isAdded() ? 'danger' : 'primary'}
@@ -106,12 +107,13 @@ export function StickerSetToggleButton(props: { stickerSet: ApiStickerSet }) {
       disabled={!isRegistered()}
       onClick={handleClick}
     >
-      <span ref={labelRef} class={styles.toggleMeasure} aria-hidden>
+      <span ref={labelRef} class={styles.toggleMeasure} aria-hidden="true">
         {label()}
       </span>
-      {/* TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6) */}
+      {/* Deviation: each slide renders the label of its own key (1: added, 0: not added), so the outgoing slide keeps
+          its text while it fades out (tt cached the children of an inactive slide). */}
       <Transition name="fade" activeKey={isAdded() ? 1 : 0} className={styles.toggleTransition} shouldCleanup>
-        <span class={styles.toggleLabel}>{label()}</span>
+        {(slide) => <span class={styles.toggleLabel}>{getLabel(slide.key === 1)}</span>}
       </Transition>
     </Button>
   );

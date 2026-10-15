@@ -1,49 +1,50 @@
 import { createEffect } from 'frameact';
-import { depsOf } from '../util/effectDeps';
 
+import { type MaybeAccessor, read } from '../util/accessors';
 import { IS_TOUCH_ENV } from '../util/browser/windowEnvironment';
-import useLastCallback from './useLastCallback';
+import { depsOf } from '../util/effectDeps';
 
 const MENU_CLOSE_TIMEOUT = 250;
 let closeTimeout: number | undefined;
 
-// TODO(codemod): useMouseInside: a hook runs once; take accessors (() => x) for reactive parameters and return accessors
+// Deviation: `isOpen`, `menuCloseTimeout` and `isDisabled` are `MaybeAccessor`s. `onClose` is called when the timer fires,
+// so a caller whose handler can change passes a forwarder (`() => props.onClose()`).
 export default function useMouseInside(
-  isOpen: boolean,
+  isOpen: MaybeAccessor<boolean | undefined>,
   onClose: NoneToVoidFunction,
-  menuCloseTimeout = MENU_CLOSE_TIMEOUT,
-  isDisabled = false,
+  menuCloseTimeout: MaybeAccessor<number> = MENU_CLOSE_TIMEOUT,
+  isDisabled: MaybeAccessor<boolean | undefined> = false,
 ) {
-  let isMouseInsideRef = false;
+  let isMouseInside = false;
 
   const markMouseInside = () => {
-    isMouseInsideRef = true;
+    isMouseInside = true;
   };
 
   createEffect(
-    depsOf(() => [isDisabled, isOpen, menuCloseTimeout, onClose]),
-    () => {
+    depsOf(() => [read(isDisabled), read(isOpen), read(menuCloseTimeout)] as const),
+    ([isDisabled2, isOpen2, menuCloseTimeout2]) => {
       if (closeTimeout) {
         clearTimeout(closeTimeout);
         closeTimeout = undefined;
       }
 
-      if (isOpen && !IS_TOUCH_ENV && !isDisabled) {
+      if (isOpen2 && !IS_TOUCH_ENV && !isDisabled2) {
         closeTimeout = window.setTimeout(() => {
-          if (!isMouseInsideRef && document.hasFocus()) {
+          if (!isMouseInside && document.hasFocus()) {
             onClose();
           }
-        }, menuCloseTimeout * 2);
+        }, menuCloseTimeout2 * 2);
       }
     },
   );
 
   const handleMouseEnter = () => {
-    isMouseInsideRef = true;
+    isMouseInside = true;
   };
 
   const handleMouseLeave = () => {
-    isMouseInsideRef = false;
+    isMouseInside = false;
 
     if (closeTimeout) {
       clearTimeout(closeTimeout);
@@ -51,11 +52,11 @@ export default function useMouseInside(
     }
 
     closeTimeout = window.setTimeout(() => {
-      if (!isMouseInsideRef) {
+      if (!isMouseInside) {
         onClose();
       }
-    }, menuCloseTimeout);
+    }, read(menuCloseTimeout));
   };
 
-  return [handleMouseEnter, handleMouseLeave, markMouseInside];
+  return [handleMouseEnter, handleMouseLeave, markMouseInside] as const;
 }

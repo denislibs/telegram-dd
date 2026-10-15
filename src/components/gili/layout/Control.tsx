@@ -1,4 +1,4 @@
-import { createContext, createMemo } from 'frameact';
+import { createContext, createMemo, useContext } from 'frameact';
 import { Show } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
 
@@ -6,7 +6,6 @@ import type { IconName } from '../../../types/icons';
 
 import buildClassName from '../../../util/buildClassName';
 
-import useContext from '../../../hooks/data/useContext';
 import useLang from '../../../hooks/useLang';
 import useUniqueId from '../../../hooks/useUniqueId';
 
@@ -23,6 +22,7 @@ export type ControlContextType = {
 
 export const ControlContext = createContext<ControlContextType | undefined>(undefined);
 
+// Deviation: tt's `useContext` hook (hooks/data/useContext.ts) is frameact's `useContext`.
 export function useControlContext() {
   return useContext(ControlContext);
 }
@@ -41,18 +41,20 @@ const Control = (props: ControlProps) => {
   const interactive = useInteractiveContext();
   const id = `control-${uniqueId}`;
 
-  const contextValue = createMemo(() => ({
+  const contextValue: ControlContextType = {
     id,
     inputClassName: styles.input,
-  }));
+  };
 
   return (
-    <ControlContext.Provider value={contextValue()}>
+    <ControlContext.Provider value={contextValue}>
       <div
         class={buildClassName(styles.control, props.inputEnd && styles.inputEnd, props.className)}
         dir={lang.isRtl ? 'rtl' : undefined}
       >
-        {interactive?.isLoading && <Spinner className={styles.spinner} />}
+        <Show when={interactive?.isLoading}>
+          <Spinner className={styles.spinner} />
+        </Show>
         {props.children}
       </div>
     </ControlContext.Provider>
@@ -77,16 +79,16 @@ function ControlText(props: ControlTextProps & { baseClassName: string }) {
 
   return (
     <Show
-      when={!shouldRenderLabel()}
+      when={shouldRenderLabel()}
       fallback={
-        <label htmlFor={resolvedHtmlFor()} class={buildClassName(props.baseClassName, props.className)} dir="auto">
+        <span class={buildClassName(props.baseClassName, props.className)} dir="auto">
           {props.children}
-        </label>
+        </span>
       }
     >
-      <span class={buildClassName(props.baseClassName, props.className)} dir="auto">
+      <label for={resolvedHtmlFor()} class={buildClassName(props.baseClassName, props.className)} dir="auto">
         {props.children}
-      </span>
+      </label>
     </Show>
   );
 }
