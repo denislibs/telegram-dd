@@ -27,7 +27,7 @@ test.use({
 
 async function openMessages(page: Page) {
   await openApp(page, '/#?mockScenario=messages');
-  await expect(page.locator(ROW)).toHaveCount(4);
+  await expect(page.locator(ROW)).toHaveCount(6);
 }
 
 async function openChat(page: Page, name: string) {
@@ -77,8 +77,8 @@ test('type and send: the message appears at the bottom, sending then sent, the c
 }) => {
   await openMessages(page);
   await openChat(page, 'Carol Short');
-  // Carol is not on top: Dave's chat is
-  await expect(page.locator(ROW).first()).toContainText('Dave Entities');
+  // Carol is not on top: the channel is
+  await expect(page.locator(ROW).first()).toContainText('Daily News');
   const before = await page.locator(ITEM).count();
 
   await typeText(page, 'Hello from the composer [slow]');

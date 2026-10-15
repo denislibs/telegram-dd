@@ -23,3 +23,15 @@ test('middle column: a long chat opened at its first unread message', async ({ p
   await page.waitForTimeout(1500);
   await expectAccessible(page, '#MiddleColumn');
 });
+
+// A supergroup (sender groups with avatars and names, a service message, forwards, an album stub) and a broadcast channel
+// (views, a forward header, the mute bar of the footer)
+for (const chat of ['Team Chat', 'Daily News']) {
+  test(`middle column: the ${chat === 'Team Chat' ? 'group' : 'channel'} chat`, async ({ page }) => {
+    await openApp(page, '/#?mockScenario=messages');
+    await page.locator('#LeftColumn .chat-list .ListItem.Chat').filter({ hasText: chat }).click();
+    await page.locator('#MiddleColumn .MessageList .message-list-item').first().waitFor();
+    await page.waitForTimeout(1500);
+    await expectAccessible(page, '#MiddleColumn');
+  });
+}

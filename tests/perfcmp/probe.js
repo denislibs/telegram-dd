@@ -136,10 +136,16 @@
 
     listedChatIds,
 
-    /** Resolves when the app shows no folder-switch animation (a Transition slide in progress). */
-    async waitForTransitionEnd(timeoutMs = 3000) {
+    /**
+     * Resolves when the folder-switch animation (a Transition slide in progress) has started and ended. The start is
+     * awaited first (up to `startTimeoutMs`): telegram-tt puts the slide classes on 50-80 ms after the click (4x CPU),
+     * so a check one frame after the click saw no animation and the next switch overlapped the running one.
+     */
+    async waitForTransitionEnd(timeoutMs = 3000, startTimeoutMs = 300) {
       const animating = () =>
         document.querySelector('.ChatFolders .Transition_slide-from, .ChatFolders .Transition_slide-to');
+      const startDeadline = performance.now() + startTimeoutMs;
+      while (!animating() && performance.now() < startDeadline) await nextFrame();
       const deadline = performance.now() + timeoutMs;
       while (animating() && performance.now() < deadline) await nextFrame();
       return performance.now();

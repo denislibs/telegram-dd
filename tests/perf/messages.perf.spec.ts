@@ -5,7 +5,7 @@ import { expectNoLeak } from './leaks';
 import { expectNoLongTasks } from './longTasks';
 
 // The middle column (messages slice), on the production build (playwright.perf.config.ts): opening and closing a chat must not
-// leak, and opening a chat and scrolling its history must not block the main thread under 4x CPU throttling. The production
+// leak, and opening a chat and scrolling its history must not block the main thread under calibrated CPU throttling. The production
 // build of the mocked client has no request middleware (a `@vite-ignore` dynamic import is not bundled), so every history
 // request is answered with the whole chat, which is what telegram-tt's mock does as well (`pnpm perf:compare`).
 
@@ -14,7 +14,7 @@ const LIST = '#MiddleColumn .MessageList';
 
 async function openMessages(page: Page) {
   await openApp(page, '/#?mockScenario=messages');
-  await expect(page.locator(ROW)).toHaveCount(4);
+  await expect(page.locator(ROW)).toHaveCount(6);
   await page.waitForTimeout(1000);
 }
 
@@ -30,7 +30,16 @@ async function openChat(page: Page, name: string) {
 // The heap is measured after 1.5 s of idle (`settleMs`): right after a cycle the state of the open chat (a debounced scroll
 // offset, pending observer reports, ripples) is still settling and is worth about 2 MB, so a measurement could catch the
 // baseline and the final heap in different states (a flake of 1 run in 3 under load, with no growth in between).
-const LEAK = { runs: 50, maxGrowthKb: 512, warmupRuns: 70, settleMs: 1500 } as const;
+const LEAK = {
+  runs: 50,
+  maxGrowthKb: 512,
+  warmupRuns: 70,
+  settleMs: 1500,
+  // a chat that stays in memory after it is closed is about 8000 nodes (a message list of 60 bubbles): the counter tells it from
+  // the code V8 compiles and from the history records, which the heap size cannot
+  maxNodeGrowth: 400,
+  maxListenerGrowth: 60,
+} as const;
 
 test.describe('message list: leaks', () => {
   test.describe.configure({ timeout: 400_000 });
@@ -52,7 +61,7 @@ test.describe('message list: leaks', () => {
     const result = await expectNoLeak(page, cycle, LEAK);
     test.info().annotations.push({
       type: 'heap',
-      description: `${result.growthKb.toFixed(0)} KB over ${LEAK.runs} open/close cycles`,
+      description: `${result.growthKb.toFixed(0)} KB, ${result.nodeGrowth} nodes, ${result.listenerGrowth} listeners over ${LEAK.runs} open/close cycles`,
     });
   });
 
@@ -69,14 +78,14 @@ test.describe('message list: leaks', () => {
     const result = await expectNoLeak(page, cycle, LEAK);
     test.info().annotations.push({
       type: 'heap',
-      description: `${result.growthKb.toFixed(0)} KB over ${LEAK.runs} chat switches`,
+      description: `${result.growthKb.toFixed(0)} KB, ${result.nodeGrowth} nodes, ${result.listenerGrowth} listeners over ${LEAK.runs} chat switches`,
     });
   });
 });
 
-test.describe('message list: long tasks under 4x CPU throttling', () => {
+test.describe('message list: long tasks under calibrated CPU throttling', () => {
   // Opening the 300-message chat and scrolling its history to the first message (the history pages in). The limit is telegram-tt's own
-  // worst task on the same kind of run (`pnpm perf:compare --scenario open-chat`: a 400-message chat, CPU x4, 5 runs): 123 ms
+  // worst task on the same kind of run (`pnpm perf:compare --scenario open-chat`: a 400-message chat, CPU x4 on the reference machine, 5 runs): 123 ms
   // (117-198); this app's 124 ms (117-182). A task's length follows the machine, so the cap is the highest tt value seen, 198 ms,
   // plus 3%: 204 ms. The number of long tasks is higher (22 against 14) and the script time 1.28x tt's: a gap, tracked in
   // docs/reports/slice-messages.md, not hidden here.
@@ -98,6 +107,25 @@ test.describe('message list: long tasks under 4x CPU throttling', () => {
           await page.waitForTimeout(80);
         }
         await page.waitForTimeout(500);
+      },
+      { maxMs: 204 },
+    );
+  });
+
+  // The group (sender groups with avatars, an album stub, forwards) and the channel: a cold open of each, after a warm-up open
+  // of the first chat, with the same cap
+  test("opening the group and the channel stays under telegram-tt's worst task (204 ms)", async ({ page }) => {
+    await openMessages(page);
+    await openChat(page, 'Bob Reader');
+    await page.waitForTimeout(800);
+
+    await expectNoLongTasks(
+      page,
+      async () => {
+        for (const name of ['Team Chat', 'Daily News', 'Team Chat']) {
+          await openChat(page, name);
+          await page.waitForTimeout(600);
+        }
       },
       { maxMs: 204 },
     );

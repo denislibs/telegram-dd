@@ -24,13 +24,16 @@ test.use({
       /GetFullUser|buildApiUserFullInfo|reading 'id'/,
       /action "loadFullUser" failed/,
       /SafeLink.getDecodedUrl error/,
+      // a message that the test plays into a channel makes the update manager ask for the channel difference, which the mocked
+      // client does not have
+      /\[UpdateManager\] Channel for difference not found/,
     ],
   },
 });
 
 async function openMessages(page: Page) {
   await openApp(page, '/#?mockScenario=messages');
-  await expect(page.locator(ROW)).toHaveCount(4);
+  await expect(page.locator(ROW)).toHaveCount(6);
 }
 
 async function openChat(page: Page, name: string) {
@@ -452,6 +455,59 @@ test.describe('message list', () => {
     await expect(spoiler.locator('.Spoiler__content')).toHaveCSS('opacity', '1');
   });
 
+  test('a text link whose text differs from its address asks before it opens', async ({ page, context }) => {
+    await openMessages(page);
+    await openChat(page, 'Carol Short');
+    const text = 'click here for the offer';
+    await page.evaluate(
+      ([messageText]) => {
+        (window as unknown as TestWindow).getActions().apiUpdate({
+          '@type': 'newMessage',
+          chatId: '7',
+          id: 2200,
+          message: {
+            id: 2200,
+            chatId: '7',
+            date: Math.floor(Date.now() / 1000),
+            isOutgoing: false,
+            senderId: '7',
+            content: {
+              text: {
+                text: messageText,
+                entities: [
+                  { type: 'MessageEntityTextUrl', offset: 6, length: 4, url: 'https://example.org/offer?x=1' },
+                ],
+              },
+            },
+          },
+        });
+      },
+      [text] as const,
+    );
+    const link = page.locator(`${LIST} #message-2200 a[data-entity-type="MessageEntityTextUrl"]`);
+    await expect(link).toHaveText('here');
+
+    let popups = 0;
+    context.on('page', () => popups++);
+
+    // the click asks first (tt: `SafeLinkModal`); nothing is opened and the dialog names the address
+    await link.click();
+    const dialog = page.locator('dialog[open], .Modal.confirm').first();
+    await expect(dialog).toContainText('example.org/offer');
+    expect(popups).toBe(0);
+
+    // "Cancel" closes it, nothing opened
+    await dialog.getByRole('button', { name: /cancel/i }).click();
+    await expect(page.locator('dialog[open]')).toHaveCount(0);
+    expect(popups).toBe(0);
+
+    // the confirmation opens the address in a new tab
+    await link.click();
+    const popup = context.waitForEvent('page');
+    await page.locator('dialog[open], .Modal.confirm').first().locator('.confirm-dialog-button').first().click();
+    expect((await popup).url()).toContain('example.org/offer');
+  });
+
   test('a javascript: link is never rendered as a live href', async ({ page }) => {
     await openMessages(page);
     await openChat(page, 'Carol Short');
@@ -514,5 +570,232 @@ test.describe('message list', () => {
           ).length,
       ),
     ).toBe(0);
+  });
+});
+
+// A supergroup and a channel (mock `messages` scenario: `-1000000000009` "Team Chat", `-1000000000010` "Daily News"; the group
+// has sender groups, a service message, forwards, an album and two days). The rules are tt's (`MessageListContent`,
+// `SenderGroupContainer`): the avatar sits on the last bubble of a sender group, the name on the first, a service message
+// is between the groups, a forward has its header.
+const GROUP_ID = '-1000000000009';
+
+test.describe('group and channel chats', () => {
+  type GroupInfo = {
+    id: string;
+    messages: { id: number; classes: string[]; title?: string }[];
+    avatars: { peerId?: string; bottom: number }[];
+    lastBottom: number;
+  };
+
+  async function readGroups(page: Page): Promise<GroupInfo[]> {
+    return page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('#MiddleColumn .MessageList .sender-group-container')].map((group) => {
+        const messages = [...group.querySelectorAll<HTMLElement>(':scope > .Message')];
+        return {
+          id: group.id,
+          messages: messages.map((message) => ({
+            id: Number(message.dataset.messageId),
+            classes: [...message.classList],
+            // (the name of the original sender of a forward is in the forward header: that is not the name of the sender)
+            title: message.querySelector('.message-content.is-forwarded')
+              ? undefined
+              : (message.querySelector('.message-title .sender-title')?.textContent ?? undefined),
+          })),
+          avatars: [...group.querySelectorAll<HTMLElement>(':scope > [class*="avatarContainer"] .Avatar')].map(
+            (avatar) => ({
+              peerId: avatar.dataset.testSenderId,
+              bottom: avatar.getBoundingClientRect().bottom,
+            }),
+          ),
+          lastBottom: messages.length ? messages[messages.length - 1].getBoundingClientRect().bottom : 0,
+        };
+      }),
+    );
+  }
+
+  test('a supergroup: sender groups with the avatar on the last bubble and the name on the first', async ({ page }) => {
+    await openMessages(page);
+    await openChat(page, 'Team Chat');
+
+    const groups = await readGroups(page);
+    // the grouping of tt: consecutive messages of one sender, an album is one message, a service message and a sender
+    // change end a group, and so does the other day
+    expect(groups.map((group) => group.id)).toEqual([
+      'message-group-4001',
+      'message-group-4004-4005',
+      'message-group-4006',
+      'message-group-4007',
+      'message-group-4009',
+      'message-group-4010-4011',
+      'message-group-4012',
+      'message-group-4013',
+      'message-group-4014',
+      'message-group-4015-4016',
+    ]);
+
+    const senders: Record<string, string | undefined> = {
+      'message-group-4001': '6',
+      'message-group-4004-4005': '5',
+      'message-group-4006': '6',
+      'message-group-4007': undefined, // own messages have no avatar
+      'message-group-4009': '11',
+      'message-group-4010-4011': '5',
+      'message-group-4012': '12',
+      'message-group-4013': '11',
+      'message-group-4014': '12',
+      'message-group-4015-4016': '11',
+    };
+    for (const group of groups) {
+      const sender = senders[group.id];
+      const first = group.messages[0];
+      const last = group.messages[group.messages.length - 1];
+      expect(first.classes, `${group.id} first`).toContain('first-in-group');
+      expect(last.classes, `${group.id} last`).toContain('last-in-group');
+      for (const middle of group.messages.slice(1, -1)) {
+        expect(middle.classes).not.toContain('first-in-group');
+        expect(middle.classes).not.toContain('last-in-group');
+      }
+      if (group.messages.length > 1) {
+        expect(first.classes).not.toContain('last-in-group');
+        expect(last.classes).not.toContain('first-in-group');
+      }
+
+      // one avatar per group (none for my own messages), at the bottom of the group: on the last bubble
+      expect(
+        group.avatars.map((avatar) => avatar.peerId),
+        `${group.id} avatar`,
+      ).toEqual(sender ? [sender] : []);
+      if (sender) expect(Math.abs(group.avatars[0].bottom - group.lastBottom)).toBeLessThanOrEqual(8);
+
+      // the name is on the first bubble only (a media message has none: tt's `withSenderName && !media`; a forward has the
+      // forward header instead, checked in the next test)
+      if (sender && !['message-group-4001', 'message-group-4010-4011'].includes(group.id)) {
+        expect(first.title, `${group.id} name`).toBeTruthy();
+        for (const other of group.messages.slice(1)) expect(other.title).toBeUndefined();
+      } else {
+        expect(first.title).toBeUndefined();
+      }
+    }
+    expect(groups[1].messages[0].title).toBe('Alice Tester');
+    expect(groups[4].messages[0].title).toBe('Eve Newcomer');
+
+    // only the last message of the list is `last-in-list`
+    await expect(page.locator(`${LIST} .last-in-list`)).toHaveCount(1);
+    await expect(page.locator(`${LIST} #message-4016`)).toHaveClass(/last-in-list/);
+    // two days: two date groups, each with its sticky date
+    await expect(page.locator(`${LIST} .message-date-group`)).toHaveCount(2);
+    await expect(page.locator(`${LIST} .message-date-group .sticky-date`)).toHaveCount(2);
+  });
+
+  test('a service message sits between the sender groups; forwards and the album keep their shape', async ({
+    page,
+  }) => {
+    await openMessages(page);
+    await openChat(page, 'Team Chat');
+
+    const service = page.locator(`${LIST} #message-4008`);
+    await expect(service).toHaveClass(/ActionMessage/);
+    await expect(service).toContainText('Bob');
+    await expect(service).toContainText('Eve');
+    // not inside a sender group, between the group of 4007 and the one of 4009
+    await expect(service.locator('xpath=..')).toHaveClass(/message-date-group/);
+    const order = await page.evaluate(() =>
+      [...document.querySelectorAll('#MiddleColumn .MessageList .message-date-group > *')].map((el) => el.id),
+    );
+    expect(order.indexOf('message-4008')).toBe(order.indexOf('message-group-4007') + 1);
+    expect(order[order.indexOf('message-4008') + 1]).toBe('message-group-4009');
+
+    // a message forwarded from a user (name and avatar) and from a hidden name
+    const fromUser = page.locator(`${LIST} #message-4010`);
+    await expect(fromUser.locator('.forward-title-container')).toHaveCount(1);
+    await expect(fromUser.locator('.message-title .sender-title')).toHaveText('Frank Source');
+    await expect(fromUser.locator('.forward-avatar')).toHaveCount(1);
+    await expect(fromUser.locator('.content-inner')).toHaveClass(/forwarded-message/);
+    const hidden = page.locator(`${LIST} #message-4011`);
+    await expect(hidden.locator('.message-title .sender-title')).toHaveText('Anonymous Source');
+    await expect(hidden.locator('.forward-avatar')).toHaveCount(0);
+
+    // an album is one row (the stub of the media), with its caption; the other two parts are not rows
+    const album = page.locator(`${LIST} #message-4001`);
+    await expect(album).toHaveClass(/is-album/);
+    await expect(album.locator('.Album')).toHaveCount(1);
+    await expect(album).toContainText('Album caption');
+    await expect(page.locator(`${LIST} #message-4002, ${LIST} #message-4003`)).toHaveCount(0);
+  });
+
+  test('a new message of the last sender extends its group, one of another sender starts a new one', async ({
+    page,
+  }) => {
+    await openMessages(page);
+    await openChat(page, 'Team Chat');
+
+    // a new message joins the group of the last one when it is of the same sender and within ten minutes of it (tt's
+    // `GROUP_INTERVAL_SECONDS`); the last message of the scenario is on the second day, at its 240th second
+    const LAST_DATE = 1_700_000_000 + 44 * 24 * 3600 + 240;
+    const play = (id: number, senderId: string, text: string, date: number) =>
+      page.evaluate(
+        ([messageId, sender, messageText, chatId, messageDate]) => {
+          (window as unknown as TestWindow).getActions().apiUpdate({
+            '@type': 'newMessage',
+            chatId,
+            id: messageId,
+            message: {
+              id: messageId,
+              chatId,
+              date: messageDate,
+              isOutgoing: false,
+              senderId: sender,
+              content: { text: { text: messageText } },
+            },
+          });
+        },
+        [id, senderId, text, GROUP_ID, date] as const,
+      );
+
+    await play(4017, '11', 'extends the group of Eve', LAST_DATE + 60);
+    await expect(page.locator(`${LIST} #message-4017`)).toBeVisible();
+    await settle(page);
+
+    // the group changed its key (its last message): the old group is gone, nothing is duplicated
+    await expect(page.locator(`${LIST} #message-group-4015-4016`)).toHaveCount(0);
+    await expect(page.locator(`${LIST} #message-group-4015-4017`)).toHaveCount(1);
+    for (const id of [4015, 4016, 4017]) await expect(page.locator(`${LIST} #message-${id}`)).toHaveCount(1);
+    await expect(page.locator(`${LIST} #message-4016`)).not.toHaveClass(/last-in-group/);
+    await expect(page.locator(`${LIST} #message-4017`)).toHaveClass(/last-in-group/);
+    await expect(page.locator(`${LIST} #message-4017`)).toHaveClass(/last-in-list/);
+    await expect(page.locator(`${LIST} #message-4016`)).not.toHaveClass(/last-in-list/);
+    let groups = await readGroups(page);
+    let group = groups.find((item) => item.id === 'message-group-4015-4017')!;
+    expect(group.messages.map((message) => message.id)).toEqual([4015, 4016, 4017]);
+    expect(group.avatars).toHaveLength(1);
+    expect(Math.abs(group.avatars[0].bottom - group.lastBottom)).toBeLessThanOrEqual(8);
+
+    await play(4018, '12', 'a message of Frank', LAST_DATE + 120);
+    await expect(page.locator(`${LIST} #message-4018`)).toBeVisible();
+    await settle(page);
+    groups = await readGroups(page);
+    expect(groups.slice(-2).map((item) => item.id)).toEqual(['message-group-4015-4017', 'message-group-4018']);
+    group = groups[groups.length - 1];
+    expect(group.avatars.map((avatar) => avatar.peerId)).toEqual(['12']);
+    expect(group.messages[0].title).toBe('Frank Source');
+    expect(groups[groups.length - 2].avatars).toHaveLength(1);
+    await expect(page.locator(`${LIST} .last-in-list`)).toHaveCount(1);
+  });
+
+  test('a channel: posts without avatars or names, with views, a forward header and the edited mark', async ({
+    page,
+  }) => {
+    await openMessages(page);
+    await openChat(page, 'Daily News');
+
+    await expect(page.locator(`${LIST} .Message`)).toHaveCount(4);
+    await expect(page.locator(`${LIST} .sender-group-container`)).toHaveCount(0);
+    await expect(page.locator(`${LIST} .Avatar[data-test-sender-id]`)).toHaveCount(0);
+    await expect(page.locator(`${LIST} #message-5001 .message-title .sender-title`)).toHaveCount(0);
+    await expect(page.locator(`${LIST} #message-5001 .message-views`)).toBeVisible();
+    await expect(page.locator(`${LIST} #message-5003 .message-title .sender-title`)).toHaveText('Other Channel');
+    await expect(page.locator(`${LIST} #message-5004`)).toHaveClass(/was-edited/);
+    await expect(page.locator(`${LIST} .last-in-list`)).toHaveCount(1);
+    await expect(page.locator(`${LIST} #message-5004`)).toHaveClass(/last-in-list/);
   });
 });

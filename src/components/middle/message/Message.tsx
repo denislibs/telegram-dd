@@ -1324,6 +1324,28 @@ const Message = (ownProps: OwnProps) => {
   );
 
   function renderContent() {
+    const hasSpecialContent = createMemo(() =>
+      Boolean(
+        sticker() ||
+        hasAnimatedEmoji() ||
+        (props.withAnimatedEffects && props.effect) ||
+        phoneCall() ||
+        isRoundVideo() ||
+        audio() ||
+        voice() ||
+        withVoiceTranscription() ||
+        document() ||
+        storyData() ||
+        contact() ||
+        props.poll?.summary.id ||
+        todo() ||
+        giveaway() ||
+        giveawayResults() ||
+        game() ||
+        dice() ||
+        invoice()?.extendedMedia,
+      ),
+    );
     const className = createMemo(() =>
       buildClassName(
         'content-inner',
@@ -1416,159 +1438,165 @@ const Message = (ownProps: OwnProps) => {
             )}
           </div>
         )}
-        {sticker() && props.observeIntersectionForLoading && props.observeIntersectionForPlaying && (
-          <Sticker
-            message={props.message}
-            observeIntersection={props.observeIntersectionForLoading}
-            observeIntersectionForPlaying={props.observeIntersectionForPlaying}
-            shouldLoop={props.shouldLoopStickers}
-            shouldPlayEffect={shouldPlayEffect()}
-            withEffect={props.withAnimatedEffects}
-            isMediaNsfw={props.isMediaNsfw}
-            onStopEffect={hideEffect}
-          />
-        )}
-        {hasAnimatedEmoji() && props.animatedCustomEmoji && (
-          <AnimatedCustomEmoji
-            customEmojiId={props.animatedCustomEmoji}
-            withEffects={props.withAnimatedEffects && props.isChatWithUser && !props.effect}
-            isOwn={isOwn()}
-            observeIntersection={props.observeIntersectionForLoading}
-            forceLoadPreview={isLocal()}
-            messageId={messageId()}
-            chatId={chatId()}
-            activeEmojiInteractions={props.activeEmojiInteractions}
-          />
-        )}
-        {hasAnimatedEmoji() && props.animatedEmoji && (
-          <AnimatedEmoji
-            emoji={props.animatedEmoji}
-            withEffects={props.withAnimatedEffects && props.isChatWithUser && !props.effect}
-            isOwn={isOwn()}
-            observeIntersection={props.observeIntersectionForLoading}
-            forceLoadPreview={isLocal()}
-            messageId={messageId()}
-            chatId={chatId()}
-            activeEmojiInteractions={props.activeEmojiInteractions}
-          />
-        )}
-        {props.withAnimatedEffects && props.effect && !isLocal() && (
-          <MessageEffect
-            shouldPlay={shouldPlayEffect()}
-            messageId={props.message.id}
-            isMirrored={!props.message.isOutgoing}
-            effect={props.effect}
-            observeIntersectionForLoading={props.observeIntersectionForLoading}
-            observeIntersectionForPlaying={props.observeIntersectionForPlaying}
-            onStop={hideEffect}
-          />
-        )}
-        {phoneCall() && <MessagePhoneCall message={props.message} phoneCall={phoneCall()!} chatId={chatId()} />}
-        {!isAlbum() && isRoundVideo() && !withVoiceTranscription() && (
-          <RoundVideo
-            message={props.message}
-            observeIntersection={props.observeIntersectionForLoading}
-            canAutoLoad={props.canAutoLoadMedia}
-            isDownloading={props.isDownloading}
-            onReadMedia={shouldReadMedia() ? handleReadMedia : undefined}
-            onHideTranscription={setIsTranscriptionHidden}
-            isTranscriptionError={isTranscriptionError()}
-            isTranscribed={Boolean(props.transcribedText)}
-            canTranscribe={props.canTranscribeVoice && !hasTtl()}
-            isTranscriptionHidden={isTranscriptionHidden()}
-            isTranscribing={props.isTranscribing}
-          />
-        )}
-        {(audio() || voice() || withVoiceTranscription()) && (
-          <Audio
-            theme={props.theme}
-            message={props.message}
-            variant="inline"
-            threadId={props.threadId}
-            noPlaylist={isScheduled()}
-            uploadProgress={props.uploadProgress}
-            isSelectable={props.isInDocumentGroup}
-            isSelected={props.isSelected}
-            noAvatars={props.noAvatars}
-            onPlay={handleAudioPlay}
-            onReadMedia={voice() && shouldReadMedia() ? handleReadMedia : undefined}
-            onCancelUpload={handleCancelUpload}
-            isDownloading={props.isDownloading}
-            isTranscribing={props.isTranscribing}
-            isTranscriptionHidden={isTranscriptionHidden()}
-            isTranscribed={Boolean(props.transcribedText)}
-            isTranscriptionError={isTranscriptionError()}
-            canDownload={!props.isProtected}
-            onHideTranscription={setIsTranscriptionHidden}
-            canTranscribe={props.canTranscribeVoice && !hasTtl()}
-          />
-        )}
-        {document() && (
-          <Document
-            document={document()!}
-            message={props.message}
-            observeIntersection={props.observeIntersectionForLoading}
-            canAutoLoad={props.canAutoLoadMedia}
-            autoLoadFileMaxSizeMb={props.autoLoadFileMaxSizeMb}
-            uploadProgress={props.uploadProgress}
-            isSelectable={props.isInDocumentGroup}
-            isSelected={props.isSelected}
-            onMediaClick={handleDocumentClick}
-            onCancelUpload={handleCancelUpload}
-            isDownloading={props.isDownloading}
-            shouldWarnAboutFiles={props.shouldWarnAboutFiles}
-          />
-        )}
-        {storyData() && !isStoryMention() && <Story message={props.message} isProtected={props.isProtected} />}
-        {isStoryMention() && <StoryMention message={props.message} />}
-        {contact() && <Contact contact={contact()!} noUserColors={isOwn()} />}
-        {/* Deviation: tt's `key={poll.summary.id}` remounts the poll when its id changes. */}
-        <Show when={props.poll?.summary.id} keyed>
-          {(_pollId) => (
-            <Poll
-              chatId={chatId()}
-              messageId={messageId()}
-              poll={props.poll!}
-              messageText={text()}
-              theme={props.theme}
-              isInScheduled={isScheduled()}
-              observeIntersectionForLoading={props.observeIntersectionForLoading}
+        {/* Perf (not in tt): the blocks below are created only for a message that has one of them (a text message would
+            create ~17 conditional bindings, all false). The condition is the OR of their first terms: a superset. */}
+        <Show when={hasSpecialContent()}>
+          {sticker() && props.observeIntersectionForLoading && props.observeIntersectionForPlaying && (
+            <Sticker
+              message={props.message}
+              observeIntersection={props.observeIntersectionForLoading}
               observeIntersectionForPlaying={props.observeIntersectionForPlaying}
+              shouldLoop={props.shouldLoopStickers}
+              shouldPlayEffect={shouldPlayEffect()}
+              withEffect={props.withAnimatedEffects}
+              isMediaNsfw={props.isMediaNsfw}
+              onStopEffect={hideEffect}
             />
           )}
-        </Show>
-        {todo() && <TodoList message={props.message} todoList={todo()!} />}
-        {(giveaway() || giveawayResults()) && <Giveaway message={props.message} />}
-        {game() && <Game message={props.message} threadId={props.threadId} canAutoLoadMedia={props.canAutoLoadMedia} />}
-        {dice() && (
-          <DiceWrapper
-            canSendDice={props.canSendStickers}
-            isLocal={isLocal()}
-            dice={dice()!}
-            isOutgoing={isOwn()}
-            canPlayWinEffect={shouldPlayDiceEffect()}
-            onEffectPlayed={hideDiceEffect}
-          />
-        )}
-        {invoice()?.extendedMedia && <InvoiceMediaPreview message={props.message} isConnected={props.isConnected} />}
+          {hasAnimatedEmoji() && props.animatedCustomEmoji && (
+            <AnimatedCustomEmoji
+              customEmojiId={props.animatedCustomEmoji}
+              withEffects={props.withAnimatedEffects && props.isChatWithUser && !props.effect}
+              isOwn={isOwn()}
+              observeIntersection={props.observeIntersectionForLoading}
+              forceLoadPreview={isLocal()}
+              messageId={messageId()}
+              chatId={chatId()}
+              activeEmojiInteractions={props.activeEmojiInteractions}
+            />
+          )}
+          {hasAnimatedEmoji() && props.animatedEmoji && (
+            <AnimatedEmoji
+              emoji={props.animatedEmoji}
+              withEffects={props.withAnimatedEffects && props.isChatWithUser && !props.effect}
+              isOwn={isOwn()}
+              observeIntersection={props.observeIntersectionForLoading}
+              forceLoadPreview={isLocal()}
+              messageId={messageId()}
+              chatId={chatId()}
+              activeEmojiInteractions={props.activeEmojiInteractions}
+            />
+          )}
+          {props.withAnimatedEffects && props.effect && !isLocal() && (
+            <MessageEffect
+              shouldPlay={shouldPlayEffect()}
+              messageId={props.message.id}
+              isMirrored={!props.message.isOutgoing}
+              effect={props.effect}
+              observeIntersectionForLoading={props.observeIntersectionForLoading}
+              observeIntersectionForPlaying={props.observeIntersectionForPlaying}
+              onStop={hideEffect}
+            />
+          )}
+          {phoneCall() && <MessagePhoneCall message={props.message} phoneCall={phoneCall()!} chatId={chatId()} />}
+          {!isAlbum() && isRoundVideo() && !withVoiceTranscription() && (
+            <RoundVideo
+              message={props.message}
+              observeIntersection={props.observeIntersectionForLoading}
+              canAutoLoad={props.canAutoLoadMedia}
+              isDownloading={props.isDownloading}
+              onReadMedia={shouldReadMedia() ? handleReadMedia : undefined}
+              onHideTranscription={setIsTranscriptionHidden}
+              isTranscriptionError={isTranscriptionError()}
+              isTranscribed={Boolean(props.transcribedText)}
+              canTranscribe={props.canTranscribeVoice && !hasTtl()}
+              isTranscriptionHidden={isTranscriptionHidden()}
+              isTranscribing={props.isTranscribing}
+            />
+          )}
+          {(audio() || voice() || withVoiceTranscription()) && (
+            <Audio
+              theme={props.theme}
+              message={props.message}
+              variant="inline"
+              threadId={props.threadId}
+              noPlaylist={isScheduled()}
+              uploadProgress={props.uploadProgress}
+              isSelectable={props.isInDocumentGroup}
+              isSelected={props.isSelected}
+              noAvatars={props.noAvatars}
+              onPlay={handleAudioPlay}
+              onReadMedia={voice() && shouldReadMedia() ? handleReadMedia : undefined}
+              onCancelUpload={handleCancelUpload}
+              isDownloading={props.isDownloading}
+              isTranscribing={props.isTranscribing}
+              isTranscriptionHidden={isTranscriptionHidden()}
+              isTranscribed={Boolean(props.transcribedText)}
+              isTranscriptionError={isTranscriptionError()}
+              canDownload={!props.isProtected}
+              onHideTranscription={setIsTranscriptionHidden}
+              canTranscribe={props.canTranscribeVoice && !hasTtl()}
+            />
+          )}
+          {document() && (
+            <Document
+              document={document()!}
+              message={props.message}
+              observeIntersection={props.observeIntersectionForLoading}
+              canAutoLoad={props.canAutoLoadMedia}
+              autoLoadFileMaxSizeMb={props.autoLoadFileMaxSizeMb}
+              uploadProgress={props.uploadProgress}
+              isSelectable={props.isInDocumentGroup}
+              isSelected={props.isSelected}
+              onMediaClick={handleDocumentClick}
+              onCancelUpload={handleCancelUpload}
+              isDownloading={props.isDownloading}
+              shouldWarnAboutFiles={props.shouldWarnAboutFiles}
+            />
+          )}
+          {storyData() && !isStoryMention() && <Story message={props.message} isProtected={props.isProtected} />}
+          {isStoryMention() && <StoryMention message={props.message} />}
+          {contact() && <Contact contact={contact()!} noUserColors={isOwn()} />}
+          {/* Deviation: tt's `key={poll.summary.id}` remounts the poll when its id changes. */}
+          <Show when={props.poll?.summary.id} keyed>
+            {(_pollId) => (
+              <Poll
+                chatId={chatId()}
+                messageId={messageId()}
+                poll={props.poll!}
+                messageText={text()}
+                theme={props.theme}
+                isInScheduled={isScheduled()}
+                observeIntersectionForLoading={props.observeIntersectionForLoading}
+                observeIntersectionForPlaying={props.observeIntersectionForPlaying}
+              />
+            )}
+          </Show>
+          {todo() && <TodoList message={props.message} todoList={todo()!} />}
+          {(giveaway() || giveawayResults()) && <Giveaway message={props.message} />}
+          {game() && (
+            <Game message={props.message} threadId={props.threadId} canAutoLoadMedia={props.canAutoLoadMedia} />
+          )}
+          {dice() && (
+            <DiceWrapper
+              canSendDice={props.canSendStickers}
+              isLocal={isLocal()}
+              dice={dice()!}
+              isOutgoing={isOwn()}
+              canPlayWinEffect={shouldPlayDiceEffect()}
+              onEffectPlayed={hideDiceEffect}
+            />
+          )}
+          {invoice()?.extendedMedia && <InvoiceMediaPreview message={props.message} isConnected={props.isConnected} />}
 
-        {withVoiceTranscription() && (
-          <p
-            class={buildClassName(
-              'transcription',
-              !isTranscriptionHidden() && isTranscriptionError() && 'transcription-error',
-            )}
-            dir="auto"
-          >
-            {isTranscriptionError() ? (
-              oldLang('NoWordsRecognized')
-            ) : props.isTranscribing && props.transcribedText ? (
-              <DotAnimation content={props.transcribedText} />
-            ) : (
-              props.transcribedText
-            )}
-          </p>
-        )}
+          {withVoiceTranscription() && (
+            <p
+              class={buildClassName(
+                'transcription',
+                !isTranscriptionHidden() && isTranscriptionError() && 'transcription-error',
+              )}
+              dir="auto"
+            >
+              {isTranscriptionError() ? (
+                oldLang('NoWordsRecognized')
+              ) : props.isTranscribing && props.transcribedText ? (
+                <DotAnimation content={props.transcribedText} />
+              ) : (
+                props.transcribedText
+              )}
+            </p>
+          )}
+        </Show>
 
         <Show when={isInvertedMedia()}>{renderInvertedMediaContent(hasCustomAppendix)}</Show>
 
@@ -1729,11 +1757,14 @@ const Message = (ownProps: OwnProps) => {
       </>
     );
 
+    // Perf (not in tt): nothing is created for a message without media (a superset of the conditions below).
     return (
-      <Show when={paidMedia()} fallback={renderMedia()}>
-        <PaidMediaOverlay chatId={chatId()} messageId={messageId()} paidMedia={paidMedia()!} isOutgoing={isOwn()}>
-          {renderMedia()}
-        </PaidMediaOverlay>
+      <Show when={Boolean(paidMedia() || isAlbum() || photo() || video())}>
+        <Show when={paidMedia()} fallback={renderMedia()}>
+          <PaidMediaOverlay chatId={chatId()} messageId={messageId()} paidMedia={paidMedia()!} isOutgoing={isOwn()}>
+            {renderMedia()}
+          </PaidMediaOverlay>
+        </Show>
       </Show>
     );
   }
@@ -2007,6 +2038,17 @@ const Message = (ownProps: OwnProps) => {
 
   const additionalInlineButtons = createMemo(() => suggestedPostButtons() || openThreadButtons());
 
+  const hasActionOrCommentBlock = createMemo(() =>
+    Boolean(canShowActionButton() || (withCommentButton() && !isCustomShape())),
+  );
+  const hasInlineOrOutsideBlock = createMemo(() =>
+    Boolean(
+      props.message.inlineButtons ||
+      additionalInlineButtons() ||
+      (reactionsPosition() === 'outside' && !isStoryMention()),
+    ),
+  );
+
   return (
     <div
       ref={(el) => {
@@ -2083,147 +2125,155 @@ const Message = (ownProps: OwnProps) => {
           <Show when={!isInDocumentGroupNotLast() && metaPosition() === 'standalone' && !isStoryMention()}>
             {renderReactionsAndMeta()}
           </Show>
-          {canShowActionButton() && (
-            <div class="message-action-buttons-container">
-              <div class="message-action-buttons-sticky-zone">
-                <div class="message-action-buttons message-action-button-sticky">
-                  {hasSummary() && (
+          {/* Perf (not in tt): these rarely-true blocks of a message are behind one `Show` each (a conditional that is false still
+              costs two memos and a render effect per message) */}
+          <Show when={hasActionOrCommentBlock()}>
+            {canShowActionButton() && (
+              <div class="message-action-buttons-container">
+                <div class="message-action-buttons-sticky-zone">
+                  <div class="message-action-buttons message-action-button-sticky">
+                    {hasSummary() && (
+                      <Button
+                        className="message-action-button action-summary"
+                        color="translucent-white"
+                        round
+                        withSparkleEffect
+                        ariaLabel={isShowingSummary() ? lang('AriaHideSummary') : lang('AriaShowSummary')}
+                        onClick={isShowingSummary() ? hideSummary : showSummary}
+                        iconName={isShowingSummary() ? 'expand' : 'collapse'}
+                      />
+                    )}
+                  </div>
+                </div>
+                <div
+                  class={buildClassName(
+                    'message-action-buttons',
+                    props.isLoadingComments && 'message-action-buttons-shown',
+                  )}
+                >
+                  {withCommentButton() && isCustomShape() && (
+                    <CommentButton
+                      threadInfo={commentsThreadInfo()}
+                      disabled={props.noComments || !commentsThreadInfo()}
+                      isLoading={props.isLoadingComments}
+                      isCustomShape
+                    />
+                  )}
+                  {props.canForward && (
                     <Button
-                      className="message-action-button action-summary"
+                      className="message-action-button"
                       color="translucent-white"
                       round
-                      withSparkleEffect
-                      ariaLabel={isShowingSummary() ? lang('AriaHideSummary') : lang('AriaShowSummary')}
-                      onClick={isShowingSummary() ? hideSummary : showSummary}
-                      iconName={isShowingSummary() ? 'expand' : 'collapse'}
+                      ariaLabel={oldLang('lng_context_forward_msg')}
+                      onClick={props.isLastInDocumentGroup ? handleGroupForward : handleForward}
+                      iconName="share-filled"
+                    />
+                  )}
+                  {canFocus() && (
+                    <Button
+                      className="message-action-button"
+                      color="translucent-white"
+                      round
+                      ariaLabel={lang('FocusMessage')}
+                      onClick={props.isPinnedList ? handleFocus : handleFocusForwarded}
+                      iconName="arrow-right"
                     />
                   )}
                 </div>
               </div>
-              <div
-                class={buildClassName(
-                  'message-action-buttons',
-                  props.isLoadingComments && 'message-action-buttons-shown',
-                )}
-              >
-                {withCommentButton() && isCustomShape() && (
-                  <CommentButton
-                    threadInfo={commentsThreadInfo()}
-                    disabled={props.noComments || !commentsThreadInfo()}
-                    isLoading={props.isLoadingComments}
-                    isCustomShape
-                  />
-                )}
-                {props.canForward && (
-                  <Button
-                    className="message-action-button"
-                    color="translucent-white"
-                    round
-                    ariaLabel={oldLang('lng_context_forward_msg')}
-                    onClick={props.isLastInDocumentGroup ? handleGroupForward : handleForward}
-                    iconName="share-filled"
-                  />
-                )}
-                {canFocus() && (
-                  <Button
-                    className="message-action-button"
-                    color="translucent-white"
-                    round
-                    ariaLabel={lang('FocusMessage')}
-                    onClick={props.isPinnedList ? handleFocus : handleFocusForwarded}
-                    iconName="arrow-right"
-                  />
-                )}
-              </div>
-            </div>
-          )}
-          {withCommentButton() && !isCustomShape() && (
-            <CommentButton
-              threadInfo={commentsThreadInfo()}
-              disabled={props.noComments || !commentsThreadInfo()}
-              isLoading={props.isLoadingComments}
-            />
-          )}
+            )}
+            {withCommentButton() && !isCustomShape() && (
+              <CommentButton
+                threadInfo={commentsThreadInfo()}
+                disabled={props.noComments || !commentsThreadInfo()}
+                isLoading={props.isLoadingComments}
+              />
+            )}
+          </Show>
           {withAppendix() && <MessageAppendix isOwn={isOwn()} />}
           <Show when={withQuickReactionButton() && quickReactionPosition() === 'in-content'}>
             {renderQuickReactionButton()}
           </Show>
         </div>
-        {props.message.inlineButtons && (
-          <InlineButtons
-            inlineButtons={props.message.inlineButtons}
-            isReceipt={Boolean(invoice()?.receiptMessageId)}
-            isEphemeral={props.message.isEphemeral}
-            onClick={handleInlineButtonClick}
-          />
-        )}
-        {additionalInlineButtons() && (
-          <InlineButtons
-            inlineButtons={additionalInlineButtons()!}
-            isEphemeral={props.message.isEphemeral}
-            onClick={handleLocalInlineButtonClick}
-          />
-        )}
-        {reactionsPosition() === 'outside' && !isStoryMention() && (
-          <Reactions
-            message={props.reactionMessage!}
-            threadId={props.threadId}
-            isOutside
-            isCurrentUserPremium={props.isPremium}
-            observeIntersection={props.observeIntersectionForPlaying}
-            noRecentReactors={props.isChannel}
-            tags={props.tags}
-            isAccountFrozen={props.isAccountFrozen}
-          />
-        )}
+        <Show when={hasInlineOrOutsideBlock()}>
+          {props.message.inlineButtons && (
+            <InlineButtons
+              inlineButtons={props.message.inlineButtons}
+              isReceipt={Boolean(invoice()?.receiptMessageId)}
+              isEphemeral={props.message.isEphemeral}
+              onClick={handleInlineButtonClick}
+            />
+          )}
+          {additionalInlineButtons() && (
+            <InlineButtons
+              inlineButtons={additionalInlineButtons()!}
+              isEphemeral={props.message.isEphemeral}
+              onClick={handleLocalInlineButtonClick}
+            />
+          )}
+          {reactionsPosition() === 'outside' && !isStoryMention() && (
+            <Reactions
+              message={props.reactionMessage!}
+              threadId={props.threadId}
+              isOutside
+              isCurrentUserPremium={props.isPremium}
+              observeIntersection={props.observeIntersectionForPlaying}
+              noRecentReactors={props.isChannel}
+              tags={props.tags}
+              isAccountFrozen={props.isAccountFrozen}
+            />
+          )}
+        </Show>
       </div>
-      {contextMenuAnchor() && (
-        <ContextMenuContainer
-          isOpen={isContextMenuOpen()}
-          anchor={contextMenuAnchor()!}
-          targetHref={
-            contextMenuTarget()?.matches('a[href]') ? (contextMenuTarget() as HTMLAnchorElement).href : undefined
-          }
-          isAltKeyPressed={isContextMenuAltKeyPressed()}
-          message={props.message}
-          album={props.album}
-          messageListType={props.messageListType}
-          threadId={props.threadId}
-          onClose={handleContextMenuClose}
-          onCloseAnimationEnd={handleContextMenuHide}
-          repliesThreadInfo={props.repliesThreadInfo}
-          noReplies={props.noReplies}
-          detectedLanguage={detectedLanguage()}
-        />
-      )}
-      {isDeclineDialogOpen() && (
-        <ConfirmDialog
-          isOpen={isDeclineDialogOpen()}
-          onClose={closeDeclineDialog}
-          title={lang('SuggestedPostDecline')}
-          confirmLabel={lang('SuggestedPostDecline')}
-          confirmHandler={handleDeclineConfirm}
-          confirmIsDestructive
-        >
-          <div class="decline-dialog-question">
-            {renderText(
-              lang(
-                'DeclinePostDialogQuestion',
-                {
-                  sender: props.sender ? getPeerFullTitle(oldLang, props.sender) : '',
-                },
-                { withNodes: true, withMarkdown: true },
-              ),
-            )}
-          </div>
-          <InputText
-            placeholder={lang('DeclineReasonPlaceholder')}
-            value={declineReason()}
-            onChange={handleDeclineReasonChange}
-            maxLength={MAX_REASON_LENGTH}
+      <Show when={contextMenuAnchor() || isDeclineDialogOpen()}>
+        {contextMenuAnchor() && (
+          <ContextMenuContainer
+            isOpen={isContextMenuOpen()}
+            anchor={contextMenuAnchor()!}
+            targetHref={
+              contextMenuTarget()?.matches('a[href]') ? (contextMenuTarget() as HTMLAnchorElement).href : undefined
+            }
+            isAltKeyPressed={isContextMenuAltKeyPressed()}
+            message={props.message}
+            album={props.album}
+            messageListType={props.messageListType}
+            threadId={props.threadId}
+            onClose={handleContextMenuClose}
+            onCloseAnimationEnd={handleContextMenuHide}
+            repliesThreadInfo={props.repliesThreadInfo}
+            noReplies={props.noReplies}
+            detectedLanguage={detectedLanguage()}
           />
-        </ConfirmDialog>
-      )}
+        )}
+        {isDeclineDialogOpen() && (
+          <ConfirmDialog
+            isOpen={isDeclineDialogOpen()}
+            onClose={closeDeclineDialog}
+            title={lang('SuggestedPostDecline')}
+            confirmLabel={lang('SuggestedPostDecline')}
+            confirmHandler={handleDeclineConfirm}
+            confirmIsDestructive
+          >
+            <div class="decline-dialog-question">
+              {renderText(
+                lang(
+                  'DeclinePostDialogQuestion',
+                  {
+                    sender: props.sender ? getPeerFullTitle(oldLang, props.sender) : '',
+                  },
+                  { withNodes: true, withMarkdown: true },
+                ),
+              )}
+            </div>
+            <InputText
+              placeholder={lang('DeclineReasonPlaceholder')}
+              value={declineReason()}
+              onChange={handleDeclineReasonChange}
+              maxLength={MAX_REASON_LENGTH}
+            />
+          </ConfirmDialog>
+        )}
+      </Show>
     </div>
   );
 };

@@ -13,7 +13,7 @@ const INPUT = '#editable-message-text';
 
 async function openMessages(page: Page) {
   await openApp(page, '/#?mockScenario=messages');
-  await expect(page.locator(ROW)).toHaveCount(4);
+  await expect(page.locator(ROW)).toHaveCount(6);
   await page.waitForTimeout(1000);
 }
 

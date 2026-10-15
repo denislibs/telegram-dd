@@ -133,6 +133,8 @@ export function createScrollAnchor(options: ScrollAnchorOptions): ScrollAnchor {
       snapshotOf = change;
       elementsStale = true;
       if (!isAlive(anchor)) anchor = firstItem();
+      // Nothing to restore: no layout read (the scroll handler measures the anchor itself when it needs it).
+      if (untrack(() => noScrollRestore?.())) return;
       if (anchor) anchorTop = anchor.getBoundingClientRect().top;
     },
     { name: 'scrollAnchor.snapshot' },
@@ -145,6 +147,12 @@ export function createScrollAnchor(options: ScrollAnchorOptions): ScrollAnchor {
       elementsStale = true;
       const el = untrack(container);
       if (!el) return;
+      // Nothing to restore (an absolutely positioned list, tt's `withAbsolutePositioning`): reading the anchor's rect
+      // here forced the layout of the rows this update inserted in the middle of the frame, once per page-in.
+      if (untrack(() => noScrollRestore?.())) {
+        if (!isAlive(anchor)) anchor = firstItem();
+        return;
+      }
       const current = anchor;
       if (isAlive(current)) {
         const newTop = current.getBoundingClientRect().top;

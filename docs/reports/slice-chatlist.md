@@ -354,6 +354,68 @@ A jump by assignment does not scroll by itself (no further scroll events): like 
 The long-task limits of the scroll test were re-checked: with this fix the list slides back as well, so the scroll test now includes
 those slides, and under a loaded machine (load ~10) the worst task is tt's too (see the long task table).
 
+## Fix round 3: the scroll long-task gate on a slower machine (PR #16, CI)
+
+CI (a GitHub runner, 4x CPU throttling) failed `scrolling through the list stays under telegram-tt's worst task (135 ms)` with three
+tasks of 153-170 ms, twice. The cap is not raised: a page-in of ~30 rows was ONE 55-100 ms task (a row costs ~1.1 ms to mount at 4x, plus
+~8 ms of layout forced by the scroll anchor, plus the native style, layout and paint), so every slower machine pushed it over the line.
+The cause is fixed instead, in two places (found with per-function profiles of both apps in the perf:compare scenario):
+
+1. `src/lib/kit/scrollAnchor.ts`: a list that does not restore the scroll (`noScrollRestore`, tt's `withAbsolutePositioning`: the chat
+   list) no longer reads the anchor's rect in the snapshot and in the restore effect. The read forced the layout of the rows the update
+   had just inserted, in the middle of the frame, once per page-in. The anchor is still re-picked when it is gone.
+2. `src/components/left/main/hooks/useProgressiveIds.ts` (a deviation from tt, marked in `ChatList.tsx`): a window that gains more than
+   15 ids at once (a page-in, the first mount of a folder's list) mounts them 15 per frame, the rows next to the mounted ones first
+   (a list from scratch: from the top), small changes (a reorder, a new chat) at once. The mounted ids are always a subsequence of the
+   window in its order, it catches up with the window, and it cancels its frame on disposal. A row's position is its index in the WINDOW
+   (`indexInViewport`), not in the mounted subsequence, so the rows that wait leave no hole. The rows that wait are below (or above) the
+   visible part: the infinite scroll asks for more ~800 px before the end, a viewport shows ~11 rows.
+
+Also `tests/perfcmp/probe.js` (the folders scenario waited for the end of an animation that had not started yet).
+
+Tried and dropped: mounting a progressive page-in hidden (`display: none`) and revealing it once, to save the layout and paint of the
+intermediate frames. It measured worse (38 long tasks, script 1.74x of tt, against 17 and 1.47x; under a different load, but tt's own numbers were in the same run) because of the per-row effect and the
+reveal; it is not in the code. A chunk of 12 (three frames) gave fewer long tasks and more layout and paint than 15.
+
+`perf:compare --scenario scroll,folders --runs 5` (CPU x4; the load of this machine was 10-27 while other work ran, so the three
+columns are paired with telegram-tt's numbers of the same run):
+
+| scroll the 1200-chat list     | before, load ~7 (`31c33d8`) | before, load ~27 | after, load ~10 | after, load ~17 |
+| ----------------------------- | --------------------------: | ---------------: | --------------: | --------------: |
+| long tasks, this app / tt     |                     47 / 24 |          47 / 30 |          17 / 8 |         39 / 29 |
+| total blocking time, app / tt |               1491 / 314 ms |    2031 / 403 ms |     140 / 82 ms |    567 / 610 ms |
+| longest task, app / tt        |                125 / 127 ms |     156 / 135 ms |     78 / 109 ms |    101 / 127 ms |
+| script, app / tt              |              3437 / 2462 ms |   3887 / 2536 ms |  2794 / 1901 ms |  3630 / 2712 ms |
+
+| 10 folder switches            | before, load ~27 | after, load ~10 | after, load ~17 |
+| ----------------------------- | ---------------: | --------------: | --------------: |
+| long tasks, this app / tt     |            4 / 4 |           4 / 4 |           4 / 5 |
+| total blocking time, app / tt |     208 / 141 ms |      47 / 96 ms |    111 / 136 ms |
+| longest task, app / tt        |     147 / 136 ms |     67 / 120 ms |     91 / 134 ms |
+
+The worst task is below telegram-tt's on this machine at every load (0.80x and 0.72x scrolling, 0.56-0.68x for the folders), and the
+long tasks and the blocking time are close to tt's (the longest scroll task is 78 ms at load ~10). The cap of the test stays 135 ms: it is tt's own worst task. The remaining difference is script (1.3-1.5x tt, the
+per-row cost of `Chat`), tracked above.
+
+| Test                                                                                                                                                                                                                                                                              | Before        | After |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | ----- |
+| unit `useProgressiveIds.test.ts` (9): chunk order from the top, a small change at once, page-in below / above next to the mounted rows, subsequence of the window and catch-up, a reorder while rows wait, ids that leave while waiting, `undefined`, frame cancelled on disposal | no hook       | green |
+| kit unit: `noScrollRestore` reads no layout of the anchor on an update, and restores again once it is off                                                                                                                                                                         | red (4 reads) | green |
+| e2e `chatlist.spec.ts`: a `requestAnimationFrame` sampler over 24 wheel steps down and 24 up: a page-in goes on in the next frame (15 per frame) and NO frame shows a gap above or below the rows                                                                                 | (new)         | green |
+
+The existing no-gap e2e tests (wheel steps, a jump by `scrollTop`) pass with the progressive mount.
+
+## Fix round 4: the perf gates run at the same device speed everywhere
+
+After round 3 the scroll gate still failed on the GitHub runner (tasks of 147 / 139 ms, 143 ms on the retry) while the same code
+measures 78 ms here: a fixed `setCPUThrottlingRate(4)` slows the machine it runs on, so "4x" is a slower device on a slower
+runner. The caps were calibrated against telegram-tt on this machine and are not raised. Instead the throttling rate is
+calibrated: a deterministic CPU benchmark runs in the browser before the throttling is set, and
+`rate = 4 * referenceMs / measuredMs` (clamped to [1, 8]) makes every machine emulate the same target device, "4x on the reference
+machine". A machine too slow even for rate 1 fails the gate with a message. `tests/perf/**` and `pnpm perf:compare` (one rate per
+invocation, the same for both apps; `--cpu 4` forces a fixed rate) use it; the rate and the benchmark time are printed and attached
+to every test. How it works and how to re-measure the reference: `docs/quality-gates.md`, "Calibrated throttling".
+
 ## Remaining stubs
 
 15 new FOUNDATION STUBs (render nothing, tt's props kept; `pnpm gates:diff` lists them): `left/ArchivedChats.async`,

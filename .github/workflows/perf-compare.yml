@@ -14,9 +14,9 @@ on:
         required: false
         default: '7'
       cpu_throttling:
-        description: 'CPU throttling factor (Emulation.setCPUThrottlingRate)'
+        description: 'CPU throttling: auto (calibrated to the target device, the default) or a fixed factor (Emulation.setCPUThrottlingRate)'
         required: false
-        default: '4'
+        default: 'auto'
       aa:
         description: 'Also run tt against tt (A/A) to measure the noise of this runner'
         type: boolean

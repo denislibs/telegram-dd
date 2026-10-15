@@ -81,7 +81,6 @@ import buildClassName from '../../util/buildClassName';
 import { depsOf } from '../../util/effectDeps';
 import { isUserId } from '../../util/entities/ids';
 import { buildCollectionByKey } from '../../util/iteratees';
-import { isLocalMessageId } from '../../util/keys/messageKey';
 import resetScroll from '../../util/resetScroll';
 import { debounce } from '../../util/schedulers';
 import { getServerTime } from '../../util/serverTime';
@@ -104,6 +103,7 @@ import useInterval from '../../hooks/schedulers/useInterval';
 import useNativeCopySelectedMessages from '../../hooks/useNativeCopySelectedMessages';
 import { isBackgroundModeActive } from '../../hooks/window/useBackgroundMode';
 import useContainerHeight from './hooks/useContainerHeight';
+import useInitialMessageLoading from './hooks/useInitialMessageLoading';
 import useStickyDates from './hooks/useStickyDates';
 
 import Loading from '../ui/Loading';
@@ -886,31 +886,14 @@ const MessageList = (ownProps: OwnProps) => {
   };
 
   // Initial message loading
-  createMeasureEffect(
-    depsOf(() => [props.isChatLoaded, props.messageIds, loadMoreAround(), props.focusingId, isRestricted()] as const),
-    ([isChatLoaded2, messageIds2, loadMoreAround2, focusingId2, isRestricted2]) => {
-      if (!loadMoreAround2 || !isChatLoaded2 || isRestricted2 || focusingId2) {
-        return;
-      }
-
-      // Loading history while sending a message can return the same message and cause ambiguity
-      const isLastMessageLocal = messageIds2 && isLocalMessageId(messageIds2[messageIds2.length - 1]);
-      if (isLastMessageLocal) {
-        return;
-      }
-
-      const container = containerRef;
-
-      if (
-        !messageIds2 ||
-        messageIds2.length === 1 ||
-        (messageIds2.length < MESSAGE_LIST_SLICE / 2 &&
-          (container.firstElementChild as HTMLDivElement).clientHeight <= container.offsetHeight)
-      ) {
-        loadMoreAround2();
-      }
-    },
-  );
+  useInitialMessageLoading({
+    containerRef: () => containerRef,
+    isChatLoaded: () => props.isChatLoaded,
+    messageIds: () => props.messageIds,
+    loadMoreAround,
+    focusingId: () => props.focusingId,
+    isRestricted,
+  });
 
   const rememberScrollPosition = () => {
     if (!renderMessageIds() || !listItemElementsRef) {

@@ -215,15 +215,17 @@ const SenderGroupContainer = (ownProps: OwnProps) => {
     );
   }
 
-  function renderAvatar() {
-    const hiddenName = !avatarPeer() && forwardInfo() ? forwardInfo()!.hiddenUserName : undefined;
+  // Deviation: tt built the avatar element on each render. Here `renderAvatar` reads nothing (the props of `Avatar` are getters),
+  // so the element stays when the profile of the sender is updated (`avatarPeer()` is the store object of the user)
+  const hiddenName = createMemo(() => (!avatarPeer() && forwardInfo() ? forwardInfo()!.hiddenUserName : undefined));
 
+  function renderAvatar() {
     return (
       <Avatar
         size="small"
         className={styles.senderAvatar}
         peer={avatarPeer()}
-        text={hiddenName}
+        text={hiddenName()}
         onClick={avatarPeer() ? handleAvatarClick : undefined}
         onContextMenu={handleContextMenu}
       />

@@ -190,9 +190,10 @@ test.describe('chat list: long tasks under 4x CPU throttling', () => {
     );
   });
 
-  // The first switch to a folder mounts its list (ChatList, Transition slide, rows). `pnpm perf:compare --scenario folders` (CPU x4,
-  // 5 runs): telegram-tt's longest task is 51 ms (50-65), this app's 85 ms (80-92) with 4 long tasks against tt's 1: a known gap
-  // (docs/reports/slice-chatlist.md). The cap is this app's measured worst plus a margin, so that it cannot get worse.
+  // The first switch to a folder mounts its list (ChatList, Transition slide, the first rows; the rest of the rows follow, 15 per
+  // frame: `useProgressiveIds`). `pnpm perf:compare --scenario folders` (CPU x4, 5 runs): this app's longest task is 67 ms (64-89)
+  // against telegram-tt's 120 ms (109-129), 4 long tasks each. The cap is this app's measured worst plus a margin, so that it cannot
+  // get worse (docs/reports/slice-chatlist.md, fix round 3).
   test('mounting the list of a folder stays under 100 ms per task', async ({ page }) => {
     await openChatList(page, 90);
 
@@ -209,9 +210,10 @@ test.describe('chat list: long tasks under 4x CPU throttling', () => {
   // Scrolling slides the rendered window of the list by 25-30 rows, down and back up. The limit is telegram-tt's own worst task on
   // the same scroll (`pnpm perf:compare --scenario scroll`: 1200 chats scrolled to the bottom, CPU x4, 5 runs): 104 ms (102-107)
   // on a quiet machine (load ~5), 127 ms (117-131) on a loaded one (load ~10): a task's length follows the machine, so the cap is the
-  // highest tt value seen, 131 ms, plus 3%. This app measured 82 ms (76-102) and 125 ms (117-129) in the same two runs: the same
-  // worst task as tt. The number of long tasks is not the same (41-47 against 4-24): a gap, tracked in the report
-  // (docs/reports/slice-chatlist.md), not hidden here.
+  // highest tt value seen, 131 ms, plus 3%. It is not a number to raise: a page-in of rows is mounted over frames, 15 rows each
+  // (`useProgressiveIds`), and the kit reads no anchor layout in a list that does not restore the scroll, so this app's worst task is
+  // 78 ms (59-239 under load) against tt's 109 ms at load ~10; the long tasks are 17 against tt's 8 (47 against 24
+  // before), the total blocking time 140 ms against 82 (1491 against 314 before): docs/reports/slice-chatlist.md, fix round 3.
   test("scrolling through the list stays under telegram-tt's worst task (135 ms)", async ({ page }) => {
     await openChatList(page, 90);
 

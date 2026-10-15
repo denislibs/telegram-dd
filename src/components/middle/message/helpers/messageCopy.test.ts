@@ -181,4 +181,31 @@ describe('buildMessageCopyContent with hostile message text', () => {
     expect(content.plainText).toContain('safe');
     expectInert(content);
   });
+
+  // From the messages slice (a `Range` over rendered messages carries the text a concealed spoiler hides)
+  it('never carries the text of a concealed spoiler of a selection, and keeps a revealed one', async () => {
+    seed([textMessage(1, 'x')]);
+
+    const content = await buildMessageCopyContent(
+      messageList,
+      {
+        type: 'selection',
+        chatId: PEER_ID,
+        threadId: MAIN_THREAD_ID,
+        messageListType: 'thread',
+        messageId: 1,
+        html:
+          'a <span class="Spoiler Spoiler--concealed"><span class="Spoiler__content">SECRET code</span></span> b ' +
+          '<span class="Spoiler"><span class="Spoiler__content">revealed</span></span>',
+      },
+      tabId,
+    );
+
+    for (const text of [content.plainText, content.html, content.markdown]) {
+      expect(text).not.toContain('SECRET');
+      expect(text).not.toContain('code');
+    }
+    expect(content.plainText).toContain('revealed');
+    expect(content.plainText.replace(/[\s\w]/g, '')).toMatch(/^[⠀-⣿]+$/);
+  });
 });

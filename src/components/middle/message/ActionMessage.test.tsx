@@ -200,4 +200,29 @@ describe('ActionMessage', () => {
     const el = await mount(7);
     expect(el.querySelector('.ActionMessage')).toBeNull();
   });
+
+  it('hides the buttons of a request when it expires, without any update of the message', async () => {
+    seed();
+    const period = 3600;
+    setGlobal({ ...getGlobal(), appConfig: { ...getGlobal().appConfig, noForwardsRequestExpirePeriod: period } });
+    // expires in about a second
+    const date = Math.floor(Date.now() / 1000) - period + 1;
+    setGlobal(
+      addMessages(getGlobal(), [
+        {
+          ...pinMessage(8, 5),
+          date,
+          replyInfo: undefined,
+          content: { action: { type: 'noForwardsRequest', isExpired: false, isEnabled: true } },
+        } as unknown as ApiMessage,
+      ]),
+    );
+    const el = await mount(8);
+    expect(el.querySelector('[role="group"]')).not.toBeNull();
+
+    await new Promise((resolve) => setTimeout(resolve, 1400));
+    await frames();
+
+    expect(el.querySelector('[role="group"]')).toBeNull();
+  });
 });

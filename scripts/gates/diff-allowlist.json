@@ -723,6 +723,18 @@
     "src/util/tiptap/TeactRenderer.ts": {
       "reason": "The bridge between ProseMirror node views and frameact: tt re-rendered a teact component with new props, here the props are getters over one signal and the root is a frameact render() (porting guide 4.2, tiptap node views).",
       "maxRatio": 0.7
+    },
+    "src/components/middle/footer/FooterActionBar.tsx": {
+      "reason": "Component-model rewrite (props getters, memos for the main button and the side slots, a keyed Show for tt's `key={mainButton.key}`); the markup, the classes and the logic are tt's.",
+      "maxRatio": 0.52
+    },
+    "src/components/main/SafeLinkModal.tsx": {
+      "reason": "A ConfirmDialog instead of tt's `@gili/modal` Modal (the dialog of this app), props getters and memos; the text, the rendering of the address (host labels, suspicious characters, credentials, invisible characters) and the warning are tt's.",
+      "maxRatio": 0.5
+    },
+    "src/components/common/MessageOutgoingStatus.tsx": {
+      "reason": "Perf (not in tt): a plain icon in the DOM of a Transition until the status changes, then the real Transition; props getters.",
+      "maxRatio": 0.72
     }
   }
 }

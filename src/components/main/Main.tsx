@@ -61,6 +61,7 @@ import LeftColumn from '../left/LeftColumn';
 import MessageListHistoryHandler from '../middle/MessageListHistoryHandler';
 import MiddleColumn from '../middle/MiddleColumn';
 import RightColumn from '../right/RightColumn';
+import SafeLinkModal from './SafeLinkModal';
 
 import './Main.scss';
 import backgroundStyles from '../../styles/_patternBackground.module.scss';
@@ -77,6 +78,7 @@ type StateProps = {
   isMiddleColumnOpen: boolean;
   isRightColumnOpen: boolean;
   isMediaViewerOpen: boolean;
+  safeLinkModalUrl?: string;
   isStoryViewerOpen: boolean;
   shouldSkipHistoryAnimations?: boolean;
   wasTimeFormatSetManually?: boolean;
@@ -616,6 +618,7 @@ const Main = (ownProps: OwnProps) => {
       <RightColumn isMobile={props.isMobile} />
       {/* TODO(port): MediaViewer, StoryViewer, recipient pickers, Dialogs, AudioPlayer, ModalContainer, HistoryCalendar,
           sticker set / custom emoji set / premium / payment modals, calls, GameModal, DownloadManager, visual effects */}
+      <SafeLinkModal url={props.safeLinkModalUrl} />
       <UnreadCount isForAppBadge />
       <MessageListHistoryHandler />
     </Wallpaper>
@@ -644,6 +647,7 @@ const mapStateToProps = (global: GlobalState, { isMobile }: OwnProps): Complete<
     isMiddleColumnOpen: Boolean(chatId),
     isRightColumnOpen: selectIsRightColumnShown(global, isMobile),
     isMediaViewerOpen: selectIsMediaViewerOpen(global),
+    safeLinkModalUrl: selectTabState(global).safeLinkModalUrl,
     isStoryViewerOpen: selectIsStoryViewerOpen(global),
     shouldSkipHistoryAnimations,
     withInterfaceAnimations: selectCanAnimateInterface(global),

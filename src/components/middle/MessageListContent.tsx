@@ -1,7 +1,7 @@
 import { type Accessor, createMemo, getIsHeavyAnimating, untrack } from 'frameact';
 import { For, Show } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
-import { getActions, getGlobal } from '../../global';
+import { getActions, useGlobal } from '../../global';
 
 import type { ApiMessage } from '../../api/types';
 import type { IAlbum, IDocumentGroup, MessageListType, ThreadId } from '../../types';
@@ -269,68 +269,81 @@ const MessageListContent = (props: OwnProps) => {
     </div>
   );
 
-  const renderPaidMessageAction = (message: ApiMessage, album?: IAlbum) => {
-    const messagesLength = album?.messages?.length || 1;
-    const amount = message.paidMessageStars! * messagesLength;
+  // Deviation: components over the entry accessor (tt re-ran these functions on every render of the list): the paid amount, the
+  // sender, the replied-to message and the change summary follow the store, so an album that gets another part, or a sender
+  // or an original message that loads after the row was mounted, update the row. `useGlobal()` is the tracked global.
+  const PaidMessageAction = (rowProps: { entry: Accessor<PaidActionEntry> }) => {
+    const global = useGlobal();
+    const entry = rowProps.entry;
+    const amount = createMemo(() => entry().message.paidMessageStars! * (entry().album?.messages?.length || 1));
+    const userTitle = createMemo(() => {
+      const sender = selectSender(global, entry().message);
+      return sender ? getPeerTitle(lang, sender) : '';
+    });
+
     return (
       <div class={buildClassName('local-action-message')}>
         <span>
-          {message.isOutgoing
+          {entry().message.isOutgoing
             ? lang('ActionPaidOneMessageOutgoing', {
-                amount: formatStarsAsText(lang, amount),
+                amount: formatStarsAsText(lang, amount()),
               })
-            : (() => {
-                const sender = selectSender(getGlobal(), message);
-                const userTitle = sender ? getPeerTitle(lang, sender) : '';
-                return lang('ActionPaidOneMessageIncoming', {
-                  user: userTitle,
-                  amount: formatStarsAsText(lang, amount),
-                });
-              })()}
+            : lang('ActionPaidOneMessageIncoming', {
+                user: userTitle(),
+                amount: formatStarsAsText(lang, amount()),
+              })}
         </span>
       </div>
     );
   };
 
-  const renderSuggestedPostInfoAction = (message: ApiMessage) => {
-    const { price, scheduleDate } = message.suggestedPostInfo!;
-    const sender = selectSender(getGlobal(), message);
-    const userTitle = sender ? getPeerTitle(lang, sender) : '';
-    const userLink = renderPeerLink(sender?.id, userTitle || lang('ActionFallbackUser'));
-
-    const originalMessage =
-      message.replyInfo?.type === 'message' && message.replyInfo.replyToMsgId
-        ? selectChatMessage(getGlobal(), message.chatId, message.replyInfo.replyToMsgId)
+  const SuggestedPostInfoAction = (rowProps: { entry: Accessor<SuggestedPostEntry> }) => {
+    const global = useGlobal();
+    const entry = rowProps.entry;
+    const message = () => entry().message;
+    const sender = createMemo(() => selectSender(global, message()));
+    const originalMessage = createMemo(() => {
+      const replyInfo = message().replyInfo;
+      return replyInfo?.type === 'message' && replyInfo.replyToMsgId
+        ? selectChatMessage(global, message().chatId, replyInfo.replyToMsgId)
         : undefined;
-    const changesInfo = getSuggestedChangesInfo(message, originalMessage);
-
-    const titleText = changesInfo
-      ? getSuggestedChangesActionText(lang, message, originalMessage, message.isOutgoing, userLink)
-      : message.isOutgoing
-        ? lang('ActionSuggestedPostOutgoing', undefined, { withNodes: true, withMarkdown: true })
-        : lang('ActionSuggestedPostIncoming', { user: userLink }, { withNodes: true, withMarkdown: true });
-
-    const tableData: TableEntry[] = compact([
-      [
-        lang('TitlePrice'),
-        price
-          ? price.currency === 'TON'
-            ? formatTonAsText(lang, convertTonFromNanos(price.amount))
-            : formatStarsAsText(lang, price.amount)
-          : lang('SuggestMessageNoPrice'),
-      ],
-      [
-        lang('TitleTime'),
-        scheduleDate ? formatScheduledDateTime(scheduleDate, lang, oldLang) : lang('SuggestMessageAnytime'),
-      ],
-    ]);
+    });
+    const userLink = () => {
+      const userTitle = sender() ? getPeerTitle(lang, sender()!) : '';
+      return renderPeerLink(sender()?.id, userTitle || lang('ActionFallbackUser'));
+    };
+    const titleText = () => {
+      const changesInfo = getSuggestedChangesInfo(message(), originalMessage());
+      return changesInfo
+        ? getSuggestedChangesActionText(lang, message(), originalMessage(), message().isOutgoing, userLink())
+        : message().isOutgoing
+          ? lang('ActionSuggestedPostOutgoing', undefined, { withNodes: true, withMarkdown: true })
+          : lang('ActionSuggestedPostIncoming', { user: userLink() }, { withNodes: true, withMarkdown: true });
+    };
+    const tableData = createMemo((): TableEntry[] => {
+      const { price, scheduleDate } = message().suggestedPostInfo!;
+      return compact([
+        [
+          lang('TitlePrice'),
+          price
+            ? price.currency === 'TON'
+              ? formatTonAsText(lang, convertTonFromNanos(price.amount))
+              : formatStarsAsText(lang, price.amount)
+            : lang('SuggestMessageNoPrice'),
+        ],
+        [
+          lang('TitleTime'),
+          scheduleDate ? formatScheduledDateTime(scheduleDate, lang, oldLang) : lang('SuggestMessageAnytime'),
+        ],
+      ]);
+    });
 
     return (
       <div class={buildClassName('local-action-message')}>
         <span class={actionMessageStyles.suggestedPostContainer}>
-          <div class={actionMessageStyles.suggestedPostTitle}>{titleText}</div>
-          {Boolean(tableData.length) && (
-            <MiniTable className={actionMessageStyles.suggestedPostInfo} data={tableData} />
+          <div class={actionMessageStyles.suggestedPostTitle}>{titleText()}</div>
+          {Boolean(tableData().length) && (
+            <MiniTable className={actionMessageStyles.suggestedPostInfo} data={tableData()} />
           )}
         </span>
       </div>
@@ -365,6 +378,30 @@ const MessageListContent = (props: OwnProps) => {
   );
 
   // The entries of the list (see the note above): the loops of tt's `calculateSenderGroups` and of the render body.
+  // Perf (not in tt): the entries of the previous run by path, so that an entry whose fields did not change keeps its
+  // object and `<For>` does not wake its row (a row reads its props through its entry: a new entry object re-runs every
+  // prop-reading memo, effect and the mapper of the row, for every row, on every change of the list).
+  let entryCache = new Map<string, Entry | DateGroupEntry>();
+  const isSameEntry = (prev: AnyLiteral, next: AnyLiteral) => {
+    for (const key in next) {
+      if (key === 'children' || key === 'path') continue;
+      if (key === 'dateGroup') {
+        if (
+          prev.dateGroup.datetime !== next.dateGroup.datetime ||
+          prev.dateGroup.originalDate !== next.dateGroup.originalDate
+        ) {
+          return false;
+        }
+        continue;
+      }
+      if (prev[key] !== next[key]) return false;
+    }
+    for (const key in prev) {
+      if (key !== 'path' && !(key in next)) return false;
+    }
+    return true;
+  };
+
   const model = createMemo(() => {
     const messageGroups = props.messageGroups;
     const liveTailStartOriginalId = props.liveTailStartOriginalId;
@@ -396,7 +433,7 @@ const MessageListContent = (props: OwnProps) => {
               type: 'action-message',
               key: getMessageOriginalId(message),
               message,
-              appearanceOrder: messageCount - ++appearanceIndex,
+              appearanceOrder: Math.max(0, messageCount - ++appearanceIndex),
               isJustAdded: addedIds?.has(message.id),
               isLastInList,
             } satisfies ActionMessageEntry,
@@ -454,7 +491,7 @@ const MessageListContent = (props: OwnProps) => {
                   withSenderName: position.isFirstInGroup && (props.withUsers || shouldShowGuestAvatar) && !isOwn,
                   noComments: shouldHideComments(),
                   noReplies: !shouldHideComments() || props.threadId !== MAIN_THREAD_ID || props.type === 'scheduled',
-                  appearanceOrder: messageCount - ++appearanceIndex,
+                  appearanceOrder: Math.max(0, messageCount - ++appearanceIndex),
                   isJustAdded,
                   isThreadTop: isThreadTopMessage,
                   isFirstInGroup: position.isFirstInGroup,
@@ -539,7 +576,7 @@ const MessageListContent = (props: OwnProps) => {
             ? lastItem.messages[lastItem.messages.length - 1]
             : lastItem;
         const lastMessageId = getMessageOriginalId(lastMessage);
-        const lastAppearanceOrder = messageCount - appearanceIndex;
+        const lastAppearanceOrder = Math.max(0, messageCount - appearanceIndex);
 
         const isOwn = isOwnMessage(lastMessage);
 
@@ -693,6 +730,27 @@ const MessageListContent = (props: OwnProps) => {
     // its row. A row of the outer list gets its entry after the outer list has been mapped, so an inner list that reads
     // it is dirty again when an effect of an inner row runs: frameact then reports a "potential infinite loop" (engine gap
     // #7 of the messages report). The paths are the keys of the ancestors, so they are as stable as the rows.
+    const nextCache = new Map<string, Entry | DateGroupEntry>();
+    const reuseEntries = (parentPath: string, list: (Entry | DateGroupEntry)[]) => {
+      for (let i = 0; i < list.length; i++) {
+        const next = list[i];
+        const cacheKey = `${parentPath}/${next.key}`;
+        const prev = entryCache.get(cacheKey);
+        let kept = next;
+        if (prev && prev !== next && isSameEntry(prev, next)) {
+          // the children are read from `childrenByPath`, never from the row's entry
+          if ('children' in next) (prev as { children: Entry[] }).children = next.children;
+          kept = prev;
+          list[i] = prev;
+        }
+        nextCache.set(cacheKey, kept);
+        if ('children' in kept) reuseEntries(cacheKey, kept.children);
+      }
+    };
+    reuseEntries('', dateGroups);
+    reuseEntries('~live-tail', liveTailDateGroups);
+    entryCache = nextCache;
+
     const childrenByPath = new Map<string, Entry[]>();
     const register = (parentPath: string, entries: Entry[]) => {
       for (const entry of entries) {
@@ -734,12 +792,10 @@ const MessageListContent = (props: OwnProps) => {
       case 'unread-divider':
         return renderUnreadDivider();
       case 'paid-action': {
-        const paid = entry as Accessor<PaidActionEntry>;
-        return renderPaidMessageAction(paid().message, paid().album);
+        return <PaidMessageAction entry={entry as Accessor<PaidActionEntry>} />;
       }
       case 'suggested-post': {
-        const suggested = entry as Accessor<SuggestedPostEntry>;
-        return renderSuggestedPostInfoAction(suggested().message);
+        return <SuggestedPostInfoAction entry={entry as Accessor<SuggestedPostEntry>} />;
       }
       case 'discussion-note':
         return (

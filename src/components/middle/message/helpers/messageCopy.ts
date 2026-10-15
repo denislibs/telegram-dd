@@ -8,6 +8,7 @@ import type { ClipboardTextContent, MessageCopyRequest } from '../../../../types
 
 import { isChatChannel } from '../../../../global/helpers';
 import { getPeerTitle } from '../../../../global/helpers/peers';
+import { generateBrailleSpoiler } from '../../../../global/helpers/messageSummary';
 import { renderMessageSummaryHtml } from '../../../../global/helpers/renderMessageSummaryHtml';
 import {
   selectAllowedMessageActionsSlow,
@@ -23,6 +24,23 @@ import { parseMessageCopyHtml, serializeMessageCopyTiptapJson } from '../../../.
 import { buildRichMessageFromFormatted, buildTiptapJsonFromRichMessage } from '../../../ui/textInput/richText';
 
 const EMPTY_PARAGRAPH: TiptapJsonContent = { type: 'paragraph' };
+
+/**
+ * Deviation (spoilers, merged from the messages slice): the clone of a `Range` over rendered messages carries the text that
+ * the page hides (`user-select: none` does not keep a text out of `Range.cloneContents`, and a concealed spoiler's content is
+ * only transparent). The text of every concealed spoiler is replaced by braille characters of the same length before the
+ * HTML is parsed: a copy must not show what the sender concealed. A revealed spoiler keeps its text.
+ */
+export function concealSpoilersInSelectionHtml(html: string) {
+  if (!html.includes('Spoiler--concealed')) return html;
+
+  // An inert document: nothing in the markup runs or loads
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('.Spoiler--concealed').forEach((spoiler) => {
+    spoiler.textContent = generateBrailleSpoiler((spoiler.textContent || '').length);
+  });
+  return doc.body.innerHTML;
+}
 
 export async function buildMessageCopyContent(
   messageList: MessageList,
@@ -63,7 +81,7 @@ export async function buildMessageCopyContent(
 
   const doc =
     request.type === 'selection'
-      ? parseMessageCopyHtml(request.html)
+      ? parseMessageCopyHtml(concealSpoilersInSelectionHtml(request.html))
       : buildMessagesDoc(global, messageList.chatId, messages, request, tabId);
   const result = serializeMessageCopyTiptapJson(doc);
   if (!result.plainText.trim()) throw new Error('EMPTY_MESSAGE_COPY_CONTENT');

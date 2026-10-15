@@ -28,6 +28,7 @@ import { useHotkeys } from '../../../hooks/useHotkeys';
 import useInfiniteScroll from '../../../hooks/useInfiniteScroll';
 import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
 import useOrderDiff from './hooks/useOrderDiff';
+import useProgressiveIds from './hooks/useProgressiveIds';
 
 import InfiniteScroll from '../../ui/InfiniteScroll';
 import Loading from '../../ui/Loading';
@@ -58,6 +59,10 @@ type OwnProps = {
 };
 
 const INTERSECTION_THROTTLE = 200;
+/** Rows mounted per frame when the window gains more than that many at once. A page-in of 30 is two frames; 12 (three
+ * frames) gave fewer long tasks but more layout and paint in the perf:compare scroll scenario. A 800 px viewport shows
+ * ~11 rows. */
+const PROGRESSIVE_CHUNK = 15;
 const RESERVED_HOTKEYS = new Set(['9', '0']);
 
 const ChatList = (props: OwnProps) => {
@@ -203,6 +208,9 @@ const ChatList = (props: OwnProps) => {
   // The index of each id in the window comes from a map built once per window: `indexOf` per row was O(n) per row, O(n^2) per
   // update, which matters with `noVirtualization` (the whole list is the window).
   const indexInViewport = createMemo(() => new Map(viewportIds()?.map((id, index) => [id, index])));
+  // Not in tt: a page-in (or a folder's first mount) mounts its rows over a few frames (`useProgressiveIds`), so the
+  // rendered rows are a subsequence of the window and a row's position is its index in the WINDOW, not in `each`.
+  const renderedIds = useProgressiveIds(viewportIds, PROGRESSIVE_CHUNK);
   const getRowOrderKey = (id: string) => {
     const index = indexInViewport().get(id)!;
     return viewportOffset() + index < pinnedCount() ? index : getOrderKey(id, isSaved());
@@ -210,8 +218,9 @@ const ChatList = (props: OwnProps) => {
 
   function renderChats() {
     return (
-      <ManualFor each={viewportIds()} orderKey={getRowOrderKey}>
-        {(id, index) => {
+      <ManualFor each={renderedIds()} orderKey={getRowOrderKey}>
+        {(id) => {
+          const index = () => indexInViewport().get(id)!;
           const isPinned = () => viewportOffset() + index() < pinnedCount();
           const offsetTop = () =>
             props.noAbsolutePositioning
