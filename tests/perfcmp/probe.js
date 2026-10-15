@@ -290,6 +290,7 @@
       input.focus();
       const latencies = [];
       let sent = 0;
+      const typingStart = pc.mark('pc:typing');
       for (let message = 0; message < messages; message++) {
         for (let char = 0; char < charsPerMessage; char++) {
           const start = performance.now();
@@ -306,7 +307,7 @@
         sent++;
         await sleep(restMs);
       }
-      return { latencies, sent };
+      return { latencies, sent, typingStart };
     },
 
     folderTabs: () => document.querySelectorAll('.ChatFolders .TabList > [data-file-hover-open]'),

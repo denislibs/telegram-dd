@@ -26,6 +26,8 @@ export interface ScenarioContext {
 export interface ScenarioOutput {
   /** Page time (performance.now) at which a blocking animation ended; enables the "after release" metrics. */
   animationEnd?: number;
+  /** Page time at which the scenario's second phase starts (typing: the first keystroke); splits the window metrics. */
+  splitAt?: number;
   /** Extra metrics the scenario measured itself. */
   extra?: Record<string, number>;
 }
@@ -187,11 +189,12 @@ export const SCENARIOS: Scenario[] = [
       const opened = await pc<boolean>(page, 'openFirstChat', 5);
       await pc<boolean>(page, 'waitForCount', '#editable-message-text[contenteditable="true"]', 1, 20000);
       await sleep(page, 1500);
-      const result = await pc<{ latencies: number[]; sent: number }>(page, 'typeAndSend', 20, 10, 100);
+      const result = await pc<{ latencies: number[]; sent: number; typingStart: number }>(page, 'typeAndSend', 20, 10, 100);
       await sleep(page, 500);
       const sorted = [...result.latencies].sort((a, b) => a - b);
       const at = (fraction: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))] ?? 0;
       return {
+        splitAt: result.typingStart,
         extra: {
           chatOpened: opened ? 1 : 0,
           messagesSent: result.sent,

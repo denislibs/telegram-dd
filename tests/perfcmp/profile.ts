@@ -36,8 +36,12 @@ const { values: args } = parseArgs({
     'dd-dir': { type: 'string' },
     top: { type: 'string', default: '40' },
     cpu: { type: 'string', default: 'auto' },
+    sourcemap: { type: 'boolean', default: false },
+    'build-only': { type: 'boolean', default: false },
+    'tt-dir': { type: 'string' },
   },
 });
+const SOURCEMAP = args.sourcemap ? ['--sourcemap'] : [];
 
 function run(command: string, argv: string[], cwd: string, env: Record<string, string>) {
   return new Promise<void>((done, fail) => {
@@ -66,7 +70,7 @@ async function buildDd(outDir: string) {
     }
     await run(
       'pnpm',
-      ['exec', 'vite', 'build', '--outDir', outDir, '--emptyOutDir', '--minify', 'false'],
+      ['exec', 'vite', 'build', '--outDir', outDir, '--emptyOutDir', '--minify', 'false', ...SOURCEMAP],
       ROOT,
       PERFCMP_ENV,
     );
@@ -84,7 +88,7 @@ async function buildTt(outDir: string) {
   if (!existsSync(join(TT_COPY, MOCK_FILE))) throw new Error('run pnpm perf:compare once first (tt copy + scenario)');
   await run(
     join(TT_COPY, 'node_modules/.bin/vite'),
-    ['build', '--outDir', outDir, '--emptyOutDir', '--minify', 'false'],
+    ['build', '--outDir', outDir, '--emptyOutDir', '--minify', 'false', ...SOURCEMAP],
     TT_COPY,
     {
       ...PERFCMP_ENV,
@@ -348,7 +352,7 @@ async function main() {
   const apps = args.app.split(',');
   const dirs: Record<string, string> = {
     dd: args['dd-dir'] ?? join(out, 'dist-dd'),
-    tt: join(TT_COPY, 'dist-prof'),
+    tt: args['tt-dir'] ?? join(TT_COPY, 'dist-prof'),
   };
   if (!args['no-build']) {
     if (apps.includes('dd')) {
@@ -360,6 +364,7 @@ async function main() {
       await buildTt(dirs.tt);
     }
   }
+  if (args['build-only']) return;
   const runs = Number(args.runs);
   const top = Number(args.top);
   for (const scenarioId of args.scenario.split(',')) {

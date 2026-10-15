@@ -190,6 +190,24 @@ export async function runScenario(url: string, scenario: Scenario, config: RunCo
         paintMs: trace.paintMs,
         gcMs: trace.gcMs,
       });
+      const splitUs = output.splitAt !== undefined ? markTime(events, 'pc:typing', thread) : undefined;
+      if (splitUs !== undefined) {
+        for (const [suffix, window] of [
+          ['Open', { startUs, endUs: splitUs }],
+          ['Type', { startUs: splitUs, endUs }],
+        ] as const) {
+          const part = analyzeTrace(events, thread, window);
+          Object.assign(metrics, {
+            [`scriptMs${suffix}`]: part.scriptMs,
+            [`styleMs${suffix}`]: part.styleMs,
+            [`layoutMs${suffix}`]: part.layoutMs,
+            [`paintMs${suffix}`]: part.paintMs,
+            [`maxTaskMs${suffix}`]: part.maxTaskMs,
+            [`layoutCount${suffix}`]: part.layoutCount,
+            [`styleCount${suffix}`]: part.styleRecalcCount,
+          });
+        }
+      }
       if (output.animationEnd !== undefined) {
         const releaseUs = markTime(events, 'pc:anim-end', thread);
         if (releaseUs !== undefined) {
@@ -198,6 +216,19 @@ export async function runScenario(url: string, scenario: Scenario, config: RunCo
       }
     }
 
+    if (output.splitAt !== undefined) {
+      const split = output.splitAt;
+      metrics.droppedFramesOpen = droppedFrames(sample.frames, sample.t0, split).dropped;
+      metrics.droppedFramesType = droppedFrames(sample.frames, split, sample.t1).dropped;
+      const open = longTaskStats(sample.longTasks.filter((task) => task.start < split));
+      const type = longTaskStats(sample.longTasks.filter((task) => task.start >= split));
+      Object.assign(metrics, {
+        longTaskCountOpen: open.count,
+        longTaskMaxMsOpen: open.maxMs,
+        longTaskCountType: type.count,
+        longTaskMaxMsType: type.maxMs,
+      });
+    }
     if (output.animationEnd !== undefined) {
       const release = output.animationEnd - 16;
       metrics.postReleaseLongTaskMs = longTaskStats(sample.longTasks.filter((task) => task.start >= release)).totalMs;
