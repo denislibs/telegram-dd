@@ -66,9 +66,7 @@ appended tests of `tests/e2e/composer.spec.ts`.
 
 Open items found while testing:
 
-- **Messages slice:** a `MessageList` effect (`container.parentElement!` in the add-message branch) throws `Cannot read properties of null (reading
-'classList')` when it runs after a heavy animation for the list of a chat that was left. Reproduced in the e2e that holds a heavy animation across a
-  switch; the composer e2e ignores exactly that message with this reason. A one-line guard in `MessageList.tsx`, to be routed to the messages slice.
+- **Messages slice (fixed in this branch):** a `MessageList` effect (`container.parentElement!`) threw `Cannot read properties of null (reading 'classList')` when it ran after a heavy animation for a chat that was left. tt's layout effect runs synchronously, so it has no such case; the port now bails out when the container is detached (the scroll handler's own condition). The H1 e2e no longer ignores the message and fails without the guard.
 - **Stricterdom violation on Saved Messages from the menu** in the mocked app (`childList` of `.Composer` outside an effect); the same on the commit
   before this round, so not caused by it.
 - **Tooltip `selectItem`** runs from a `requestMutation` (tt's code in `controller.ts`), so choosing an item with Enter / Tab writes the store in the

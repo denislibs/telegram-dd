@@ -86,13 +86,6 @@ test('a code fence typed into the input shows the code that follows and sends it
 });
 
 test.describe('a chat switch while a heavy animation runs', () => {
-  // Known issue of the messages slice (not the composer): the `MessageList` effect that runs once the animation is over reads
-  // `container.parentElement` of the list of the chat that was left, which is gone by then. The error does not touch the
-  // composer; it is reported in docs/reports/slice-composer.md.
-  test.use({
-    strictOptions: { ignoreConsole: [...IGNORED_CONSOLE, /Cannot read properties of null \(reading 'classList'\)/] },
-  });
-
   // The main-menu "Saved Messages" item and the hotkeys switch without `forceOnHeavyAnimation`, so the switch lands while a
   // root heavy animation (a closing menu, a scroll animation) holds back the effects that a store write dirtied.
   async function beginHeavyAnimation(page: Page) {
