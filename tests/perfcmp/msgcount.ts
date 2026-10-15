@@ -1,4 +1,4 @@
-// `pnpm exec tsx tests/perfcmp/msgcount.ts --dd-dir DIR [--tt-dir DIR] [--heap]`: the open-chat scenario at CPU x4 with
+// `pnpm exec tsx tests/perfcmp/msgcount.ts --dd-dir DIR [--tt-dir DIR] [--heap]`: the open-chat scenario under calibrated CPU throttling (x4 on the reference machine) with
 // counters: message elements created / removed (unique elements), the message count per page-in, long tasks, and
 // optionally (--heap) frameact node counts from heap snapshots (Computation / Effect / SignalNode / Scope) at three points.
 import { type CDPSession, chromium } from '@playwright/test';
@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 import { SCENARIO_HASH, serveDir } from './apps';
+import { calibrateCpu, describeCalibration, parseRate } from './cpuCalibration';
 import { CHAT_LIST_ROW, pc, scenarioById } from './scenarios';
 
 const ROOT = resolve(import.meta.dirname, '../..');
@@ -16,7 +17,7 @@ const { values: args } = parseArgs({
     'tt-dir': { type: 'string' },
     heap: { type: 'boolean', default: false },
     runs: { type: 'string', default: '1' },
-    cpu: { type: 'string', default: '4' },
+    cpu: { type: 'string', default: 'auto' },
   },
 });
 
@@ -80,6 +81,19 @@ async function nodeCounts(cdp: CDPSession) {
   return counts;
 }
 
+// The CPU throttling is calibrated to the target device (cpuCalibration.ts), as `perf:compare` does; `--cpu N` forces a rate.
+let cpuRate = 4;
+async function calibrate() {
+  const browser = await chromium.launch();
+  try {
+    const calibration = await calibrateCpu(await browser.newContext(), parseRate(args.cpu));
+    cpuRate = calibration.rate;
+    process.stdout.write(`${describeCalibration(calibration)}\n`);
+  } finally {
+    await browser.close();
+  }
+}
+
 async function once(url: string, heap: boolean) {
   const browser = await chromium.launch({
     args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding'],
@@ -98,14 +112,14 @@ async function once(url: string, heap: boolean) {
     const count = () => page.evaluate(() => document.querySelectorAll('#MiddleColumn .message-list-item').length);
     const heaps: Record<string, unknown> = {};
     if (heap) heaps.before = { msgs: await count(), ...(await nodeCounts(cdp)) };
-    await cdp.send('Emulation.setCPUThrottlingRate', { rate: Number(args.cpu) });
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpuRate });
     await pc(page, 'start');
     await pc(page, 'openFirstChat');
     await pc(page, 'sleep', 1500);
     if (heap) {
       await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
       heaps.opened = { msgs: await count(), ...(await nodeCounts(cdp)) };
-      await cdp.send('Emulation.setCPUThrottlingRate', { rate: Number(args.cpu) });
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpuRate });
     }
     const createdAtOpen = await page.evaluate(() => (window as any).__mc.created);
     // the scenario's scroll with a timeline of page-ins (created count changes)
@@ -147,7 +161,7 @@ async function once(url: string, heap: boolean) {
         created: await page.evaluate(() => (window as any).__mc.created),
         ...(await nodeCounts(cdp)),
       };
-      await cdp.send('Emulation.setCPUThrottlingRate', { rate: Number(args.cpu) });
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpuRate });
     }
     const scrolled = await scroll(Infinity);
     void paged;
@@ -173,6 +187,7 @@ async function once(url: string, heap: boolean) {
 
 async function main() {
   void scenarioById;
+  await calibrate();
   for (const [app, dir] of [
     ['dd', args['dd-dir']],
     ['tt', args['tt-dir']],

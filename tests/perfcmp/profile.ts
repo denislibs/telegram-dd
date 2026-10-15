@@ -16,6 +16,7 @@ import { parseArgs } from 'node:util';
 import { PERFCMP_ENV } from '../config';
 import { patches } from '../../scripts/visual/tt-patches.mjs';
 import { SCENARIO_HASH, serveDir } from './apps';
+import { calibrateCpu, describeCalibration, parseRate } from './cpuCalibration';
 import { buildLargeScenario, DEFAULT_CHAT_COUNT, LARGE_SCENARIO_NAME } from './scenario';
 import { CHAT_LIST_ROW, pc, scenarioById } from './scenarios';
 import { categorize, findMainThread, markTime, parseTrace, TASK_EVENT, type TraceEvent } from './trace';
@@ -34,7 +35,7 @@ const { values: args } = parseArgs({
     out: { type: 'string', default: join(ROOT, '.cache/perfprof') },
     'dd-dir': { type: 'string' },
     top: { type: 'string', default: '40' },
-    cpu: { type: 'string', default: '4' },
+    cpu: { type: 'string', default: 'auto' },
   },
 });
 
@@ -327,7 +328,21 @@ function merge(target: Map<string, number>, source: Map<string, number>) {
   for (const [k, v] of source) target.set(k, (target.get(k) ?? 0) + v);
 }
 
+// The CPU throttling is calibrated to the target device (cpuCalibration.ts), as `perf:compare` does; `--cpu N` forces a rate.
+let cpuRate = 4;
+async function calibrate() {
+  const browser = await chromium.launch();
+  try {
+    const calibration = await calibrateCpu(await browser.newContext(), parseRate(args.cpu));
+    cpuRate = calibration.rate;
+    process.stdout.write(`${describeCalibration(calibration)}\n`);
+  } finally {
+    await browser.close();
+  }
+}
+
 async function main() {
+  await calibrate();
   const out = args.out;
   mkdirSync(out, { recursive: true });
   const apps = args.app.split(',');
@@ -359,7 +374,7 @@ async function main() {
       const perRun = [];
       try {
         for (let i = 0; i < runs; i++) {
-          const result = await profileOnce(server.url + SCENARIO_HASH, scenarioId, Number(args.cpu));
+          const result = await profileOnce(server.url + SCENARIO_HASH, scenarioId, cpuRate);
           merge(self, result.all.self);
           merge(total, result.all.total);
           merge(longSelf, result.long.self);

@@ -5,7 +5,7 @@ import { expectNoLeak } from './leaks';
 import { expectNoLongTasks } from './longTasks';
 
 // The middle column (messages slice), on the production build (playwright.perf.config.ts): opening and closing a chat must not
-// leak, and opening a chat and scrolling its history must not block the main thread under 4x CPU throttling. The production
+// leak, and opening a chat and scrolling its history must not block the main thread under calibrated CPU throttling. The production
 // build of the mocked client has no request middleware (a `@vite-ignore` dynamic import is not bundled), so every history
 // request is answered with the whole chat, which is what telegram-tt's mock does as well (`pnpm perf:compare`).
 
@@ -83,9 +83,9 @@ test.describe('message list: leaks', () => {
   });
 });
 
-test.describe('message list: long tasks under 4x CPU throttling', () => {
+test.describe('message list: long tasks under calibrated CPU throttling', () => {
   // Opening the 300-message chat and scrolling its history to the first message (the history pages in). The limit is telegram-tt's own
-  // worst task on the same kind of run (`pnpm perf:compare --scenario open-chat`: a 400-message chat, CPU x4, 5 runs): 123 ms
+  // worst task on the same kind of run (`pnpm perf:compare --scenario open-chat`: a 400-message chat, CPU x4 on the reference machine, 5 runs): 123 ms
   // (117-198); this app's 124 ms (117-182). A task's length follows the machine, so the cap is the highest tt value seen, 198 ms,
   // plus 3%: 204 ms. The number of long tasks is higher (22 against 14) and the script time 1.28x tt's: a gap, tracked in
   // docs/reports/slice-messages.md, not hidden here.
