@@ -6,6 +6,7 @@ import { defineConfig, loadEnv, normalizePath, type UserConfig } from 'vite';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
 import buildGitInfoPlugin from './plugins/gitInfo.ts';
+import mockClientAssetsPlugin from './plugins/mockClientAssets.ts';
 import packageJson from './package.json' with { type: 'json' };
 
 // Ported from telegram-tt's vite.config.ts. Dropped: webpack/babel-react leftovers, bundle-stats/visualizer reports,
@@ -125,6 +126,8 @@ export default defineConfig(({ mode }): UserConfig => {
     plugins: [
       // frameact() must stay first: it owns the JSX transform.
       frameact(),
+      // The `media` scenario of the mocked client is bundled in production builds too (perf gates, `pnpm perf:compare`).
+      ...(appMockedClient === '1' ? [mockClientAssetsPlugin()] : []),
       buildGitInfoPlugin({
         appEnv,
         head,

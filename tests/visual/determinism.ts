@@ -16,6 +16,11 @@ export const deterministicContextOptions = (viewport: { width: number; height: n
 
 /** Page-level determinism: fixed clock, seeded Math.random, no animations / transitions / carets. */
 export async function makeDeterministic(context: BrowserContext) {
+  // `IS_PROGRESSIVE_SUPPORTED` only tests `'serviceWorker' in navigator` (blocking service workers does not remove the property):
+  // both apps would request `./progressive/<hash>` and get a 404. Without it every media loads as a blob from the mock.
+  await context.addInitScript(() => {
+    delete (Navigator.prototype as { serviceWorker?: unknown }).serviceWorker;
+  });
   await context.addInitScript(() => {
     // mulberry32: the same sequence on every load
     let seed = 0x2f6e2b1;

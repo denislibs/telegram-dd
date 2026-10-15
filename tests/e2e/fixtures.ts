@@ -7,8 +7,22 @@ import { expect, test as base } from '@playwright/test';
 
 import { createStrictMonitor, DEFAULT_STRICT_OPTIONS, type StrictOptions } from './strictMonitor';
 
-export const test = base.extend<{ strictOptions: Partial<StrictOptions> }>({
+// `getMediaFormat` returns `Progressive` for every video when `IS_PROGRESSIVE_SUPPORTED` (`'serviceWorker' in navigator`), and a
+// blocked service worker still leaves the property: the app would request `./progressive/<hash>` from the dev server (404). The gates
+// remove the property before any script runs, so every media loads as a blob from the mock (decision D1); `progressive.spec.ts`
+// runs with `keepServiceWorker` and proves the streaming path on our build.
+export const DISABLE_SERVICE_WORKER = () => {
+  delete (Navigator.prototype as { serviceWorker?: unknown }).serviceWorker;
+};
+
+export const test = base.extend<{ strictOptions: Partial<StrictOptions>; keepServiceWorker: boolean }>({
   strictOptions: [DEFAULT_STRICT_OPTIONS, { option: true }],
+  keepServiceWorker: [false, { option: true }],
+
+  context: async ({ context, keepServiceWorker }, use) => {
+    if (!keepServiceWorker) await context.addInitScript(DISABLE_SERVICE_WORKER);
+    await use(context);
+  },
 
   page: async ({ page, baseURL, strictOptions }, use) => {
     const monitor = createStrictMonitor(page, new URL(baseURL ?? 'http://127.0.0.1').origin, strictOptions);
