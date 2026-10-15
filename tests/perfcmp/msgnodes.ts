@@ -15,6 +15,9 @@ const { values: args } = parseArgs({
   options: { dir: { type: 'string' }, top: { type: 'string', default: '80' } },
 });
 
+const DIST_DIR = args.dir ?? '';
+if (!DIST_DIR) throw new Error('--dir DIST is required');
+
 interface Snap {
   byKind: Map<string, Map<string, number>>;
   ids: Set<number>;
@@ -92,7 +95,7 @@ function parse(json: string, scripts: Map<string, string>, lines: Map<string, st
 }
 
 async function main() {
-  const server = await serveDir(args.dir);
+  const server = await serveDir(DIST_DIR);
   const browser = await chromium.launch();
   try {
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
@@ -107,7 +110,7 @@ async function main() {
     await pc(page, 'waitForCount', CHAT_LIST_ROW, 1, 60_000);
     await pc(page, 'sleep', 2500);
     const lines = new Map<string, string[]>();
-    const assets = join(args.dir, 'assets');
+    const assets = join(DIST_DIR, 'assets');
     for (const url of scripts.values()) {
       const file = url.replace(/^.*\//, '');
       try {
