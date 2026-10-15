@@ -239,8 +239,8 @@
      * Scenario 7. Opens the chat at the top of the list (the one with the long history) through the app's own action and
      * resolves when its first message is rendered; false when the app shows no message list.
      */
-    async openFirstChat() {
-      actions().openChat({ id: listedChatIds()[0] });
+    async openFirstChat(rank = 0) {
+      actions().openChat({ id: listedChatIds()[rank] });
       return pc.waitForCount('#MiddleColumn .MessageList .message-list-item', 1, 20000);
     },
 
