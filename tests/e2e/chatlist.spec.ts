@@ -19,17 +19,23 @@ const ACTIVE_ROW = '#LeftColumn .Transition_slide-active > .chat-list .ListItem.
 // The mocked sync of the app writes whole-global snapshots taken before its awaits, which can undo what the test played
 // (see tests/e2e/authHelpers.ts): the contacts are checked and played again when they are gone.
 async function addContacts(page: Page, count: number, from = 1) {
-  for (let attempt = 0; attempt < 4; attempt++) {
-    await playContacts(page, count, from);
-    await page.waitForTimeout(800);
-    const present = await page.evaluate(
+  const present = () =>
+    page.evaluate(
       ([n, first]) => {
-        const { byId } = (window as unknown as TestWindow).getGlobal().chats;
-        return Boolean(byId[String(1000 + first)] && byId[String(1000 + first + n - 1)]);
+        const { byId, listIds } = (window as unknown as TestWindow).getGlobal().chats;
+        const listed: string[] = listIds.active ?? [];
+        const ids = [String(1000 + first), String(1000 + first + n - 1)];
+        return ids.every((id) => byId[id] && listed.includes(id));
       },
       [count, from] as const,
     );
-    if (present) return;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await playContacts(page, count, from);
+    await page.waitForTimeout(700);
+    // present now and still present after the time a late sync needs to undo them
+    if (!(await present())) continue;
+    await page.waitForTimeout(1000);
+    if (await present()) return;
   }
   throw new Error('the mocked sync keeps undoing the contacts of the test');
 }
@@ -645,6 +651,8 @@ test.describe('chat list', () => {
   });
 
   test('no gap after a jump by scrollTop assignment (down, then up) once the user scrolls on', async ({ page }) => {
+    test.setTimeout(120_000); // 400 chats and ~80 scroll steps; a loaded machine doubles that
+    test.setTimeout(120_000); // 400 chats and ~80 scroll steps; a loaded machine doubles that
     await openApp(page);
     await addContacts(page, 400);
     await expect.poll(() => visualOrder(page).then((titles) => titles[0])).toBe('Contact 400');

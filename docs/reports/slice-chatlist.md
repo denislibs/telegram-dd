@@ -124,7 +124,7 @@ At HEAD of the fix round 1 (rebased on `origin/main` with PR #15, the perfcmp ha
 | `pnpm gates`       | diff / tests / licenses pass, upstream reported, size within the budget (the budget was re-baselined in the slice: JS +64 KiB brotli, CSS +13 KiB)                                                                                                                                                                                                                                                                                                                                                               |
 | `pnpm test:e2e`    | 48 passed, zero console / page / request / stricterdom problems. `chatlist.spec.ts` has 14 tests: the list renders, the context menu (Escape, backdrop, an item runs its action), folders (tabs, Escape, Ctrl+Shift+Digit, a click on the active tab scrolls to the top), a new message (DOM moves, animation end state, contiguity, the badge), typing, infinite scroll (window size, contiguity), Alt+Up/Down, a hidden list that receives reorders, rows mounted by a later scroll, spoilers/login code/draft |
 | `pnpm test:a11y`   | 13 passed (the chat list, the open main menu). Baseline entry: `aria-required-parent` of the main menu (tt's `Menu` without `ariaLabel`: no `role=menu` on the bubble, ported verbatim)                                                                                                                                                                                                                                                                                                                          |
-| `pnpm test:perf`   | 11 passed. Leaks (documented limit 512 KB over 50 runs after 25 warm-up runs, the second half of the runs may add 256 KB): folder switching +255 KB, list remount (Settings -> Archive -> chats: the lists are disposed) +212 KB, context menu +249 KB. Long tasks at 4x CPU: a new message + folder switching under 50 ms, mounting a folder's list under 100 ms, scrolling under 107 ms (telegram-tt's worst task, measured)                                                                                   |
+| `pnpm test:perf`   | 11 passed. Leaks (documented limit 512 KB over 50 runs after 25 warm-up runs, the second half of the runs may add 256 KB): folder switching +255 KB, list remount (Settings -> Archive -> chats: the lists are disposed) +212 KB, context menu +249 KB. Long tasks at 4x CPU: a new message + folder switching under 50 ms, mounting a folder's list under 100 ms, scrolling under 135 ms (telegram-tt's worst task seen in two measurements, 104 and 131 ms, plus 3%)                                           |
 | `pnpm test:visual` | 10 passed, nothing skipped. `main-chat-list` and `main-menu` are `ported: true` at threshold 0: **0 px** against tt (1280x800, mock `default`)                                                                                                                                                                                                                                                                                                                                                                   |
 
 Visual notes: the search field's spinner is masked as before (the mocked sync never answers); the main menu footer shows the
@@ -308,11 +308,51 @@ A heap snapshot diff (CDP `HeapProfiler.takeHeapSnapshot` after 6 warm-up cycles
 |                                         | long tasks          |              4 |                    1 |
 |                                         | script              |         586 ms |               409 ms |
 
-The scroll gate is tt's worst task, 107 ms (it was an arbitrary 100). The numbers say what is behind it: this app has the same worst
+The scroll gate is tt's worst task (it was an arbitrary 100). tt's number follows the machine: 104 ms (102-107) at load ~5, 127 ms (117-131) at load ~10, with this app at 82 and 125 ms in the same two runs; the cap is the highest tt value seen, 131 ms, plus 3%: 135 ms. The numbers say what is behind it: this app has the same worst
 task as tt but ten times as many long tasks while scrolling (each page-in of ~30 rows costs 50-80 ms at 4x, tt's mostly stays under
 50 ms; script 1.23x), and mounting a folder's list is 1.7x tt's longest task. Both are gaps to work on (the per-row cost of `Chat`:
 its mapper memo alone has ~58 dependencies, `useChatListEntry`, the avatar), not hidden: the first mount of a folder list has its own test with a
 100 ms cap (this app's measured worst plus a margin), so it cannot get worse.
+
+## Fix round 2 (found live on a real account): a gap above the rows after scrolling back up
+
+Symptom: scroll the chat list far down (the window of rendered rows slides forward), then scroll up: a large empty area above the
+rows (`scrollTop` 6018, rows 90..147, the first row at `top: 6480`: 462 px of the viewport empty), and no load until `scrollTop`
+neared 0.
+
+Cause: the kit's `InfiniteScroll.onScroll` decided "near an edge" from the container's own edges (`top <= area`,
+`scrollHeight - top - clientHeight <= area`). telegram-tt uses the first and the last RENDERED item: `isNearTop = scrollTop <=
+firstItemTop + sensitiveArea`, `isNearBottom = lastItemBottom - (scrollTop + offsetHeight) <= sensitiveArea` (the item position is
+`offsetTop`, or the rect relative to the scroller when `scrollContainerClosest` is set). The rows of the chat list are absolutely
+positioned at `(offset + i) * 72`, so after the window slid the container edges are thousands of px from the rows and the window never
+slid back.
+
+Fix (`src/lib/kit/infiniteScroll.ts`): tt's edges and item positions; near the top while moving up asks forwards, near the bottom
+while moving down asks backwards (tt's directions for the chat list, unchanged); the edge item becomes the anchor (tt: `nextAnchor`
+= the first / the last item) when scroll restore is on; a nested list without a box does nothing (tt's `getBoundingClientRect().width`
+check). The first and the last item are found by POSITION: tt's `listItemElements[0]` / `[length - 1]` are the visual first / last only
+because teact reorders the DOM, and a `<ManualFor>` list keeps its rows where they were. The next-frame preload and the dispose guard
+of round 1 are kept.
+
+Audit of the other container-edge uses: `useInfiniteScroll` reads no geometry; `preload` uses `clientHeight && scrollHeight <
+clientHeight` as tt (round 1); `trackAnchor` and `createScrollAnchor` walk `anchor.items()` in DOM order, which is wrong for a
+`ManualFor` list, so `trackAnchor` is skipped when scroll restore is off (the chat list, `withAbsolutePositioning`): there is no
+anchor to keep; a list that restores scroll AND reorders its DOM nodes by `ManualFor` would need the anchor walk to sort by
+position (not needed by any list of this slice; noted in the kit file). `useTopOverscroll` reads `scrollTop === 0` as tt.
+
+| Test                                                                                                                                                                                                                                                | Before                         | After |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | ----- |
+| kit unit: rows at `(90 + i) * 72` px, scrolling up from 6200 to 6018 asks forwards                                                                                                                                                                  | red (no load)                  | green |
+| kit unit: a jump up from 7000 to 3000 asks forwards, moving down inside the gap asks nothing                                                                                                                                                        | red                            | green |
+| kit unit: scrolling down asks backwards near the LAST ROW (4176 px), not the container bottom                                                                                                                                                       | red                            | green |
+| kit unit: nothing is asked while the rows are far from both viewport edges                                                                                                                                                                          | green                          | green |
+| e2e `chatlist.spec.ts`: 400 chats, 40 wheel steps down (`scrollTop` > 6000, the first window gone), 38 steps up; the gap (first row top above the viewport top, last row bottom below the viewport bottom) is 0 every 4-5 steps and back at the top | red (a gap at the 4th step up) | green |
+| e2e: a fast jump by `scrollTop` assignment (3 windows up, 2 down), then small wheel steps                                                                                                                                                           | red (a 7488 px gap remains)    | green |
+
+A jump by assignment does not scroll by itself (no further scroll events): like in tt the next scroll steps fetch the window.
+
+The long-task limits of the scroll test were re-checked: with this fix the list slides back as well, so the scroll test now includes
+those slides, and under a loaded machine (load ~10) the worst task is tt's too (see the long task table).
 
 ## Remaining stubs
 
