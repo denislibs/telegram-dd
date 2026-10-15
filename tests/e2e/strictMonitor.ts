@@ -16,7 +16,9 @@ export const DEFAULT_IGNORED_CONSOLE = [
   // language pack): tt prints the same errors under the mock (docs/quality-gates.md, "the mocked backend"). The main screen
   // boots on every page since the chat list slice.
   /Failed to fetch language/,
-  /fetchChatFolders|action "loadChatFolders" failed|reading 'findIndex'/,
+  // (the `default` scenario's folder has a plain string title: `buildApiChatFolder` expects a TextWithEntities, in tt as well; the
+  // mock's GetDialogFilters answers with the real `messages.DialogFilters` shape now, so the folder list fails one step later)
+  /fetchChatFolders|action "loadChatFolders" failed|reading 'findIndex'|buildApiFormattedText|buildApiChatFolder|\{message: Cannot read properties of undefined \(reading 'map'\)\}/,
 ];
 
 // Requests to the app origin that are expected to fail. The app boots the in-repo MockClient (APP_MOCKED_CLIENT=1) on

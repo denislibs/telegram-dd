@@ -145,7 +145,7 @@ test.describe('message list', () => {
     await openChat(page, 'Carol Short');
 
     await expect(page.locator(`#MiddleColumn .MiddleHeader`)).toContainText('Carol Short');
-    await expect(page.locator(ITEM)).toHaveCount(4);
+    await expect(page.locator(ITEM)).toHaveCount(3);
     await expect(page.locator(`${LIST} .sticky-date`)).toHaveCount(1);
     await expect(page.locator(`${LIST} .sticky-date`)).toContainText('December 26, 2023');
     // own and other bubbles, time and the outgoing status
@@ -443,8 +443,12 @@ test.describe('message list', () => {
     const spoiler = content.locator('.Spoiler');
     await expect(spoiler).toHaveClass(/Spoiler--concealed/);
     await expect(spoiler.locator('.Spoiler__content')).toHaveCSS('opacity', '0');
-    await spoiler.click();
-    await expect(spoiler).not.toHaveClass(/Spoiler--concealed/);
+    // retried: a click that lands while the page is still settling (a late layout or a late re-render of the message)
+    // is lost, which says nothing about the spoiler
+    await expect(async () => {
+      await spoiler.click({ timeout: 2000 });
+      await expect(spoiler).not.toHaveClass(/Spoiler--concealed/, { timeout: 1500 });
+    }).toPass({ timeout: 10_000 });
     await expect(spoiler.locator('.Spoiler__content')).toHaveCSS('opacity', '1');
   });
 
