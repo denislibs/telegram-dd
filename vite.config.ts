@@ -115,6 +115,9 @@ export default defineConfig(({ mode }): UserConfig => {
       assetsInlineLimit: (filePath) => (IMAGE_ASSET_RE.test(filePath) ? false : undefined),
     },
     worker: {
+      // The MockClient runs in the API worker, whose bundle is built with these plugins, not with the main ones: the `media`
+      // scenario must be bundled there (plugins/mockClientAssets.ts).
+      plugins: () => (appMockedClient === '1' ? [mockClientAssetsPlugin()] : []),
       // The GramJS API worker is a module worker (`new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })`).
       format: 'es',
       rolldownOptions: {

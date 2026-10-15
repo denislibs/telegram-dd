@@ -98,7 +98,10 @@ test.describe('media chats: leaks', () => {
       await page.waitForTimeout(150);
     };
 
-    const result = await expectNoLeak(page, cycle, LEAK);
+    // The heap of a chat of videos grows 390-400 KB over 50 cycles (3 runs on an idle machine; second half 204-217 KB, 0 nodes, 0 listeners:
+    // nothing is retained, the heap size is the media pipeline and V8 code) and was 645 KB once while another job loaded the machine:
+    // the limit is 2x the clean growth, the node and listener counters keep the retention check strict.
+    const result = await expectNoLeak(page, cycle, { ...LEAK, maxGrowthKb: 800 });
     test.info().annotations.push({
       type: 'heap',
       description: `${result.growthKb.toFixed(0)} KB, ${result.nodeGrowth} nodes, ${result.listenerGrowth} listeners over ${LEAK.runs} open/close cycles of Vic Videos`,
