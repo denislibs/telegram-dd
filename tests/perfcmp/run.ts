@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 
 import { type AppId, buildDd, buildTt, SCENARIO_HASH, type Served, serveDir } from './apps';
+import { calibrateCpu, describeCalibration, parseRate } from './cpuCalibration';
 import {
   type AppSummary,
   finishScenario,
@@ -34,7 +35,7 @@ const { values: args } = parseArgs({
   options: {
     scenario: { type: 'string', multiple: true },
     runs: { type: 'string', default: '5' },
-    cpu: { type: 'string', default: String(DEFAULT_CONFIG.cpuRate) },
+    cpu: { type: 'string', default: 'auto' },
     aa: { type: 'boolean', default: false },
     'no-build': { type: 'boolean', default: false },
     rebuild: { type: 'boolean', default: false },
@@ -91,12 +92,29 @@ async function main() {
   const runs = Math.max(1, Number(args.runs));
   const config: RunConfig = {
     ...DEFAULT_CONFIG,
-    cpuRate: Number(args.cpu),
+    cpuRate: DEFAULT_CONFIG.cpuRate, // replaced by the calibrated (or forced) rate below
     trace: !args['no-trace'],
     headed: args.headed,
   };
   const scenarios = selectScenarios();
   const isAA = args.aa;
+
+  // One calibrated rate for the whole invocation: both apps get the same throttling, so the ratios stay valid.
+  const calibration = await (async () => {
+    const browser = await chromium.launch();
+    try {
+      return await calibrateCpu(await browser.newContext(), parseRate(args.cpu));
+    } finally {
+      await browser.close();
+    }
+  })();
+  config.cpuRate = calibration.rate;
+  log(describeCalibration(calibration));
+  if (calibration.belowTarget) {
+    log(
+      'WARNING: this machine is below the target device even without throttling: the absolute numbers are not comparable.',
+    );
+  }
 
   // Build and serve. In an A/A run both sides are the same tt build behind the same server.
   const served: Served[] = [];
@@ -213,6 +231,7 @@ async function main() {
       config: {
         runs,
         cpuRate: config.cpuRate,
+        cpuCalibration: calibration,
         trace: config.trace,
         scenarios: scenarios.map((scenario) => scenario.id),
       },

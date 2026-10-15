@@ -3,7 +3,7 @@ import { type CDPSession, expect, type Page } from '@playwright/test';
 export interface LeakOptions {
   /** How many times the action runs between the two heap measurements (default 50). */
   runs?: number;
-  /** Allowed JS heap growth over all `runs`, after a forced GC, in KB (default 512). */
+  /** Allowed JS heap growth over all `runs`, after a forced GC, in KB (default 512); the second half of the runs may add half of it at most. */
   maxGrowthKb?: number;
   /** Unmeasured runs before the baseline, so lazy caches / JIT / first-use allocations do not count (default 5). */
   warmupRuns?: number;
@@ -14,6 +14,8 @@ export interface LeakResult {
   finalKb: number;
   growthKb: number;
   growthPerRunKb: number;
+  /** Growth over the second half of the runs: JIT code and one-time caches settle early, a leak keeps growing. */
+  secondHalfGrowthKb: number;
 }
 
 async function usedHeapKb(cdp: CDPSession): Promise<number> {
@@ -41,16 +43,27 @@ export async function expectNoLeak(
     for (let i = 0; i < warmupRuns; i++) await action(-1 - i);
 
     const baselineKb = await usedHeapKb(cdp);
-    for (let i = 0; i < runs; i++) await action(i);
+    const half = Math.floor(runs / 2);
+    for (let i = 0; i < half; i++) await action(i);
+    const midKb = await usedHeapKb(cdp);
+    for (let i = half; i < runs; i++) await action(i);
     const finalKb = await usedHeapKb(cdp);
 
     const growthKb = finalKb - baselineKb;
-    const result = { baselineKb, finalKb, growthKb, growthPerRunKb: growthKb / runs };
+    const secondHalfGrowthKb = finalKb - midKb;
+    const result = { baselineKb, finalKb, growthKb, growthPerRunKb: growthKb / runs, secondHalfGrowthKb };
     expect(
       growthKb,
       `JS heap grew by ${growthKb.toFixed(0)} KB over ${runs} runs (${result.growthPerRunKb.toFixed(1)} KB/run); ` +
         `limit ${maxGrowthKb} KB. Something retains what the action creates.`,
     ).toBeLessThanOrEqual(maxGrowthKb);
+    // A leak is linear: the second half of the runs grows as much as the first. Compiled code and warmed caches are front-loaded,
+    // so the second half alone must stay under half of the limit.
+    expect(
+      secondHalfGrowthKb,
+      `JS heap still grew by ${secondHalfGrowthKb.toFixed(0)} KB over the second half of the ${runs} runs; limit ${maxGrowthKb / 2} KB. ` +
+        `The growth is not settling: something retains what the action creates.`,
+    ).toBeLessThanOrEqual(maxGrowthKb / 2);
     return result;
   } finally {
     await cdp.detach().catch(() => undefined);

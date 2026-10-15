@@ -126,15 +126,14 @@ const DropdownMenu = (rawProps: OwnProps) => {
         onClose={handleClose}
         onCloseAnimationEnd={props.onHide}
         onMouseEnterBackdrop={props.onMouseEnterBackdrop}
-        {...(props.withPortal && menuAnchor()
-          ? {
-              anchor: menuAnchor(),
-              getTriggerElement,
-              getRootElement,
-              getMenuElement,
-              getLayout,
-            }
-          : undefined)}
+        // Deviation: the dynamic-position options are passed as explicit props that are `undefined` until the anchor is
+        // known: a conditional spread fixed the keys of the options object at creation (no anchor yet), so the menu was
+        // positioned statically at the portal's origin.
+        anchor={props.withPortal ? menuAnchor() : undefined}
+        getTriggerElement={props.withPortal && menuAnchor() ? getTriggerElement : undefined}
+        getRootElement={props.withPortal && menuAnchor() ? getRootElement : undefined}
+        getMenuElement={props.withPortal && menuAnchor() ? getMenuElement : undefined}
+        getLayout={props.withPortal && menuAnchor() ? getLayout : undefined}
       >
         {props.children}
       </Menu>

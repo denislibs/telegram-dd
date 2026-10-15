@@ -98,11 +98,17 @@ export const screens: VisualScreen[] = [
     threshold: 0,
   },
   {
-    // tt's main screen vs our current placeholder: the runner must report a big diff.
+    // tt's main screen vs a screen of ours that is not the main screen (the phone number form): the runner must report
+    // a big diff. (It compared with our main placeholder until the chat list was ported.)
     name: 'harness-detects-difference',
     ported: true,
     reference: { app: 'tt', path: '/', ready: TT_MAIN_READY },
-    candidate: { app: 'ours', path: '/', ready: ['#Main'] },
+    candidate: {
+      app: 'ours',
+      path: '/',
+      ready: MAIN_READY,
+      prepare: authStep('authorizationStateWaitPhoneNumber', '#auth-phone-number-form'),
+    },
     mask: TT_MAIN_MASK,
     threshold: 0.02,
     expect: 'differ',
@@ -120,16 +126,16 @@ export const screens: VisualScreen[] = [
   // --- the port's to-do list (skipped until `ported: true`) -----------------------------------------------------
   {
     name: 'main-chat-list',
-    ported: false,
+    ported: true,
     reference: { app: 'tt', path: '/', ready: TT_MAIN_READY },
     candidate: { app: 'ours', path: '/', ready: TT_MAIN_READY },
     selector: '#LeftColumn',
     mask: TT_MAIN_MASK,
-    threshold: 0.001,
+    threshold: 0,
   },
   {
     name: 'main-menu',
-    ported: false,
+    ported: true,
     reference: {
       app: 'tt',
       path: '/',
@@ -143,7 +149,7 @@ export const screens: VisualScreen[] = [
       prepare: (page) => page.getByRole('button', { name: 'Open menu' }).click(),
     },
     mask: TT_MAIN_MASK,
-    threshold: 0.001,
+    threshold: 0,
   },
   {
     name: 'chat-with-history',

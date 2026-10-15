@@ -263,12 +263,14 @@ Real vs scaffolded today:
   determinism layer, pixelmatch, `__diff__/` output and the scenario-sync check. `harness-tt-vs-tt` proves the
   pipeline is deterministic (0 differing pixels, stable over repeated runs). `harness-detects-difference` compares tt's
   main screen with our placeholder and passes only if the diff is large (`expect: 'differ'`).
-- **Scaffolded**: `main-chat-list`, `main-menu`, `chat-with-history` are `ported: false` (our UI does not render them
-  yet). Our app needs nothing special to join the comparison: it already honours `?mockScenario` through the shared
+- **Scaffolded**: `chat-with-history` is `ported: false` (the message list is not ported yet). `main-chat-list` and `main-menu` are ported (chat list slice, 0 px). Our app needs nothing special to join the comparison: it already honours `?mockScenario` through the shared
   `MockClient`; the ported `App` just has to boot into the logged-in state in mocked mode, as tt does
   (`global.auth.state = 'authorizationStateReady'` when `IS_MOCKED_CLIENT`).
 - tt's mock does not implement every request (e.g. folders, language pack: errors in its console, a perpetual sync
   spinner). That is tt's noise, identical on every run; do not "fix" it in the screens, mask it.
+
+Ported screens (chat list slice): `main-chat-list` (`#LeftColumn`) and `main-menu` (the open main menu), threshold 0 (0 px against tt, `docs/reports/slice-chatlist.md`).
+Both apps run the same MockClient patch: tt's copy through `scripts/visual/tt-patches.mjs`, ours in `src/lib/gramjs/client/MockClient.ts` (`start()` calls `onConnected`).
 
 Ported screens (auth slice): `auth-phone-number`, `auth-code`, `auth-password`, `auth-registration`, `auth-qr-code`
 (`authScreen()` in `tests/visual/screens.ts`). Both apps boot logged in under the mock, so each target plays the server:
@@ -280,21 +282,60 @@ the screen transition. Result: 0 differing pixels on all five, threshold 0.05 %.
 ### 3. Leak check
 
 `tests/perf/leaks.ts`: `expectNoLeak(page, action, { runs: 50, maxGrowthKb: 512, warmupRuns: 5 })`. It runs `warmupRuns`
-unmeasured, forces GC (`HeapProfiler.collectGarbage`, twice), reads `Runtime.getHeapUsage`, runs the action `runs`
-times, forces GC and reads again; it fails when the growth exceeds `maxGrowthKb` and returns the numbers. The action
-must be a full cycle (open and close a modal, mount and unmount a chat, scroll there and back): a one-way state change
-legitimately grows the heap. Main thread only (workers are not measured). Run on the production build. Pick
-`maxGrowthKb` as ~2x the growth you see on a clean run (`test.info().annotations` in the example prints it) and keep it
-tight: a real leak is proportional to `runs`. `perf.spec.ts` shows the usage and proves detection with a deliberate leak.
+unmeasured, forces GC (`HeapProfiler.collectGarbage`, twice), reads `Runtime.getHeapUsage`, runs the action `runs / 2`
+times, reads again, runs the other half and reads a last time; it fails when the total growth exceeds `maxGrowthKb` **or** the second
+half alone grows by more than `maxGrowthKb / 2` (a leak is linear; compiled code and warmed caches are front-loaded), and returns the
+numbers. The action must be a full cycle (open and close a modal, mount and unmount a chat, scroll there and back): a one-way state
+change legitimately grows the heap, and a cycle that only toggles kept-alive views disposes nothing (the kit's `Transition` keeps a
+slide per key: remount the screen to test disposal). Main thread only (workers are not measured). Run on the production build.
+`Runtime.getHeapUsage` counts V8's compiled code: a screen with hot paths needs a longer warm-up (the chat list tests use 25 runs;
+`docs/reports/slice-chatlist.md` has the heap snapshot diff that told code growth from a retained object). Pick `maxGrowthKb` as ~2x
+the growth you see on a clean run and keep it at the default unless a snapshot diff says why: a real leak is proportional to `runs`.
+`perf.spec.ts` shows the usage and proves detection with a deliberate leak.
 
 ### 4. Long tasks
 
-`tests/perf/longTasks.ts`: `expectNoLongTasks(page, action, { maxMs: 50, cpuThrottlingRate: 4 })`. It sets
+`tests/perf/longTasks.ts`: `expectNoLongTasks(page, action, { maxMs: 50 })`. It calibrates the CPU throttling rate (see
+"Calibrated throttling" below; `cpuThrottlingRate: 4` forces a fixed rate), sets
 `Emulation.setCPUThrottlingRate`, collects `PerformanceObserver('longtask')` entries while the action runs and fails
 when any task is longer than `maxMs` (the browser reports only tasks above 50 ms, so `maxMs` below 50 equals 50; raise
 it to tolerate a known slow spot, never to hide a new one). `startLongTaskCollector` / `collectLongTasks` are exported for
 custom flows (a navigation resets the collector). Note: code run through `page.evaluate` is not an event-loop task and
 is never a long task; drive the UI (clicks, scrolls, typing) so the app's own handlers and frame phases run.
+
+### Calibrated throttling (why the millisecond caps are portable)
+
+`Emulation.setCPUThrottlingRate(4)` slows down the machine it runs on, so "4x" on a slow CI runner is a much slower device than
+"4x" on a fast laptop: the same code measured 78 ms locally and 147 ms on a GitHub runner (PR #16), and a cap set against
+telegram-tt on one machine failed on the other. The perf gates therefore do not use a fixed rate. Like Lighthouse's
+`benchmarkIndex`, they time a fixed JavaScript workload in the browser before throttling and scale the rate by how fast this
+machine is against the machine the caps were set on:
+
+```
+rate = targetRate * referenceMs / measuredMs        clamped to [1, 8]
+```
+
+- **The target device** is the reference machine at 4x: `tests/perfcmp/cpu-reference.json` holds `targetRate` (4) and
+  `referenceMs`, the median time of the benchmark (`tests/perfcmp/cpuBenchmark.js`: ~45 ms per round of objects and arrays
+  built and sorted, strings split / joined / replaced, JSON, maps and sets, small allocations; seeded and deterministic; 7 timed
+  rounds after 1 warm-up, run in a blank page of the same browser, about 0.4 s) on the machine the caps were set on (an Apple M1
+  Pro, Chromium 156). A faster machine is throttled more (up to 8), a slower one less (down to 1), so 4x on the reference machine
+  and "the calibrated rate" anywhere else slow a task down to the same speed.
+- Every `expectNoLongTasks` call prints `[perf] CPU benchmark 47.2 ms (reference 42.5 ms, samples ...) -> CPU throttling x3.6`
+  and attaches the same numbers as `cpu-calibration` (JSON) to the test; a failing assertion repeats the rate it ran with.
+- **A machine below the target device** (raw rate under 1: even unthrottled it is slower than the target) fails the gate with
+  a message saying so, it never passes silently: the caps cannot be checked there.
+- `PERF_CPU_RATE=4 pnpm test:perf` (or `cpuThrottlingRate: 4` in a call) forces a fixed rate and skips the benchmark.
+- `pnpm perf:compare` calibrates once per invocation and gives dd and tt the same rate (the ratios stay valid); `--cpu 4` forces
+  a fixed rate, `--cpu auto` is the default, and the report header prints the calibration. A machine below the target gets a
+  warning there (it is a measurement, not a gate).
+- **Re-measuring the reference.** It must be redone when the benchmark changes (bump `CPU_BENCHMARK_REVISION` in
+  `cpuCalibration.ts`; the unit test of the checksum fails on any change of the workload) and when the caps are re-based on a
+  different reference machine. On that machine with nothing else running: `pnpm perf:calibrate --runs 20 --write` (the lowest
+  median becomes `referenceMs`, with the machine, Chromium version, date and load noted). Then re-check the caps against
+  telegram-tt on it (`pnpm perf:compare --scenario scroll,folders`), because caps and reference define the target device together.
+- The rate computation (`computeRate`, clamping, the below-target flag, forced rates) has unit tests in
+  `tests/perfcmp/cpuCalibration.test.ts`.
 
 ### 5. Accessibility
 
@@ -322,13 +363,13 @@ baseline commit from the porting guide into `reference/telegram-tt` and runs `pn
 
 ### Thresholds at a glance
 
-| Gate       | Default                                  | Tighten / loosen                                                  |
-| ---------- | ---------------------------------------- | ----------------------------------------------------------------- |
-| strict e2e | zero problems                            | `strictOptions.ignore*` per test, with a reason                   |
-| visual     | per screen `threshold` (share of pixels) | start honest, ratchet down; `pixelThreshold` for AA noise; `mask` |
-| leaks      | 512 KB over 50 runs after 5 warm-up runs | `maxGrowthKb`, `runs`, `warmupRuns`                               |
-| long tasks | 50 ms at 4x CPU throttling               | `maxMs` (>= 50), `cpuThrottlingRate`                              |
-| a11y       | no violations outside the baseline       | baseline entries with a reason                                    |
+| Gate       | Default                                    | Tighten / loosen                                                  |
+| ---------- | ------------------------------------------ | ----------------------------------------------------------------- |
+| strict e2e | zero problems                              | `strictOptions.ignore*` per test, with a reason                   |
+| visual     | per screen `threshold` (share of pixels)   | start honest, ratchet down; `pixelThreshold` for AA noise; `mask` |
+| leaks      | 512 KB over 50 runs after 5 warm-up runs   | `maxGrowthKb`, `runs`, `warmupRuns`                               |
+| long tasks | 50 ms at the target device (calibrated x4) | `maxMs` (>= 50), `cpuThrottlingRate` (forces a rate)              |
+| a11y       | no violations outside the baseline         | baseline entries with a reason                                    |
 
 ## Performance vs telegram-tt
 
@@ -340,7 +381,7 @@ it only by hand (`.github/workflows/perf-compare.yml`, `workflow_dispatch`).
 ```bash
 pnpm perf:compare                                   # every scenario, 5 runs per app, CPU x4, ~25 min
 pnpm perf:compare --scenario cold-start,scroll      # chosen scenarios (ids: pnpm perf:compare --list)
-pnpm perf:compare --runs 9 --cpu 6                  # more runs / other throttling
+pnpm perf:compare --runs 9 --cpu 6                  # more runs / a fixed throttling rate (default: auto, calibrated)
 pnpm perf:compare --aa                              # tt against tt: the noise of the method on this machine
 pnpm perf:compare --no-trace                        # skip the CDP trace (no script/style/layout/paint/GC columns)
 pnpm perf:compare --no-build | --rebuild            # reuse the built apps as they are / force a rebuild
@@ -356,7 +397,7 @@ Reports land in `tests/perfcmp/results/<name>.{md,json}` (and `latest-dd-vs-tt.*
   Production matters: tt's DEBUG build copies the whole global on every `getGlobal()`, ours runs stricterdom. Builds are
   cached by their inputs (our sources + working tree, the tt reference + patch list + scenario), so a rerun only rebuilds
   what changed; both are served by the same plain static server.
-- **Chromium (Playwright, headless), 1280x800, CPU throttling x4** (`Emulation.setCPUThrottlingRate`), a **fresh browser
+- **Chromium (Playwright, headless), 1280x800, CPU throttling calibrated to x4 on the reference machine** ("Calibrated throttling" above; `Emulation.setCPUThrottlingRate`), a **fresh browser
   per run**. N runs per app and scenario, **interleaved** (run 1 of every scenario for both apps, then run 2, ...; the
   order of the two apps alternates), medians reported with the min-max range. Each machine load average is recorded.
 - A warm scenario boots unthrottled, rests 2.5 s, forces a GC, then switches the throttle on and measures only the

@@ -11,6 +11,12 @@ export const DEFAULT_IGNORED_CONSOLE = [
   /\[frameact\/store\] Slow store update:/,
   /\[frameact\] Slow (effect run|\w+ drain):/,
   /\[API\] Slow updates processing:/,
+  /Slow `\w+`: \d+ ms/, // tt's own DEBUG timing hint of `folderManager` (`updateFolderManager`): wall-clock noise as well
+  // The main screen asks the mocked client for what telegram-tt's MockClient does not implement (the folder list, the
+  // language pack): tt prints the same errors under the mock (docs/quality-gates.md, "the mocked backend"). The main screen
+  // boots on every page since the chat list slice.
+  /Failed to fetch language/,
+  /fetchChatFolders|action "loadChatFolders" failed|reading 'findIndex'/,
 ];
 
 // Requests to the app origin that are expected to fail. The app boots the in-repo MockClient (APP_MOCKED_CLIENT=1) on

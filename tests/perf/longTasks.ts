@@ -1,4 +1,12 @@
-import { type CDPSession, expect, type Page } from '@playwright/test';
+import { type CDPSession, expect, type Page, test } from '@playwright/test';
+
+import {
+  belowTargetMessage,
+  calibrateCpu,
+  type CpuCalibration,
+  describeCalibration,
+  parseRate,
+} from '../perfcmp/cpuCalibration';
 
 export interface LongTasksOptions {
   /**
@@ -6,8 +14,30 @@ export interface LongTasksOptions {
    * same as 50; raise it to tolerate known slow spots while they are being fixed.
    */
   maxMs?: number;
-  /** CPU slowdown factor for the action (default 4, i.e. a mid-range phone). */
-  cpuThrottlingRate?: number;
+  /**
+   * CPU slowdown factor for the action. Default 'auto' (or the PERF_CPU_RATE environment variable): the rate is calibrated
+   * on this machine so that it emulates the target device, "4x on the reference machine" (tests/perfcmp/cpuCalibration.ts,
+   * docs/quality-gates.md, "Calibrated throttling"). A number forces that rate, with no benchmark.
+   */
+  cpuThrottlingRate?: number | 'auto';
+}
+
+/** Times the CPU benchmark in a blank page and logs / attaches the result; fails on a machine below the target device. */
+export async function calibratedRate(page: Page, requested: number | 'auto' | undefined): Promise<CpuCalibration> {
+  const forced = requested ?? parseRate(process.env.PERF_CPU_RATE);
+  const calibration = await calibrateCpu(page.context(), forced);
+  const line = describeCalibration(calibration);
+  process.stdout.write(`[perf] ${line}\n`);
+  try {
+    await test.info().attach('cpu-calibration', {
+      body: JSON.stringify({ line, ...calibration }, undefined, 2),
+      contentType: 'application/json',
+    });
+  } catch {
+    // outside a test (no attachments)
+  }
+  expect(calibration.belowTarget, belowTargetMessage(calibration)).toBe(false);
+  return calibration;
 }
 
 export interface LongTaskEntry {
@@ -50,18 +80,20 @@ export async function collectLongTasks(page: Page): Promise<LongTaskEntry[]> {
 export async function expectNoLongTasks(
   page: Page,
   action: () => Promise<void>,
-  { maxMs = 50, cpuThrottlingRate = 4 }: LongTasksOptions = {},
+  { maxMs = 50, cpuThrottlingRate }: LongTasksOptions = {},
 ): Promise<LongTaskEntry[]> {
+  // The benchmark runs before the throttling is set (and in another page, so the app under test is not disturbed).
+  const { rate } = await calibratedRate(page, cpuThrottlingRate);
   const cdp: CDPSession = await page.context().newCDPSession(page);
   try {
     await startLongTaskCollector(page);
-    await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpuThrottlingRate });
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate });
     await action();
     const tasks = await collectLongTasks(page);
     const offenders = tasks.filter((task) => task.duration > maxMs);
     expect(
       offenders,
-      `main-thread tasks longer than ${maxMs} ms at ${cpuThrottlingRate}x CPU throttling:\n` +
+      `main-thread tasks longer than ${maxMs} ms at ${rate}x CPU throttling (calibrated to the target device, x4 on the reference machine):\n` +
         offenders
           .map((task) => `  ${task.duration.toFixed(0)} ms at ${task.startTime.toFixed(0)} ms (${task.name})`)
           .join('\n'),

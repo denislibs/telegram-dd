@@ -123,6 +123,46 @@ describe('createScrollAnchor', () => {
     expect(root.scrollTop).toBe(160); // anchored on 5 again
   });
 
+  it('noScrollRestore: an update reads no layout of the anchor (no forced reflow), and restoring works again once it is off', async () => {
+    const root = container();
+    fakeLayout(root);
+    const [items, setItems] = createSignal(ids(0, 10));
+    const [never, setNever] = createSignal(true);
+    createRoot(() => {
+      insert(
+        root,
+        createComponent(ForC, {
+          get each() {
+            return items();
+          },
+          children: row,
+        }),
+      );
+      createScrollAnchor({ container: () => root, items, noScrollRestore: never });
+    });
+    await frame();
+    root.scrollTop = 80;
+    const rectReads = vi.spyOn(Object.getPrototypeOf(root) as HTMLElement, 'getBoundingClientRect');
+    try {
+      setItems([-1, ...ids(0, 10)]);
+      await frame();
+      setItems([-2, -1, ...ids(0, 10)]);
+      await frame();
+      expect(rectReads).not.toHaveBeenCalled();
+      expect(root.scrollTop).toBe(80);
+
+      setNever(false);
+      setItems([-3, -2, -1, ...ids(0, 10)]);
+      await frame();
+      setItems([-4, -3, -2, -1, ...ids(0, 10)]);
+      await frame();
+      expect(rectReads).toHaveBeenCalled();
+      expect(root.scrollTop).toBe(160); // two rows prepended, restored by the anchor (item 0) both times
+    } finally {
+      rectReads.mockRestore();
+    }
+  });
+
   it('store list under a non-blocking animation: the parked snapshot, update and restore are released into ONE frame in phase order, even when the animation ends from a mutate task (R1)', async () => {
     const root = container();
     const log: string[] = [];
@@ -211,7 +251,9 @@ function mount(extra: Record<string, unknown>, initial: number[]) {
   const [items, setItems] = createSignal(initial);
   const loads: unknown[] = [];
   let el!: HTMLDivElement;
-  createRoot(() => {
+  let dispose!: () => void;
+  createRoot((disposeRoot) => {
+    dispose = disposeRoot;
     insert(
       root,
       createComponent(InfiniteScroll, {
@@ -236,22 +278,116 @@ function mount(extra: Record<string, unknown>, initial: number[]) {
     );
   });
   fakeLayout(el);
-  return { el, items, setItems, loads };
+  return { el, items, setItems, loads, dispose };
 }
+
+async function frames(count: number) {
+  for (let i = 0; i < count; i++) await frame();
+}
+
+/** Rows at `(offset + i) * 72` px like the chat list (absolutely positioned: the container's own edges are far from them). */
+function mountAbsolute(offset: number, count: number, scrollHeight: number) {
+  const m = mount({ noScrollRestore: true, sensitiveArea: 800 }, ids(offset, offset + count));
+  const rows = Array.from(m.el.querySelectorAll<HTMLElement>('.ListItem'));
+  rows.forEach((rowEl, i) => {
+    Object.defineProperty(rowEl, 'offsetTop', { configurable: true, get: () => (offset + i) * 72 });
+    Object.defineProperty(rowEl, 'offsetHeight', { configurable: true, get: () => 72 });
+  });
+  Object.defineProperty(m.el, 'scrollHeight', { configurable: true, get: () => scrollHeight });
+  Object.defineProperty(m.el, 'clientHeight', { configurable: true, get: () => 662 });
+  Object.defineProperty(m.el, 'offsetHeight', { configurable: true, get: () => 662 });
+  return m;
+}
+
+describe('<InfiniteScroll> near-edge loads use the first and the last RENDERED item (tt), not the container edges', () => {
+  it('after the window slid down, scrolling up asks forwards while the container top is still far (6018 px)', async () => {
+    const { el, loads } = mountAbsolute(90, 58, 12000);
+    await frames(2);
+    loads.length = 0;
+    el.scrollTop = 6200;
+    el.dispatchEvent(new Event('scroll')); // the first event only records the position
+    el.scrollTop = 6018;
+    el.dispatchEvent(new Event('scroll'));
+    expect(loads).toEqual([{ direction: 'forwards' }]);
+  });
+
+  it('a jump upwards that lands far above the rows asks forwards; moving down inside the gap does not', async () => {
+    const { el, loads } = mountAbsolute(90, 58, 12000);
+    await frames(2);
+    loads.length = 0;
+    el.scrollTop = 7000;
+    el.dispatchEvent(new Event('scroll'));
+    el.scrollTop = 3000; // 3480 px above the first row (6480): the container top (3000 px away) is no reason to stay quiet
+    el.dispatchEvent(new Event('scroll'));
+    expect(loads).toEqual([{ direction: 'forwards' }]);
+
+    vi.advanceTimersByTime(1100);
+    loads.length = 0;
+    el.scrollTop = 5800; // moving down towards the rows: nothing to ask
+    el.dispatchEvent(new Event('scroll'));
+    expect(loads).toEqual([]);
+  });
+
+  it('scrolling down asks backwards near the last rendered row, not near the container bottom', async () => {
+    const { el, loads } = mountAbsolute(0, 58, 12000); // rows end at 4176
+    await frames(2);
+    loads.length = 0;
+    el.scrollTop = 2000;
+    el.dispatchEvent(new Event('scroll'));
+    el.scrollTop = 3000; // 4176 - (3000 + 662) = 514 <= 800; the container bottom is 8000 px away
+    el.dispatchEvent(new Event('scroll'));
+    expect(loads).toEqual([{ direction: 'backwards', noScroll: false }]);
+  });
+
+  it('does not ask while the rows are far from both edges of the viewport', async () => {
+    const { el, loads } = mountAbsolute(0, 58, 12000);
+    await frames(2);
+    loads.length = 0;
+    el.scrollTop = 1000;
+    el.dispatchEvent(new Event('scroll'));
+    el.scrollTop = 1200; // moving down, 4176 - 1862 = 2314 > 800
+    el.dispatchEvent(new Event('scroll'));
+    expect(loads).toEqual([]);
+  });
+});
+
+describe('<InfiniteScroll> preload guards', () => {
+  it('a list without a box (display: none: clientHeight 0) is not "short": it does not slide its window', async () => {
+    const { el, setItems, loads } = mount({ preloadBackwards: 0 }, ids(0, 50));
+    Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => 0 });
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => 0 });
+    await frames(2);
+    setItems(ids(0, 52));
+    await frames(2);
+    expect(loads).toEqual([]);
+  });
+
+  it('a preload booked before the list is disposed does not run after it', async () => {
+    const { setItems, loads, dispose } = mount({}, ids(0, 5));
+    await frames(2);
+    const before = loads.length;
+    expect(before).toBeGreaterThan(0);
+    setItems(ids(0, 6));
+    await frame(); // the items effect books the preload for the next frame
+    dispose();
+    await frames(2);
+    expect(loads.length).toBe(before);
+  });
+});
 
 describe('<InfiniteScroll>', () => {
   it('preloads backwards when the list is shorter than preloadBackwards; otherwise when it does not fill the viewport; not when it does', async () => {
     const short = mount({}, ids(0, 5));
-    await frame();
+    await frames(2); // the preload is a measure task booked from the items effect: it runs the next frame
     expect(short.loads).toEqual([{ direction: 'backwards', noScroll: true }]);
     expect(short.el.className).toBe('list');
 
     const notFilling = mount({ preloadBackwards: 0 }, ids(0, 3)); // 120 px < 200 px viewport
-    await frame();
+    await frames(2); // the preload is a measure task booked from the items effect: it runs the next frame
     expect(notFilling.loads).toEqual([{ direction: 'backwards', noScroll: false }]);
 
     const full = mount({}, ids(0, 50));
-    await frame();
+    await frames(2); // the preload is a measure task booked from the items effect: it runs the next frame
     expect(full.loads).toEqual([]);
   });
 
@@ -335,13 +471,13 @@ describe('<InfiniteScroll> switching lists', () => {
       );
     });
     fakeLayout(el);
-    await frame();
+    await frames(2);
     expect(loads.length).toBe(1);
     setWhich('b'); // both arrays are unchanged: shape version 0 each
-    await frame();
+    await frames(2);
     expect(loads.length).toBe(2);
     setWhich('a');
-    await frame();
+    await frames(2);
     expect(loads.length).toBe(3);
   });
 });

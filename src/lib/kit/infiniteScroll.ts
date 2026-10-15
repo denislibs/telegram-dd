@@ -16,7 +16,7 @@
 //     within it of the top. Each direction is `debounce(fn, 1000, true, false)`: one request, then
 //     quiet for a second (or until the next chunk arrives, which re-arms it). The scroll event the
 //     restore itself causes (`consumeRestored`) never asks for anything.
-import { createMeasureEffect, onCleanup } from 'frameact';
+import { createMeasureEffect, onCleanup, requestMeasure } from 'frameact';
 import { insert, spread } from 'frameact/dom';
 import { debounce } from 'frameact/scheduler';
 
@@ -75,6 +75,7 @@ export function InfiniteScroll(props: InfiniteScrollProps): unknown {
   const scrollContainerSelector = props.scrollContainer;
   let scroller: HTMLElement = el;
   let listening = false;
+  let disposed = false;
   let lastScrollTop: number | undefined;
   let anchorIndex = 0;
 
@@ -102,10 +103,16 @@ export function InfiniteScroll(props: InfiniteScrollProps): unknown {
 
   /** Measure phase (layout reads): preload while the list is short or does not fill the viewport. */
   function preload(): void {
+    if (disposed) return; // a task booked before the list was disposed (tt: the effect of an unmounted instance is skipped)
     const count = props.items?.length ?? 0;
     if (count < (props.preloadBackwards ?? DEFAULT_PRELOAD_BACKWARDS)) {
       props.onLoadMore?.({ direction: 'backwards', noScroll: true });
-    } else if (scroller.scrollHeight <= scroller.clientHeight) {
+      return;
+    }
+    // As in tt: a list without a box (`clientHeight` 0, e.g. inside a `display: none` slide) is not "short", whatever its
+    // `scrollHeight` is. Asking again there slid the window of a hidden chat list towards the end.
+    const { scrollHeight, clientHeight } = scroller;
+    if (clientHeight && scrollHeight < clientHeight) {
       loadBackwards();
     }
   }
@@ -134,6 +141,36 @@ export function InfiniteScroll(props: InfiniteScrollProps): unknown {
     anchor.track(items[i], rect.top);
   }
 
+  /** An item's top in the scroller's content, as tt's `getOffsetTopInContainer`: `offsetTop`, or (a nested scroller) from the rects. */
+  function offsetTopInContainer(item: HTMLElement): number {
+    if (!scrollContainerSelector) return item.offsetTop;
+    return item.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+  }
+
+  /**
+   * The first and the last RENDERED item by position (tt: `listItemElements[0]` and `[length - 1]`, which is the same thing when
+   * the DOM order is the visual one; a `<ManualFor>` list keeps its rows where they were, so the DOM order says nothing).
+   */
+  function itemExtremes(items: HTMLElement[]) {
+    let first: HTMLElement | undefined;
+    let last: HTMLElement | undefined;
+    let firstTop = Infinity;
+    let lastBottom = -Infinity;
+    for (const item of items) {
+      const itemTop = offsetTopInContainer(item);
+      if (itemTop < firstTop) {
+        firstTop = itemTop;
+        first = item;
+      }
+      const itemBottom = itemTop + item.offsetHeight;
+      if (itemBottom > lastBottom) {
+        lastBottom = itemBottom;
+        last = item;
+      }
+    }
+    return { first, last, firstTop, lastBottom };
+  }
+
   function onScroll(event: Event): void {
     props.onScroll?.(event);
     const top = scroller.scrollTop;
@@ -142,14 +179,32 @@ export function InfiniteScroll(props: InfiniteScrollProps): unknown {
       lastScrollTop = top;
       return;
     }
-    trackAnchor();
+    // tt: a nested list without a box (a hidden slide) has nothing to measure
+    if (scrollContainerSelector && !el.getBoundingClientRect().width) {
+      lastScrollTop = undefined;
+      return;
+    }
+    const withAnchor = !props.noScrollRestore;
+    if (withAnchor) trackAnchor();
     const prevTop = lastScrollTop;
     lastScrollTop = top;
     if (prevTop === undefined || top === prevTop) return; // the first event only tracks the anchor
     const area = props.sensitiveArea ?? DEFAULT_SENSITIVE_AREA_PX;
-    if (top > prevTop) {
-      if (scroller.scrollHeight - top - scroller.clientHeight <= area) loadBackwards();
-    } else if (top <= area) loadForwards();
+    const items = anchor.items();
+    const { first, last, firstTop, lastBottom } = itemExtremes(items);
+    // tt: the edges are those of the first and the last RENDERED item, not of the container: the rows of an absolutely positioned
+    // list (the chat list) sit at `(offset + i) * height`, so the container's own edges are far from them after the window slid.
+    const isNearTop = top <= (first ? firstTop : 0) + area;
+    const isNearBottom = (last ? lastBottom : scroller.scrollHeight) - (top + scroller.offsetHeight) <= area;
+    if (top < prevTop && isNearTop) {
+      // moving up near the first item: it becomes the anchor, then more is asked forwards
+      if (withAnchor && first) anchor.track(first, first.getBoundingClientRect().top);
+      loadForwards();
+    }
+    if (top > prevTop && isNearBottom) {
+      if (withAnchor && last) anchor.track(last, last.getBoundingClientRect().top);
+      loadBackwards();
+    }
   }
 
   /** After attach: the scrolling element (the div, or the ancestor `scrollContainer` names) and its scroll listener. */
@@ -167,12 +222,16 @@ export function InfiniteScroll(props: InfiniteScrollProps): unknown {
     () => {
       if (!listening) listen();
       armLoaders();
-      preload();
+      // The rows of this update are inserted in this frame's mutate phase, after this measure phase: a measure task
+      // booked from here runs in the next frame, when the list's layout is current (a preload that measured here saw the
+      // old rows: a list that grows from a few rows asked for more while it already filled the viewport).
+      requestMeasure(preload);
     },
     { name: 'infiniteScroll.items' },
   );
 
   onCleanup(() => {
+    disposed = true;
     if (listening) natives.removeEventListener.call(scroller, 'scroll', onScroll);
   });
 

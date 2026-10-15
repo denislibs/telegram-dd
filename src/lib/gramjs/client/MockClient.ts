@@ -72,11 +72,18 @@ class TelegramClient {
     }
     return import(`./__mocks__/${scenario}.json`).then(async (mockData) => {
       this.mockData = mockData as MockTypes;
+      // Deviation: a document that cannot be loaded does not fail the scenario. The files of `__data__` are loaded by a
+      // `@vite-ignore` dynamic import that a production build does not bundle (the perf gates run the mock on one).
       await Promise.all(this.mockData.documents.map(async (l, i) => {
-        const response = await import(/* @vite-ignore */ `./__data__/${l.url}`).then((module) => fetch(module.default));
-        const bytes = await response.arrayBuffer();
-        this.mockData.documents[i].size = BigInt(bytes.byteLength);
-        this.mockData.documents[i].bytes = new Uint8Array(bytes);
+        try {
+          const response = await import(/* @vite-ignore */ `./__data__/${l.url}`).then((module) => fetch(module.default));
+          const bytes = await response.arrayBuffer();
+          this.mockData.documents[i].size = BigInt(bytes.byteLength);
+          this.mockData.documents[i].bytes = new Uint8Array(bytes);
+        } catch (e) {
+          this.mockData.documents[i].size = BigInt(0);
+          this.mockData.documents[i].bytes = new Uint8Array();
+        }
       }));
 
       this.callbacks.forEach(({ eventBuilder, callback }) => (callback(
@@ -97,12 +104,15 @@ class TelegramClient {
     return this.mockData.dialogs[type].map((dialog) => createMockedDialog(dialog.id, this.mockData));
   }
 
-  start({
+  // Deviation: tt's `start()` ignores `onConnected`, so the API worker's `initApi()` never resolved under the mock and every
+  // `callApi` queued forever (the chat list stayed on its spinner). Same fix as `scripts/visual/tt-patches.mjs`.
+  async start({
     mockScenario,
   }: {
     mockScenario: string;
-  }) {
-    return this.loadScenario(mockScenario);
+  }, onConnected?: () => void) {
+    await this.loadScenario(mockScenario);
+    onConnected?.();
   }
 
   async invoke<A, R>(request: Api.Request<A, R>) {
