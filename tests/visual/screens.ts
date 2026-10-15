@@ -87,10 +87,9 @@ const authScreen = (
 });
 
 // The middle column (messages slice): the `messages` scenario (src/lib/gramjs/client/__mocks__/messages.json, its history is
-// paged by __invokeMiddlewares__/messages.ts in both apps). A chat is opened by a click on its row; the composer is not ported:
-// our footer is an inert placeholder of its size (the message list reserves the space under its messages from the footer's
-// height), so tt's composer is masked.
-const MIDDLE_MASK = [...TT_MAIN_MASK, '#MiddleColumn .middle-column-footer'];
+// paged by __invokeMiddlewares__/messages.ts in both apps). A chat is opened by a click on its row. The composer is ported
+// (composer slice): nothing in the footer is masked.
+const MIDDLE_MASK = TT_MAIN_MASK;
 const openChatByName = (name: string) => async (page: import('@playwright/test').Page) => {
   await page.locator('#LeftColumn .chat-list .ListItem.Chat').filter({ hasText: name }).click();
   await page.locator('#MiddleColumn .MiddleHeader').getByText(name).waitFor();
@@ -107,6 +106,29 @@ const middleScreen = (name: string, chat: string, threshold = 0): VisualScreen =
   mask: MIDDLE_MASK,
   threshold,
 });
+
+const composerScreen = (
+  name: string,
+  chat: string,
+  steps: (page: import('@playwright/test').Page) => Promise<void>,
+  threshold = 0,
+): VisualScreen => {
+  const prepare = async (page: import('@playwright/test').Page) => {
+    await openChatByName(chat)(page);
+    await page.locator('#editable-message-text[contenteditable="true"]').waitFor();
+    await page.waitForTimeout(1000);
+    await steps(page);
+  };
+  return {
+    name,
+    ported: true,
+    scenario: 'messages',
+    reference: { app: 'tt', path: '/', ready: TT_MAIN_READY, prepare },
+    candidate: { app: 'ours', path: '/', ready: TT_MAIN_READY, prepare },
+    mask: MIDDLE_MASK,
+    threshold,
+  };
+};
 
 export const screens: VisualScreen[] = [
   // --- harness self-checks (real, run today) ------------------------------------------------------------------
@@ -149,6 +171,22 @@ export const screens: VisualScreen[] = [
   middleScreen('middle-chat-open', 'Carol Short'),
   middleScreen('middle-chat-unread', 'Alice Tester'),
   middleScreen('middle-chat-entities', 'Dave Entities'),
+  // The composer (composer slice): the same keyboard path in both apps. The editor is created asynchronously (the `editor`
+  // bundle), so the screens wait for the input to be editable.
+  composerScreen('middle-composer-empty', 'Carol Short', async () => {}),
+  composerScreen('middle-composer-reply', 'Carol Short', async (page) => {
+    await page.locator('#editable-message-text').click();
+    await page.keyboard.press('Control+ArrowUp');
+    await page.locator('.Composer .ComposerEmbeddedMessage').waitFor();
+    await page.waitForTimeout(1000);
+  }),
+  composerScreen('middle-composer-formatting', 'Carol Short', async (page) => {
+    await page.locator('#editable-message-text').click();
+    await page.keyboard.type('Some text to format');
+    for (let i = 0; i < 6; i++) await page.keyboard.press('Shift+ArrowLeft');
+    await page.locator('[role=toolbar][data-text-formatter]').waitFor();
+    await page.waitForTimeout(1000);
+  }),
 
   // --- the port's to-do list (skipped until `ported: true`) -----------------------------------------------------
   {
