@@ -500,7 +500,7 @@ describe('jsx', () => {
     expectIncludes(code, '<input use:value={() => props.value} onInput={noop} />');
     expectIncludes(
       code,
-      '{/* TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{() => …}</Show> */}',
+      '{/* TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{(key) => …}</Show> (the callback MUST take an argument, a zero-argument child is a plain child and never remounts; a falsy key such as 0 renders nothing: use when={{ id: key }}) */}',
     );
     expect(report.todos.map((t) => t.kind).sort()).toEqual(['key-remount', 'transition-children']);
     expectIncludes(code, "import { ManualFor } from 'frameact/dom';");
