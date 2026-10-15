@@ -119,7 +119,8 @@ export function renderTextWithEntities({
   cacheBuster?: string;
   forcePlayback?: boolean;
   noCustomEmojiPlayback?: boolean;
-  isInSelectMode?: boolean;
+  // Deviation: an accessor is allowed, so that a toggle of select mode is read by `Blockquote` and does not rebuild the text
+  isInSelectMode?: boolean | (() => boolean);
   chatId?: string;
   messageId?: number;
   threadId?: ThreadId;
@@ -539,7 +540,8 @@ function processEntity({
   sharedCanvasHqRef?: Accessor<HTMLCanvasElement | undefined>;
   forcePlayback?: boolean;
   noCustomEmojiPlayback?: boolean;
-  isInSelectMode?: boolean;
+  // Deviation: an accessor is allowed, so that a toggle of select mode is read by `Blockquote` and does not rebuild the text
+  isInSelectMode?: boolean | (() => boolean);
   chatId?: string;
   messageId?: number;
   threadId?: ThreadId;
@@ -612,7 +614,7 @@ function processEntity({
       return <strong data-entity-type={entity.type}>{renderNestedMessagePart()}</strong>;
     case ApiMessageEntityTypes.Blockquote:
       return (
-        <Blockquote canBeCollapsible={entity.canCollapse} isToggleDisabled={isInSelectMode}>
+        <Blockquote canBeCollapsible={entity.canCollapse} isToggleDisabled={typeof isInSelectMode === 'function' ? isInSelectMode() : isInSelectMode}>
           {renderNestedMessagePart()}
         </Blockquote>
       );

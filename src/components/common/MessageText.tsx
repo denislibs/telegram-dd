@@ -60,8 +60,29 @@ function MessageText(props: OwnProps) {
     return props.isForAnimation && current ? stripCustomEmoji(current) : current;
   });
   const source = createMemo((): Partial<ApiFormattedText> => adaptedFormattedText() || {});
-  const text = () => source().text;
-  const entities = () => source().entities;
+  // Deviation: memos, not plain functions, and every input of the render binding below goes through a memo. teact reconciled a
+  // re-render, so the `Spoiler` / `Blockquote` / `CodeBlock` instances (and their state: a revealed spoiler, an expanded quote)
+  // survived a views / reactions / read-flag update of the message and the toggling of select mode. Here the nodes are rebuilt
+  // whenever anything the binding reads changes, and a plain `props.x` read re-runs it when the parent's getter re-evaluates
+  // (a prop that forwards a store field of the message does, whenever the message object is replaced), even if the value is
+  // equal. A memo stops the propagation of an equal value; `extractMessageText` returns a new object on each call, but `text`
+  // (a string) and `entities` (the array of the message's own content) stay `===` across such updates.
+  const text = createMemo(() => source().text);
+  const entities = createMemo(() => source().entities);
+  const chatId = createMemo(() => ('chatId' in props.messageOrStory ? props.messageOrStory.chatId : undefined));
+  const messageId = createMemo(() => props.messageOrStory.id);
+  const shouldAnimateTyping = createMemo(() => Boolean(props.shouldAnimateTyping));
+  const highlight = createMemo(() => props.highlight);
+  const emojiSize = createMemo(() => props.emojiSize);
+  const shouldRenderAsHtml = createMemo(() => props.shouldRenderAsHtml);
+  const asPreview = createMemo(() => props.asPreview);
+  const isProtected = createMemo(() => props.isProtected);
+  const observeIntersectionForLoading = createMemo(() => props.observeIntersectionForLoading);
+  const observeIntersectionForPlaying = createMemo(() => props.observeIntersectionForPlaying);
+  const withTranslucentThumbs = createMemo(() => props.withTranslucentThumbs);
+  const forcePlayback = createMemo(() => props.forcePlayback);
+  const maxTimestamp = createMemo(() => props.maxTimestamp);
+  const threadId = createMemo(() => props.threadId);
 
   const entitiesWithFocusedQuote = createMemo(() => {
     const currentText = text();
@@ -92,7 +113,7 @@ function MessageText(props: OwnProps) {
   });
 
   const withSharedCanvas = createMemo(() => {
-    if (props.shouldAnimateTyping) {
+    if (shouldAnimateTyping()) {
       return false;
     }
 
@@ -106,25 +127,26 @@ function MessageText(props: OwnProps) {
     return renderTextWithEntities({
       text: t.text,
       entities: t.entities,
-      highlight: props.highlight,
-      emojiSize: props.emojiSize,
-      shouldRenderAsHtml: props.shouldRenderAsHtml,
+      highlight: highlight(),
+      emojiSize: emojiSize(),
+      shouldRenderAsHtml: shouldRenderAsHtml(),
       containerId,
-      asPreview: props.asPreview,
-      isProtected: props.isProtected,
-      observeIntersectionForLoading: props.observeIntersectionForLoading,
-      observeIntersectionForPlaying: props.observeIntersectionForPlaying,
-      withTranslucentThumbs: props.withTranslucentThumbs,
+      asPreview: asPreview(),
+      isProtected: isProtected(),
+      observeIntersectionForLoading: observeIntersectionForLoading(),
+      observeIntersectionForPlaying: observeIntersectionForPlaying(),
+      withTranslucentThumbs: withTranslucentThumbs(),
       // Deviation: tt passed `useRef` objects; the canvas refs are accessors (as `CustomEmoji.sharedCanvasRef`)
       sharedCanvasRef: withSharedCanvas() ? () => sharedCanvasRef : undefined,
       sharedCanvasHqRef: withSharedCanvas() ? () => sharedCanvasHqRef : undefined,
       cacheBuster: textCacheBuster().toString(),
-      forcePlayback: props.forcePlayback,
-      isInSelectMode: props.isInSelectMode,
-      maxTimestamp: props.maxTimestamp,
-      chatId: 'chatId' in props.messageOrStory ? props.messageOrStory.chatId : undefined,
-      messageId: props.messageOrStory.id,
-      threadId: props.threadId,
+      forcePlayback: forcePlayback(),
+      // Deviation: an accessor (see `isInSelectMode` of `renderTextWithEntities`): entering select mode must not rebuild the text
+      isInSelectMode: () => Boolean(props.isInSelectMode),
+      maxTimestamp: maxTimestamp(),
+      chatId: chatId(),
+      messageId: messageId(),
+      threadId: threadId(),
     });
   };
 
@@ -145,7 +167,7 @@ function MessageText(props: OwnProps) {
         {[
           withSharedCanvas() && <canvas ref={sharedCanvasRef} class="shared-canvas" />,
           withSharedCanvas() && <canvas ref={sharedCanvasHqRef} class="shared-canvas" />,
-          props.shouldAnimateTyping ? (
+          shouldAnimateTyping() ? (
             <TypingWrapper
               formattedText={textToRender()}
               renderText={renderText}
@@ -153,7 +175,7 @@ function MessageText(props: OwnProps) {
               noInitialAnimation={props.noInitialTypingAnimation}
               shouldRenderPlaceholder={shouldRenderTypingPlaceholder()}
               onCompleted={props.onTypingAnimationEnd}
-              completionKey={props.messageOrStory.id}
+              completionKey={messageId()}
             />
           ) : (
             renderText(textToRender())

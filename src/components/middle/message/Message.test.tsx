@@ -387,4 +387,86 @@ describe('Message (text)', () => {
     // the snap effect is a deferred feature (`animateSnap` is a stub): the plain delete animation plays
     expect(bubble.classList.contains('is-deleting') || bubble.classList.contains('is-dissolving')).toBe(true);
   });
+
+  describe('rich text state survives unrelated updates', () => {
+    const richText = 'secret and a quote line and plain';
+    const richEntities = [
+      { type: 'MessageEntitySpoiler', offset: 0, length: 6 },
+      { type: 'MessageEntityBlockquote', offset: 11, length: 12, canCollapse: true },
+    ];
+    const richMessage = (id: number, extra: Partial<ApiMessage> = {}) =>
+      message(PEER_ID, id, richText, {
+        content: { text: { text: richText, entities: richEntities } },
+        viewsCount: 1,
+        ...extra,
+      } as Partial<ApiMessage>);
+
+    async function mountRich(id: number) {
+      seed([richMessage(id)], [privateChat(PEER_ID)]);
+      const el = await mount(PEER_ID, id);
+      const spoiler = el.querySelector<HTMLElement>('.Spoiler')!;
+      spoiler.click();
+      await frames();
+      expect(spoiler.classList.contains('Spoiler--concealed')).toBe(false);
+      return { el, spoiler, quote: el.querySelector('blockquote')! };
+    }
+
+    it('a revealed spoiler stays revealed (and the same node) when the views change', async () => {
+      const { el, spoiler, quote } = await mountRich(140);
+
+      setGlobal(updateChatMessage(getGlobal(), PEER_ID, 140, { viewsCount: 10 }));
+      await frames();
+
+      expect(el.querySelector('.Spoiler')).toBe(spoiler);
+      expect(spoiler.classList.contains('Spoiler--concealed')).toBe(false);
+      expect(el.querySelector('blockquote')).toBe(quote);
+    });
+
+    it('a revealed spoiler stays revealed when the reactions change', async () => {
+      const { el, spoiler } = await mountRich(141);
+
+      setGlobal(
+        updateChatMessage(getGlobal(), PEER_ID, 141, {
+          reactions: {
+            results: [{ reaction: { type: 'emoji', emoticon: '👍' }, count: 1 }],
+            recentReactions: [],
+          },
+        } as Partial<ApiMessage>),
+      );
+      await frames();
+
+      expect(el.querySelector('.Spoiler')).toBe(spoiler);
+      expect(spoiler.classList.contains('Spoiler--concealed')).toBe(false);
+    });
+
+    it('a revealed spoiler stays revealed when select mode starts and ends', async () => {
+      const { el, spoiler, quote } = await mountRich(142);
+
+      setGlobal(updateTabState(getGlobal(), { selectedMessages: { chatId: PEER_ID, messageIds: [142] } }, tabId));
+      await frames();
+      expect(el.querySelector('.Message')!.classList.contains('is-in-selection-mode')).toBe(true);
+      expect(el.querySelector('.Spoiler')).toBe(spoiler);
+      expect(spoiler.classList.contains('Spoiler--concealed')).toBe(false);
+      expect(el.querySelector('blockquote')).toBe(quote);
+
+      setGlobal(updateTabState(getGlobal(), { selectedMessages: undefined }, tabId));
+      await frames();
+      expect(el.querySelector('.Spoiler')).toBe(spoiler);
+      expect(spoiler.classList.contains('Spoiler--concealed')).toBe(false);
+    });
+
+    it('an edit of the text does rebuild the entities (a new text is a new render)', async () => {
+      const { el, spoiler } = await mountRich(143);
+
+      setGlobal(
+        updateChatMessage(getGlobal(), PEER_ID, 143, {
+          content: { text: { text: `${richText}!`, entities: richEntities } },
+        } as Partial<ApiMessage>),
+      );
+      await frames();
+
+      expect(el.querySelector('.text-content')!.textContent).toContain('plain!');
+      expect(el.querySelector('.Spoiler')).not.toBe(spoiler);
+    });
+  });
 });
