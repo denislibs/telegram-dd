@@ -41,13 +41,13 @@ async function typeText(page: Page, text: string) {
   await page.keyboard.type(text);
 }
 
-/** The text of the draft of a chat's main thread: `null` for a draft without text (a reply), `undefined` without a draft. */
+/** The text of the draft of a chat's main thread: `(no text)` for a draft without text (a reply), `undefined` without a draft. */
 const draftOf = (page: Page, chatTitle: string) =>
   page.evaluate((title) => {
     const global = (window as unknown as TestWindow).getGlobal();
     const chat = Object.values<any>(global.chats.byId).find((candidate) => candidate.title === title);
     const draft = global.messages.byChatId[chat.id]?.threadsById?.['-1']?.localState?.draft;
-    return draft ? ((draft.text?.text as string | undefined) ?? null) : undefined;
+    return draft ? ((draft.text?.text as string | undefined) ?? '(no text)') : undefined;
   }, chatTitle);
 
 async function lastMessageOf(page: Page, chatId: string) {

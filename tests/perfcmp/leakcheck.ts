@@ -134,10 +134,11 @@ async function main() {
         await page.keyboard.type('``` ');
         await page.keyboard.type('code');
         await page.waitForTimeout(100);
-        if (codeChecks++ < 2)
+        if (codeChecks++ < 2) {
           process.stdout.write(
             `code block in the input: ${await page.locator(`${INPUT} pre`).count()}, html ${(await page.locator(INPUT).innerHTML()).slice(0, 160)}\n`,
           );
+        }
         await page.keyboard.press('ControlOrMeta+a');
         await page.keyboard.press('Backspace');
         await page.keyboard.press('Backspace');
@@ -224,18 +225,21 @@ async function main() {
       `heap growth A->B ${(B.usedKb - A.usedKb).toFixed(0)} KB, B->C ${(C.usedKb - B.usedKb).toFixed(0)} KB over ${runs} runs each\n`,
     );
     process.stdout.write(`watched counts A / B / C:\n`);
-    for (const [name, counts] of Object.entries(report.watch))
+    for (const [name, counts] of Object.entries(report.watch)) {
       process.stdout.write(`  ${name.padEnd(28)} ${counts.join(' / ')}\n`);
+    }
     process.stdout.write('growth by node type KB (A->B, B->C):\n');
-    for (const [type, ab, bc] of report.byType)
+    for (const [type, ab, bc] of report.byType) {
       process.stdout.write(
         `  ${String(type).padEnd(22)} ${(ab as number).toFixed(1).padStart(8)} ${(bc as number).toFixed(1).padStart(8)}\n`,
       );
+    }
     process.stdout.write('top growth by name B->C (count, KB):\n');
-    for (const entry of report.diffBC.slice(0, 25))
+    for (const entry of report.diffBC.slice(0, 25)) {
       process.stdout.write(
         `  ${String(entry.count).padStart(6)} ${(entry.size / 1024).toFixed(1).padStart(8)}  ${entry.name}\n`,
       );
+    }
   } finally {
     await browser.close();
     await server.close();

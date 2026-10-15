@@ -13,7 +13,7 @@ const MessageInputAsync = (props: OwnProps) => {
   // itself is loaded and cached once by `loadBundle`).
   const MessageInput = lazy<OwnProps>(() => loadBundle(Bundles.Editor).then((m) => ({ default: m.MessageInput })), {
     placeholder: () => (
-      <div id={props.id} aria-busy>
+      <div id={props.id} aria-busy="true">
         <div class="shared-canvas-container">
           <div class={buildClassName('custom-scroll', 'input-scroller', props.isNeedPremium && 'is-need-premium')}>
             <div class={buildClassName('input-scroller-content', props.isNeedPremium && 'is-need-premium')}>
@@ -22,7 +22,7 @@ const MessageInputAsync = (props: OwnProps) => {
                 id={props.editableInputId || EDITABLE_INPUT_ID}
                 class="form-control allow-selection focus-disabled"
                 role="textbox"
-                aria-disabled
+                aria-disabled="true"
                 aria-labelledby={placeholderId()}
                 tabIndex={-1}
               />

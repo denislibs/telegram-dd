@@ -4,6 +4,7 @@ import { getActions } from '../../../../global';
 
 import type { ApiDraft, ApiInputRichMessage, ApiMessage } from '../../../../api/types';
 import type { EditingDraft, MessageListType, ThreadId } from '../../../../types';
+import type { ComposerScope } from './useDraft';
 import { ApiMessageEntityTypes } from '../../../../api/types';
 
 import { EDITABLE_INPUT_CSS_SELECTOR } from '../../../../config';
@@ -12,7 +13,6 @@ import { type MaybeAccessor, read } from '../../../../util/accessors';
 import { depsOf } from '../../../../util/effectDeps';
 import focusEditableElement from '../../../../util/focusEditableElement';
 import { buildRichMessageFromFormatted, getRichInputAsFormatted } from '../../../ui/textInput/richText';
-import type { ComposerScope } from './useDraft';
 
 import { useDebouncedResolver } from '../../../../hooks/useAsyncResolvers';
 import useBackgroundMode from '../../../../hooks/window/useBackgroundMode';

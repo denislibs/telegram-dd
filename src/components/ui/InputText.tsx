@@ -70,7 +70,7 @@ const InputText = (rawProps: OwnProps) => {
         placeholder={props.placeholder}
         maxLength={props.maxLength}
         autocomplete={props.autoComplete}
-        spellcheck={IS_TAURI ? false : undefined}
+        spellcheck={IS_TAURI ? 'false' : undefined}
         inputMode={props.inputMode}
         disabled={props.disabled}
         readOnly={props.readOnly}

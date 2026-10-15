@@ -128,6 +128,19 @@ describe('TeactNodeViewRenderer', () => {
     expect(element.querySelector('[data-testid="atom"]')).toBe(atom);
   });
 
+  it('shows an update dispatched from an event in the next frame, as tt did (editor review L1)', async () => {
+    const { editor, element } = createEditor('<p>x<span data-atom></span>y</p>');
+    await harness.frame();
+
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(2, undefined, { label: 'changed' }));
+    await harness.frame();
+    expect(element.querySelector('[data-testid="atom"]')!.textContent).toBe('changed');
+
+    editor.commands.setNodeSelection(2);
+    await harness.frame();
+    expect(element.querySelector('[data-testid="atom"]')!.className).toBe('selected');
+  });
+
   it('puts the ProseMirror content element into NodeViewContent and writes contenteditable as a string', async () => {
     const { editor, element } = createEditor('<p>x<span data-wrapper></span>y</p>');
     await harness.frame();

@@ -31,9 +31,10 @@ const EditableListItem = (props: TeactNodeViewComponentProps) => {
 
   return (
     <div class={hasCheckbox() ? styles.listCheckboxItem : undefined}>
+      {/* Deviation: `contenteditable` is an attribute with a string value; `contentEditable={false}` writes no attribute. */}
       <span
         class={styles.listCheckboxWrapper}
-        contentEditable={false}
+        contenteditable="false"
         hidden={!hasCheckbox()}
         onMouseDown={handleMouseDown}
         onClick={handleClick}

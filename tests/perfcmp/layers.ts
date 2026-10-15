@@ -119,8 +119,9 @@ try {
         .send('DOM.describeNode', { backendNodeId: layer.backendNodeId })
         .catch(() => undefined);
       const n = described?.node;
-      if (n)
+      if (n) {
         node = `${n.localName}${(n.attributes ?? []).reduce((acc: string, v: string, i: number, arr: string[]) => (i % 2 === 0 && v === 'class' ? `${acc}.${arr[i + 1].split(' ').slice(0, 2).join('.')}` : acc), '')}`;
+      }
     }
     withReasons.push(`${layer.width}x${layer.height} ${node} [${compositingReasons.join(',')}]`);
   }

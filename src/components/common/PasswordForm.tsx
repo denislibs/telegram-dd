@@ -136,7 +136,7 @@ const PasswordForm = (rawProps: OwnProps) => {
                 ? 'one-time-code'
                 : 'current-password'
           }
-          spellcheck={IS_TAURI ? false : undefined}
+          spellcheck={IS_TAURI ? 'false' : undefined}
           onInput={onPasswordChange}
           maxLength={256}
           dir="auto"

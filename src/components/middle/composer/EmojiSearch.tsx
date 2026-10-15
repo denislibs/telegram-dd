@@ -1,5 +1,6 @@
 import { createEffect, createMeasureEffect, createMemo, createSignal, requestMeasure, requestMutation } from 'frameact';
 import { For, Show, toggleExtraClass } from 'frameact/dom';
+import { forceMeasure } from 'frameact/stricterdom';
 
 import type { ApiEmojiGroup } from '../../../api/types';
 
@@ -133,7 +134,8 @@ const EmojiSearch = (props: OwnProps) => {
   };
 
   const handleSurfaceClick = () => {
-    requestMutation(() => inputRef?.focus());
+    // Deviation: `focus()` is a layout read; tt's mutation task is kept, the read is declared with `forceMeasure`.
+    requestMutation(() => forceMeasure(() => inputRef?.focus()));
   };
 
   const handleChipsScroll = (e: Event) => {

@@ -18,19 +18,17 @@ const ITEM = `${LIST} .message-list-item`;
 const INPUT = '#editable-message-text';
 const SEND = '.Composer .main-button';
 
-test.use({
-  // The known noise of the mocked client: no full user info / folders / language pack (see tests/e2e/strictMonitor.ts)
-  strictOptions: {
-    ignoreConsole: [
-      /GetFullUser|buildApiUserFullInfo|reading 'id'/,
-      /action "loadFullUser" failed/,
-      // frameact's timing hint, a frame of delay and nothing else: the tooltip controller (tt's code) updates the props of its
-      // rendered container from a mutate task, and the measure effect of `useHorizontalScroll` reads them (engine gap 12 of
-      // docs/reports/slice-composer.md); it appears when an inserted emoji makes the custom emoji tooltip open
-      /measure effect .*CustomEmojiTooltip.* was dirtied during the mutate phase/,
-    ],
-  },
-});
+// The known noise of the mocked client: no full user info / folders / language pack (see tests/e2e/strictMonitor.ts)
+const IGNORED_CONSOLE = [
+  /GetFullUser|buildApiUserFullInfo|reading 'id'/,
+  /action "loadFullUser" failed/,
+  // frameact's timing hint, a frame of delay and nothing else: the tooltip controller (tt's code) updates the props of its
+  // rendered container from a mutate task, and the measure effect of `useHorizontalScroll` reads them (engine gap 12 of
+  // docs/reports/slice-composer.md); it appears when an inserted emoji makes the custom emoji tooltip open
+  /measure effect .*CustomEmojiTooltip.* was dirtied during the mutate phase/,
+];
+
+test.use({ strictOptions: { ignoreConsole: IGNORED_CONSOLE } });
 
 async function openMessages(page: Page) {
   await openApp(page, '/#?mockScenario=messages');
@@ -360,6 +358,100 @@ test.describe('paste', () => {
   });
 });
 
+// The same kind of paste with the app's CSP ON (no `bypassCSP`): nothing is fetched, nothing runs, the editor holds only
+// safe markup. A fetch of a same-origin URL is allowed by the CSP (`img-src 'self'`), so the pixel routes below prove
+// that the pasted markup never reached a live document.
+test.describe('paste with the CSP on', () => {
+  test.use({
+    strictOptions: {
+      ignoreConsole: IGNORED_CONSOLE,
+      // Chromium checks `script-src-attr` when the HTML parser SETS an `on*` attribute, also in an inert `<template>`
+      // where no handler is ever compiled (docs/reports/slice-composer.md, "Security"). `normalizeHtml` parses the pasted
+      // markup into such a template and then strips the handlers, so the second parse (ProseMirror's `readHTML`) reports
+      // nothing; this report of the first parse cannot be avoided by any DOM parsing API. Only this message, and only
+      // from that module, is allowed: a report from anywhere else still fails the test.
+      ignoreConsoleAt: [
+        {
+          text: /^Executing inline event handler violates the following Content Security Policy directive 'script-src /,
+          location: /\/src\/util\/tiptap\/botApiHtml\.ts(\?[^:]*)?:\d+$/,
+        },
+      ],
+    },
+  });
+
+  async function paste(page: Page, data: Record<string, string>) {
+    await page.locator(INPUT).click();
+    await page.evaluate((payload) => {
+      const transfer = new DataTransfer();
+      Object.entries(payload).forEach(([type, value]) => transfer.setData(type, value));
+      const event = new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true });
+      document.querySelector('#editable-message-text')!.dispatchEvent(event);
+    }, data);
+  }
+
+  test('hostile pasted HTML fetches nothing, runs nothing and leaves only safe markup', async ({ page }) => {
+    const fetched: string[] = [];
+    await page.route(/csp-pixel|evil\.example/, (route) => {
+      fetched.push(route.request().url());
+      return route.fulfill({ status: 204 });
+    });
+    page.on('request', (request) => {
+      if (/csp-pixel|evil\.example/.test(request.url())) fetched.push(request.url());
+    });
+
+    await openMessages(page);
+    await openChat(page, 'Carol Short');
+    const violations = await page.evaluate(() => {
+      const list: string[] = [];
+      document.addEventListener('securitypolicyviolation', (event) => list.push(event.violatedDirective));
+      (window as unknown as { __cspViolations: string[] }).__cspViolations = list;
+      return list.length;
+    });
+    expect(violations).toBe(0);
+
+    await paste(page, {
+      'text/html':
+        '<p><b>safe bold</b> <a href="https://example.com/ok">good link</a> ' +
+        '<a href="javascript:window.__pwned=3">evil link</a> ' +
+        '<script>window.__pwned=1</script><img src="/csp-pixel.gif?img" onerror="window.__pwned=2">' +
+        '<svg onload="window.__pwned=4"><image href="/csp-pixel.gif?svg"></image></svg>' +
+        '<iframe src="/csp-pixel.html?iframe"></iframe><object data="/csp-pixel.gif?object">obj</object>' +
+        '<style>@import url("/csp-pixel.css?import"); p { background: url("/csp-pixel.gif?css"); }</style>' +
+        '<link rel="stylesheet" href="/csp-pixel.css?link"><video poster="/csp-pixel.gif?poster"></video>' +
+        '<input type="image" src="/csp-pixel.gif?input"><details open ontoggle="window.__pwned=7"><summary>sum</summary>' +
+        'details body</details><form action="https://evil.example/form"><button formaction="javascript:window.__pwned=8">' +
+        'btn</button></form><span onclick="window.__pwned=6" style="position:fixed;background:url(/csp-pixel.gif?bg)">' +
+        'styled</span></p>',
+      'text/plain': 'safe bold good link evil link styled',
+    });
+    await expect(page.locator(`${INPUT} strong`)).toHaveText('safe bold');
+    await page.waitForTimeout(500);
+
+    const dom = await page.locator(INPUT).evaluate((input) => ({
+      forbidden: input.querySelectorAll(
+        'script, img:not(.ProseMirror-separator), svg, iframe, object, embed, style, ' + 'link, video, input, form',
+      ).length,
+      handlers: [...input.querySelectorAll('*')].flatMap((el) =>
+        [...el.attributes].map((attribute) => attribute.name).filter((name) => name.startsWith('on')),
+      ),
+      links: [...input.querySelectorAll('a')].map((a) => a.getAttribute('href')),
+      styled: [...input.querySelectorAll<HTMLElement>('[style]')].map((el) => el.getAttribute('style')),
+      text: input.textContent,
+    }));
+    expect(dom.forbidden).toBe(0);
+    expect(dom.handlers).toEqual([]);
+    expect(dom.links).toEqual(['https://example.com/ok']);
+    dom.styled.forEach((style) => expect(style).not.toMatch(/url\(|position/));
+    expect(dom.text).toContain('evil link');
+    expect(dom.text).toContain('styled');
+    expect(fetched).toEqual([]);
+    expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBeUndefined();
+    const reported = await page.evaluate(() => (window as unknown as { __cspViolations: string[] }).__cspViolations);
+    // Only the parse of the pasted markup into the inert template reports its handler attributes: the CSP is on
+    expect(reported.every((directive) => directive === 'script-src-attr')).toBe(true);
+  });
+});
+
 test('the emoji picker inserts the emoji at the caret', async ({ page }) => {
   await openMessages(page);
   await openChat(page, 'Carol Short');
@@ -418,4 +510,252 @@ test.describe('copy', () => {
     expect(html).toContain('Carol three');
     expect(html).not.toMatch(/<script|onerror=|javascript:/i);
   });
+});
+
+// Fidelity review H4: the link input of the formatter sits in an `inert` container until the link control opens; it must
+// receive focus, so that the typed URL goes into it and not over the selected text.
+test('the formatter link button: the URL goes into the link input and links the selected word', async ({ page }) => {
+  await openMessages(page);
+  await openChat(page, 'Carol Short');
+
+  await typeText(page, 'make this link');
+  for (let i = 0; i < 4; i++) await page.keyboard.press('Shift+ArrowLeft');
+  const formatter = page.locator('[role=toolbar][data-text-formatter]');
+  await expect(formatter).toBeVisible();
+  await formatter.getByRole('button', { name: 'Add Link' }).click();
+
+  const linkInput = formatter.locator('input[inputmode="url"]');
+  await expect(linkInput).toBeFocused();
+  await page.keyboard.type('example.com');
+  await expect(linkInput).toHaveValue('example.com');
+  await expect(page.locator(INPUT)).toContainText('make this link');
+  await page.keyboard.press('Enter');
+  await expect(page.locator(`${INPUT} a`)).toHaveText('link');
+
+  await page.locator(INPUT).click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await lastMessageOf(page, CAROL)).text).toBe('make this link');
+  const { entities } = await lastMessageOf(page, CAROL);
+  expect(entities).toEqual([{ type: 'MessageEntityTextUrl', offset: 10, length: 4, url: 'https://example.com' }]);
+});
+
+test('Mod+K opens the link input with focus, Escape closes it and keeps the text', async ({ page }) => {
+  await openMessages(page);
+  await openChat(page, 'Carol Short');
+
+  await typeText(page, 'make this link');
+  for (let i = 0; i < 4; i++) await page.keyboard.press('Shift+ArrowLeft');
+  // the formatter (and its range) appears once the selection settled
+  await expect(page.locator('[role=toolbar][data-text-formatter]')).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+k');
+  const linkInput = page.locator('[data-text-formatter] input[inputmode="url"]');
+  await expect(linkInput).toBeFocused();
+  await page.keyboard.type('xyz');
+  await expect(linkInput).toHaveValue('xyz');
+  // Escape closes the formatter (the link input is gone or no longer focused), nothing is linked
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-text-formatter] input[inputmode="url"]:focus')).toHaveCount(0);
+  await expect(page.locator(INPUT)).toHaveText('make this link');
+  await expect(page.locator(`${INPUT} a`)).toHaveCount(0);
+});
+
+// Editor review M1: the store merges a new reply into the draft's record in place, so the record keeps its identity; a
+// second reply must still focus the input (tt keyed the focus effect on the reply object).
+test('a second reply started while the input is blurred focuses the input again', async ({ page }) => {
+  await openMessages(page);
+  await openChat(page, 'Carol Short');
+
+  await page.locator(INPUT).click();
+  await page.keyboard.press('Control+ArrowUp');
+  const bar = page.locator('.Composer .ComposerEmbeddedMessage');
+  await expect(bar).toContainText('Carol three');
+  await expect(page.locator(INPUT)).toBeFocused();
+
+  // blur the input, then reply to another message (what a double click or "Reply" in the context menu does)
+  await page.locator(LIST).click({ position: { x: 10, y: 10 } });
+  await expect(page.locator(INPUT)).not.toBeFocused();
+  await page.evaluate(() => {
+    (window as unknown as TestWindow).getActions().updateDraftReplyInfo({ replyToMsgId: 2001 });
+  });
+  await expect(bar).toContainText('Carol one');
+  await expect(page.locator(INPUT)).toBeFocused();
+  await page.keyboard.type('typed');
+  await expect(page.locator(INPUT)).toHaveText('typed');
+});
+
+// The fidelity review's missing scenarios: autocomplete, IME, undo / redo, the editing draft across a chat switch.
+const TEAM_CHAT = '-1000000000009';
+
+/** The text of each mention node of the editor's document. */
+function mentionTexts(page: Page) {
+  return page.evaluate((selector) => {
+    type DocNode = { type: { name: string }; textContent: string };
+    const dom = document.querySelector(`${selector}.ProseMirror, ${selector} .ProseMirror`) as
+      (Element & { editor?: { state: { doc: { descendants: (fn: (node: DocNode) => void) => void } } } }) | null;
+    const texts: string[] = [];
+    dom?.editor?.state.doc.descendants((node) => {
+      if (node.type.name === 'mention') texts.push(node.textContent);
+    });
+    return texts;
+  }, INPUT);
+}
+
+test.describe('autocomplete', () => {
+  test.use({
+    strictOptions: {
+      ignoreConsole: [
+        ...IGNORED_CONSOLE,
+        // the mocked client has no update state for the group (as in messages.spec.ts)
+        /\[UpdateManager\] Channel for difference not found/,
+        // frameact's timing hint (engine gap 12 / editor review L1): the tooltip controller writes the props of its
+        // container from a mutate task, and a selected item is inserted from one (`addRecentEmoji` writes the store there)
+        /measure effect .*(EmojiTooltip|MentionTooltip|MessageInput|ConfirmDialog).* was dirtied during the mutate phase/,
+      ],
+    },
+  });
+
+  test('the @ mention tooltip: arrows move the selection, Tab inserts the mention, Escape closes it', async ({
+    page,
+  }) => {
+    await openMessages(page);
+    await openChat(page, 'Team Chat');
+    // The mocked client has no participants list: the members come as the chat's full info
+    await page.evaluate((chatId) => {
+      (window as unknown as TestWindow).getActions().apiUpdate({
+        '@type': 'updateChatFullInfo',
+        id: chatId,
+        fullInfo: { members: ['5', '6', '7', '8'].map((userId) => ({ userId })) },
+      });
+    }, TEAM_CHAT);
+
+    await typeText(page, 'hi @');
+    const tooltip = page.locator('.composer-tooltip');
+    await expect(tooltip.locator('.ListItem')).toHaveCount(4);
+    await expect(tooltip.locator('.ListItem').nth(0)).toHaveClass(/\bfocus\b/);
+    await page.keyboard.press('ArrowDown');
+    await expect(tooltip.locator('.ListItem').nth(1)).toHaveClass(/\bfocus\b/);
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowUp');
+    await expect(tooltip.locator('.ListItem').nth(1)).toHaveClass(/\bfocus\b/);
+    const selectedName = (await tooltip.locator('.ListItem').nth(1).locator('.fullName').innerText()).split(' ')[0];
+    await page.keyboard.press('Tab');
+    // a mention node (an avatar and the name as its content); the query is gone
+    await expect.poll(() => mentionTexts(page)).toEqual([selectedName]);
+    await expect(page.locator(`${INPUT} p`)).not.toContainText('@');
+
+    // a query narrows the list; Escape closes the tooltip and keeps the text
+    await page.keyboard.type('@Car');
+    await expect(tooltip.locator('.ListItem')).toHaveCount(1);
+    await expect(tooltip.locator('.ListItem')).toContainText('Carol');
+    await page.keyboard.press('Escape');
+    await expect(tooltip.locator('xpath=..')).not.toHaveClass(/open/);
+    await expect(page.locator(INPUT)).toContainText('@Car');
+
+    // Enter on a reopened list inserts the mention too (and does not send)
+    const before = await page.locator(ITEM).count();
+    await page.keyboard.type('o');
+    await expect(tooltip.locator('xpath=..')).toHaveClass(/open/);
+    await page.keyboard.press('Enter');
+    await expect.poll(() => mentionTexts(page)).toEqual([selectedName, 'Carol']);
+    await expect(page.locator(`${INPUT} p`)).not.toContainText('@Caro');
+    await expect(page.locator(ITEM)).toHaveCount(before);
+  });
+
+  test('the : emoji tooltip: an arrow selects an emoji, Enter inserts it in place of the query', async ({ page }) => {
+    await openMessages(page);
+    await openChat(page, 'Carol Short');
+
+    await typeText(page, 'so :smile');
+    const tooltip = page.locator('.composer-tooltip');
+    await expect(tooltip.locator('xpath=..')).toHaveClass(/open/);
+    const first = tooltip.locator('.EmojiButton').first();
+    await expect(first).toBeVisible();
+    const emoji = (await first.getAttribute('title')) ? await first.innerText() : '';
+    // the emoji list is horizontal and nothing is selected until an arrow key
+    await page.keyboard.press('ArrowRight');
+    await expect(first).toHaveClass(/\bfocus\b/);
+    await page.keyboard.press('Enter');
+    await expect(page.locator(`${INPUT} p`)).not.toContainText(':smile');
+    if (emoji) await expect(page.locator(INPUT)).toContainText(`so ${emoji}`);
+    await expect(page.locator(`${INPUT} p`)).not.toHaveText('so ');
+  });
+});
+
+test('IME: Enter during a composition does not send, Enter after it does', async ({ page }) => {
+  await openMessages(page);
+  await openChat(page, 'Carol Short');
+  const before = await page.locator(ITEM).count();
+
+  await typeText(page, 'konnichiwa');
+  await page.evaluate((selector) => {
+    const input = document.querySelector(selector)!;
+    const target = input.querySelector('p') || input;
+    target.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
+    target.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true, isComposing: true }),
+    );
+  }, INPUT);
+  await page.waitForTimeout(500);
+  await expect(page.locator(ITEM)).toHaveCount(before);
+  await expect(page.locator(INPUT)).toContainText('konnichiwa');
+
+  await page.evaluate((selector) => {
+    const input = document.querySelector(selector)!;
+    const target = input.querySelector('p') || input;
+    target.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '' }));
+  }, INPUT);
+  await page.waitForTimeout(100);
+  await page.keyboard.press('Enter');
+  await expect(page.locator(ITEM)).toHaveCount(before + 1);
+  await expect.poll(async () => (await lastMessageOf(page, CAROL)).text).toBe('konnichiwa');
+});
+
+test('undo and redo by keyboard; the history buttons stay hidden outside the expanded input', async ({ page }) => {
+  await openMessages(page);
+  await openChat(page, 'Carol Short');
+
+  const history = page.locator('.Composer .rich-editor-history');
+  await expect(history).not.toHaveClass(/rich-editor-history-open/);
+  await expect(history).toHaveAttribute('inert', '');
+  await expect(history).toHaveAttribute('aria-hidden', /^(true|)$/);
+
+  await typeText(page, 'undo me');
+  // canUndo is tracked even while the buttons are hidden
+  await expect(history.getByRole('button', { name: 'Undo', includeHidden: true })).toBeEnabled();
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator(`${INPUT} p`)).toHaveText('');
+  await expect(history.getByRole('button', { name: 'Redo', includeHidden: true })).toBeEnabled();
+  await page.keyboard.press('ControlOrMeta+Shift+z');
+  await expect(page.locator(INPUT)).toHaveText('undo me');
+  await expect(history).not.toHaveClass(/rich-editor-history-open/);
+});
+
+test('an edit survives a chat switch: the editing bar and the edited text come back', async ({ page }) => {
+  await openMessages(page);
+  await openChat(page, 'Carol Short');
+
+  await page.locator(INPUT).click();
+  await page.keyboard.press('ArrowUp');
+  const bar = page.locator('.Composer .ComposerEmbeddedMessage');
+  await expect(bar).toContainText(/Edit\s?Message/i);
+  await expect(page.locator(INPUT)).toContainText('Carol two');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' changed');
+  await page.waitForTimeout(300);
+
+  await openChat(page, 'Bob Reader');
+  await expect(page.locator('.Composer .ComposerEmbeddedMessage')).toHaveCount(0);
+  await expect(page.locator(`${INPUT} p`)).toHaveText('');
+
+  await openChat(page, 'Carol Short');
+  await expect(bar).toContainText(/Edit\s?Message/i);
+  await expect(page.locator(INPUT)).toHaveText('Carol two changed');
+  // the message itself is unchanged until the edit is saved
+  expect(
+    await page.evaluate(() => {
+      const global = (window as unknown as TestWindow).getGlobal();
+      return global.messages.byChatId['7'].byId['2002'].content.text.text as string;
+    }),
+  ).toBe('Carol two');
 });

@@ -220,11 +220,11 @@ export async function runScenario(url: string, scenario: Scenario, config: RunCo
       const split = output.splitAt;
       metrics.droppedFramesOpen = droppedFrames(sample.frames, sample.t0, split).dropped;
       metrics.droppedFramesType = droppedFrames(sample.frames, split, sample.t1).dropped;
-      const open = longTaskStats(sample.longTasks.filter((task) => task.start < split));
+      const openStats = longTaskStats(sample.longTasks.filter((task) => task.start < split));
       const type = longTaskStats(sample.longTasks.filter((task) => task.start >= split));
       Object.assign(metrics, {
-        longTaskCountOpen: open.count,
-        longTaskMaxMsOpen: open.maxMs,
+        longTaskCountOpen: openStats.count,
+        longTaskMaxMsOpen: openStats.maxMs,
         longTaskCountType: type.count,
         longTaskMaxMsType: type.maxMs,
       });

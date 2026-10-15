@@ -262,6 +262,11 @@ The chat-list and messages reports' gaps #1-#8 apply as they were. New:
    renders `aria-hidden=""` and no `aria-expanded`; assistive technology ignores the first and the second is absent instead of
    `"false"`. The JSX types accept booleans, so every ported `aria-hidden={cond}` / `aria-expanded={cond}` is wrong (about 40 sites were
    turned into strings by hand; `contenteditable={false}` is the same). Minimal repro: render the line above and read the attributes.
+   The enumerated attributes behave the same: `draggable={false}`, `contentEditable={false}` and `spellcheck={false}` write nothing (an
+   `<img>` stays draggable), where teact assigned the property and got `"false"`. Every remaining site in `src/` now writes the strings
+   (`src/util/booleanAttribute.ts` for a boolean prop), and `src/util/booleanAttributes.test.ts` fails on a new one; frameact should
+   stringify booleans for `aria-*` and for `contenteditable` / `draggable` / `spellcheck` / `translate` / `autocorrect` (or type them as
+   strings only, so that tsc finds every site).
 10. **`use:checked={() => props.x}` on an `<input>` that also spreads `{...rest}` logs a DEV error and is written once** (the accessor form
     is not tracked in a spread). Repro: `<input {...rest} use:checked={() => props.checked} />` with `props.checked` changing; `gili/Checkbox`
     passes the plain value instead.

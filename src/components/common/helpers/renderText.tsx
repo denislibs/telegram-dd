@@ -143,7 +143,7 @@ function replaceEmojis(
               class={`${className}${!isLoaded ? ' opacity-transition slow shown' : ''}`}
               alt={emoji}
               data-path={src}
-              draggable={false}
+              draggable="false"
               onLoad={!isLoaded ? handleEmojiLoad : undefined}
             />,
           );

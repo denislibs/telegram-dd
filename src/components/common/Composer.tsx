@@ -3321,7 +3321,7 @@ const Composer = (ownProps: OwnProps) => {
           </Show>
           <div
             class={buildClassName('rich-editor-history', isRichInputExpansionActive() && 'rich-editor-history-open')}
-            aria-hidden={!isRichInputExpansionActive()}
+            aria-hidden={isRichInputExpansionActive() ? 'false' : 'true'}
             inert={!isRichInputExpansionActive()}
           >
             <Button

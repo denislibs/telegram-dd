@@ -9,7 +9,6 @@ import type {
 import { isNodeViewSelected, NodeView } from '@tiptap/core';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import type { Decoration, DecorationSource } from '@tiptap/pm/view';
-import { requestMutation } from 'frameact';
 import { createComponent } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
 
@@ -191,10 +190,11 @@ class TeactNodeView extends NodeView<TeactNodeViewComponent, Editor, TeactNodeVi
     };
   }
 
+  // Deviation: tt rendered the new props from a mutation task (teact's render writes the DOM). Here an update only writes
+  // the props signal, which is allowed in any phase, and the bindings apply it in the next mutate phase; a mutation task
+  // that writes the signal would apply it one frame later than tt.
   private updateRenderer() {
-    requestMutation(() => {
-      renderers.get(this)?.updateProps(this.buildRootProps());
-    });
+    renderers.get(this)?.updateProps(this.buildRootProps());
   }
 
   private updateSelection(force?: boolean) {

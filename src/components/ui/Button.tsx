@@ -5,6 +5,7 @@ import type { JSX } from 'frameact/jsx-runtime';
 
 import type { IconName } from '../../types/icons';
 
+import booleanAttribute from '../../util/booleanAttribute';
 import { IS_TOUCH_ENV, MouseButton } from '../../util/browser/windowEnvironment';
 import buildClassName from '../../util/buildClassName';
 import buildStyle from '../../util/buildStyle';
@@ -264,8 +265,9 @@ const Button = (rawProps: OwnProps) => {
         autofocus={props.autoFocus}
         aria-label={props.ariaLabel}
         aria-controls={props.ariaControls}
-        aria-haspopup={props.hasPopup}
-        aria-selected={props.ariaSelected}
+        // Deviation: frameact removes an attribute set to `false` and writes `""` for `true`; tt wrote "true" / "false".
+        aria-haspopup={booleanAttribute(props.hasPopup)}
+        aria-selected={booleanAttribute(props.ariaSelected)}
         title={props.ariaLabel}
         tabIndex={props.tabIndex}
         dir={props.isRtl ? 'rtl' : undefined}

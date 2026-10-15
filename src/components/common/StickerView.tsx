@@ -188,7 +188,7 @@ const StickerView = (rawProps: OwnProps) => {
         )}
         style={filterStyle()}
         alt=""
-        draggable={false}
+        draggable="false"
       />
       {shouldRenderFullMedia() &&
         (isLottie() ? (
@@ -243,7 +243,7 @@ const StickerView = (rawProps: OwnProps) => {
             src={fullMediaData()}
             alt={emoji()}
             style={filterStyle()}
-            draggable={false}
+            draggable="false"
           />
         ))}
     </>

@@ -68,6 +68,7 @@ import {
   RE_RICH_MARKDOWN_LINK_INPUT,
 } from '../../../../util/tiptap/richMarkdown';
 import { getRichEditorMediaAttrs, getRichMediaUpload } from '../../../../util/tiptap/richMedia';
+import { hasVisibleLinkText, normalizeSafeLinkUrl } from '../../../../util/tiptap/safeLink';
 import setEditorContentWithoutHistory from '../../../../util/tiptap/setEditorContentWithoutHistory';
 import styles from '../../../../util/tiptap/styling.module.scss';
 import { buildRichEditorFormatting } from '../../../ui/textInput/richEditorFormatting';
@@ -260,10 +261,22 @@ export function __createRichEditor({
   return richEditor;
 }
 
-// Deviation: ProseMirror is third-party code that owns the input's DOM. It reads layout (`scrollToSelection`) from its own
-// observers and updates, whatever phase the frame is in, and a DOM change in the editor wakes its MutationObserver right
-// after a mutate phase: stricterdom reports each of those reads. The entry points are muted, as the porting guide asks for
-// third-party DOM writers (`suppressStrict`); nothing of ours runs inside them.
+// Deviation: ProseMirror is third-party code that owns the input's DOM. It reads layout from its own observers and updates,
+// whatever phase the frame is in: `updateState` stores and restores the scroll position around each DOM update,
+// `scrollToSelection` measures the selection, and `domObserver.flush` checks the editor's CSS (`getComputedStyle`) on the
+// first typed change. A DOM change in the editor wakes its MutationObserver right after a mutate phase, so stricterdom
+// would report each of those reads. The three entry points are muted (`suppressStrict`, as the porting guide asks for
+// third-party DOM code); stricterdom cannot declare a third-party DOM owner that would exempt only ProseMirror's own reads
+// (engine gap 11 of docs/reports/slice-composer.md).
+// The windows are wider than ProseMirror's own code, and everything that runs inside them is unchecked, ours included:
+// - inside `updateState`: every ProseMirror plugin view (`update`), so the tooltip controller's formatter and suggestion
+//   plugins and the table controls;
+// - inside `domObserver.flush`, i.e. for every change typed into the editor: the whole dispatch, so every tiptap
+//   `transaction` / `update` / `selectionUpdate` listener (`useRichEditor`, `MessageInput`, `TextFormatter`,
+//   `RichEditorToolbar`, the node views).
+// A tiptap listener of a change dispatched by our own code (a command) runs after `updateState` returned and is checked.
+// Today those listeners only write signals or book frame tasks (`richEditor.strict.test.ts` pins what is and is not
+// reported); a layout read added to one of them would not be reported on the typing path.
 function muteStrictForProseMirror(editor: Editor) {
   const view = editor.view as EditorView & {
     domObserver: { flush: () => void };
@@ -412,6 +425,8 @@ function buildRichEditorSchemaExtensions(
       linkOnPaste: false,
       openOnClick: false,
       protocols: ['tg', 'ton'],
+      // Deviation (security): see `RichEditorLink`
+      isAllowedUri: (url) => Boolean(normalizeSafeLinkUrl(url)),
       HTMLAttributes: {
         class: styles.textEntityLink,
         dir: 'auto',
@@ -1099,7 +1114,36 @@ function toggleRichEditorCode(editor: Editor) {
   return editor.state.selection.empty ? editor.commands.toggleCode() : editor.commands.toggleSelectionCode();
 }
 
+// Deviation (security): tt keeps a pasted `<a href>` whenever tiptap's default `isAllowedUri` allows it (`ftp:`,
+// `sms:`, `cid:`, `xmpp:`, `callto:`, relative, protocol-relative and `#fragment` addresses), as it is, and sends it
+// as a text link, also when its text is invisible (only whitespace or zero-width characters). A pasted link now gets
+// the link modal's normalisation and the scheme allowlist (`normalizeSafeLinkUrl`), and a link without visible text
+// is dropped; the text stays in both cases.
 const RichEditorLink = LinkExtension.extend({
+  addAttributes() {
+    const attributes = this.parent?.() ?? {};
+    return {
+      ...attributes,
+      href: {
+        ...attributes.href,
+        parseHTML: (element: HTMLElement) => normalizeSafeLinkUrl(element.getAttribute('href')),
+      },
+    };
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: 'a[href]',
+        getAttrs: (element) =>
+          normalizeSafeLinkUrl(element.getAttribute('href')) &&
+          (hasVisibleLinkText(element.textContent || '') || element.querySelector('img, [data-document-id], tg-emoji'))
+            ? {}
+            : false,
+      },
+    ];
+  },
+
   parseMarkdown(token, helpers) {
     const markdown = parseRichMarkdownToken(token, false);
     if (!markdown || !isRichMarkdownWebLink(markdown)) {

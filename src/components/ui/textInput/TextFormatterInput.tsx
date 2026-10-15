@@ -1,4 +1,4 @@
-import { createEffect, createMeasureEffect, createMemo, requestMutation } from 'frameact';
+import { createEffect, createMemo, createMutationEffect, requestForcedReflow } from 'frameact';
 import { Show } from 'frameact/dom';
 
 import type { IconName } from '../../../types/icons';
@@ -43,20 +43,26 @@ const TextFormatterInput = (props: OwnProps) => {
 
   const canSubmit = createMemo(() => props.canSubmitEmpty || Boolean(props.value.trim().length));
 
-  createMeasureEffect(
+  // tt focused from a mutation task booked after the render that removed `inert` from the link control. Here that
+  // removal is a binding of the parent in the mutate phase, so a measure-phase `focus()` hit an inert ancestor and was
+  // ignored (the typed URL replaced the selected text).
+  // Deviation: `focus()` is a layout read, so it runs in the forced-reflow measure that follows this frame's mutate phase
+  // (after every binding applied), and the selection in the forced-reflow mutate after it.
+  createMutationEffect(
     () => props.isActive,
     (isActive2) => {
       if (!isActive2) {
-        return undefined;
+        return;
       }
 
-      // Deviation: `focus()` is a layout read, so it runs in the measure phase; only the selection is a mutation.
-      const input = inputRef;
-      if (!input) return undefined;
+      requestForcedReflow(() => {
+        const input = inputRef;
+        if (!input || !props.isActive) return undefined;
 
-      input.focus();
-      requestMutation(() => {
-        input.setSelectionRange(input.value.length, input.value.length);
+        input.focus();
+        return () => {
+          input.setSelectionRange(input.value.length, input.value.length);
+        };
       });
     },
   );
@@ -109,7 +115,7 @@ const TextFormatterInput = (props: OwnProps) => {
           use:value={() => props.value}
           placeholder={props.placeholder}
           autocomplete="off"
-          spellcheck={props.shouldSpellCheck === false || IS_TAURI ? false : undefined}
+          spellcheck={props.shouldSpellCheck === false || IS_TAURI ? 'false' : undefined}
           inputMode={props.inputMode}
           dir={props.dir}
           aria-label={props.ariaLabel}

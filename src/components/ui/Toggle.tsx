@@ -8,7 +8,7 @@ interface OwnProps {
 
 function Toggle(props: OwnProps) {
   return (
-    <div class={buildClassName(styles.root, 'Toggle')} aria-hidden>
+    <div class={buildClassName(styles.root, 'Toggle')} aria-hidden="true">
       <i class={buildClassName(styles.filler, styles[props.value])} />
       <i class={buildClassName(styles.widget, styles[props.value])} />
     </div>

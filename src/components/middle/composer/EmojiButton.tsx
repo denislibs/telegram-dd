@@ -37,7 +37,7 @@ const EmojiButton = (props: OwnProps) => {
           loading="lazy"
           data-path={src()}
           onLoad={!isLoaded() ? handleEmojiLoad : undefined}
-          draggable={false}
+          draggable="false"
         />
       )}
     </div>

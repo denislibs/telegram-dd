@@ -370,7 +370,7 @@ const StickerSet = (ownProps: OwnProps) => {
         {(isRecent() || isFavorite() || canCut()) && <canvas ref={sharedCanvasHqRef} class="shared-canvas" />}
         {props.withDefaultTopicIcon && (
           <Button className="StickerButton custom-emoji" color="translucent" onClick={handleDefaultTopicIconClick}>
-            <img src={grey} alt="Reset" class="sticker-media" draggable={false} />
+            <img src={grey} alt="Reset" class="sticker-media" draggable="false" />
           </Button>
         )}
         {props.withDefaultStatusIcon && (

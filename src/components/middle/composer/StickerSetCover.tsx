@@ -133,11 +133,11 @@ const StickerSetCover = (rawProps: OwnProps) => {
             style={colorFilter()}
             class={styles.image}
             alt=""
-            draggable={false}
+            draggable="false"
           />
         )
       ) : thumbDataUri() ? (
-        <img src={thumbDataUri()} class={styles.image} alt="" draggable={false} />
+        <img src={thumbDataUri()} class={styles.image} alt="" draggable="false" />
       ) : undefined}
     </div>
   );

@@ -351,6 +351,7 @@ const MessageInput = (ownProps: OwnProps) => {
     }
 
     updateRafRef = requestAnimationFrame(() => {
+      updateRafRef = undefined;
       syncCloneWithSource(source);
       updateInputHeight(isEmpty);
     });
@@ -495,6 +496,7 @@ const MessageInput = (ownProps: OwnProps) => {
       return () => {
         if (updateRafRef) {
           cancelAnimationFrame(updateRafRef);
+          updateRafRef = undefined;
         }
         unregisterRichEditorRoot();
       };
@@ -547,7 +549,7 @@ const MessageInput = (ownProps: OwnProps) => {
 
   createMutationEffect(
     depsOf(() => [editor(), props.isActive, isInputEmpty(), isRichEditorReady(), richValue(), isMounted()] as const),
-    ([editor2, isActive2, isInputEmpty2, isRichEditorReady2, , isMounted2]) => {
+    ([editor2, isActive2, isInputEmpty2, isRichEditorReady2, , isMounted2], prev) => {
       // Deviation: waits for the element (see `isMounted`); tt's layout effect ran after the commit.
       if (!isMounted2) {
         return;
@@ -556,6 +558,23 @@ const MessageInput = (ownProps: OwnProps) => {
       if (!isActive2 && inputRef) {
         inputRef.blur();
         updateInputHeight(true);
+        return;
+      }
+
+      // Perf (composer review): a document change made by typing is synced by `handleEditorUpdate`'s frame callback, which
+      // is pending at this point; syncing here too cloned the document twice per keystroke and, as this runs in the mutate
+      // phase before the forced-reflow phase of the same frame pass, made the height measure of the previous update a
+      // forced layout. tt's layout effect ran outside that pass. Only a value-only change with that callback pending is
+      // skipped: a programmatic `setValue` (no editor update) and every other dependency still sync here.
+      if (
+        updateRafRef !== undefined &&
+        prev &&
+        prev[0] === editor2 &&
+        prev[1] === isActive2 &&
+        prev[2] === isInputEmpty2 &&
+        prev[3] === isRichEditorReady2 &&
+        prev[5] === isMounted2
+      ) {
         return;
       }
 
@@ -743,9 +762,14 @@ const MessageInput = (ownProps: OwnProps) => {
     syncCloneWithSource(editor()?.view.dom);
   }
 
+  // Deviation: tt keyed this effect on the `replyInfo` object, a new one per reply. The store merges a new reply into the
+  // draft's record in place, so the record keeps its identity: the key is its content (the serialisation reads, and so
+  // subscribes to, every field). A repeat of the very same reply does not refocus (tt did).
+  const replyInfoKey = () => (props.replyInfo ? JSON.stringify(props.replyInfo) : undefined);
+
   // Deviation: a measure effect, as `focus()` is a layout read (tt: `useEffect`, also a measure-phase effect).
   createMeasureEffect(
-    depsOf(() => [props.chatId, props.replyInfo, props.canAutoFocus, isRichEditorReady()] as const),
+    depsOf(() => [props.chatId, replyInfoKey(), props.canAutoFocus, isRichEditorReady()] as const),
     ([, , canAutoFocus2]) => {
       if (IS_TOUCH_ENV) {
         return;
@@ -953,7 +977,7 @@ const MessageInput = (ownProps: OwnProps) => {
               }}
               role="textbox"
               dir="auto"
-              spellcheck={IS_TAURI ? false : undefined}
+              spellcheck={IS_TAURI ? 'false' : undefined}
               onClick={() => {
                 if (!isCollapsedRichOnlyPreview()) focusInput();
               }}
@@ -995,7 +1019,7 @@ const MessageInput = (ownProps: OwnProps) => {
         ref={(el) => {
           scrollerCloneRef = el;
         }}
-        aria-hidden
+        aria-hidden="true"
         class={buildClassName('custom-scroll', SCROLLER_CLASS, 'clone', props.isNeedPremium && 'is-need-premium')}
       >
         <div class={inputScrollerContentClass()} data-stricterdom-ignore>

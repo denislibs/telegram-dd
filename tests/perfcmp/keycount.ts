@@ -46,11 +46,6 @@ const { values: args } = parseArgs({
 
 const PROBE = join(import.meta.dirname, 'probe.js');
 
-interface FnCount {
-  key: string;
-  count: number;
-}
-
 async function countsOf(
   cdp: import('@playwright/test').CDPSession,
   scripts: Map<string, { url: string; map?: SourceMapLike; lineStarts: number[] }>,
@@ -130,10 +125,15 @@ function traceCounts(events: TraceEvent[], from: string, to: string) {
     styleElements: 0,
     layoutObjects: 0,
   };
-  const stack: TraceEvent[] = [];
+  const openEvents: TraceEvent[] = [];
   for (const event of mine) {
-    while (stack.length && stack[stack.length - 1].ts + stack[stack.length - 1].dur! <= event.ts) stack.pop();
-    const inScript = stack.some((outer) => categorize(outer.name) === 'script');
+    while (
+      openEvents.length &&
+      openEvents[openEvents.length - 1].ts + openEvents[openEvents.length - 1].dur! <= event.ts
+    ) {
+      openEvents.pop();
+    }
+    const inScript = openEvents.some((outer) => categorize(outer.name) === 'script');
     const category = categorize(event.name);
     if (event.name === 'UpdateLayoutTree') {
       out.styles++;
@@ -185,25 +185,26 @@ function traceCounts(events: TraceEvent[], from: string, to: string) {
     } else if (category === 'script' && !stack.some((outer) => categorize(outer.name) === 'script')) {
       out.scriptMs += event.dur! / 1000;
     }
-    stack.push(event);
+    openEvents.push(event);
   }
   return { ...out, reasons } as typeof out & { reasons: Record<string, number> };
 }
 
-const mapCache = new Map<string, SourceMapLike | null>();
+const mapCache = new Map<string, SourceMapLike | false>();
 let mapDir = '';
 function frameKey(f: { functionName: string; url: string; lineNumber: number; columnNumber: number }) {
   const file = f.url.split('/').pop() ?? '';
   let map = mapCache.get(file);
   if (map === undefined) {
     const path = join(mapDir, 'assets', `${file}.map`);
-    map = existsSync(path) ? new SourceMapConsumer(JSON.parse(readFileSync(path, 'utf8'))) : null;
+    map = existsSync(path) ? new SourceMapConsumer(JSON.parse(readFileSync(path, 'utf8'))) : false;
     mapCache.set(file, map);
   }
   if (map) {
     const o = map.originalPositionFor({ line: f.lineNumber + 1, column: f.columnNumber });
-    if (o.source)
+    if (o.source) {
       return `${f.functionName || '(anon)'} ${o.source.replace(/^.*?(src\/|node_modules\/)/, '$1').replace(/^node_modules\/.pnpm\/[^/]+\/node_modules\//, '')}:${o.line}`;
+    }
   }
   return `${f.functionName || '(anon)'} ${file}:${f.lineNumber + 1}`;
 }
@@ -347,8 +348,9 @@ async function measure(app: string, dir: string) {
           if (!part) continue;
           for (const [k, v] of Object.entries(part)) {
             if (k === 'reasons') {
-              for (const [r, c] of Object.entries(v as Record<string, number>))
+              for (const [r, c] of Object.entries(v as Record<string, number>)) {
                 out[`reason ${r}`] = (out[`reason ${r}`] ?? 0) + c;
+              }
             } else out[k] = (out[k] ?? 0) + (v as number);
           }
         }

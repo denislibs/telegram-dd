@@ -292,7 +292,7 @@ const StickerButton = <T extends number | ApiSticker | ApiBotInlineMediaResult |
       ) : (
         isIntersecting() &&
         props.sticker.thumbnail?.dataUri && (
-          <img src={props.sticker.thumbnail.dataUri} class="sticker-media" alt="" draggable={false} />
+          <img src={props.sticker.thumbnail.dataUri} class="sticker-media" alt="" draggable="false" />
         )
       )}
       {!props.noIcons && !props.noShowPremium && isLocked() && (

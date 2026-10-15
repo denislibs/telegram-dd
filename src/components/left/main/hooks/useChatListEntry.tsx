@@ -381,7 +381,7 @@ function renderSummary(
               isRoundVideo() && 'round',
               getMessageIsSpoiler(message()) && 'media-preview-spoiler',
             )}
-            draggable={false}
+            draggable="false"
           />
           {getMessageVideo(message()) && <Icon name="play" />}
           {messageSummary()}

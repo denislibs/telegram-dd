@@ -5,6 +5,7 @@
 import type { Editor } from '@tiptap/core';
 import { beginHeavyAnimation, createSignal, flushSync } from 'frameact';
 import { delegateEvents, render } from 'frameact/dom';
+import { unwrap } from 'frameact/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getGlobal, setGlobal, withGlobal } from '../../global';
 
@@ -24,7 +25,6 @@ import { addUsers } from '../../global/reducers/users';
 import { selectCurrentMessageList } from '../../global/selectors';
 import { getCurrentTabId } from '../../util/establishMultitabRole';
 import { cloneDeep } from '../../util/iteratees';
-import { unwrap } from 'frameact/store';
 
 import Composer from './Composer';
 

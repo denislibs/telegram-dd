@@ -10,8 +10,9 @@ type TeactRendererOptions<Props extends AnyLiteral> = {
 const DEFAULT_RENDERER_ELEMENT_TAG = 'div';
 
 // Deviation: tt re-rendered a teact component with new props. A frameact component runs once, so the props are
-// getters over one signal (`updateProps` writes it) and only the bindings that read a changed key update. The key set is
-// fixed by the first props object (it is a ProseMirror NodeViewProps, which always has the same keys).
+// getters over one signal (`updateProps` writes it, `equals: false`): every binding, memo and effect that reads any prop
+// re-runs on each update, as tt's render did, and stops there when its own result is unchanged. The key set is fixed by
+// the first props object (it is a ProseMirror NodeViewProps, which always has the same keys).
 // The element is created here and handed to ProseMirror as the node view's DOM: ProseMirror owns it from there; the
 // component renders into it with `render()` and `destroy()` disposes that root.
 export default class TeactRenderer<Props extends AnyLiteral = AnyLiteral> {
