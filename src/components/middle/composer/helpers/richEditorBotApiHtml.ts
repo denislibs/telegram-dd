@@ -29,7 +29,8 @@ export const RichEditorBotApiHtml = Extension.create({
           clipboardTextSerializer: ({ content }) => serializeTiptapPlainText(content),
           transformCopied: (slice, view) =>
             replaceEmojiNodes(preserveCopiedRichEditorTable(slice, view.state.selection)),
-          transformPastedHTML: normalizeBotApiHtml,
+          // Deviation (security): pasted rich buttons become text (`replaceButtonHtmlWithText`)
+          transformPastedHTML: (html) => normalizeBotApiHtml(html, { shouldReplaceButtons: true }),
         },
       }),
     ];

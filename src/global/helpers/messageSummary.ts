@@ -130,9 +130,23 @@ export function getMessageSummaryDescription(
   statefulContent: StatefulMediaContent | undefined,
   truncatedText?: string | TeactNode,
   isExtended = false,
+  shouldRenderAsHtml = false,
 ) {
-  return getSummaryDescription(lang, message.content, statefulContent, message, truncatedText, isExtended);
+  return getSummaryDescription(
+    lang, message.content, statefulContent, message, truncatedText, isExtended, shouldRenderAsHtml,
+  );
 }
+
+// Deviation (security): tt concatenates the server strings of a summary (a file name, an audio title, an invoice title,
+// a game title, a poll question, ...) into the HTML string of `renderMessageSummaryHtml` as they are, so a file name
+// such as `x<a href="https://evil.example">...</a>` became a live link, mention, spoiler or custom emoji in the copied
+// clipboard HTML. In HTML mode every part except `truncatedText` (already HTML, rendered by `renderMessageText` with
+// `shouldRenderAsHtml`) is escaped, and the poll and todo titles go through the entity renderer in HTML mode. The plain
+// mode (chat list, reply bar, notifications) is unchanged.
+export function escapeSummaryHtml(text: string) {
+  return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+}
+
 function getSummaryDescription(
   lang: LangFn,
   mediaContent: MediaContent,
@@ -140,7 +154,17 @@ function getSummaryDescription(
   message?: ApiMessage,
   truncatedText?: string | TeactNode,
   isExtended = false,
+  shouldRenderAsHtml = false,
 ) {
+  // Identity in plain mode, so that the plain summary stays byte-identical to tt's
+  const asText = <T extends string | undefined>(value: T) =>
+    (shouldRenderAsHtml && value ? escapeSummaryHtml(value) : value) as T;
+  const renderFormattedText = ({ text: formattedText, entities }: ApiFormattedText) => (shouldRenderAsHtml
+    ? (renderTextWithEntities({
+      text: formattedText, entities, asPreview: true, shouldRenderAsHtml: true,
+    }) as string[]).join('')
+    : renderTextWithEntities({ text: formattedText, entities, asPreview: true }));
+
   const {
     text,
     photo,
@@ -177,51 +201,49 @@ function getSummaryDescription(
 
   if (message?.groupedId || isPaidMediaAlbum) {
     hasUsedTruncatedText = true;
-    summary = truncatedText || lang('Album');
+    summary = truncatedText || asText(lang('Album'));
   }
 
   if (photo || isPaidMediaSinglePhoto) {
     hasUsedTruncatedText = true;
-    summary = truncatedText || lang('AttachPhoto');
+    summary = truncatedText || asText(lang('AttachPhoto'));
   }
 
   if (video || isPaidMediaSingleVideo) {
     hasUsedTruncatedText = true;
-    summary = truncatedText || lang(video?.isGif ? 'AttachGif' : 'AttachVideo');
+    summary = truncatedText || asText(lang(video?.isGif ? 'AttachGif' : 'AttachVideo'));
   }
 
   if (sticker) {
-    summary = lang('AttachSticker').trim();
+    summary = asText(lang('AttachSticker').trim());
   }
 
   if (audio) {
-    summary = getMessageAudioCaption(mediaContent) || lang('AttachMusic');
+    summary = asText(getMessageAudioCaption(mediaContent) || lang('AttachMusic'));
   }
 
   if (voice) {
     hasUsedTruncatedText = true;
-    summary = truncatedText || lang('AttachAudio');
+    summary = truncatedText || asText(lang('AttachAudio'));
   }
 
   if (document) {
     hasUsedTruncatedText = !isExtended;
-    summary = isExtended ? document.fileName : (truncatedText || document.fileName);
+    summary = isExtended ? asText(document.fileName) : (truncatedText || asText(document.fileName));
   }
 
   if (contact) {
-    summary = lang('AttachContact');
+    summary = asText(lang('AttachContact'));
   }
 
   if (poll) {
-    summary = renderTextWithEntities({
-      text: poll.summary.question.text,
-      entities: poll.summary.question.entities,
-      asPreview: true,
-    });
+    summary = renderFormattedText(poll.summary.question);
   }
 
   if (invoice) {
-    summary = invoice.extendedMedia ? invoice.title : lang('AttachInvoice', { description: invoice.description });
+    summary = asText(
+      invoice.extendedMedia ? invoice.title : lang('AttachInvoice', { description: invoice.description }),
+    );
   }
 
   if (text) {
@@ -233,46 +255,42 @@ function getSummaryDescription(
   }
 
   if (location?.mediaType === 'geo' || location?.mediaType === 'venue') {
-    summary = lang('AttachLocation');
+    summary = asText(lang('AttachLocation'));
   }
 
   if (location?.mediaType === 'geoLive') {
-    summary = lang('AttachLiveLocation');
+    summary = asText(lang('AttachLiveLocation'));
   }
 
   if (game) {
-    summary = `🎮 ${game.title}`;
+    summary = `🎮 ${asText(game.title)}`;
   }
 
   if (giveaway) {
-    summary = lang('AttachGiveaway');
+    summary = asText(lang('AttachGiveaway'));
   }
 
   if (giveawayResults) {
-    summary = lang('AttachGiveawayResults');
+    summary = asText(lang('AttachGiveawayResults'));
   }
 
   if (storyData) {
-    summary = truncatedText || lang('AttachStory');
+    summary = truncatedText || asText(lang('AttachStory'));
   }
 
   if (todo) {
-    summary = renderTextWithEntities({
-      text: todo.todo.title.text,
-      entities: todo.todo.title.entities,
-      asPreview: true,
-    });
+    summary = renderFormattedText(todo.todo.title);
   }
 
   if (dice) {
-    summary = dice.emoticon;
+    summary = asText(dice.emoticon);
   }
 
   if (richMessage) {
     summary = truncatedText as string;
   }
 
-  return summary || lang('MessageUnsupported');
+  return summary || asText(lang('MessageUnsupported'));
 }
 
 export function generateBrailleSpoiler(length: number) {

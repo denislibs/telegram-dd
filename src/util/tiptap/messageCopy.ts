@@ -16,6 +16,7 @@ import {
   normalizeRenderedRichContentHtml,
   serializeTiptapPlainText,
 } from './botApiHtml';
+import { encodeMarkdownLinkDestination, SAFE_LINK_PROTOCOLS } from './safeLink';
 
 const MESSAGE_COPY_EXTENSIONS = __buildRichEditorSchemaExtensions();
 const MESSAGE_COPY_SCHEMA = getSchema(MESSAGE_COPY_EXTENSIONS);
@@ -44,7 +45,8 @@ export function serializeMessageCopyTiptapJson(doc: TiptapJsonContent): Clipboar
   return {
     plainText: serializeTiptapPlainText(proseMirrorDoc.content),
     html: container.innerHTML,
-    markdown: MESSAGE_COPY_MARKDOWN_MANAGER.serialize(normalizedDoc),
+    // Deviation (security): see `encodeMarkdownLinkDestination`
+    markdown: MESSAGE_COPY_MARKDOWN_MANAGER.serialize(encodeMarkdownLinks(normalizedDoc)),
   };
 }
 
@@ -52,7 +54,7 @@ export function serializeMessageCopyTiptapJson(doc: TiptapJsonContent): Clipboar
 // `<a href="javascript:...">` reached the clipboard HTML and `[text](javascript:...)` the markdown. The message view
 // shows such a link as `ensureProtocol(url)`; the copy does the same and drops the link (keeping its text) when the
 // result is not an address of an allowed scheme.
-const SAFE_COPY_LINK_PROTOCOLS = ['http', 'https', 'tg', 'ton', 'mailto', 'tel'];
+const SAFE_COPY_LINK_PROTOCOLS = SAFE_LINK_PROTOCOLS;
 
 function sanitizeCopyLinkMarks(marks: TiptapJsonContent['marks']): TiptapJsonContent['marks'] {
   return marks?.flatMap((mark) => {
@@ -76,5 +78,19 @@ function normalizeMessageCopyJson(node: TiptapJsonContent): TiptapJsonContent {
     ...node,
     ...(node.marks && { marks: sanitizeCopyLinkMarks(node.marks) }),
     content: node.content?.map(normalizeMessageCopyJson),
+  };
+}
+
+function encodeMarkdownLinks(node: TiptapJsonContent): TiptapJsonContent {
+  return {
+    ...node,
+    ...(node.marks && {
+      marks: node.marks.map((mark) =>
+        mark.type === 'link' && typeof mark.attrs?.href === 'string'
+          ? { ...mark, attrs: { ...mark.attrs, href: encodeMarkdownLinkDestination(mark.attrs.href) } }
+          : mark,
+      ),
+    }),
+    ...(node.content && { content: node.content.map(encodeMarkdownLinks) }),
   };
 }

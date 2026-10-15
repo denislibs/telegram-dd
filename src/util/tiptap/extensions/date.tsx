@@ -314,13 +314,17 @@ function buildFormattedDateOptions(attrs: AnyLiteral): FormattedDateEntityOption
   };
 }
 
+// Deviation (security): tt accepts any finite number, and a pasted `unix="1e300"` threw `RangeError: Invalid time
+// value` in the node view and on every send while it stayed in the editor. A date is a whole number of seconds in
+// (0, 2^31 - 1], the bound of the markdown path (`buildFormattedDateMarkdownAttrs`) and of the API's `int`, well inside
+// the JS `Date` range; otherwise the element is parsed as its text.
 function parseDate(value: unknown) {
   const rawValue = value instanceof HTMLElement
     ? value.getAttribute('unix') || value.dataset.unix
     : value;
   const date = typeof rawValue === 'number' ? rawValue : Number(rawValue);
 
-  return Number.isFinite(date) ? date : undefined;
+  return Number.isSafeInteger(date) && date > 0 && date <= MAX_INT_32 ? date : undefined;
 }
 
 function getDateFormat(element: HTMLElement) {

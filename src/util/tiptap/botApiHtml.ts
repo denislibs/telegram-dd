@@ -32,6 +32,7 @@ import {
   buildButtonHtmlAttrs,
   BUTTON_ROW_NODE_NAME,
   normalizeButtonHtml,
+  replaceButtonHtmlWithText,
   RICH_BUTTON_NODE_NAME,
 } from './richButton';
 import {
@@ -124,8 +125,14 @@ export function extendBotApiMarkdownHtml(
   return extensions.map((extension) => extendBotApiMarkdownHtmlExtension(extension, schema, serializer));
 }
 
-export function normalizeBotApiHtml(html: string) {
-  return normalizeHtml(html, false);
+export type NormalizeBotApiHtmlOptions = {
+  // Deviation (security): a paste into the composer drops rich buttons, keeping their text
+  // (`replaceButtonHtmlWithText`)
+  shouldReplaceButtons?: boolean;
+};
+
+export function normalizeBotApiHtml(html: string, options?: NormalizeBotApiHtmlOptions) {
+  return normalizeHtml(html, false, options);
 }
 
 export function normalizeRenderedRichContentHtml(html: string) {
@@ -344,14 +351,56 @@ function buildTable(
   return element;
 }
 
-function normalizeHtml(html: string, isRenderedRichContent: boolean) {
+function normalizeHtml(html: string, isRenderedRichContent: boolean, options?: NormalizeBotApiHtmlOptions) {
   const template = document.createElement('template');
   // Template content stays inert until ProseMirror parses it against the editor schema
   template.innerHTML = html;
+  stripActiveHtml(template.content);
   sanitizePastedRichEditorMedia(template.content);
+  if (options?.shouldReplaceButtons) replaceButtonHtmlWithText(template.content);
   if (isRenderedRichContent) normalizeRenderedRichContent(template.content);
   normalizeBotApiHtmlForTiptap(template.content);
   return template.innerHTML;
+}
+
+// Deviation (security): tt hands the read-back of the template, with every `on*` attribute and active element still in
+// it, to ProseMirror, which parses it once more (`readHTML`) and so made the CSP report each event handler twice. Inert
+// either way, but the string handed onward is now clean: no event handler, no resource or action attribute, no
+// element that runs, loads or submits anything. The content of `form` and of `object` (fallback content) stays, as the
+// schema would keep it. `style` is reduced to the declarations the schema's parse rules read (bold, italic, underline,
+// strike): dropping it would turn Google Docs' `<b style="font-weight:normal">` wrapper into bold text. The template
+// parse itself still reports each handler attribute (Chrome checks `script-src-attr` when the parser sets it).
+const ACTIVE_ELEMENTS_SELECTOR = 'script, style, link, meta, base, iframe, embed, noscript, template';
+const UNWRAPPED_ELEMENTS_SELECTOR = 'form, object';
+const STRIPPED_ATTRIBUTES = new Set(['srcset', 'formaction', 'xlink:href']);
+
+function stripActiveHtml(root: DocumentFragment) {
+  root.querySelectorAll(ACTIVE_ELEMENTS_SELECTOR).forEach((element) => element.remove());
+  root.querySelectorAll<HTMLElement>(UNWRAPPED_ELEMENTS_SELECTOR).forEach(unwrapElement);
+  root.querySelectorAll<HTMLElement>('*').forEach((element) => {
+    Array.from(element.attributes).forEach(({ name }) => {
+      const lowerName = name.toLowerCase();
+      if (lowerName.startsWith('on') || STRIPPED_ATTRIBUTES.has(lowerName)) element.removeAttribute(name);
+    });
+    // The `style` of a Bot API `<tg-button>` is its colour, not CSS
+    if (element.hasAttribute('style') && element.tagName !== 'TG-BUTTON') {
+      reduceStyleToFormatting(element);
+    }
+  });
+}
+
+function reduceStyleToFormatting(element: HTMLElement) {
+  const { fontWeight, fontStyle, textDecoration } = element.style;
+  const style = [
+    fontWeight && `font-weight: ${fontWeight}`,
+    fontStyle && `font-style: ${fontStyle}`,
+    textDecoration && `text-decoration: ${textDecoration}`,
+  ].filter(Boolean).join('; ');
+  if (style) {
+    element.setAttribute('style', style);
+  } else {
+    element.removeAttribute('style');
+  }
 }
 
 function sanitizePastedRichEditorMedia(root: DocumentFragment) {

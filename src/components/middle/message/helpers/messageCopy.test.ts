@@ -1,20 +1,42 @@
 // Original test (not in telegram-tt): the clipboard content built for copied messages is inert for hostile message text.
 import '../../../../global/actions/all';
 
+import { marked, type Token, type Tokens } from 'marked';
 import { describe, expect, it } from 'vitest';
-import { setGlobal } from '../../../../global';
+import { getGlobal, setGlobal } from '../../../../global';
 
 import type { ApiChat, ApiMessage, ApiMessageEntity, ApiUser } from '../../../../api/types';
 import type { GlobalState, TabState } from '../../../../global/types';
 import { ApiMessageEntityTypes, MAIN_THREAD_ID } from '../../../../api/types';
 
+import { getMessageSummaryText } from '../../../../global/helpers/messageSummary';
 import { INITIAL_GLOBAL_STATE, INITIAL_TAB_STATE } from '../../../../global/initialState';
 import { addChats } from '../../../../global/reducers/chats';
 import { addMessages } from '../../../../global/reducers/messages';
 import { addUsers } from '../../../../global/reducers/users';
 import { getCurrentTabId } from '../../../../util/establishMultitabRole';
 import { cloneDeep } from '../../../../util/iteratees';
+import { getTranslationFn } from '../../../../util/localization';
 import { buildMessageCopyContent } from './messageCopy';
+
+// jsdom has no `innerText`: assigning it only sets a plain property, so tt's `escape_html` filter (`renderText`, which
+// reads `innerHTML` after setting `innerText`) returned '' and the sender-header path rendered every text message as
+// `MessageUnsupported`. A minimal version of the browser's setter (text, line breaks as `<br>`) for this file.
+if (!('innerText' in HTMLElement.prototype)) {
+  Object.defineProperty(HTMLElement.prototype, 'innerText', {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.textContent;
+    },
+    set(this: HTMLElement, value: string) {
+      this.replaceChildren(
+        ...String(value)
+          .split('\n')
+          .flatMap((line, index) => (index ? [document.createElement('br'), line] : [line])),
+      );
+    },
+  });
+}
 
 const tabId = getCurrentTabId();
 const SELF_ID = '1000';
@@ -139,6 +161,38 @@ describe('buildMessageCopyContent with hostile message text', () => {
     urls.forEach((url) => expect(content.markdown).toContain(`](${url})`));
   });
 
+  it.each([
+    'https://ok.example/a) [evil](https://evil.example/md',
+    'https://ok.example/a)<img src=x onerror=alert(1)>',
+    'https://ok.example/a b "title"',
+    'https://ok.example/a\\',
+    'mailto:a b<img src=x>(c)',
+    'tg://resolve?domain=x)<b>y</b>',
+  ])('keeps the markdown link address %j inside its link', async (url) => {
+    seed([textMessage(1, 'link here', [{ type: ApiMessageEntityTypes.TextUrl, offset: 0, length: 4, url }])]);
+
+    const content = await buildMessageCopyContent(
+      messageList,
+      { type: 'messages', chatId: PEER_ID, threadId: MAIN_THREAD_ID, messageListType: 'thread', messageIds: [1] },
+      tabId,
+    );
+
+    // A markdown reader sees exactly one link, over the link text, and no raw HTML
+    const tokens: Token[] = [];
+    marked.walkTokens(marked.lexer(content.markdown), (token) => {
+      tokens.push(token);
+    });
+    const links = tokens.filter((token) => token.type === 'link');
+    expect(links).toHaveLength(1);
+    expect((links[0] as Tokens.Link).text).toBe('link');
+    expect(tokens.filter((token) => token.type === 'html')).toEqual([]);
+    expect(content.markdown).not.toMatch(/<(img|b)\b/i);
+    expect(content.markdown).toMatch(/^\[link\]\([^()\s<>"]+\) here$/);
+    // The HTML flavour keeps the address as the sender wrote it (the attribute is escaped by the serialiser)
+    const anchor = new DOMParser().parseFromString(content.html, 'text/html').querySelector('a');
+    expect(anchor?.getAttribute('href')).toBe(url);
+  });
+
   it('is inert on the sender-header path, which renders the message to an HTML summary first', async () => {
     seed([textMessage(1, HOSTILE_TEXT)]);
 
@@ -155,8 +209,37 @@ describe('buildMessageCopyContent with hostile message text', () => {
       tabId,
     );
 
-    expect(content.plainText).toContain('Ann:');
+    expect(content.plainText).toBe(`Ann:\n${HOSTILE_TEXT}`);
+    expect(content.html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    expect(content.markdown).toContain('**Ann:**');
+    expect(content.markdown).toContain('onerror=alert(1)');
     expectInert(content);
+  });
+
+  it('copies the text of plain messages on the sender-header path', async () => {
+    seed([textMessage(1, 'hello world'), textMessage(2, 'second one')]);
+
+    const content = await buildMessageCopyContent(
+      messageList,
+      {
+        type: 'messages',
+        chatId: PEER_ID,
+        threadId: MAIN_THREAD_ID,
+        messageListType: 'thread',
+        messageIds: [1, 2],
+        withSenderHeaders: true,
+      },
+      tabId,
+    );
+
+    expect(content.plainText).toBe('Ann:\nhello world\n\nAnn:\nsecond one');
+    expect(content.html).toContain('<p>hello world</p>');
+    expect(content.html).toContain('<p>second one</p>');
+    expect(content.markdown).toContain('hello world');
+    expect(content.markdown).toContain('second one');
+    for (const text of [content.plainText, content.html, content.markdown]) {
+      expect(text).not.toContain('MessageUnsupported');
+    }
   });
 
   it('is inert for the HTML of a selection', async () => {
@@ -207,5 +290,127 @@ describe('buildMessageCopyContent with hostile message text', () => {
     }
     expect(content.plainText).toContain('revealed');
     expect(content.plainText.replace(/[\s\w]/g, '')).toMatch(/^[⠀-⣿]+$/);
+  });
+});
+
+// Server strings that are not message text (file names, titles, a poll question, ...) are concatenated into the HTML
+// summary of the sender-header path: they must reach the clipboard as text, never as markup.
+describe('buildMessageCopyContent with hostile server strings on the sender-header path', () => {
+  const INJECTED =
+    'x<a href="https://evil.example/inj">CLICK</a><tg-spoiler>sp</tg-spoiler>' +
+    '<a href="tg://user?id=777">M</a><tg-emoji emoji-id="123">E</tg-emoji>';
+
+  const mediaMessage = (id: number, content: object) =>
+    ({
+      id,
+      chatId: PEER_ID,
+      date: 1_700_000_000 + id,
+      isOutgoing: false,
+      senderId: PEER_ID,
+      content: content as ApiMessage['content'],
+    }) as ApiMessage;
+
+  const CASES: { name: string; content: object; expected: string }[] = [
+    {
+      name: 'document file name',
+      content: { document: { id: 'd1', fileName: INJECTED, mimeType: 'application/pdf', size: 1 } },
+      expected: `📎 ${INJECTED}`,
+    },
+    {
+      name: 'document file name with a caption',
+      content: {
+        document: { id: 'd1', fileName: INJECTED, mimeType: 'application/pdf', size: 1 },
+        text: { text: 'caption' },
+      },
+      // tt: the line break of the HTML summary collapses to a space in the parsed paragraph
+      expected: `📎 ${INJECTED} caption`,
+    },
+    {
+      name: 'audio title and performer',
+      content: {
+        audio: { id: 'a1', title: INJECTED, performer: `${INJECTED}2`, duration: 1, mimeType: 'audio/mp3', size: 1 },
+      },
+      expected: `🎧 ${INJECTED} — ${INJECTED}2`,
+    },
+    {
+      name: 'invoice title',
+      content: { invoice: { title: INJECTED, description: INJECTED, extendedMedia: [{}], currency: 'USD' } },
+      expected: INJECTED,
+    },
+    {
+      name: 'game title',
+      content: { game: { id: 'g1', title: INJECTED, shortName: 's', description: '', accessHash: '1' } },
+      expected: `🎮 ${INJECTED}`,
+    },
+    {
+      name: 'poll question',
+      content: { pollId: 'p1' },
+      expected: `📊 ${INJECTED}`,
+    },
+    {
+      name: 'todo title',
+      content: { todo: { todo: { title: { text: INJECTED }, items: [{ id: 1, title: { text: INJECTED } }] } } },
+      expected: `📝 ${INJECTED}`,
+    },
+    {
+      name: 'dice emoticon',
+      content: { dice: { emoticon: INJECTED, value: 1 } },
+      expected: INJECTED,
+    },
+  ];
+
+  it.each(CASES)('keeps the $name as text', async ({ content, expected }) => {
+    seed([mediaMessage(1, content), textMessage(2, 'second')]);
+    setGlobal(
+      {
+        ...getGlobal(),
+        messages: {
+          ...getGlobal().messages,
+          pollById: {
+            p1: {
+              mediaType: 'poll',
+              summary: { id: 'p1', hash: '1', question: { text: INJECTED }, answers: [] },
+              results: {},
+            },
+          },
+        },
+      },
+      { forceOutdated: true },
+    );
+
+    const result = await buildMessageCopyContent(
+      messageList,
+      {
+        type: 'messages',
+        chatId: PEER_ID,
+        threadId: MAIN_THREAD_ID,
+        messageListType: 'thread',
+        messageIds: [1, 2],
+        withSenderHeaders: true,
+      },
+      tabId,
+    );
+
+    // The visible text is the server string itself
+    expect(result.plainText).toBe(`Ann:\n${expected}\n\nAnn:\nsecond`);
+    expect(result.html).not.toMatch(/<a[\s>]/i);
+    expect(result.html).not.toMatch(/<tg-spoiler|<tg-emoji/i);
+    const doc = new DOMParser().parseFromString(result.html, 'text/html');
+    expect(doc.querySelector('a, tg-spoiler, tg-emoji, [data-entity-type]')).toBeNull();
+    expect(doc.body.textContent).toContain(INJECTED);
+    expect(result.markdown).not.toContain('](');
+    expect(result.markdown).not.toContain('||sp||');
+    expectInert(result);
+  });
+
+  it('leaves the plain summary (chat list, reply bar) as tt renders it: no escaping', () => {
+    const message = mediaMessage(1, {
+      document: { id: 'd1', fileName: INJECTED, mimeType: 'application/pdf', size: 1 },
+    });
+    expect(getMessageSummaryText(getTranslationFn(), message, undefined)).toBe(`📎 ${INJECTED}`);
+    const game = mediaMessage(2, {
+      game: { id: 'g1', title: INJECTED, shortName: 's', description: '', accessHash: '1' },
+    });
+    expect(getMessageSummaryText(getTranslationFn(), game, undefined)).toBe(`🎮 ${INJECTED}`);
   });
 });

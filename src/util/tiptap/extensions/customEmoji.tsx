@@ -5,6 +5,7 @@ import { Show } from 'frameact/dom';
 import type { TeactNodeViewComponentProps } from '../TeactNodeViewRenderer';
 
 import buildClassName from '../../buildClassName';
+import isValidDocumentId from '../../emoji/isValidDocumentId';
 import {
   buildRichMarkdownNodeInputRule,
   buildRichMarkdownTokenizer,
@@ -19,8 +20,6 @@ import TeactNodeViewRenderer from '../TeactNodeViewRenderer';
 import styles from '../styling.module.scss';
 
 const CUSTOM_EMOJI_FALLBACK = '\u{FFFC}';
-const DOCUMENT_ID_BITS = 64;
-const RE_DOCUMENT_ID = /^-?\d+$/;
 
 export type CustomEmojiNodeOptions = {
   sharedCanvasRef?: () => HTMLCanvasElement | undefined;
@@ -57,9 +56,7 @@ export const CustomEmojiNode = Node.create<CustomEmojiNodeOptions>({
     return {
       documentId: {
         default: undefined,
-        parseHTML: (element: HTMLElement) => (
-          element.dataset.documentId || element.getAttribute('emoji-id') || undefined
-        ),
+        parseHTML: getHtmlDocumentId,
       },
       alt: {
         default: '',
@@ -82,10 +79,14 @@ export const CustomEmojiNode = Node.create<CustomEmojiNodeOptions>({
     };
   },
 
+  // Deviation (security): tt creates a custom emoji node for any `data-document-id` / `emoji-id`, and a pasted
+  // `not-a-number` failed the whole custom emoji batch it was loaded in (`BigInt`) and the send. Only a 64-bit decimal
+  // id makes a node, as in the markdown path; otherwise the element is parsed as its content (its text stays).
   parseHTML() {
+    const getAttrs = (element: HTMLElement) => (getHtmlDocumentId(element) ? {} : false);
     return [
-      { tag: '[data-document-id]' },
-      { tag: 'tg-emoji[emoji-id]' },
+      { tag: '[data-document-id]', getAttrs },
+      { tag: 'tg-emoji[emoji-id]', getAttrs },
     ];
   },
 
@@ -117,12 +118,7 @@ export function buildCustomEmojiMarkdownAttrs(markdown: RichMarkdownLink) {
   }
 
   const documentId = markdown.url.searchParams.get('id') || undefined;
-  if (!documentId || !RE_DOCUMENT_ID.test(documentId)) {
-    return undefined;
-  }
-
-  const numericDocumentId = BigInt(documentId);
-  if (BigInt.asIntN(DOCUMENT_ID_BITS, numericDocumentId) !== numericDocumentId) {
+  if (!isValidDocumentId(documentId)) {
     return undefined;
   }
 
@@ -153,4 +149,9 @@ function CustomEmojiView(props: TeactNodeViewComponentProps) {
       )}
     </Show>
   );
+}
+
+function getHtmlDocumentId(element: HTMLElement) {
+  const documentId = element.dataset.documentId || element.getAttribute('emoji-id');
+  return isValidDocumentId(documentId) ? documentId : undefined;
 }
