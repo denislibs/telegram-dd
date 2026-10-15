@@ -3,10 +3,10 @@
 // typing, the send button sends the text through `sendMessage`, and a chat switch resets the input before the content
 // requested for the new chat is inserted.
 import type { Editor } from '@tiptap/core';
-import { createSignal, flushSync } from 'frameact';
+import { beginHeavyAnimation, createSignal, flushSync } from 'frameact';
 import { delegateEvents, render } from 'frameact/dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getGlobal, setGlobal } from '../../global';
+import { getGlobal, setGlobal, withGlobal } from '../../global';
 
 import type { ApiChat, ApiUser } from '../../api/types';
 import type { GlobalState, TabState } from '../../global/types';
@@ -21,8 +21,10 @@ import { addMessages } from '../../global/reducers/messages';
 import { updateTabState } from '../../global/reducers/tabs';
 import { updateThreadInfo, updateThreadLocalState } from '../../global/reducers/threads';
 import { addUsers } from '../../global/reducers/users';
+import { selectCurrentMessageList } from '../../global/selectors';
 import { getCurrentTabId } from '../../util/establishMultitabRole';
 import { cloneDeep } from '../../util/iteratees';
+import { unwrap } from 'frameact/store';
 
 import Composer from './Composer';
 
@@ -64,6 +66,13 @@ class ResizeObserverStub {
   disconnect = () => undefined;
 }
 globalThis.ResizeObserver ??= ResizeObserverStub;
+// jsdom has no modal dialogs
+HTMLDialogElement.prototype.showModal ??= function showModal(this: HTMLDialogElement) {
+  this.open = true;
+};
+HTMLDialogElement.prototype.close ??= function close(this: HTMLDialogElement) {
+  this.open = false;
+};
 // jsdom has no layout for ranges; ProseMirror asks for them when it scrolls the selection into view
 const EMPTY_RECT = { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) };
 Range.prototype.getClientRects ??= () => [] as unknown as DOMRectList;
@@ -164,6 +173,33 @@ describe('Composer', () => {
       root,
     );
     return { root, setCurrentChatId };
+  }
+
+  // The chat id comes from the store, as it does in the middle column: store-derived values are what a heavy animation holds
+  // back (frame effects dirtied by a store write park until the animation ends), a plain signal is never held back.
+  function mountFromStore(chatId: string, shouldSeed = true) {
+    if (shouldSeed) seed(chatId);
+    const Host = (own: Record<string, never>) => {
+      const stateProps = withGlobal(own, (global) => ({ chatId: selectCurrentMessageList(global)!.chatId }));
+      return (
+        <div class="middle-column-footer">
+          <Composer
+            type="messageList"
+            chatId={stateProps.chatId}
+            threadId={MAIN_THREAD_ID}
+            messageListType="thread"
+            isReady
+            isMobile={false}
+            inputId="message-input-text"
+            editableInputId={EDITABLE_INPUT_ID}
+            editableInputCssSelector={EDITABLE_INPUT_CSS_SELECTOR}
+          />
+        </div>
+      );
+    };
+    const root = container();
+    dispose = render(() => <Host />, root);
+    return root;
   }
 
   it("renders tt's composer structure", async () => {
@@ -312,5 +348,262 @@ describe('Composer', () => {
     expect(actions.saveDraft).toHaveBeenCalledWith(
       expect.objectContaining({ chatId: ANN_ID, text: expect.objectContaining({ text: 'Unsent text for Ann' }) }),
     );
+  });
+
+  describe('a chat switch while a heavy animation runs (store-derived chat id)', () => {
+    // The main-menu "Saved Messages" item and the Ctrl+digit hotkeys switch without `forceOnHeavyAnimation`, so the
+    // switch lands while a root heavy animation (a closing menu, a scroll animation) holds back store-dirtied effects.
+    async function switchDuringAnimation(root: HTMLElement, toChatId: string) {
+      const editor = await waitForEditor(root);
+      editor.commands.insertContent('Unsent text for Ann');
+      await frames();
+
+      const endAnimation = beginHeavyAnimation(Infinity);
+      openList(toChatId);
+      await frames(8);
+      endAnimation();
+      await frames(8);
+      return editor;
+    }
+
+    it('saves the text of the chat that is left and does not clear the draft of the chat that is entered', async () => {
+      const root = mountFromStore(ANN_ID);
+      setGlobal(
+        updateThreadLocalState(getGlobal(), BOB_ID, MAIN_THREAD_ID, { draft: { text: { text: 'Draft for Bob' } } }),
+      );
+
+      const editor = await switchDuringAnimation(root, BOB_ID);
+
+      expect(actions.saveDraft).toHaveBeenCalledWith(
+        expect.objectContaining({ chatId: ANN_ID, text: expect.objectContaining({ text: 'Unsent text for Ann' }) }),
+      );
+      const clearedChatIds = actions.clearDraft.mock.calls.map(([payload]) => payload.chatId);
+      expect(clearedChatIds).not.toContain(BOB_ID);
+      expect(clearedChatIds).not.toContain(ANN_ID);
+      expect(editor.getText()).toBe('Draft for Bob');
+    });
+
+    it('saves the edited text of the chat that is left as its editing draft', async () => {
+      seed(ANN_ID);
+      let global = addMessages(getGlobal(), [
+        {
+          id: 7,
+          chatId: ANN_ID,
+          date: 1_700_000_000,
+          isOutgoing: true,
+          senderId: SELF_ID,
+          content: { text: { text: 'Old text' } },
+        },
+      ]);
+      global = updateThreadLocalState(global, ANN_ID, MAIN_THREAD_ID, { editingId: 7 });
+      setGlobal(global);
+      const root = mountFromStore(ANN_ID, false);
+      const editor = await waitForEditor(root);
+      await frames();
+      expect(editor.getText()).toBe('Old text');
+      editor.commands.insertContent(', edited');
+      await frames();
+
+      const endAnimation = beginHeavyAnimation(Infinity);
+      openList(BOB_ID);
+      await frames(8);
+      endAnimation();
+      await frames(8);
+
+      expect(actions.setEditingDraft).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: ANN_ID,
+          draft: expect.objectContaining({ text: 'Old text, edited' }),
+        }),
+      );
+      expect(actions.setEditingDraft).not.toHaveBeenCalledWith(
+        expect.objectContaining({ chatId: ANN_ID, draft: undefined }),
+      );
+      expect(actions.clearDraft.mock.calls.map(([payload]) => payload.chatId)).not.toContain(BOB_ID);
+      expect(editor.getText()).toBe('');
+    });
+  });
+
+  it('saves a reply-only draft to the server as tt does (`clearDraft` keeps the reply and drops the local flag)', async () => {
+    const root = mountFromStore(ANN_ID);
+    await waitForEditor(root);
+    await frames();
+
+    setGlobal(
+      updateThreadLocalState(getGlobal(), ANN_ID, MAIN_THREAD_ID, {
+        draft: { replyInfo: { type: 'message', replyToMsgId: 7 }, isLocal: true },
+      }),
+    );
+    await frames(8);
+
+    expect(actions.clearDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: ANN_ID, threadId: MAIN_THREAD_ID, shouldKeepReply: true }),
+    );
+  });
+
+  describe('cancelling an edit', () => {
+    // `setEditingId` writes the store at once, as the real action does: the composer must not look at the store to learn
+    // whether an edit was in progress when the bar was cleared.
+    async function startEditing() {
+      let global = addMessages(getGlobal(), [
+        {
+          id: 7,
+          chatId: ANN_ID,
+          date: 1_700_000_000,
+          isOutgoing: true,
+          senderId: SELF_ID,
+          content: { text: { text: 'Old text' } },
+        },
+      ]);
+      global = updateThreadLocalState(global, ANN_ID, MAIN_THREAD_ID, {
+        editingId: 7,
+        draft: { text: { text: 'Pre-edit draft' } },
+      });
+      setGlobal(global);
+      actions.setEditingId.mockImplementation(({ messageId }: { messageId?: number }) => {
+        setGlobal(updateThreadLocalState(getGlobal(), ANN_ID, MAIN_THREAD_ID, { editingId: messageId }));
+      });
+      const root = mountFromStore(ANN_ID, false);
+      const editor = await waitForEditor(root);
+      await frames();
+      expect(editor.getText()).toBe('Old text');
+      return { root, editor };
+    }
+
+    it('restores the draft that was there before the edit when the cancel button is pressed', async () => {
+      seed(ANN_ID);
+      const { root, editor } = await startEditing();
+
+      root
+        .querySelector<HTMLButtonElement>('.embedded-cancel')!
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      await frames(8);
+
+      expect(editor.getText()).toBe('Pre-edit draft');
+      expect(actions.setEditingDraft).toHaveBeenCalledWith(
+        expect.objectContaining({ chatId: ANN_ID, draft: undefined }),
+      );
+    });
+
+    it('restores the draft that was there before the edit when Escape is pressed', async () => {
+      seed(ANN_ID);
+      const { editor } = await startEditing();
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await frames(8);
+
+      expect(editor.getText()).toBe('Pre-edit draft');
+    });
+  });
+
+  it('hands the `:` emoji tooltip plain store values, so that its memoized keyword library hits the cache', async () => {
+    seed(ANN_ID);
+    setGlobal({
+      ...getGlobal(),
+      recentEmojis: ['😀'],
+      emojiKeywords: { en: { version: 1, keywords: { '😀': ['smile'] } } },
+    });
+    const root = mountFromStore(ANN_ID, false);
+    const editor = await waitForEditor(root);
+
+    const tooltips = editor.extensionManager.extensions.find((extension) => extension.name === 'richEditorTooltips');
+    const context = (tooltips!.options as { getContext: () => Record<string, unknown> }).getContext();
+
+    // `memoized` skips its cache for a store proxy (`unwrap(value) !== value`), and the keyword library is rebuilt on
+    // every keystroke
+    expect(context.baseEmojiKeywords).toBeDefined();
+    for (const key of ['recentEmojiIds', 'baseEmojiKeywords', 'emojiKeywords']) {
+      const value = context[key];
+      if (value && typeof value === 'object') expect(unwrap(value)).toBe(value);
+    }
+  });
+
+  it('sends the typing `cancel` of the chat it switches to, as tt does (its sender is re-created per chat)', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const root = mountFromStore(ANN_ID);
+    await waitForEditor(root);
+    await frames();
+    expect(actions.sendMessageAction).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: ANN_ID, action: { type: 'cancel' } }),
+    );
+
+    openList(BOB_ID);
+    await frames(8);
+
+    expect(actions.sendMessageAction).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: BOB_ID, action: { type: 'cancel' } }),
+    );
+  });
+
+  it('restores a draft without dirtying a measure effect during the mutate phase', async () => {
+    const warn = vi.spyOn(console, 'warn');
+    seed(ANN_ID);
+    setGlobal(
+      updateThreadLocalState(getGlobal(), ANN_ID, MAIN_THREAD_ID, { draft: { text: { text: 'Draft for Ann' } } }),
+    );
+    const root = mountFromStore(ANN_ID, false);
+    const editor = await waitForEditor(root);
+    await frames();
+    expect(editor.getText()).toBe('Draft for Ann');
+
+    // Another client's draft arrives
+    setGlobal(
+      updateThreadLocalState(getGlobal(), ANN_ID, MAIN_THREAD_ID, { draft: { text: { text: 'Draft from a phone' } } }),
+    );
+    await frames(8);
+    expect(editor.getText()).toBe('Draft from a phone');
+
+    const messages = warn.mock.calls.map((args) => String(args[0]));
+    warn.mockRestore();
+    expect(messages.filter((message) => message.includes('dirtied during the mutate phase'))).toEqual([]);
+  });
+
+  describe('sending content that has no text form (a collapsible block)', () => {
+    const DETAILS = '<details><summary>Title</summary><p>Hidden text</p></details>';
+
+    async function sendRichOnly(isPremium: boolean) {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+      seed(ANN_ID);
+      if (isPremium) {
+        const global = getGlobal();
+        setGlobal({
+          ...global,
+          users: {
+            ...global.users,
+            byId: { ...global.users.byId, [SELF_ID]: { ...global.users.byId[SELF_ID], isPremium: true } },
+          },
+        });
+      }
+      const root = mountFromStore(ANN_ID, false);
+      const editor = await waitForEditor(root);
+      editor.commands.insertContent(DETAILS);
+      await frames();
+      root.querySelector<HTMLButtonElement>('.Composer > .main-button')!.click();
+      await frames();
+      await Promise.resolve();
+      await frames();
+      return root;
+    }
+
+    // As in tt: without Premium the rich-only content cannot be sent as it is, and the Send button asks whether to remove
+    // the formatting (nothing is sent until the user chooses)
+    it('asks to remove the formatting instead of sending it, without Premium', async () => {
+      const root = await sendRichOnly(false);
+
+      expect(actions.sendMessage).not.toHaveBeenCalled();
+      expect(document.body.textContent).toContain('This message uses rich formatting, which requires Telegram Premium');
+      expect(root.ownerDocument.querySelector('dialog')).not.toBeNull();
+    });
+
+    it('sends it as a rich message with Premium', async () => {
+      await sendRichOnly(true);
+
+      expect(actions.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messageList: { chatId: ANN_ID, threadId: MAIN_THREAD_ID, type: 'thread' },
+          richMessage: expect.objectContaining({ blocks: [expect.objectContaining({ type: 'details' })] }),
+        }),
+      );
+    });
   });
 });

@@ -12,6 +12,7 @@ import { type MaybeAccessor, read } from '../../../../util/accessors';
 import { depsOf } from '../../../../util/effectDeps';
 import focusEditableElement from '../../../../util/focusEditableElement';
 import { buildRichMessageFromFormatted, getRichInputAsFormatted } from '../../../ui/textInput/richText';
+import type { ComposerScope } from './useDraft';
 
 import { useDebouncedResolver } from '../../../../hooks/useAsyncResolvers';
 import useBackgroundMode from '../../../../hooks/window/useBackgroundMode';
@@ -35,7 +36,17 @@ const useEditing = (
   type: MaybeAccessor<MessageListType>,
   draft?: MaybeAccessor<ApiDraft | undefined>,
   editingDraft?: MaybeAccessor<EditingDraft | undefined>,
-): [VoidFunction, VoidFunction, Accessor<boolean>] => {
+  // Deviation: the chat change is owned by the composer (see `useDraft`): `getScope` is the chat the content belongs to,
+  // `syncChat` runs a chat change that has not run yet (an effect that is about to write new content calls it first).
+  getScope: () => ComposerScope = () => ({
+    chatId: read(chatId),
+    threadId: read(threadId),
+    type: read(type),
+    isEditing: Boolean(read(editedMessage)),
+    isDisabled: false,
+  }),
+  syncChat: () => void = NO_OP,
+): [VoidFunction, VoidFunction, Accessor<boolean>, (scope: ComposerScope, snapshot?: ApiInputRichMessage) => void] => {
   const { editMessage, setEditingDraft, toggleMessageWebPage, openDeleteMessageModal } = getActions();
   const [shouldForceShowEditing, setShouldForceShowEditing] = createSignal(false);
 
@@ -48,6 +59,7 @@ const useEditing = (
       if (!editedMessage2) {
         return;
       }
+      syncChat();
 
       if (replyingToId && prevReplyingToId !== replyingToId) {
         replaceRichMessage(undefined);
@@ -99,19 +111,37 @@ const useEditing = (
     },
   );
 
-  const saveEditingDraft = (scopedChatId: string, scopedThreadId: ThreadId, scopedType: MessageListType) => {
+  // tt: the cleanup of the effect below, run when the chat changes. The composer calls it before the input is reset, with
+  // the content of the chat being left (`scope` is that chat as it was: the current values are already the next chat's).
+  const saveFor = (scope: ComposerScope, snapshot?: ApiInputRichMessage) => {
+    if (!scope.isEditing) return;
+
     setEditingDraft({
-      chatId: scopedChatId,
-      threadId: scopedThreadId,
-      type: scopedType,
-      draft: buildEditingDraft(read(richMessage)),
+      chatId: scope.chatId,
+      threadId: scope.threadId,
+      type: scope.type,
+      draft: buildEditingDraft(snapshot),
     });
   };
 
   createEffect(
     depsOf(() => [read(chatId), read(editedMessage), read(threadId), read(type)] as const),
     ([chatId2, editedMessage2, threadId2, type2]) =>
-      editedMessage2 ? () => saveEditingDraft(chatId2, threadId2, type2) : undefined,
+      editedMessage2
+        ? () => {
+            // A chat change has saved the editing draft of the chat being left already, from its own content (`saveFor`),
+            // and this cleanup would find the input reset
+            const scope = getScope();
+            if (scope.chatId !== chatId2 || scope.threadId !== threadId2) return;
+
+            setEditingDraft({
+              chatId: chatId2,
+              threadId: threadId2,
+              type: type2,
+              draft: buildEditingDraft(read(richMessage)),
+            });
+          }
+        : undefined,
   );
 
   // Deviation: tt's async `useDerivedSignal(detectLinkDebounced, [...], true)` is an effect that runs the debounced
@@ -226,9 +256,10 @@ const useEditing = (
   const handleBlur = () => {
     if (!read(editedMessage)) return;
 
+    const { chatId: scopedChatId, threadId: scopedThreadId } = getScope();
     setEditingDraft({
-      chatId: read(chatId),
-      threadId: read(threadId),
+      chatId: scopedChatId,
+      threadId: scopedThreadId,
       type: read(type),
       draft: buildEditingDraft(read(richMessage)),
     });
@@ -238,7 +269,7 @@ const useEditing = (
   useBackgroundMode(handleBlur, NO_OP);
   useBeforeUnload(handleBlur);
 
-  return [handleEditComplete, handleEditCancel, shouldForceShowEditing];
+  return [handleEditComplete, handleEditCancel, shouldForceShowEditing, saveFor];
 };
 
 function buildEditingDraft(richMessage: ApiInputRichMessage | undefined): EditingDraft | undefined {

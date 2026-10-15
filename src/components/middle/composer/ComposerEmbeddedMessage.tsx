@@ -81,7 +81,9 @@ type OwnProps = {
   chatId: string;
   threadId: ThreadId;
   messageListType: MessageListType;
-  onClear?: NoneToVoidFunction;
+  // `wasEditing`: whether a message was being edited when the bar was cleared (the store no longer says so once the
+  // editing id has been reset right below, tt's closure still did).
+  onClear?: (wasEditing: boolean) => void;
   onIsOpenChange?: (isOpen: boolean) => void;
 };
 
@@ -243,7 +245,8 @@ const ComposerEmbeddedMessage = (ownProps: OwnProps) => {
   );
 
   const clearEmbedded = () => {
-    if (frozenEditingId()) {
+    const wasEditing = Boolean(frozenEditingId());
+    if (wasEditing) {
       setEditingId({ messageId: undefined });
     } else if (frozenForwardedMessagesCount()) {
       exitForwardMode();
@@ -253,7 +256,7 @@ const ComposerEmbeddedMessage = (ownProps: OwnProps) => {
     } else if (frozenReplyInfo() && !frozenShouldForceShowEditing()) {
       resetDraftReplyInfo();
     }
-    onClear()?.();
+    onClear()?.(wasEditing);
   };
 
   createEffect(

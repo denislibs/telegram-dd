@@ -126,6 +126,13 @@ export default function useRichEditor(
 
       async function initEditor() {
         const editorBundle = await loadBundle(Bundles.Editor);
+        // Perf (composer review): the lazy `MessageInput` is mounted by the task that evaluated the editor chunk and the
+        // bundle promise is settled by then, so without a yield the editor (~120 ms at 4x) was created in the SAME task
+        // as the `MessageInput` mount: one task of ~170 ms where tt has the editor creation alone (~135 ms).
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 0);
+        });
+        if (isDestroyed) return;
         const { createRichEditor, isRichEditorEmpty } = editorBundle;
         editorBundleRef = editorBundle;
         isEditorEmptyRef = isRichEditorEmpty;

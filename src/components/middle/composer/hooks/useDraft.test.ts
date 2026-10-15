@@ -2,13 +2,13 @@
 // switching the chat saves the draft of the chat that is left and restores the one of the chat that is entered, and
 // clearing the input (a sent message) clears the draft. The fake `saveDraft`/`clearDraft` write the drafts the way the
 // real actions do (they feed the `draft` the hook reads back).
-import { createMemo, createRoot, createSignal, flushSync } from 'frameact';
+import { createEffect, createMemo, createRoot, createSignal, flushSync, untrack } from 'frameact';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ApiDraft, ApiFormattedText, ApiInputRichMessage } from '../../../../api/types';
 
 import { buildRichMessageFromFormatted } from '../../../ui/textInput/richText';
-import useDraft from './useDraft';
+import useDraft, { type ComposerScope } from './useDraft';
 
 const { actions } = vi.hoisted(() => ({
   actions: {
@@ -42,14 +42,34 @@ function setup(initialDrafts: Record<string, ApiDraft> = {}) {
   createRoot((disposeRoot) => {
     dispose = disposeRoot;
     const draft = createMemo(() => drafts()[chatId()]);
-    useDraft({
+    let scope: ComposerScope = {
+      chatId: untrack(chatId),
+      threadId: THREAD,
+      type: 'thread',
+      isEditing: false,
+      isDisabled: false,
+    };
+    const { saveFor, restoreFor } = useDraft({
       draft,
       chatId,
       threadId: THREAD,
       richMessage,
       replaceRichMessage: (value) => setRichMessage(value ?? rich('')),
       editedMessage: undefined,
+      getScope: () => scope,
+      syncChat: () => syncChat(),
     });
+    // The owner of the chat change is the composer: save the chat being left, reset the input, restore the new chat.
+    const syncChat = () => {
+      if (chatId() === scope.chatId) return;
+      const leftScope = scope;
+      const snapshot = untrack(richMessage);
+      scope = { ...scope, chatId: chatId() };
+      saveFor(leftScope, snapshot);
+      setRichMessage(rich(''));
+      restoreFor();
+    };
+    createEffect(() => chatId(), syncChat);
   });
 
   const settle = () => {
@@ -142,5 +162,23 @@ describe('useDraft', () => {
     });
     expect(t.drafts().A).toBeUndefined();
     t.dispose();
+  });
+
+  it('saves a draft that is waiting for its debounce when the composer goes away, and releases the timer', () => {
+    const t = setup();
+    t.settle();
+
+    t.setRichMessage(rich('typed, then closed'));
+    t.settle();
+    expect(actions.saveDraft).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+    t.dispose();
+    t.settle();
+
+    // The timer would keep the closed composer (and its whole editor) alive until it fired
+    expect(vi.getTimerCount()).toBe(0);
+    expect(actions.saveDraft).toHaveBeenCalledTimes(1);
+    expect(actions.saveDraft.mock.calls[0][0]).toMatchObject({ chatId: 'A', text: { text: 'typed, then closed' } });
   });
 });

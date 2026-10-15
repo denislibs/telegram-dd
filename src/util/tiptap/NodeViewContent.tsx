@@ -1,5 +1,4 @@
 import { Dynamic } from 'frameact/dom';
-import type { JSX } from 'frameact/jsx-runtime';
 
 import { useTeactNodeViewContext } from './TeactNodeViewContext';
 
@@ -8,7 +7,6 @@ type OwnProps = {
   className?: string;
   placeholder?: string;
   contentEditable?: boolean;
-  children?: JSX.Element;
 };
 
 const DEFAULT_ELEMENT_TAG = 'div';
@@ -26,6 +24,8 @@ const NodeViewContent = (props: OwnProps) => {
     element.appendChild(contentDOMElement);
   }
 
+  // Deviation: no `children` slot. This element becomes the parent of the ProseMirror-owned content element, and a
+  // frameact-inserted child next to it (or a `Show`/`textContent` clear in root mode) would corrupt the document.
   return (
     <Dynamic
       component={props.as ?? DEFAULT_ELEMENT_TAG}
@@ -36,9 +36,7 @@ const NodeViewContent = (props: OwnProps) => {
       ref={handleElementRef}
       data-node-view-content=""
       data-placeholder={props.placeholder}
-    >
-      {props.children}
-    </Dynamic>
+    />
   );
 };
 

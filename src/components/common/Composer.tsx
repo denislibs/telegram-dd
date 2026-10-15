@@ -9,9 +9,11 @@ import {
   requestMeasure,
   requestMutation,
   requestNextMutation,
+  untrack,
 } from 'frameact';
 import { Show } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
+import { unwrap } from 'frameact/store';
 import { forceMeasure } from 'frameact/stricterdom';
 import { getActions, getGlobal, withGlobal } from '../../global';
 
@@ -192,7 +194,7 @@ import useSendMessageAction from '../../hooks/useSendMessageAction';
 import useWindowSize from '../../hooks/window/useWindowSize';
 import useAttachmentModal from '../middle/composer/hooks/useAttachmentModal';
 import useClipboardPaste from '../middle/composer/hooks/useClipboardPaste';
-import useDraft from '../middle/composer/hooks/useDraft';
+import useDraft, { type ComposerScope } from '../middle/composer/hooks/useDraft';
 import useEditing from '../middle/composer/hooks/useEditing';
 import useLoadLinkPreview from '../middle/composer/hooks/useLoadLinkPreview';
 import usePaidMessageConfirmation from '../middle/composer/hooks/usePaidMessageConfirmation';
@@ -687,8 +689,6 @@ const Composer = (ownProps: OwnProps) => {
   };
 
   const updateRichMessage = (value?: ApiInputRichMessage, shouldKeepHistory?: boolean) => {
-    syncComposerWithChat();
-
     if (value && !props.isCurrentUserPremium && !props.isChatWithSelf) {
       const formattedValue = getRichInputAsFormatted(value);
       if (formattedValue && containsCustomEmoji(formattedValue)) {
@@ -973,6 +973,10 @@ const Composer = (ownProps: OwnProps) => {
           props.isForCurrentMessageList,
           isInStoryViewer(),
           sendMessageAction,
+          // Deviation: tt's `sendMessageAction` was re-created per chat and thread, which re-ran this effect on every
+          // chat switch (the cancel of the new chat); here it is one stable function.
+          props.chatId,
+          props.threadId,
         ] as const,
     ),
     ([activeVoiceRecording2, activeVideoRecording2, isForCurrentMessageList2, isInStoryViewer2]) => {
@@ -1071,6 +1075,7 @@ const Composer = (ownProps: OwnProps) => {
       if (shouldSendWithAttachments) return;
       if (resultChatId !== chatId2 || resultThreadId !== threadId2) return;
 
+      syncComposerWithChat();
       aiMessageToSendRef = updateRichMessage(
         content.type === 'rich' ? content.richMessage : buildRichMessageFromFormatted(content.text),
         true,
@@ -1082,15 +1087,37 @@ const Composer = (ownProps: OwnProps) => {
 
   const hasQuickReplies = createMemo(() => Boolean(props.quickReplies && Object.keys(props.quickReplies).length));
 
-  useDraft({
-    draft: () => props.draft,
+  const isDraftDisabled = () =>
+    Boolean(isInStoryViewer() || props.requestedDraft || (!props.hasSuggestedPost && isMonoforum()));
+
+  // The chat the content of the input belongs to (see `syncComposerWithChat`)
+  let composerScope: ComposerScope = {
+    chatId: props.chatId,
+    threadId: props.threadId,
+    type: props.messageListType,
+    isEditing: Boolean(props.editingMessage),
+    isDisabled: untrack(isDraftDisabled),
+  };
+
+  // Deviation: the store merges an updated draft into its own copy, which keeps its identity (see `trackRecord`), while
+  // tt's effects ran on each new draft object, e.g. the one a phone sent while this chat is open: the committed global
+  // gives that identity.
+  const getCommittedDraft = () => {
+    trackRecord(props.draft);
+    return props.draft ? selectDraft(getGlobal(), props.chatId, props.threadId) : undefined;
+  };
+
+  const { saveFor: saveDraftFor, restoreFor: restoreDraftFor } = useDraft({
+    draft: getCommittedDraft,
     chatId: () => props.chatId,
     threadId: () => props.threadId,
     richMessage,
     replaceRichMessage: updateRichMessage,
     editedMessage: () => props.editingMessage,
-    isDisabled: () => isInStoryViewer() || Boolean(props.requestedDraft) || (!props.hasSuggestedPost && isMonoforum()),
+    isDisabled: isDraftDisabled,
     hasUnresolvedMedia: () => hasRichMediaBlocking(),
+    getScope: () => composerScope,
+    syncChat: () => syncComposerWithChat(),
   });
 
   useLoadLinkPreview({
@@ -1207,7 +1234,7 @@ const Composer = (ownProps: OwnProps) => {
     return true;
   };
 
-  const [handleEditComplete, handleEditCancel, shouldForceShowEditing] = useEditing(
+  const [handleEditComplete, handleEditCancel, shouldForceShowEditing, saveEditingDraftFor] = useEditing(
     richMessage,
     updateRichMessage,
     () => props.editingMessage,
@@ -1218,29 +1245,56 @@ const Composer = (ownProps: OwnProps) => {
     () => props.messageListType,
     () => props.draft,
     () => props.editingDraft,
+    () => composerScope,
+    () => syncComposerWithChat(),
   );
 
   // Handle chat change (should be placed after `useDraft` and `useEditing`)
-  // Deviation: tt reset the composer for the chat being left in the cleanup of a layout effect (`useStateRef` kept the
-  // callbacks current). On a chat change every layout cleanup ran before every effect, so the reset came before
-  // `useDraft` / `useEditing` restored the content of the new chat and before the requested draft, AI result, mention
-  // and media effects below inserted theirs. frameact runs an effect's cleanup right before its own next apply, in the
-  // order the effects were reached from the change, so that order is not guaranteed here: the composer remembers the
-  // chat its content belongs to, and the reset runs at the first of this effect or a write of new content
-  // (`updateRichMessage`, which `useDraft` / `useEditing` call, and the effects below), whichever comes first.
-  let composerChatKey = `${props.chatId}_${props.threadId}`;
+  // Deviation: tt did it in the cleanup of a layout effect: every cleanup of a commit ran before every effect, so the
+  // content of the chat being left was saved from the value of the last render, the input was reset, and only then
+  // `useDraft` / `useEditing` restored the content of the new chat and the requested draft, AI result, mention and media
+  // effects below inserted theirs. Here effects have no common commit: some of them are held back by a heavy animation
+  // (store-dirtied frame effects park), the others are not, and none runs in creation order. So the chat change is one
+  // function with a single owner that does the three steps in that order, synchronously: it saves the content of the chat
+  // being left from a snapshot taken before anything touched it (under the chat the content belongs to, `composerScope`),
+  // resets the input, and restores the draft of the new chat. It runs at the first of the effect below or an effect that
+  // is about to write new content (they call it first), whichever comes first, and is a no-op once it has run.
   const syncComposerWithChat = () => {
-    const chatKey = `${props.chatId}_${props.threadId}`;
-    if (chatKey === composerChatKey) return;
+    if (props.chatId === composerScope.chatId && props.threadId === composerScope.threadId) return;
 
-    composerChatKey = chatKey;
+    const leftScope = composerScope;
+    const snapshot = untrack(richMessage);
+    composerScope = {
+      chatId: props.chatId,
+      threadId: props.threadId,
+      type: props.messageListType,
+      isEditing: Boolean(props.editingMessage),
+      isDisabled: isDraftDisabled(),
+    };
+
+    saveDraftFor(leftScope, snapshot);
+    saveEditingDraftFor(leftScope, snapshot);
     cancelRecordingVoice();
     resetComposer(false, true);
+    restoreDraftFor();
   };
   createEffect(
-    depsOf(() => [props.chatId, props.threadId] as const),
-    () => {
+    depsOf(
+      () =>
+        [
+          props.chatId,
+          props.threadId,
+          props.messageListType,
+          Boolean(props.editingMessage),
+          isDraftDisabled(),
+        ] as const,
+    ),
+    ([, , messageListType, isEditing, isDisabled]) => {
       syncComposerWithChat();
+      // Same chat: keep what the next chat change needs to know about this one
+      composerScope.type = messageListType;
+      composerScope.isEditing = isEditing;
+      composerScope.isDisabled = isDisabled;
     },
   );
   onDestroy(() => {
@@ -1435,10 +1489,12 @@ const Composer = (ownProps: OwnProps) => {
     getRichMediaPastePosition,
   );
 
-  const handleEmbeddedClear = () => {
+  // Deviation: `wasEditing` comes from the bar, which resets the editing id first. tt read `editingMessage` of the render
+  // closure, which was still set; here the prop already follows the store.
+  const handleEmbeddedClear = (wasEditing: boolean) => {
     if (hasRichMediaBlocking()) return;
 
-    if (props.editingMessage) {
+    if (wasEditing) {
       handleEditCancel();
     }
   };
@@ -2011,6 +2067,7 @@ const Composer = (ownProps: OwnProps) => {
     ),
     ([editableInputId2, , requestedDraft2]) => {
       if (requestedDraft2) {
+        syncComposerWithChat();
         updateRichMessage(undefined);
         insertFormattedTextAndUpdateCursor(requestedDraft2, true);
         resetOpenChatWithDraft();
@@ -2253,9 +2310,11 @@ const Composer = (ownProps: OwnProps) => {
     groupChatMembers: groupChatMembers(),
     topInlineBotIds: canUseInlineBots() ? props.topInlineBotIds : undefined,
     topGuestBotIds: props.topGuestBotIds,
-    recentEmojiIds: props.recentEmojis,
-    baseEmojiKeywords: props.baseEmojiKeywords,
-    emojiKeywords: props.emojiKeywords,
+    // Deviation: plain values. These are store proxies here, which `memoized` (the keyword library of the `:` tooltip)
+    // never caches, so the library was rebuilt on each keystroke; tt got the immutable global objects.
+    recentEmojiIds: props.recentEmojis && unwrap(props.recentEmojis),
+    baseEmojiKeywords: props.baseEmojiKeywords && unwrap(props.baseEmojiKeywords),
+    emojiKeywords: props.emojiKeywords && unwrap(props.emojiKeywords),
     inlineBots: props.inlineBots,
     botCommands: props.botCommands,
     chatBotCommands: chatBotCommands(),
@@ -2450,6 +2509,7 @@ const Composer = (ownProps: OwnProps) => {
     ([attachments2, isComposerBlocked2]) => {
       if (!isComposerBlocked2) return;
 
+      syncComposerWithChat();
       updateRichMessage(undefined);
     },
   );

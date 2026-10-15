@@ -1,7 +1,7 @@
 // Original test (not in telegram-tt): the message input renders an empty element for the rich editor and never re-creates
 // it; the send shortcuts, the ArrowUp / Ctrl+Arrow shortcuts of an empty input, the editor registration and the
 // max-length counter work as in tt.
-import { createSignal, flushSync } from 'frameact';
+import { createSignal, flushSync, requestMutation } from 'frameact';
 import { delegateEvents, render } from 'frameact/dom';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setGlobal } from '../../../global';
@@ -11,6 +11,7 @@ import type { TabState } from '../../../global/types';
 import type { RichEditor, RichEditorRoot } from './richEditorTypes';
 
 import { container, useDomHarness } from '../../../lib/kit/testing/dom';
+import { flushMicrotasks } from '../../../lib/kit/testing/micro';
 import { INITIAL_GLOBAL_STATE, INITIAL_TAB_STATE } from '../../../global/initialState';
 import { getCurrentTabId } from '../../../util/establishMultitabRole';
 import { cloneDeep } from '../../../util/iteratees';
@@ -37,6 +38,7 @@ const EMPTY = buildRichMessageFromFormatted();
 function createFakeEditor(initial: ApiInputRichMessage = EMPTY) {
   const [value, setValue] = createSignal(initial);
   const [isReady, setIsReady] = createSignal(false);
+  const [editor, setEditor] = createSignal<unknown>(undefined);
   const unregister = vi.fn();
   const registerRoot = vi.fn((_root: RichEditorRoot) => unregister);
 
@@ -47,7 +49,9 @@ function createFakeEditor(initial: ApiInputRichMessage = EMPTY) {
     get isReady() {
       return isReady();
     },
-    editor: undefined,
+    get editor() {
+      return editor();
+    },
     canUndo: false,
     canRedo: false,
     hasUnresolvedMedia: false,
@@ -57,7 +61,7 @@ function createFakeEditor(initial: ApiInputRichMessage = EMPTY) {
     replaceRange: vi.fn(),
   } as unknown as RichEditor;
 
-  return { richEditor, setValue, setIsReady, registerRoot, unregister };
+  return { richEditor, setValue, setIsReady, setEditor, registerRoot, unregister };
 }
 
 function press(target: Element, init: KeyboardEventInit) {
@@ -338,5 +342,90 @@ describe('MessageInput', () => {
     t.setValue(buildRichMessageFromFormatted({ text: 'a'.repeat(130) }));
     await settle();
     expect(t.root.querySelector('.max-length-indicator')!.classList.contains('color-danger')).toBe(true);
+  });
+
+  describe('the measuring clone', () => {
+    // The clone is synced by the editor update (a frame callback) and, for a change of the value that no editor update
+    // made (`setValue`), by the effect over the value. A typed character is both an editor update and a new value: it
+    // must clone the document once, not twice.
+    //
+    // A browser runs the microtasks between two animation frame callbacks, which is where the mutate phase of the frame
+    // pass runs (after the callback that started the pass, before the next one: the one of the editor update that was
+    // booked later). The harness fires all callbacks first, so this describe drives its own frames.
+    let queue: Array<FrameRequestCallback | undefined> = [];
+
+    beforeEach(() => {
+      queue = [];
+      globalThis.requestAnimationFrame = (cb) => queue.push(cb);
+      globalThis.cancelAnimationFrame = (id) => {
+        queue[id - 1] = undefined;
+      };
+    });
+
+    const browserFrame = async () => {
+      const callbacks = queue;
+      queue = [];
+      for (const callback of callbacks) {
+        callback?.(0);
+        await flushMicrotasks();
+      }
+      flushSync();
+    };
+
+    async function mountWithEditor() {
+      const t = mount();
+      await browserFrame();
+      const input = t.root.querySelector<HTMLDivElement>('#editable-message-text')!;
+      const registered = t.registerRoot.mock.calls[0][0];
+      const transaction = { setMeta: () => transaction };
+      t.setEditor({
+        isDestroyed: false,
+        view: { dom: input, dispatch: vi.fn() },
+        state: { tr: transaction },
+        setEditable: vi.fn(),
+      });
+      t.setIsReady(true);
+      await browserFrame();
+      const clone = t.root.querySelector<HTMLDivElement>('div.clone[dir="auto"]')!;
+      const replaceChildren = vi.spyOn(clone, 'replaceChildren');
+      return { ...t, input, registered, clone, replaceChildren };
+    }
+
+    it('is synced once per typed character', async () => {
+      const t = await mountWithEditor();
+      const type = async (text: string) => {
+        // The frame is already booked when the editor updates (the key's own handlers book work), then the order of the
+        // editor's update handler: the value first, then the root's `onUpdate`
+        requestMutation(() => undefined);
+        t.input.textContent = text;
+        t.setValue(buildRichMessageFromFormatted({ text }));
+        t.registered.onUpdate(false, t.input);
+        await browserFrame();
+        await browserFrame();
+      };
+
+      // The first character also changes whether the input is empty, which is a dependency of its own
+      await type('a');
+      t.replaceChildren.mockClear();
+
+      for (const text of ['ab', 'abc', 'abcd']) {
+        await type(text);
+      }
+
+      expect(t.clone.textContent).toBe('abcd');
+      expect(t.replaceChildren).toHaveBeenCalledTimes(3);
+    });
+
+    it('is still synced for a value that was set without an editor update', async () => {
+      const t = await mountWithEditor();
+
+      t.input.textContent = 'restored draft';
+      t.setValue(buildRichMessageFromFormatted({ text: 'restored draft' }));
+      await browserFrame();
+      await browserFrame();
+
+      expect(t.clone.textContent).toBe('restored draft');
+      expect(t.replaceChildren).toHaveBeenCalledTimes(1);
+    });
   });
 });

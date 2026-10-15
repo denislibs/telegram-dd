@@ -10,12 +10,16 @@ import { MEDIA_NODE_NAME } from '../../../../util/tiptap/constants';
 import useRichEditor from './useRichEditor';
 
 // The factory must not import the editor module itself: that module reaches `moduleLoader` (mocked) and would deadlock.
+const { createdEditors } = vi.hoisted(() => ({ createdEditors: { count: 0 } }));
 vi.mock('../../../../util/moduleLoader', () => ({
   Bundles: { Editor: 'Editor' },
   loadBundle: async () => {
     const editorModule = await import('../helpers/richEditor');
     return {
-      createRichEditor: editorModule.__createRichEditor,
+      createRichEditor: (...args: Parameters<typeof editorModule.__createRichEditor>) => {
+        createdEditors.count += 1;
+        return editorModule.__createRichEditor(...args);
+      },
       isRichEditorEmpty: editorModule.__isRichEditorEmpty,
       getRichEditorCanUndo: editorModule.__getRichEditorCanUndo,
       getRichEditorCanRedo: editorModule.__getRichEditorCanRedo,
@@ -105,6 +109,33 @@ describe('useRichEditor', () => {
     expect(richEditor.isReady).toBe(false);
     expect(richEditor.editor).toBeUndefined();
     expect(editor.isDestroyed).toBe(true);
+    dispose();
+  });
+
+  it('does not create the editor for a root that went away while the creation task was yielded', async () => {
+    // The editor is created in a task of its own, after the bundle is loaded: a root that is unregistered in between must
+    // not get an editor at all (creating it only to destroy it costs ~120 ms of the main thread)
+    await import('../helpers/richEditor');
+    createdEditors.count = 0;
+    const root = buildRoot();
+    let richEditor!: ReturnType<typeof useRichEditor>;
+    const dispose = createRoot((stop) => {
+      richEditor = useRichEditor(true, true, true, true);
+      return stop;
+    });
+
+    const unregister = richEditor.registerRoot(root);
+    flushSync();
+    unregister();
+    flushSync();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 200);
+    });
+
+    expect(createdEditors.count).toBe(0);
+    expect(richEditor.editor).toBeUndefined();
+    expect(root.onReady).not.toHaveBeenCalled();
+    expect(root.element.querySelector('.ProseMirror')).toBeNull();
     dispose();
   });
 

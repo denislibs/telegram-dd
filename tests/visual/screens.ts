@@ -179,20 +179,14 @@ export const screens: VisualScreen[] = [
   // The composer (composer slice): the same keyboard path in both apps. The editor is created asynchronously (the `editor`
   // bundle), so the screens wait for the input to be editable.
   composerScreen('middle-composer-empty', 'Carol Short', async () => {}),
-  composerScreen(
-    'middle-composer-reply',
-    'Carol Short',
-    async (page) => {
-      await page.locator('#editable-message-text').click();
-      await page.keyboard.press('Control+ArrowUp');
-      await page.locator('.Composer .ComposerEmbeddedMessage').waitFor();
-      await page.waitForTimeout(1000);
-      // The footer only: a reply draft is local until the composer saves it (when the window loses focus, or the chat is
-      // left), and whether the harness's page is focused varies from run to run: the chat list preview of the replied chat shows
-      // "Draft:" in one app and the last message in the other (210 px in the left column, seen in 1 of 3 runs).
-    },
-    '#MiddleColumn .middle-column-footer',
-  ),
+  // The whole screen, the chat list included: the reply-only draft is saved to the server as soon as the reply is set (as in tt),
+  // so the chat list shows "Draft:" in both apps in every run, whether the page has the focus or not.
+  composerScreen('middle-composer-reply', 'Carol Short', async (page) => {
+    await page.locator('#editable-message-text').click();
+    await page.keyboard.press('Control+ArrowUp');
+    await page.locator('.Composer .ComposerEmbeddedMessage').waitFor();
+    await page.waitForTimeout(1000);
+  }),
   composerScreen('middle-composer-formatting', 'Carol Short', async (page) => {
     await page.locator('#editable-message-text').click();
     await page.keyboard.type('Some text to format');

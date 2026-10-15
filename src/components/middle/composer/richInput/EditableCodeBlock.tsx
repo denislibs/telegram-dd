@@ -1,5 +1,4 @@
 import { createEffect, createMemo, createMutationEffect, createSignal } from 'frameact';
-import { Show } from 'frameact/dom';
 
 import type { IAnchorPosition } from '../../../../types';
 
@@ -179,11 +178,17 @@ const EditableCodeBlock = (props: TeactNodeViewComponentProps) => {
         <Icon name="dropdown-arrows" className={styles.languageIcon} />
       </button>
       <div ref={handleCodeBlockWrapperRef} class={styles.codeBlockWrapper}>
-        <Show when={isCodeBlockEmpty()}>
-          <div class={styles.placeholder} contenteditable="false" aria-hidden="true">
-            {lang('RichEditorBlockPlaceholder')}
-          </div>
-        </Show>
+        {/* Deviation: always rendered and hidden with `display: none`. As the only JSX child of this wrapper, a `<Show>` is a
+            root-mode slot that clears the whole parent (`textContent = ''`) when it empties, which also removed
+            ProseMirror's content element that the ref moved in here (typing into an empty block made the text vanish). */}
+        <div
+          class={styles.placeholder}
+          style={isCodeBlockEmpty() ? undefined : { display: 'none' }}
+          contenteditable="false"
+          aria-hidden="true"
+        >
+          {lang('RichEditorBlockPlaceholder')}
+        </div>
       </div>
       <Menu
         ref={(el) => {
