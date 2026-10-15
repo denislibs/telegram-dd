@@ -539,6 +539,10 @@
     "src/components/middle/footer/FooterActionBar.tsx": {
       "reason": "Component-model rewrite (props getters, memos for the main button and the side slots, a keyed Show for tt's `key={mainButton.key}`); the markup, the classes and the logic are tt's.",
       "maxRatio": 0.52
+    },
+    "src/components/main/SafeLinkModal.tsx": {
+      "reason": "A ConfirmDialog instead of tt's `@gili/modal` Modal (the dialog of this app), props getters and memos; the text, the rendering of the address (host labels, suspicious characters, credentials, invisible characters) and the warning are tt's.",
+      "maxRatio": 0.5
     }
   }
 }

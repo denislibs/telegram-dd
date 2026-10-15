@@ -455,6 +455,59 @@ test.describe('message list', () => {
     await expect(spoiler.locator('.Spoiler__content')).toHaveCSS('opacity', '1');
   });
 
+  test('a text link whose text differs from its address asks before it opens', async ({ page, context }) => {
+    await openMessages(page);
+    await openChat(page, 'Carol Short');
+    const text = 'click here for the offer';
+    await page.evaluate(
+      ([messageText]) => {
+        (window as unknown as TestWindow).getActions().apiUpdate({
+          '@type': 'newMessage',
+          chatId: '7',
+          id: 2200,
+          message: {
+            id: 2200,
+            chatId: '7',
+            date: Math.floor(Date.now() / 1000),
+            isOutgoing: false,
+            senderId: '7',
+            content: {
+              text: {
+                text: messageText,
+                entities: [
+                  { type: 'MessageEntityTextUrl', offset: 6, length: 4, url: 'https://example.org/offer?x=1' },
+                ],
+              },
+            },
+          },
+        });
+      },
+      [text] as const,
+    );
+    const link = page.locator(`${LIST} #message-2200 a[data-entity-type="MessageEntityTextUrl"]`);
+    await expect(link).toHaveText('here');
+
+    let popups = 0;
+    context.on('page', () => popups++);
+
+    // the click asks first (tt: `SafeLinkModal`); nothing is opened and the dialog names the address
+    await link.click();
+    const dialog = page.locator('dialog[open], .Modal.confirm').first();
+    await expect(dialog).toContainText('example.org/offer');
+    expect(popups).toBe(0);
+
+    // "Cancel" closes it, nothing opened
+    await dialog.getByRole('button', { name: /cancel/i }).click();
+    await expect(page.locator('dialog[open]')).toHaveCount(0);
+    expect(popups).toBe(0);
+
+    // the confirmation opens the address in a new tab
+    await link.click();
+    const popup = context.waitForEvent('page');
+    await page.locator('dialog[open], .Modal.confirm').first().locator('.confirm-dialog-button').first().click();
+    expect((await popup).url()).toContain('example.org/offer');
+  });
+
   test('a javascript: link is never rendered as a live href', async ({ page }) => {
     await openMessages(page);
     await openChat(page, 'Carol Short');

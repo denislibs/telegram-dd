@@ -5,6 +5,7 @@ import {
   createMutationEffect,
   createSignal,
   frozenWhile,
+  requestMutation,
 } from 'frameact';
 import { Show } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
@@ -181,7 +182,15 @@ const Modal = (props: OwnProps) => {
       }
 
       if (!dialog.open) {
-        dialog.showModal();
+        if (dialog.isConnected) {
+          dialog.showModal();
+        } else {
+          // Deviation: the portal may not have mounted the content when this runs (a modal that is rendered open by an element
+          // that was created in the same frame): `showModal` throws for an element that is not in the document
+          requestMutation(() => {
+            if (dialog.isConnected && !dialog.open) dialog.showModal();
+          });
+        }
       }
 
       return () => {

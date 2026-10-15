@@ -11,9 +11,12 @@ export const CODE_HIGHLIGHTING_CHANGED_META = 'codeHighlightingChanged';
 // Deviation: tt reads the grammars of highlight.js from the hoisted `node_modules/highlight.js`. highlight.js is a
 // dependency of `lowlight` only, so with pnpm that path does not exist and no language would ever load: the second
 // pattern is where pnpm keeps it. (A direct dependency on highlight.js would make the first one enough.)
-const LANGUAGE_MODULES = import.meta.glob([
+// (the `*.js.js` files next to the grammars are deprecated re-exports of them: each would be a second chunk of the same grammar)
+export const LANGUAGE_MODULES = import.meta.glob([
   '../../node_modules/highlight.js/es/languages/*.js',
   '/node_modules/.pnpm/highlight.js@*/node_modules/highlight.js/es/languages/*.js',
+  '!../../node_modules/highlight.js/es/languages/*.js.js',
+  '!/node_modules/.pnpm/highlight.js@*/node_modules/highlight.js/es/languages/*.js.js',
 ]) as Record<string, () => Promise<{ default: any }>>;
 
 const {
