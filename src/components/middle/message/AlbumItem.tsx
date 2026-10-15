@@ -1,4 +1,4 @@
-import type { TeactNode } from '../../../lib/teact/teact';
+import type { JSX } from 'frameact/jsx-runtime';
 
 import type { IAlbumLayoutItem } from './helpers/calculateAlbumLayout';
 
@@ -10,14 +10,15 @@ import styles from './AlbumItem.module.scss';
 
 type OwnProps = {
   item: IAlbumLayoutItem;
-  children: TeactNode;
+  children: JSX.Element;
   className?: string;
 };
 
+// TODO(codemod): props pattern not rewritten: nested pattern for "item"
 const AlbumItem = ({ item: { rect, sides }, children, className }: OwnProps) => {
   return (
     <div
-      className={buildClassName(
+      class={buildClassName(
         styles.root,
         !(sides & AlbumRectPart.Left) && styles.withLeftGap,
         !(sides & AlbumRectPart.Top) && styles.withTopGap,

@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useSignal, useState } from '../../../lib/teact/teact';
+import { createEffect, createMemo, createMutationEffect, createSignal, previous } from 'frameact';
 import { getActions } from '../../../global';
+import { createMediaTransition, createShowTransition } from '../../../lib/kit';
+import { depsOf } from '../../../util/effectDeps';
 
 import type { ApiMessage } from '../../../api/types';
-import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 import { ApiMediaFormat } from '../../../api/types';
 
 import { getMediaFormat, getVideoMediaHash, hasMessageTtl } from '../../../global/helpers';
@@ -16,11 +17,7 @@ import useThumbnail from '../../../hooks/media/useThumbnail';
 import { useThrottledSignal } from '../../../hooks/useAsyncResolvers';
 import useFlag from '../../../hooks/useFlag';
 import { useIsIntersecting } from '../../../hooks/useIntersectionObserver';
-import useLastCallback from '../../../hooks/useLastCallback';
-import useMediaTransition from '../../../hooks/useMediaTransition';
 import useMediaWithLoadProgress from '../../../hooks/useMediaWithLoadProgress';
-import usePreviousDeprecated from '../../../hooks/usePreviousDeprecated';
-import useShowTransition from '../../../hooks/useShowTransition';
 import useBlurredMediaThumbRef from './hooks/useBlurredMediaThumbRef';
 
 import Icon from '../../common/icons/Icon';
@@ -57,111 +54,99 @@ const PROGRESS_THROTTLE = 16; // Min period needed for `playerEl.currentTime` to
 
 let stopPrevious: NoneToVoidFunction;
 
-const RoundVideo = ({
-  message,
-  className,
-  canAutoLoad,
-  isDownloading,
-  origin,
-  observeIntersection,
-  onStop,
-  onReadMedia,
-  isTranscriptionError,
-  isTranscribed,
-  canTranscribe,
-  onHideTranscription,
-  isTranscriptionHidden,
-  isTranscribing,
-}: OwnProps) => {
-  const ref = useRef<HTMLDivElement>();
-  const playerRef = useRef<HTMLVideoElement>();
-  const circleRef = useRef<SVGCircleElement>();
+const RoundVideo = (props: OwnProps) => {
+  let ref!: HTMLDivElement;
+  let playerRef!: HTMLVideoElement;
+  let circleRef!: SVGCircleElement;
 
   const { cancelMediaDownload, openOneTimeMediaModal, transcribeAudio } = getActions();
 
-  const isIntersecting = useIsIntersecting(ref, observeIntersection);
+  const isIntersecting = useIsIntersecting(() => ref, () => props.observeIntersection);
 
-  const video = message.content.video!;
-  const isMediaUnread = message.isMediaUnread;
+  const video = createMemo(() => props.message.content.video!);
+  const isMediaUnread = createMemo(() => props.message.isMediaUnread);
 
-  const [isLoadAllowed, setIsLoadAllowed] = useState(canAutoLoad);
-  const shouldLoad = Boolean(isLoadAllowed && isIntersecting);
-  const { mediaData, loadProgress } = useMediaWithLoadProgress(
-    getVideoMediaHash(video, 'inline'),
-    !shouldLoad,
-    getMediaFormat(video, 'inline'),
-  );
-  const fullMediaData = video.blobUrl || mediaData;
+  const [isLoadAllowed, setIsLoadAllowed] = createSignal(props.canAutoLoad);
+  const shouldLoad = createMemo(() => Boolean(isLoadAllowed() && isIntersecting));
+  const mediaWithLoadProgressResult = createMemo(() => useMediaWithLoadProgress(
+    () => getVideoMediaHash(video(), 'inline'),
+    !shouldLoad(),
+    () => getMediaFormat(video(), 'inline'),
+  ));
+  const mediaData = () => mediaWithLoadProgressResult().mediaData;
+  const loadProgress = () => mediaWithLoadProgressResult().loadProgress;
+  const fullMediaData = createMemo(() => video().blobUrl || mediaData());
 
-  const { loadProgress: downloadProgress } = useMediaWithLoadProgress(
-    getVideoMediaHash(video, 'download'),
-    !isDownloading,
+  const mediaWithLoadProgressResult2 = createMemo(() => useMediaWithLoadProgress(
+    () => getVideoMediaHash(video(), 'download'),
+    () => !props.isDownloading,
     ApiMediaFormat.BlobUrl,
-  );
+  ));
+  const downloadProgress = () => mediaWithLoadProgressResult2().loadProgress;
 
   const [isPlayerReady, markPlayerReady] = useFlag();
-  const hasTtl = hasMessageTtl(message);
-  const isInOneTimeModal = origin === 'oneTimeModal';
-  const shouldRenderSpoiler = hasTtl && !isInOneTimeModal;
-  const thumbDataUri = useThumbnail(message);
+  const hasTtl = createMemo(() => hasMessageTtl(props.message));
+  const isInOneTimeModal = createMemo(() => props.origin === 'oneTimeModal');
+  const shouldRenderSpoiler = createMemo(() => hasTtl() && !isInOneTimeModal());
+  const thumbDataUri = useThumbnail(() => props.message);
   const hasThumb = Boolean(thumbDataUri);
-  const noThumb = !hasThumb || isPlayerReady || shouldRenderSpoiler;
-  const thumbRef = useBlurredMediaThumbRef(video, noThumb);
-  useMediaTransition({ hasMediaData: !noThumb, ref: thumbRef });
+  const noThumb = createMemo(() => !hasThumb || isPlayerReady() || shouldRenderSpoiler());
+  const thumbRef = useBlurredMediaThumbRef(() => video(), () => noThumb());
+  // TODO(codemod): ref option: hand the result `ref` to the element (ref={t.ref}) instead
+  createMediaTransition({ hasMediaData: () => !noThumb(), ref: thumbRef });
 
-  const isTransferring = (isLoadAllowed && !isPlayerReady) || isDownloading;
-  const wasLoadDisabled = usePreviousDeprecated(isLoadAllowed) === false;
+  const isTransferring = createMemo(() => (isLoadAllowed() && !isPlayerReady()) || props.isDownloading);
+  const wasLoadDisabled = createMemo(() => previous(() => isLoadAllowed()) === false);
 
-  const { ref: spinnerRef, shouldRender: shouldRenderSpinner } = useShowTransition({
-    isOpen: isTransferring,
-    noMountTransition: wasLoadDisabled,
-    withShouldRender: true,
+  const { ref: spinnerRef, shouldRender: shouldRenderSpinner } = createShowTransition({
+    isOpen: () => isTransferring(),
+    noMountTransition: wasLoadDisabled(),
   });
 
-  const [isActivated, setIsActivated] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
+  const [isActivated, setIsActivated] = createSignal(false);
+  const [currentTime, setCurrentTime] = createSignal(0);
 
-  const [getProgress, setProgress] = useSignal(0);
-  const getThrottledProgress = useThrottledSignal(getProgress, PROGRESS_THROTTLE);
+  const [getProgress, setProgress] = createSignal(0);
+  const getThrottledProgress = useThrottledSignal(() => getProgress(), PROGRESS_THROTTLE);
 
-  useEffect(() => {
-    if (!isActivated) {
+  createEffect(depsOf(() => [setProgress, isActivated(), getThrottledProgress] as const), ([, isActivated2]) => {
+    if (!isActivated2) {
       return;
     }
 
-    const playerEl = playerRef.current!;
+    const playerEl = playerRef!;
     setProgress(playerEl.currentTime / playerEl.duration);
-  }, [setProgress, isActivated, getThrottledProgress]);
+  });
 
-  useLayoutEffect(() => {
-    if (!isActivated || !circleRef.current) {
+  createMutationEffect(depsOf(() => [isActivated(), getThrottledProgress] as const), ([isActivated2]) => {
+    if (!isActivated2 || !circleRef) {
       return;
     }
 
     const strokeDashOffset = PROGRESS_CIRCUMFERENCE - getThrottledProgress() * PROGRESS_CIRCUMFERENCE;
-    circleRef.current.setAttribute('stroke-dashoffset', strokeDashOffset.toString());
-  }, [isActivated, getThrottledProgress]);
+    circleRef.setAttribute('stroke-dashoffset', strokeDashOffset.toString());
+  });
 
-  const shouldPlay = Boolean(fullMediaData && isIntersecting);
+  const shouldPlay = createMemo(() => Boolean(fullMediaData() && isIntersecting));
 
-  const stopPlaying = useLastCallback(() => {
-    if (!playerRef.current) {
+  const stopPlaying = () => {
+    if (!playerRef) {
       return;
     }
 
     setIsActivated(false);
     setProgress(0);
-    safePlay(playerRef.current);
-  });
+    safePlay(playerRef);
+  };
 
-  const capturePlaying = useLastCallback(() => {
+  const capturePlaying = () => {
     stopPrevious?.();
     stopPrevious = stopPlaying;
-  });
+  };
 
-  const togglePlaying = useLastCallback(() => {
-    const playerEl = playerRef.current!;
-    if (isActivated) {
+  const togglePlaying = () => {
+    const playerEl = playerRef!;
+    if (isActivated()) {
       if (playerEl.paused) {
         safePlay(playerEl);
         stopCurrentAudio();
@@ -177,59 +162,59 @@ const RoundVideo = ({
       stopCurrentAudio();
       setIsActivated(true);
     }
-  });
+  };
 
-  useEffect(() => {
-    if (!isInOneTimeModal) {
+  createEffect(() => isInOneTimeModal(), (isInOneTimeModal2) => {
+    if (!isInOneTimeModal2) {
       return;
     }
     togglePlaying();
-  }, [isInOneTimeModal]);
+  });
 
-  const handleClick = useLastCallback((event) => {
+  const handleClick = (event) => {
     if (event.target.closest('.transcribe-button')) {
       return;
     }
 
-    if (!fullMediaData) {
+    if (!fullMediaData()) {
       setIsLoadAllowed((isAllowed) => !isAllowed);
 
       return;
     }
 
-    if (isDownloading) {
-      cancelMediaDownload({ media: video });
+    if (props.isDownloading) {
+      cancelMediaDownload({ media: video() });
       return;
     }
 
-    if (hasTtl && !isInOneTimeModal) {
-      openOneTimeMediaModal({ message });
-      onReadMedia?.();
+    if (hasTtl() && !isInOneTimeModal()) {
+      openOneTimeMediaModal({ message: props.message });
+      props.onReadMedia?.();
       return;
     }
 
     togglePlaying();
+  };
+
+  createEffect(depsOf(() => [isActivated(), isMediaUnread(), props.onReadMedia] as const), ([isActivated2, isMediaUnread2, onReadMedia2]) => {
+    if (onReadMedia2 && isMediaUnread2 && isActivated2) {
+      onReadMedia2();
+    }
   });
 
-  useEffect(() => {
-    if (onReadMedia && isMediaUnread && isActivated) {
-      onReadMedia();
-    }
-  }, [isActivated, isMediaUnread, onReadMedia]);
-
-  const handleTimeUpdate = useLastCallback((e: React.UIEvent<HTMLVideoElement>) => {
+  const handleTimeUpdate = (e: React.UIEvent<HTMLVideoElement>) => {
     const playerEl = e.currentTarget;
     setProgress(playerEl.currentTime / playerEl.duration);
     setCurrentTime(Math.floor(playerEl.currentTime));
-  });
+  };
 
-  const handleTranscribe = useLastCallback(() => {
-    transcribeAudio({ chatId: message.chatId, messageId: message.id });
-  });
+  const handleTranscribe = () => {
+    transcribeAudio({ chatId: props.message.chatId, messageId: props.message.id });
+  };
 
   function renderPlayWrapper() {
     return (
-      <div className="play-wrapper">
+      <div class="play-wrapper">
         <Button
           color="dark"
           round
@@ -244,23 +229,23 @@ const RoundVideo = ({
     );
   }
 
-  const handleButtonClick = useLastCallback(() => {
-    if ((isTranscribed || isTranscriptionError) && onHideTranscription) {
-      onHideTranscription(!isTranscriptionHidden);
-    } else if (!isTranscribing) {
+  const handleButtonClick = () => {
+    if ((props.isTranscribed || props.isTranscriptionError) && props.onHideTranscription) {
+      props.onHideTranscription(!props.isTranscriptionHidden);
+    } else if (!props.isTranscribing) {
       handleTranscribe();
     }
-  });
+  };
 
   return (
     <div
       ref={ref}
-      className={buildClassName('RoundVideo', 'media-inner', isInOneTimeModal && 'non-interactive', className)}
+      class={buildClassName('RoundVideo', 'media-inner', isInOneTimeModal() && 'non-interactive', props.className)}
       onClick={handleClick}
     >
-      {fullMediaData && (
-        <div className="video-wrapper">
-          {shouldRenderSpoiler && (
+      {fullMediaData() && (
+        <div class="video-wrapper">
+          {shouldRenderSpoiler() && (
             <MediaSpoiler
               isVisible
               thumbDataUri={thumbDataUri}
@@ -270,41 +255,41 @@ const RoundVideo = ({
             />
           )}
           <OptimizedVideo
-            canPlay={shouldPlay}
+            canPlay={shouldPlay()}
             ref={playerRef}
-            src={fullMediaData}
+            src={fullMediaData()}
             className="full-media"
             width={ROUND_VIDEO_DIMENSIONS_PX}
             height={ROUND_VIDEO_DIMENSIONS_PX}
-            autoPlay={!shouldRenderSpoiler}
+            autoPlay={!shouldRenderSpoiler()}
             disablePictureInPicture
-            muted={!isActivated}
+            muted={!isActivated()}
             defaultMuted
-            loop={!isActivated}
+            loop={!isActivated()}
             playsInline
             isPriority
-            onEnded={isActivated ? (onStop ?? stopPlaying) : undefined}
-            onTimeUpdate={isActivated ? handleTimeUpdate : undefined}
+            onEnded={isActivated() ? (props.onStop ?? stopPlaying) : undefined}
+            onTimeUpdate={isActivated() ? handleTimeUpdate : undefined}
             onReady={markPlayerReady}
           />
         </div>
       )}
-      {!shouldRenderSpoiler && (
+      {!shouldRenderSpoiler() && (
         <canvas
           ref={thumbRef}
-          className="thumbnail"
+          class="thumbnail"
           style={`width: ${ROUND_VIDEO_DIMENSIONS_PX}px; height: ${ROUND_VIDEO_DIMENSIONS_PX}px`}
         />
       )}
-      <div className="progress">
-        {isActivated && (
+      <div class="progress">
+        {isActivated() && (
           <svg width={ROUND_VIDEO_DIMENSIONS_PX} height={ROUND_VIDEO_DIMENSIONS_PX}>
             <circle
               ref={circleRef}
               cx={PROGRESS_CENTER}
               cy={PROGRESS_CENTER}
               r={PROGRESS_CENTER - PROGRESS_MARGIN}
-              className="progress-circle"
+              class="progress-circle"
               transform={`rotate(-90, ${PROGRESS_CENTER}, ${PROGRESS_CENTER})`}
               stroke-dasharray={PROGRESS_CIRCUMFERENCE}
               stroke-dashoffset={PROGRESS_CIRCUMFERENCE}
@@ -312,28 +297,28 @@ const RoundVideo = ({
           </svg>
         )}
       </div>
-      {shouldRenderSpinner && (
-        <div ref={spinnerRef} className={buildClassName('media-loading', styles.loading)}>
-          <ProgressSpinner progress={isDownloading ? downloadProgress : loadProgress} />
+      {shouldRenderSpinner() && (
+        <div ref={spinnerRef} class={buildClassName('media-loading', styles.loading)}>
+          <ProgressSpinner progress={props.isDownloading ? downloadProgress() : loadProgress()} />
         </div>
       )}
-      {shouldRenderSpoiler && !shouldRenderSpinner && renderPlayWrapper()}
-      {!fullMediaData && !isLoadAllowed && (
+      {shouldRenderSpoiler() && !shouldRenderSpinner() && renderPlayWrapper()}
+      {!fullMediaData() && !isLoadAllowed() && (
         <Icon name="download" className={buildClassName(styles.controlButton, styles.downloadButton)} />
       )}
-      {!isInOneTimeModal && (
-        <MediaBadge className={buildClassName('message-media-duration', isMediaUnread && 'unread')}>
-          {isActivated ? formatMediaDuration(currentTime) : formatMediaDuration(video.duration)}
-          {(!isActivated || playerRef.current!.paused) && <Icon name="muted" className="muted-icon" />}
+      {!isInOneTimeModal() && (
+        <MediaBadge className={buildClassName('message-media-duration', isMediaUnread() && 'unread')}>
+          {isActivated() ? formatMediaDuration(currentTime()) : formatMediaDuration(video().duration)}
+          {(!isActivated() || playerRef!.paused) && <Icon name="muted" className="muted-icon" />}
         </MediaBadge>
       )}
-      {canTranscribe && (
+      {props.canTranscribe && (
         <Button onClick={handleButtonClick} className="transcribe-button">
-          {isTranscribed || isTranscriptionError ? <Icon name="down" /> : <Icon name="transcribe" />}
-          {isTranscribing && (
-            <svg viewBox="0 0 32 24" className="loading-svg">
+          {props.isTranscribed || props.isTranscriptionError ? <Icon name="down" /> : <Icon name="transcribe" />}
+          {props.isTranscribing && (
+            <svg viewBox="0 0 32 24" class="loading-svg">
               <rect
-                className="loading-rect"
+                class="loading-rect"
                 fill="transparent"
                 width="32"
                 height="24"

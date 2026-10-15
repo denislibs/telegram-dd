@@ -1,15 +1,13 @@
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import type { FC } from '../../../../lib/teact/teact';
-import { memo, useMemo } from '../../../../lib/teact/teact';
-import { getActions, withGlobal } from '../../../../global';
+import { createMemo } from 'frameact';
+import { getActions } from '../../../../global';
+import type { GlobalState } from '../../../../global/types';
 
 import type { OwnProps as PhotoProps } from '../Photo';
 import type { OwnProps as VideoProps } from '../Video';
 
 import { selectIsInSelectMode, selectIsMessageSelected } from '../../../../global/selectors';
 import buildClassName from '../../../../util/buildClassName';
-
-import useLastCallback from '../../../../hooks/useLastCallback';
 
 import Icon from '../../../common/icons/Icon';
 
@@ -28,12 +26,12 @@ export default function withSelectControl(WrappedComponent: FC) {
     const { isInSelectMode, isSelected, clickArg } = props;
     const { toggleMessageSelection } = getActions();
 
-    const handleMessageSelect = useLastCallback((e: ReactMouseEvent<HTMLDivElement, MouseEvent>) => {
+    const handleMessageSelect = (e: ReactMouseEvent<HTMLDivElement, MouseEvent>) => {
       e.stopPropagation();
       toggleMessageSelection({ messageId: clickArg, withShift: e?.shiftKey });
-    });
+    };
 
-    const newProps = useMemo(() => {
+    const newProps = createMemo(() => {
       const { onClick } = props;
       return {
         ...props,
@@ -41,15 +39,15 @@ export default function withSelectControl(WrappedComponent: FC) {
         isSelected,
         onClick: isInSelectMode ? undefined : onClick,
       };
-    }, [props, isInSelectMode, isSelected]);
+    });
 
     return (
       <div
-        className={buildClassName('album-item-select-wrapper', isSelected && 'is-selected')}
+        class={buildClassName('album-item-select-wrapper', isSelected && 'is-selected')}
         onClick={isInSelectMode ? handleMessageSelect : undefined}
       >
         {isInSelectMode && (
-          <div className="message-select-control">
+          <div class="message-select-control">
             {isSelected && <Icon name="check" className="message-select-control-icon" />}
           </div>
         )}
@@ -58,13 +56,13 @@ export default function withSelectControl(WrappedComponent: FC) {
     );
   };
 
-  return memo(
-    withGlobal<OwnProps<unknown>>((global, ownProps) => {
+  const mapStateToProps = (global: GlobalState, ownProps: OwnProps<unknown>) => {
       const { clickArg, noSelectControls } = ownProps;
       return {
         isInSelectMode: !noSelectControls && selectIsInSelectMode(global),
         isSelected: !noSelectControls && selectIsMessageSelected(global, clickArg),
       };
-    })(ComponentWithSelectControl),
-  ) as typeof ComponentWithSelectControl;
+    };
+
+return ComponentWithSelectControl as typeof ComponentWithSelectControl;
 }

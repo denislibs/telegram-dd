@@ -1,9 +1,10 @@
-import { memo, useEffect, useRef, useState, useUnmountCleanup } from '@teact';
+import { createEffect, createMemo, createSignal, onDestroy } from 'frameact';
+import { Show } from 'frameact/dom';
+import { depsOf } from '../../util/effectDeps';
 
 import { formatFileSize } from '../../util/textFormat';
 
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
 
 type OwnProps = {
   className?: string;
@@ -15,73 +16,71 @@ const SKIP_AFTER = 1024 * 1024 * 1024; // 1GB
 const MIN_SIZE_INCREASE = 256 * 1024; // 256KB
 const UPDATES_PER_SECOND = 10;
 
-const AnimatedFileSize = ({ className, size, progress }: OwnProps) => {
+const AnimatedFileSize = (props: OwnProps) => {
   const lang = useLang();
-  const [currentSize, setCurrentSize] = useState<number>(0);
-  const timerRef = useRef<number>();
+  const [currentSize, setCurrentSize] = createSignal<number>(0);
+  let timerRef: number | undefined;
 
-  const resetAnimation = useLastCallback(() => {
-    clearTimeout(timerRef.current);
-    timerRef.current = undefined;
-  });
+  const resetAnimation = () => {
+    clearTimeout(timerRef);
+    timerRef = undefined;
+  };
 
-  const animateSize = useLastCallback(() => {
-    if (progress === undefined) return;
+  const animateSize = () => {
+    if (props.progress === undefined) return;
 
-    const currentTarget = size * progress;
-    const diff = currentTarget - currentSize;
+    const currentTarget = props.size * props.progress;
+    const diff = currentTarget - currentSize();
 
     if (diff !== 0) {
       const increase = Math.max(MIN_SIZE_INCREASE, diff / UPDATES_PER_SECOND);
-      const newSize = Math.min(currentTarget, currentSize + increase);
+      const newSize = Math.min(currentTarget, currentSize() + increase);
       setCurrentSize(newSize);
     }
 
-    timerRef.current = window.setTimeout(() => {
+    timerRef = window.setTimeout(() => {
       animateSize();
     }, 1000 / UPDATES_PER_SECOND);
-  });
+  };
 
-  useEffect(() => {
-    if (progress === undefined) {
+  createEffect(depsOf(() => [props.progress, props.size] as const), ([progress2, size2]) => {
+    if (progress2 === undefined) {
       resetAnimation();
       setCurrentSize(0);
       return;
     }
 
-    const currentProgress = size * progress;
-    if (currentProgress > SKIP_AFTER || progress === 1) {
+    const currentProgress = size2 * progress2;
+    if (currentProgress > SKIP_AFTER || progress2 === 1) {
       resetAnimation();
       setCurrentSize(currentProgress);
       return;
     }
 
-    if (timerRef.current) return;
+    if (timerRef) return;
 
     animateSize();
-  }, [progress, size]);
+  });
 
-  useUnmountCleanup(resetAnimation);
+  onDestroy(resetAnimation);
 
-  const currentSizeString = formatFileSize(lang, currentSize, 2);
-  const totalSizeString = formatFileSize(lang, size);
-
-  if (progress === undefined || progress === 1) {
-    return totalSizeString;
-  }
+  const currentSizeString = createMemo(() => formatFileSize(lang, currentSize(), 2));
+  const totalSizeString = createMemo(() => formatFileSize(lang, props.size));
 
   return (
-    <span className={className} dir={lang.isRtl ? 'rtl' : undefined}>
+    <Show when={!(props.progress === undefined || props.progress === 1)} fallback={totalSizeString()}>
+    <span class={props.className} dir={lang.isRtl ? 'rtl' : undefined}>
       {lang(
         'FileTransferProgress',
         {
-          currentSize: currentSizeString,
-          totalSize: totalSizeString,
+          currentSize: currentSizeString(),
+          totalSize: totalSizeString(),
         },
         { withNodes: true },
       )}
     </span>
+    </Show>
   );
 };
 
-export default memo(AnimatedFileSize);
+export default AnimatedFileSize;

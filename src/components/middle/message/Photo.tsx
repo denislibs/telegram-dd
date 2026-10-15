@@ -1,12 +1,13 @@
-import { memo, useEffect, useRef, useState } from '../../../lib/teact/teact';
+import { createEffect, createMemo, createMutationEffect, createSignal, previous, requestMutation } from 'frameact';
 import { getActions, withGlobal } from '../../../global';
+import { createMediaTransition, createShowTransition } from '../../../lib/kit';
+import { depsOf } from '../../../util/effectDeps';
+import type { GlobalState } from '../../../global/types';
 
 import type { ApiMediaExtendedPreview, ApiPhoto } from '../../../api/types';
-import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 import type { ThemeKey } from '../../../types';
 
 import { CUSTOM_APPENDIX_ATTRIBUTE, MESSAGE_CONTENT_SELECTOR } from '../../../config';
-import { requestMutation } from '../../../lib/fasterdom/fasterdom';
 import {
   getMediaDimensions,
   getMediaFormat,
@@ -20,13 +21,7 @@ import getCustomAppendixBg from './helpers/getCustomAppendixBg';
 
 import useFlag from '../../../hooks/useFlag';
 import { useIsIntersecting } from '../../../hooks/useIntersectionObserver';
-import useLastCallback from '../../../hooks/useLastCallback';
-import useLayoutEffectWithPrevDeps from '../../../hooks/useLayoutEffectWithPrevDeps';
-import useMediaTransition from '../../../hooks/useMediaTransition';
 import useMediaWithLoadProgress from '../../../hooks/useMediaWithLoadProgress';
-import usePrevious from '../../../hooks/usePrevious';
-import usePreviousDeprecated from '../../../hooks/usePreviousDeprecated';
-import useShowTransition from '../../../hooks/useShowTransition';
 import useBlurredMediaThumbRef from './hooks/useBlurredMediaThumbRef';
 
 import Icon from '../../common/icons/Icon';
@@ -65,132 +60,115 @@ type StateProps = {
   needsAgeVerification?: boolean;
 };
 
-const Photo = <T,>({
-  id,
-  photo,
-  isOwn,
-  canAutoLoad,
-  isInSelectMode,
-  isSelected,
-  uploadProgress,
-  size = 'inline',
-  layout = 'intrinsic',
-  nonInteractive,
-  noSpoilerReveal,
-  shouldAffectAppendix,
-  isDownloading,
-  isProtected,
-  theme,
-  clickArg,
-  className,
-  isMediaNsfw,
-  observeIntersection,
-  onClick,
-  onCancelUpload,
-  needsAgeVerification,
-}: OwnProps<T> & StateProps) => {
-  const ref = useRef<HTMLDivElement>();
-  const isPaidPreview = photo.mediaType === 'extendedMediaPreview';
-  const { width, height } = getMediaDimensions(photo);
+const Photo = <T,>(ownProps: OwnProps<T>) => {
+  const props = withGlobal(ownProps, mapStateToProps);
+  let ref!: HTMLDivElement;
+  const isPaidPreview = createMemo(() => props.photo.mediaType === 'extendedMediaPreview');
+  const getMediaDimensionsResult = createMemo(() => getMediaDimensions(props.photo));
+  const width = () => getMediaDimensionsResult().width;
+  const height = () => getMediaDimensionsResult().height;
 
-  const localBlobUrl = !isPaidPreview ? photo.blobUrl : undefined;
+  const localBlobUrl = createMemo(() => !isPaidPreview() ? props.photo.blobUrl : undefined);
 
-  const isIntersecting = useIsIntersecting(ref, observeIntersection);
+  const isIntersecting = useIsIntersecting(() => ref, () => props.observeIntersection);
 
-  const [isLoadAllowed, setIsLoadAllowed] = useState(canAutoLoad);
-  const shouldLoad = isLoadAllowed && isIntersecting && !isPaidPreview;
-  const { mediaData, loadProgress } = useMediaWithLoadProgress(
-    !isPaidPreview ? getPhotoMediaHash(photo, size) : undefined,
-    !shouldLoad,
-  );
-  const prevMediaData = usePrevious(mediaData);
-  const fullMediaData = localBlobUrl || mediaData;
+  const [isLoadAllowed, setIsLoadAllowed] = createSignal(props.canAutoLoad);
+  const shouldLoad = createMemo(() => isLoadAllowed() && isIntersecting && !isPaidPreview());
+  const mediaWithLoadProgressResult = createMemo(() => useMediaWithLoadProgress(
+    () => !isPaidPreview() ? getPhotoMediaHash(props.photo, (props.size === undefined ? 'inline' : props.size)) : undefined,
+    () => !shouldLoad(),
+  ));
+  const mediaData = () => mediaWithLoadProgressResult().mediaData;
+  const loadProgress = () => mediaWithLoadProgressResult().loadProgress;
+  const prevMediaData = previous(() => mediaData());
+  const fullMediaData = createMemo(() => localBlobUrl() || mediaData());
 
-  const { ref: fullMediaRef, shouldRender: shouldRenderFullMedia } = useMediaTransition<HTMLImageElement>({
-    hasMediaData: Boolean(fullMediaData),
-    withShouldRender: true,
+  const { ref: fullMediaRef, shouldRender: shouldRenderFullMedia } = createMediaTransition({
+    hasMediaData: () => Boolean(fullMediaData()),
   });
 
-  const withBlurredBackground = layout !== 'fill' && size === 'inline';
-  const [withThumb] = useState(!fullMediaData);
-  const noThumb = Boolean(fullMediaData);
-  const thumbRef = useBlurredMediaThumbRef(photo, noThumb);
-  useMediaTransition({ ref: thumbRef, hasMediaData: !noThumb });
-  const blurredBackgroundRef = useBlurredMediaThumbRef(photo, !withBlurredBackground);
-  const thumbDataUri = getMediaThumbUri(photo);
+  const withBlurredBackground = createMemo(() => (props.layout === undefined ? 'intrinsic' : props.layout) !== 'fill' && (props.size === undefined ? 'inline' : props.size) === 'inline');
+  const [withThumb] = createSignal(!fullMediaData());
+  const noThumb = createMemo(() => Boolean(fullMediaData()));
+  const thumbRef = useBlurredMediaThumbRef(() => props.photo, () => noThumb());
+  // TODO(codemod): ref option: hand the result `ref` to the element (ref={t.ref}) instead
+  createMediaTransition({ ref: thumbRef, hasMediaData: () => !noThumb() });
+  const blurredBackgroundRef = useBlurredMediaThumbRef(() => props.photo, () => !withBlurredBackground());
+  const thumbDataUri = createMemo(() => getMediaThumbUri(props.photo));
 
   const { updateContentSettings, openAgeVerificationModal } = getActions();
   const [isNsfwModalOpen, openNsfwModal, closeNsfwModal] = useFlag();
-  const [shouldAlwaysShowNsfw, setShouldAlwaysShowNsfw] = useState(false);
+  const [shouldAlwaysShowNsfw, setShouldAlwaysShowNsfw] = createSignal(false);
 
-  const shouldShowSpoiler = isPaidPreview || photo.isSpoiler || isMediaNsfw;
-  const [isSpoilerShown, showSpoiler, hideSpoiler] = useFlag(shouldShowSpoiler);
+  const shouldShowSpoiler = createMemo(() => isPaidPreview() || props.photo.isSpoiler || props.isMediaNsfw);
+  const [isSpoilerShown, showSpoiler, hideSpoiler] = useFlag(shouldShowSpoiler());
 
-  useEffect(() => {
-    if (shouldShowSpoiler) {
+  createEffect(() => shouldShowSpoiler(), (shouldShowSpoiler2) => {
+    if (shouldShowSpoiler2) {
       showSpoiler();
     } else {
       hideSpoiler();
     }
-  }, [shouldShowSpoiler]);
+  });
 
-  const handleNsfwConfirm = useLastCallback(() => {
+  const handleNsfwConfirm = () => {
     closeNsfwModal();
     hideSpoiler();
 
-    if (shouldAlwaysShowNsfw) {
+    if (shouldAlwaysShowNsfw()) {
       updateContentSettings({ isSensitiveEnabled: true });
     }
-  });
+  };
 
-  const { loadProgress: downloadProgress } = useMediaWithLoadProgress(
-    !isPaidPreview ? getPhotoMediaHash(photo, 'download') : undefined,
-    !isDownloading,
-    !isPaidPreview ? getMediaFormat(photo, 'download') : undefined,
-  );
+  const mediaWithLoadProgressResult2 = createMemo(() => useMediaWithLoadProgress(
+    () => !isPaidPreview() ? getPhotoMediaHash(props.photo, 'download') : undefined,
+    () => !props.isDownloading,
+    () => !isPaidPreview() ? getMediaFormat(props.photo, 'download') : undefined,
+  ));
+  const downloadProgress = () => mediaWithLoadProgressResult2().loadProgress;
 
-  const { isUploading, isTransferring, transferProgress } = getMediaTransferState(
-    uploadProgress || (isDownloading ? downloadProgress : loadProgress),
-    shouldLoad && !fullMediaData,
-    uploadProgress !== undefined,
-  );
-  const wasLoadDisabled = usePreviousDeprecated(isLoadAllowed) === false;
+  const getMediaTransferStateResult = createMemo(() => getMediaTransferState(
+    props.uploadProgress || (props.isDownloading ? downloadProgress() : loadProgress()),
+    shouldLoad() && !fullMediaData(),
+    props.uploadProgress !== undefined,
+  ));
+  const isUploading = () => getMediaTransferStateResult().isUploading;
+  const isTransferring = () => getMediaTransferStateResult().isTransferring;
+  const transferProgress = () => getMediaTransferStateResult().transferProgress;
+  const wasLoadDisabled = createMemo(() => previous(() => isLoadAllowed()) === false);
 
-  const { ref: spinnerRef, shouldRender: shouldRenderSpinner } = useShowTransition({
-    isOpen: isTransferring,
-    noMountTransition: wasLoadDisabled,
+  const { ref: spinnerRef, shouldRender: shouldRenderSpinner } = createShowTransition({
+    isOpen: () => isTransferring(),
+    noMountTransition: wasLoadDisabled(),
     className: 'slow',
-    withShouldRender: true,
   });
-  const { ref: downloadButtonRef, shouldRender: shouldRenderDownloadButton } = useShowTransition({
-    isOpen: !fullMediaData && !isLoadAllowed,
-    withShouldRender: true,
+  const { ref: downloadButtonRef, shouldRender: shouldRenderDownloadButton } = createShowTransition({
+    isOpen: () => !fullMediaData() && !isLoadAllowed(),
   });
-  const { ref: transferProgressRef, shouldRender: shouldRenderTransferProgress } = useShowTransition({
-    isOpen: isTransferring,
-    noMountTransition: wasLoadDisabled,
-    withShouldRender: true,
+  const { ref: transferProgressRef, shouldRender: shouldRenderTransferProgress } = createShowTransition({
+    isOpen: () => isTransferring(),
+    noMountTransition: wasLoadDisabled(),
   });
 
-  const handleClick = useLastCallback((e: React.MouseEvent<HTMLElement>) => {
-    if (isUploading) {
-      onCancelUpload?.(clickArg!);
+  const handleClick = (e: React.MouseEvent<HTMLElement>) => {
+    if (isUploading()) {
+      props.onCancelUpload?.(props.clickArg!);
       return;
     }
 
-    if (isSpoilerShown && noSpoilerReveal) {
-      onClick?.(clickArg!, e);
+    if (isSpoilerShown() && props.noSpoilerReveal) {
+      props.onClick?.(props.clickArg!, e);
       return;
     }
 
-    if (!fullMediaData) {
+    if (!fullMediaData()) {
       setIsLoadAllowed((isAllowed) => !isAllowed);
       return;
     }
 
-    if (isSpoilerShown) {
-      if (isMediaNsfw) {
-        if (needsAgeVerification) {
+    if (isSpoilerShown()) {
+      if (props.isMediaNsfw) {
+        if (props.needsAgeVerification) {
           openAgeVerificationModal();
           return;
         }
@@ -201,22 +179,23 @@ const Photo = <T,>({
       return;
     }
 
-    onClick?.(clickArg!, e);
-  });
+    props.onClick?.(props.clickArg!, e);
+  };
 
-  useLayoutEffectWithPrevDeps(
-    ([prevShouldAffectAppendix]) => {
-      if (!shouldAffectAppendix) {
+  createMutationEffect(
+    depsOf(() => [props.shouldAffectAppendix, fullMediaData(), props.isOwn, props.isInSelectMode, props.isSelected, props.theme]), (_deps, prev) => {
+      const [prevShouldAffectAppendix] = prev ?? [];
+      if (!props.shouldAffectAppendix) {
         if (prevShouldAffectAppendix) {
-          ref.current!.closest<HTMLDivElement>(MESSAGE_CONTENT_SELECTOR)!.removeAttribute(CUSTOM_APPENDIX_ATTRIBUTE);
+          ref!.closest<HTMLDivElement>(MESSAGE_CONTENT_SELECTOR)!.removeAttribute(CUSTOM_APPENDIX_ATTRIBUTE);
         }
         return;
       }
 
-      const contentEl = ref.current!.closest<HTMLDivElement>(MESSAGE_CONTENT_SELECTOR)!;
-      if (fullMediaData) {
+      const contentEl = ref!.closest<HTMLDivElement>(MESSAGE_CONTENT_SELECTOR)!;
+      if (fullMediaData()) {
         const messageId = Number(contentEl.closest<HTMLDivElement>('.Message')!.dataset.messageId);
-        getCustomAppendixBg(fullMediaData, Boolean(isOwn), messageId, isSelected, theme).then((appendixBg) => {
+        getCustomAppendixBg(fullMediaData(), Boolean(props.isOwn), messageId, props.isSelected, props.theme).then((appendixBg) => {
           requestMutation(() => {
             contentEl.style.setProperty('--appendix-bg', appendixBg);
             contentEl.setAttribute(CUSTOM_APPENDIX_ATTRIBUTE, '');
@@ -226,42 +205,41 @@ const Photo = <T,>({
         contentEl.classList.add('has-appendix-thumb');
       }
     },
-    [shouldAffectAppendix, fullMediaData, isOwn, isInSelectMode, isSelected, theme],
   );
 
-  const componentClassName = buildClassName(
+  const componentClassName = createMemo(() => buildClassName(
     'media-inner',
     styles.frame,
-    styles[layout],
-    size === 'pictogram' && styles.pictogram,
-    !isUploading && !nonInteractive && 'interactive',
-    (width === height || size === 'pictogram') && 'square-image',
-    className,
-  );
+    styles[(props.layout === undefined ? 'intrinsic' : props.layout)],
+    (props.size === undefined ? 'inline' : props.size) === 'pictogram' && styles.pictogram,
+    !isUploading() && !props.nonInteractive && 'interactive',
+    (width() === height() || (props.size === undefined ? 'inline' : props.size) === 'pictogram') && 'square-image',
+    props.className,
+  ));
 
   const style =
-    size === 'inline' ? buildStyle(`--media-width: ${width}px`, `--media-aspect-ratio: ${width / height}`) : undefined;
+    createMemo(() => (props.size === undefined ? 'inline' : props.size) === 'inline' ? buildStyle(`--media-width: ${width()}px`, `--media-aspect-ratio: ${width() / height()}`) : undefined);
 
   return (
-    <div id={id} ref={ref} className={componentClassName} style={style} onClick={isUploading ? undefined : handleClick}>
-      {withBlurredBackground && <canvas ref={blurredBackgroundRef} className="thumbnail blurred-bg" />}
-      {shouldRenderFullMedia && (
+    <div id={props.id} ref={ref} class={componentClassName()} style={style()} onClick={isUploading() ? undefined : handleClick}>
+      {withBlurredBackground() && <canvas ref={blurredBackgroundRef} class="thumbnail blurred-bg" />}
+      {shouldRenderFullMedia() && (
         <img
           ref={fullMediaRef}
-          src={fullMediaData || prevMediaData}
-          className="full-media"
+          src={fullMediaData() || prevMediaData()}
+          class="full-media"
           alt=""
-          draggable={!isProtected}
+          draggable={!props.isProtected}
         />
       )}
-      {withThumb && <canvas ref={thumbRef} className="thumbnail" />}
-      {isProtected && <span className="protector" />}
-      {shouldRenderSpinner && !shouldRenderDownloadButton && (
-        <div ref={spinnerRef} className={buildClassName('media-loading', styles.loading)}>
-          <ProgressSpinner progress={transferProgress} onClick={isUploading ? handleClick : undefined} />
+      {withThumb() && <canvas ref={thumbRef} class="thumbnail" />}
+      {props.isProtected && <span class="protector" />}
+      {shouldRenderSpinner() && !shouldRenderDownloadButton() && (
+        <div ref={spinnerRef} class={buildClassName('media-loading', styles.loading)}>
+          <ProgressSpinner progress={transferProgress()} onClick={isUploading() ? handleClick : undefined} />
         </div>
       )}
-      {shouldRenderDownloadButton && (
+      {shouldRenderDownloadButton() && (
         <Icon
           ref={downloadButtonRef}
           name="download"
@@ -269,23 +247,23 @@ const Photo = <T,>({
         />
       )}
       <MediaSpoiler
-        isVisible={isSpoilerShown}
-        withAnimation={noSpoilerReveal ? undefined : true}
-        thumbDataUri={thumbDataUri}
-        width={width}
-        height={height}
+        isVisible={isSpoilerShown()}
+        withAnimation={props.noSpoilerReveal ? undefined : true}
+        thumbDataUri={thumbDataUri()}
+        width={width()}
+        height={height()}
         className="media-spoiler"
-        isNsfw={isMediaNsfw}
+        isNsfw={props.isMediaNsfw}
       />
-      {shouldRenderTransferProgress && (
+      {shouldRenderTransferProgress() && (
         <MediaBadge ref={transferProgressRef} className="message-transfer-progress">
-          {`${Math.round(transferProgress * 100)}%`}
+          {`${Math.round(transferProgress() * 100)}%`}
         </MediaBadge>
       )}
       <SensitiveContentConfirmModal
-        isOpen={isNsfwModalOpen}
+        isOpen={isNsfwModalOpen()}
         onClose={closeNsfwModal}
-        shouldAlwaysShow={shouldAlwaysShowNsfw}
+        shouldAlwaysShow={shouldAlwaysShowNsfw()}
         onAlwaysShowChanged={setShouldAlwaysShowNsfw}
         confirmHandler={handleNsfwConfirm}
       />
@@ -293,13 +271,13 @@ const Photo = <T,>({
   );
 };
 
-export default memo(
-  withGlobal((global): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
     const appConfig = global.appConfig;
     const needsAgeVerification = appConfig.needAgeVideoVerification;
 
     return {
       needsAgeVerification,
     };
-  })(Photo),
-);
+  };
+
+export default Photo;

@@ -1,9 +1,8 @@
-import { memo, useMemo } from '../../../lib/teact/teact';
+import { createMemo } from 'frameact';
 import { getActions, getGlobal, withGlobal } from '../../../global';
 
 import type { ApiMediaExtendedPreview, ApiMessage, ApiPhoto, ApiVideo } from '../../../api/types';
 import type { GlobalState, TabState } from '../../../global/types';
-import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 import type { IAlbum, ThemeKey } from '../../../types';
 
 import {
@@ -22,8 +21,6 @@ import {
 import { getMessageKey } from '../../../util/keys/messageKey';
 import { AlbumRectPart, calculateAlbumLayout } from './helpers/calculateAlbumLayout';
 import withSelectControl from './hocs/withSelectControl';
-
-import useLastCallback from '../../../hooks/useLastCallback';
 
 import AlbumItem from './AlbumItem';
 import Photo from './Photo';
@@ -49,56 +46,47 @@ type StateProps = {
   activeDownloads: TabState['activeDownloads'];
 };
 
-const Album = ({
-  album,
-  observeIntersection,
-  hasCustomAppendix,
-  isOwn,
-  isProtected,
-  onMediaClick,
-  uploadsByKey,
-  activeDownloads,
-  theme,
-}: OwnProps & StateProps) => {
+const Album = (ownProps: OwnProps) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const { cancelUploadMedia } = getActions();
 
   const {
     content: { paidMedia },
-  } = album.mainMessage;
+  } = props.album.mainMessage;
 
-  const mediaCount = album.isPaidMedia ? paidMedia!.extendedMedia.length : album.messages.length;
+  const mediaCount = createMemo(() => props.album.isPaidMedia ? paidMedia!.extendedMedia.length : props.album.messages.length);
 
-  const handlePaidMediaClick = useLastCallback((index: number) => {
-    onMediaClick(album.mainMessage.id, index);
-  });
+  const handlePaidMediaClick = (index: number) => {
+    props.onMediaClick(props.album.mainMessage.id, index);
+  };
 
-  const handleAlbumMessageClick = useLastCallback((messageId: number) => {
-    onMediaClick(messageId);
-  });
+  const handleAlbumMessageClick = (messageId: number) => {
+    props.onMediaClick(messageId);
+  };
 
-  const handleCancelUpload = useLastCallback((messageId: number) => {
-    cancelUploadMedia({ chatId: album.mainMessage.chatId, messageId });
-  });
+  const handleCancelUpload = (messageId: number) => {
+    cancelUploadMedia({ chatId: props.album.mainMessage.chatId, messageId });
+  };
 
-  const messages = useMemo(() => {
-    if (album.isPaidMedia) {
-      return album.mainMessage.content.paidMedia!.extendedMedia.map(() => album.mainMessage);
+  const messages = createMemo(() => {
+    if (props.album.isPaidMedia) {
+      return props.album.mainMessage.content.paidMedia!.extendedMedia.map(() => props.album.mainMessage);
     }
 
-    return album.messages;
-  }, [album]);
+    return props.album.messages;
+  });
 
-  const albumLayout = useMemo(() => {
-    const ratios = getAlbumMedia(album).map((media) => {
+  const albumLayout = createMemo(() => {
+    const ratios = getAlbumMedia(props.album).map((media) => {
       const { width, height } = getMediaDimensions(media);
       return width / height;
     });
 
     return calculateAlbumLayout(ratios);
-  }, [album]);
+  });
 
   function renderAlbumMessage(message: ApiMessage, index: number) {
-    const renderingPaidMedia = album.isPaidMedia ? message.content.paidMedia?.extendedMedia[index] : undefined;
+    const renderingPaidMedia = props.album.isPaidMedia ? message.content.paidMedia?.extendedMedia[index] : undefined;
     const paidPhotoOrPreview =
       renderingPaidMedia && 'mediaType' in renderingPaidMedia ? renderingPaidMedia : renderingPaidMedia?.photo;
     const paidVideoOrPreview =
@@ -106,9 +94,9 @@ const Album = ({
     const photo = paidPhotoOrPreview || getMessagePhoto(message);
     const video = paidVideoOrPreview || getMessageContent(message).video;
 
-    const fileUpload = uploadsByKey[getMessageKey(message)];
+    const fileUpload = props.uploadsByKey[getMessageKey(message)];
     const uploadProgress = fileUpload?.progress;
-    const layoutItem = albumLayout.items[index];
+    const layoutItem = albumLayout().items[index];
     const { sides } = layoutItem;
 
     // Ignoring global updates is a known drawback here
@@ -118,44 +106,44 @@ const Album = ({
 
     if (photo) {
       const shouldAffectAppendix =
-        hasCustomAppendix &&
-        (isOwn ? index === mediaCount - 1 : Boolean(sides & AlbumRectPart.Left && sides & AlbumRectPart.Bottom));
+        props.hasCustomAppendix &&
+        (props.isOwn ? index === mediaCount() - 1 : Boolean(sides & AlbumRectPart.Left && sides & AlbumRectPart.Bottom));
 
       mediaElement = (
         <PhotoWithSelect
-          id={`album-media-${getMessageHtmlId(message.id, album.isPaidMedia ? index : undefined)}`}
+          id={`album-media-${getMessageHtmlId(message.id, props.album.isPaidMedia ? index : undefined)}`}
           photo={photo}
-          isOwn={isOwn}
-          observeIntersection={observeIntersection}
+          isOwn={props.isOwn}
+          observeIntersection={props.observeIntersection}
           canAutoLoad={canAutoLoad}
           shouldAffectAppendix={shouldAffectAppendix}
           uploadProgress={uploadProgress}
           layout="fill"
-          isProtected={isProtected}
-          clickArg={album.isPaidMedia ? index : message.id}
-          onClick={album.isPaidMedia ? handlePaidMediaClick : handleAlbumMessageClick}
+          isProtected={props.isProtected}
+          clickArg={props.album.isPaidMedia ? index : message.id}
+          onClick={props.album.isPaidMedia ? handlePaidMediaClick : handleAlbumMessageClick}
           onCancelUpload={handleCancelUpload}
-          isDownloading={photo.mediaType !== 'extendedMediaPreview' && getIsDownloading(activeDownloads, photo)}
-          theme={theme}
-          noSelectControls={album.isPaidMedia}
+          isDownloading={photo.mediaType !== 'extendedMediaPreview' && getIsDownloading(props.activeDownloads, photo)}
+          theme={props.theme}
+          noSelectControls={props.album.isPaidMedia}
         />
       );
     } else if (video) {
       mediaElement = (
         <VideoWithSelect
-          id={`album-media-${getMessageHtmlId(message.id, album.isPaidMedia ? index : undefined)}`}
+          id={`album-media-${getMessageHtmlId(message.id, props.album.isPaidMedia ? index : undefined)}`}
           video={video}
-          observeIntersectionForLoading={observeIntersection}
+          observeIntersectionForLoading={props.observeIntersection}
           canAutoLoad={canAutoLoad}
           canAutoPlay={canAutoPlay}
           uploadProgress={uploadProgress}
           layout="fill"
-          isProtected={isProtected}
-          clickArg={album.isPaidMedia ? index : message.id}
-          onClick={album.isPaidMedia ? handlePaidMediaClick : handleAlbumMessageClick}
+          isProtected={props.isProtected}
+          clickArg={props.album.isPaidMedia ? index : message.id}
+          onClick={props.album.isPaidMedia ? handlePaidMediaClick : handleAlbumMessageClick}
           onCancelUpload={handleCancelUpload}
-          isDownloading={video.mediaType !== 'extendedMediaPreview' && getIsDownloading(activeDownloads, video)}
-          noSelectControls={album.isPaidMedia}
+          isDownloading={video.mediaType !== 'extendedMediaPreview' && getIsDownloading(props.activeDownloads, video)}
+          noSelectControls={props.album.isPaidMedia}
         />
       );
     }
@@ -163,15 +151,16 @@ const Album = ({
     if (!mediaElement) return undefined;
 
     return (
-      <AlbumItem key={album.isPaidMedia ? index : message.id} item={layoutItem} className="album-item">
+      // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{(key) => …}</Show> (the callback MUST take an argument, a zero-argument child is a plain child and never remounts; a falsy key such as 0 renders nothing: use when={{ id: key }})
+      <AlbumItem key={props.album.isPaidMedia ? index : message.id} item={layoutItem} className="album-item">
         {mediaElement}
       </AlbumItem>
     );
   }
 
   return (
-    <div className="Album" style={`--album-aspect-ratio: ${albumLayout.aspectRatio}`}>
-      {messages.map(renderAlbumMessage)}
+    <div class="Album" style={`--album-aspect-ratio: ${albumLayout().aspectRatio}`}>
+      {messages().map(renderAlbumMessage)}
     </div>
   );
 };
@@ -188,8 +177,7 @@ function getAlbumMedia(album: IAlbum) {
   return media.filter((item): item is AlbumMedia => Boolean(item));
 }
 
-export default memo(
-  withGlobal<OwnProps>((global): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
     const theme = selectTheme(global);
     const activeDownloads = selectActiveDownloads(global);
 
@@ -198,5 +186,6 @@ export default memo(
       uploadsByKey: global.fileUploads.byMessageKey,
       activeDownloads,
     };
-  })(Album),
-);
+  };
+
+export default Album;

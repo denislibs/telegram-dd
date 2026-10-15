@@ -1,6 +1,7 @@
-import { memo, useEffect, useRef } from '../../lib/teact/teact';
+import { createEffect, createMemo, requestMutation } from 'frameact';
+import { mergeProps } from 'frameact/dom';
+import { depsOf } from '../../util/effectDeps';
 
-import { requestMutation } from '../../lib/fasterdom/fasterdom';
 import { animate, timingFunctions } from '../../util/animation';
 import buildClassName from '../../util/buildClassName';
 
@@ -37,32 +38,25 @@ const MAX_PROGRESS = 1;
 const GROW_DURATION = 600; // 0.6 s
 const ROTATE_DURATION = 2000; // 2 s
 
-const ProgressSpinner = ({
-  progress = 0,
-  size = 'l',
-  square,
-  transparent,
-  noCross,
-  rotationOffset,
-  withColor,
-  onClick,
-}: OwnProps) => {
-  const canvasRef = useRef<HTMLCanvasElement>();
-  const width = SIZES[size];
-  const progressRef = useStateRef(progress);
+const ProgressSpinner = (rawProps: OwnProps) => {
+  const props = mergeProps({ progress: 0, size: 'l' }, rawProps) as OwnProps & Required<Pick<OwnProps, 'progress' | 'size'>>;
+  let canvasRef!: HTMLCanvasElement;
+  const width = createMemo(() => SIZES[props.size]);
+  // TODO(codemod): useStateRef: a handler reads the current value through the accessor; replace ref.current with the accessor call
+  const progressRef = useStateRef(props.progress);
 
   const dpr = useDevicePixelRatio();
 
-  const color = useDynamicColorListener(canvasRef, undefined, !withColor);
+  const color = useDynamicColorListener(() => canvasRef, undefined, () => !props.withColor);
 
-  useEffect(() => {
+  createEffect(depsOf(() => [progressRef, props.size, width(), dpr, props.rotationOffset, color] as const), ([, size2, width2, , rotationOffset2]) => {
     let isFirst = true;
     let growFrom = MIN_PROGRESS;
     let growStartedAt: number | undefined;
     let prevProgress: number | undefined;
 
     animate(() => {
-      if (!canvasRef.current) {
+      if (!canvasRef) {
         return false;
       }
 
@@ -78,33 +72,33 @@ const ProgressSpinner = ({
       const currentProgress = growFrom + (targetProgress - growFrom) * animationFactor;
 
       drawSpinnerArc(
-        canvasRef.current,
-        width * dpr,
-        (size === 'xl' ? STROKE_WIDTH_XL : STROKE_WIDTH) * dpr,
+        canvasRef,
+        width2 * dpr,
+        (size2 === 'xl' ? STROKE_WIDTH_XL : STROKE_WIDTH) * dpr,
         color ?? 'white',
         currentProgress,
         dpr,
         isFirst,
-        rotationOffset,
+        rotationOffset2,
       );
 
       isFirst = false;
 
       return currentProgress < 1;
     }, requestMutation);
-  }, [progressRef, size, width, dpr, rotationOffset, color]);
+  });
 
-  const className = buildClassName(
-    `ProgressSpinner size-${size}`,
-    transparent && 'transparent',
-    square && 'square',
-    noCross && 'no-cross',
-  );
+  const className = createMemo(() => buildClassName(
+    `ProgressSpinner size-${props.size}`,
+    props.transparent && 'transparent',
+    props.square && 'square',
+    props.noCross && 'no-cross',
+  ));
 
   return (
-    <div className={className} onClick={onClick}>
-      {!noCross && <Icon name="close" />}
-      <canvas ref={canvasRef} className="ProgressSpinner_canvas" style={`width: ${width}px; height: ${width}px;`} />
+    <div class={className()} onClick={(e) => props.onClick?.(e)}>
+      {!props.noCross && <Icon name="close" />}
+      <canvas ref={canvasRef} class="ProgressSpinner_canvas" style={`width: ${width()}px; height: ${width()}px;`} />
     </div>
   );
 };
@@ -141,4 +135,4 @@ function drawSpinnerArc(
   ctx.stroke();
 }
 
-export default memo(ProgressSpinner);
+export default ProgressSpinner;

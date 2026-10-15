@@ -1,8 +1,9 @@
-import { memo, useEffect, useRef, useState } from '../../../lib/teact/teact';
+import { createEffect, createMemo, createSignal, previous } from 'frameact';
 import { getActions, withGlobal } from '../../../global';
+import { createMediaTransition, createShowTransition } from '../../../lib/kit';
+import type { GlobalState } from '../../../global/types';
 
 import type { ApiMediaExtendedPreview, ApiVideo } from '../../../api/types';
-import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
 
 import {
   getMediaDimensions,
@@ -19,12 +20,8 @@ import * as mediaLoader from '../../../util/mediaLoader';
 import useUnsupportedMedia from '../../../hooks/media/useUnsupportedMedia';
 import useFlag from '../../../hooks/useFlag';
 import { useIsIntersecting } from '../../../hooks/useIntersectionObserver';
-import useLastCallback from '../../../hooks/useLastCallback';
 import useMedia from '../../../hooks/useMedia';
-import useMediaTransition from '../../../hooks/useMediaTransition';
 import useMediaWithLoadProgress from '../../../hooks/useMediaWithLoadProgress';
-import usePreviousDeprecated from '../../../hooks/usePreviousDeprecated';
-import useShowTransition from '../../../hooks/useShowTransition';
 import useBlurredMediaThumbRef from './hooks/useBlurredMediaThumbRef';
 
 import Icon from '../../common/icons/Icon';
@@ -61,163 +58,153 @@ type StateProps = {
   needsAgeVerification?: boolean;
 };
 
-const Video = <T,>({
-  id,
-  video,
-  canAutoLoad,
-  canAutoPlay,
-  uploadProgress,
-  layout = 'intrinsic',
-  noSpoilerReveal,
-  isDownloading,
-  isProtected,
-  className,
-  lastPlaybackTimestamp,
-  clickArg,
-  isMediaNsfw,
-  observeIntersectionForLoading,
-  observeIntersectionForPlaying,
-  onClick,
-  onCancelUpload,
-  needsAgeVerification,
-}: OwnProps<T> & StateProps) => {
+const Video = <T,>(ownProps: OwnProps<T>) => {
+  const props = withGlobal(ownProps, mapStateToProps);
   const { cancelMediaDownload, updateContentSettings, openAgeVerificationModal } = getActions();
-  const ref = useRef<HTMLDivElement>();
-  const videoRef = useRef<HTMLVideoElement>();
+  let ref!: HTMLDivElement;
+  let videoRef!: HTMLVideoElement;
   const [isNsfwModalOpen, openNsfwModal, closeNsfwModal] = useFlag();
-  const [shouldAlwaysShowNsfw, setShouldAlwaysShowNsfw] = useState(false);
+  const [shouldAlwaysShowNsfw, setShouldAlwaysShowNsfw] = createSignal(false);
 
-  const isPaidPreview = video.mediaType === 'extendedMediaPreview';
-  const { width, height } = getMediaDimensions(video);
+  const isPaidPreview = createMemo(() => props.video.mediaType === 'extendedMediaPreview');
+  const getMediaDimensionsResult = createMemo(() => getMediaDimensions(props.video));
+  const width = () => getMediaDimensionsResult().width;
+  const height = () => getMediaDimensionsResult().height;
 
-  const localBlobUrl = !isPaidPreview ? video.blobUrl : undefined;
+  const localBlobUrl = createMemo(() => !isPaidPreview() ? props.video.blobUrl : undefined);
 
-  const shouldShowSpoiler = isPaidPreview || video.isSpoiler || isMediaNsfw;
-  const [isSpoilerShown, showSpoiler, hideSpoiler] = useFlag(shouldShowSpoiler);
+  const shouldShowSpoiler = createMemo(() => isPaidPreview() || props.video.isSpoiler || props.isMediaNsfw);
+  const [isSpoilerShown, showSpoiler, hideSpoiler] = useFlag(shouldShowSpoiler());
 
-  useEffect(() => {
-    if (shouldShowSpoiler) {
+  createEffect(() => shouldShowSpoiler(), (shouldShowSpoiler2) => {
+    if (shouldShowSpoiler2) {
       showSpoiler();
     } else {
       hideSpoiler();
     }
-  }, [shouldShowSpoiler]);
+  });
 
-  const handleNsfwConfirm = useLastCallback(() => {
+  const handleNsfwConfirm = () => {
     closeNsfwModal();
     hideSpoiler();
 
-    if (shouldAlwaysShowNsfw) {
+    if (shouldAlwaysShowNsfw()) {
       updateContentSettings({ isSensitiveEnabled: true });
     }
-  });
+  };
 
-  const isIntersectingForLoading = useIsIntersecting(ref, observeIntersectionForLoading);
-  const isIntersectingForPlaying = useIsIntersecting(ref, observeIntersectionForPlaying) && isIntersectingForLoading;
-  const wasIntersectedRef = useRef(isIntersectingForLoading);
-  if (isIntersectingForPlaying && !wasIntersectedRef.current) {
-    wasIntersectedRef.current = true;
+  const isIntersectingForLoading = useIsIntersecting(() => ref, () => props.observeIntersectionForLoading);
+  const isIntersectingForPlaying = createMemo(() => useIsIntersecting(() => ref, () => props.observeIntersectionForPlaying) && isIntersectingForLoading);
+  let wasIntersectedRef = isIntersectingForLoading;
+  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
+  if (isIntersectingForPlaying() && !wasIntersectedRef) {
+    wasIntersectedRef = true;
   }
 
-  const [isLoadAllowed, setIsLoadAllowed] = useState(canAutoLoad);
-  const shouldLoad = Boolean(isLoadAllowed && isIntersectingForLoading && !isPaidPreview);
-  const [isPlayAllowed, setIsPlayAllowed] = useState(Boolean(canAutoPlay && !isSpoilerShown));
+  const [isLoadAllowed, setIsLoadAllowed] = createSignal(props.canAutoLoad);
+  const shouldLoad = createMemo(() => Boolean(isLoadAllowed() && isIntersectingForLoading && !isPaidPreview()));
+  const [isPlayAllowed, setIsPlayAllowed] = createSignal(Boolean(props.canAutoPlay && !isSpoilerShown()));
 
-  const fullMediaHash = !isPaidPreview ? getVideoMediaHash(video, 'inline') : undefined;
-  const [isFullMediaPreloaded] = useState(Boolean(fullMediaHash && mediaLoader.getFromMemory(fullMediaHash)));
-  const { mediaData, loadProgress } = useMediaWithLoadProgress(
-    fullMediaHash,
-    !shouldLoad,
-    !isPaidPreview ? getMediaFormat(video, 'inline') : undefined,
-  );
-  const fullMediaData = localBlobUrl || mediaData;
+  const fullMediaHash = createMemo(() => !isPaidPreview() ? getVideoMediaHash(props.video, 'inline') : undefined);
+  const [isFullMediaPreloaded] = createSignal(Boolean(fullMediaHash() && mediaLoader.getFromMemory(fullMediaHash())));
+  const mediaWithLoadProgressResult = createMemo(() => useMediaWithLoadProgress(
+    () => fullMediaHash(),
+    () => !shouldLoad(),
+    () => !isPaidPreview() ? getMediaFormat(props.video, 'inline') : undefined,
+  ));
+  const mediaData = () => mediaWithLoadProgressResult().mediaData;
+  const loadProgress = () => mediaWithLoadProgressResult().loadProgress;
+  const fullMediaData = createMemo(() => localBlobUrl() || mediaData());
   const [isPlayerReady, markPlayerReady] = useFlag();
 
-  const thumbDataUri = getMediaThumbUri(video);
-  const hasThumb = Boolean(thumbDataUri);
-  const withBlurredBackground = layout !== 'fill';
+  const thumbDataUri = createMemo(() => getMediaThumbUri(props.video));
+  const hasThumb = createMemo(() => Boolean(thumbDataUri()));
+  const withBlurredBackground = createMemo(() => (props.layout === undefined ? 'intrinsic' : props.layout) !== 'fill');
 
-  const isInline = fullMediaData && wasIntersectedRef.current;
+  const isInline = createMemo(() => fullMediaData() && wasIntersectedRef);
 
-  const isUnsupported = useUnsupportedMedia(videoRef, true, !isInline);
+  const isUnsupported = useUnsupportedMedia(() => videoRef, true, () => !isInline());
 
-  const previewMediaHash = !isPaidPreview ? getVideoMediaHash(video, 'preview') : undefined;
-  const [isPreviewPreloaded] = useState(Boolean(previewMediaHash && mediaLoader.getFromMemory(previewMediaHash)));
+  const previewMediaHash = createMemo(() => !isPaidPreview() ? getVideoMediaHash(props.video, 'preview') : undefined);
+  const [isPreviewPreloaded] = createSignal(Boolean(previewMediaHash() && mediaLoader.getFromMemory(previewMediaHash())));
   const canLoadPreview = isIntersectingForLoading;
-  const previewBlobUrl = useMedia(previewMediaHash, !canLoadPreview);
-  const shouldHidePreview = isPlayerReady && !isUnsupported;
-  const { ref: previewRef } = useMediaTransition<HTMLImageElement>({
-    hasMediaData: Boolean((hasThumb || previewBlobUrl) && !shouldHidePreview),
+  const previewBlobUrl = useMedia(() => previewMediaHash(), !canLoadPreview);
+  const shouldHidePreview = createMemo(() => isPlayerReady() && !isUnsupported);
+  const { ref: previewRef } = createMediaTransition({
+    hasMediaData: () => Boolean((hasThumb() || previewBlobUrl) && !shouldHidePreview()),
   });
 
-  const noThumb = Boolean(!hasThumb || previewBlobUrl || isPlayerReady);
-  const thumbRef = useBlurredMediaThumbRef(video, noThumb);
-  useMediaTransition({ ref: thumbRef, hasMediaData: !noThumb });
-  const blurredBackgroundRef = useBlurredMediaThumbRef(video, !withBlurredBackground);
+  const noThumb = createMemo(() => Boolean(!hasThumb() || previewBlobUrl || isPlayerReady()));
+  const thumbRef = useBlurredMediaThumbRef(() => props.video, () => noThumb());
+  // TODO(codemod): ref option: hand the result `ref` to the element (ref={t.ref}) instead
+  createMediaTransition({ ref: thumbRef, hasMediaData: () => !noThumb() });
+  const blurredBackgroundRef = useBlurredMediaThumbRef(() => props.video, () => !withBlurredBackground());
 
-  const { loadProgress: downloadProgress } = useMediaWithLoadProgress(
-    !isPaidPreview ? getVideoMediaHash(video, 'download') : undefined,
-    !isDownloading,
-    !isPaidPreview ? getMediaFormat(video, 'download') : undefined,
-  );
+  const mediaWithLoadProgressResult2 = createMemo(() => useMediaWithLoadProgress(
+    () => !isPaidPreview() ? getVideoMediaHash(props.video, 'download') : undefined,
+    () => !props.isDownloading,
+    () => !isPaidPreview() ? getMediaFormat(props.video, 'download') : undefined,
+  ));
+  const downloadProgress = () => mediaWithLoadProgressResult2().loadProgress;
 
-  const { isUploading, isTransferring, transferProgress } = getMediaTransferState(
-    uploadProgress || (isDownloading ? downloadProgress : loadProgress),
-    (shouldLoad && !isPlayerReady && !isFullMediaPreloaded) || isDownloading,
-    uploadProgress !== undefined,
-  );
+  const getMediaTransferStateResult = createMemo(() => getMediaTransferState(
+    props.uploadProgress || (props.isDownloading ? downloadProgress() : loadProgress()),
+    (shouldLoad() && !isPlayerReady() && !isFullMediaPreloaded()) || props.isDownloading,
+    props.uploadProgress !== undefined,
+  ));
+  const isUploading = () => getMediaTransferStateResult().isUploading;
+  const isTransferring = () => getMediaTransferStateResult().isTransferring;
+  const transferProgress = () => getMediaTransferStateResult().transferProgress;
 
-  const wasLoadDisabled = usePreviousDeprecated(isLoadAllowed) === false;
-  const { ref: spinnerRef, shouldRender: shouldRenderSpinner } = useShowTransition({
-    isOpen: isTransferring && !isUnsupported,
-    noMountTransition: wasLoadDisabled,
-    withShouldRender: true,
+  const wasLoadDisabled = createMemo(() => previous(() => isLoadAllowed()) === false);
+  const { ref: spinnerRef, shouldRender: shouldRenderSpinner } = createShowTransition({
+    isOpen: () => isTransferring() && !isUnsupported,
+    noMountTransition: wasLoadDisabled(),
   });
-  const { ref: playButtonRef } = useShowTransition({
-    isOpen: Boolean((isLoadAllowed || fullMediaData) && !isPlayAllowed && !shouldRenderSpinner),
+  const { ref: playButtonRef } = createShowTransition({
+    isOpen: () => Boolean((isLoadAllowed() || fullMediaData()) && !isPlayAllowed() && !shouldRenderSpinner()),
   });
-  const { ref: transferProgressRef, shouldRender: shouldRenderTransferProgress } = useShowTransition({
-    isOpen: isTransferring && (!isUnsupported || isDownloading),
-    noMountTransition: wasLoadDisabled,
-    withShouldRender: true,
+  const { ref: transferProgressRef, shouldRender: shouldRenderTransferProgress } = createShowTransition({
+    isOpen: () => isTransferring() && (!isUnsupported || props.isDownloading),
+    noMountTransition: wasLoadDisabled(),
   });
 
-  const [playProgress, setPlayProgress] = useState<number>(0);
-  const handleTimeUpdate = useLastCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
+  const [playProgress, setPlayProgress] = createSignal<number>(0);
+  const handleTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
     setPlayProgress(Math.max(0, e.currentTarget.currentTime - 1));
-  });
+  };
 
   const duration =
-    (Number.isFinite(videoRef.current?.duration) && !isUnsupported ? videoRef.current?.duration : video.duration) || 0;
+    createMemo(() => (Number.isFinite(videoRef?.duration) && !isUnsupported ? videoRef?.duration : props.video.duration) || 0);
 
-  const handleClick = useLastCallback((e: React.MouseEvent<HTMLElement, MouseEvent>, isFromSpinner?: boolean) => {
-    if (isUploading) {
-      onCancelUpload?.(clickArg!);
+  const handleClick = (e: React.MouseEvent<HTMLElement, MouseEvent>, isFromSpinner?: boolean) => {
+    if (isUploading()) {
+      props.onCancelUpload?.(props.clickArg!);
       return;
     }
 
-    if (isSpoilerShown && noSpoilerReveal) {
-      onClick?.(clickArg!, e);
+    if (isSpoilerShown() && props.noSpoilerReveal) {
+      props.onClick?.(props.clickArg!, e);
       return;
     }
 
-    if (!isPaidPreview && isDownloading) {
-      cancelMediaDownload({ media: video });
+    if (!isPaidPreview() && props.isDownloading) {
+      cancelMediaDownload({ media: props.video });
       return;
     }
 
-    if (!fullMediaData) {
+    if (!fullMediaData()) {
       setIsLoadAllowed((isAllowed) => !isAllowed);
       return;
     }
 
-    if (fullMediaData && !isPlayAllowed) {
+    if (fullMediaData() && !isPlayAllowed()) {
       setIsPlayAllowed(true);
     }
 
-    if (isSpoilerShown) {
-      if (isMediaNsfw) {
-        if (needsAgeVerification) {
+    if (isSpoilerShown()) {
+      if (props.isMediaNsfw) {
+        if (props.needsAgeVerification) {
           openAgeVerificationModal();
           return;
         }
@@ -228,101 +215,101 @@ const Video = <T,>({
       return;
     }
 
-    if (isFromSpinner && shouldLoad && !isPlayerReady && !isFullMediaPreloaded) {
+    if (isFromSpinner && shouldLoad() && !isPlayerReady() && !isFullMediaPreloaded()) {
       setIsLoadAllowed(false);
       e.stopPropagation();
       return;
     }
 
-    onClick?.(clickArg!, e);
-  });
+    props.onClick?.(props.clickArg!, e);
+  };
 
-  const handleClickOnSpinner = useLastCallback((e: React.MouseEvent<HTMLElement, MouseEvent>) => {
+  const handleClickOnSpinner = (e: React.MouseEvent<HTMLElement, MouseEvent>) => {
     handleClick(e, true);
-  });
+  };
 
-  const componentClassName = buildClassName(
+  const componentClassName = createMemo(() => buildClassName(
     'media-inner dark',
     mediaStyles.frame,
-    mediaStyles[layout],
-    !isUploading && 'interactive',
-    className,
-  );
+    mediaStyles[(props.layout === undefined ? 'intrinsic' : props.layout)],
+    !isUploading() && 'interactive',
+    props.className,
+  ));
 
-  const style = buildStyle(`--media-width: ${width}px`, `--media-aspect-ratio: ${width / height}`);
+  const style = createMemo(() => buildStyle(`--media-width: ${width()}px`, `--media-aspect-ratio: ${width() / height()}`));
 
   return (
     <div
       ref={ref}
-      id={id}
-      className={componentClassName}
-      style={style}
-      onClick={isUploading ? undefined : (e) => handleClick(e)}
+      id={props.id}
+      class={componentClassName()}
+      style={style()}
+      onClick={isUploading() ? undefined : (e) => handleClick(e)}
     >
-      {withBlurredBackground && <canvas ref={blurredBackgroundRef} className="thumbnail blurred-bg" />}
-      {isInline && (
+      {withBlurredBackground() && <canvas ref={blurredBackgroundRef} class="thumbnail blurred-bg" />}
+      {isInline() && (
         <OptimizedVideo
           ref={videoRef}
-          src={fullMediaData}
+          src={fullMediaData()}
           className="full-media"
-          canPlay={isPlayAllowed && isIntersectingForPlaying && !isUnsupported}
+          canPlay={isPlayAllowed() && isIntersectingForPlaying() && !isUnsupported}
           defaultMuted
           muted
           loop
           playsInline
           disablePictureInPicture
-          draggable={!isProtected}
+          draggable={!props.isProtected}
           onTimeUpdate={handleTimeUpdate}
           onReady={markPlayerReady}
         />
       )}
       {previewBlobUrl && (
-        <img ref={previewRef} src={previewBlobUrl} className="thumbnail" alt="" draggable={!isProtected} />
+        <img ref={previewRef} src={previewBlobUrl} class="thumbnail" alt="" draggable={!props.isProtected} />
       )}
-      {hasThumb && !isPreviewPreloaded && <canvas ref={thumbRef} className="thumbnail" />}
-      {isProtected && <span className="protector" />}
+      {hasThumb() && !isPreviewPreloaded() && <canvas ref={thumbRef} class="thumbnail" />}
+      {props.isProtected && <span class="protector" />}
       <Icon
         ref={playButtonRef}
         name="play"
         className={buildClassName(mediaStyles.controlButton, mediaStyles.playButton)}
       />
       <MediaSpoiler
-        isVisible={isSpoilerShown}
-        withAnimation={noSpoilerReveal ? undefined : true}
-        thumbDataUri={thumbDataUri}
-        isNsfw={isMediaNsfw}
-        width={width}
-        height={height}
+        isVisible={isSpoilerShown()}
+        withAnimation={props.noSpoilerReveal ? undefined : true}
+        thumbDataUri={thumbDataUri()}
+        isNsfw={props.isMediaNsfw}
+        width={width()}
+        height={height()}
         className="media-spoiler"
       />
-      {shouldRenderSpinner && (
-        <div ref={spinnerRef} className={buildClassName('media-loading', mediaStyles.loading)}>
-          <ProgressSpinner progress={transferProgress} onClick={handleClickOnSpinner} />
+      {shouldRenderSpinner() && (
+        <div ref={spinnerRef} class={buildClassName('media-loading', mediaStyles.loading)}>
+          <ProgressSpinner progress={transferProgress()} onClick={handleClickOnSpinner} />
         </div>
       )}
-      {!isLoadAllowed && !fullMediaData && (
+      {!isLoadAllowed() && !fullMediaData() && (
         <Icon name="download" className={buildClassName(mediaStyles.controlButton, mediaStyles.downloadButton)} />
       )}
-      {shouldRenderTransferProgress ? (
-        <MediaBadge key="transfer-progress" ref={transferProgressRef} className="message-transfer-progress">
-          {isUploading || isDownloading ? `${Math.round(transferProgress * 100)}%` : '...'}
+      {shouldRenderTransferProgress() ? (
+        <MediaBadge ref={transferProgressRef} className="message-transfer-progress">
+          {isUploading() || props.isDownloading ? `${Math.round(transferProgress() * 100)}%` : '...'}
         </MediaBadge>
       ) : (
-        <MediaBadge key="duration" className="message-media-duration">
-          {!isPaidPreview && video.isGif ? 'GIF' : formatMediaDuration(Math.max(duration - playProgress, 0))}
+        <MediaBadge className="message-media-duration">
+          {!isPaidPreview() && props.video.isGif ? 'GIF' : formatMediaDuration(Math.max(duration() - playProgress(), 0))}
           {isUnsupported && <Icon name="message-failed" className={styles.playbackFailed} />}
         </MediaBadge>
       )}
-      {Boolean(lastPlaybackTimestamp) && (
+      {Boolean(props.lastPlaybackTimestamp) && (
         <div
-          className="message-media-last-progress"
-          style={`--_progress: ${Math.floor((lastPlaybackTimestamp / duration) * 100)}%`}
+          class="message-media-last-progress"
+          style={`--_progress: ${Math.floor((props.lastPlaybackTimestamp / duration()) * 100)}%`}
         />
       )}
       <SensitiveContentConfirmModal
-        isOpen={isNsfwModalOpen}
+        isOpen={isNsfwModalOpen()}
         onClose={closeNsfwModal}
-        shouldAlwaysShow={shouldAlwaysShowNsfw}
+        shouldAlwaysShow={shouldAlwaysShowNsfw()}
         onAlwaysShowChanged={setShouldAlwaysShowNsfw}
         confirmHandler={handleNsfwConfirm}
       />
@@ -330,13 +317,13 @@ const Video = <T,>({
   );
 };
 
-export default memo(
-  withGlobal((global): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
     const appConfig = global.appConfig;
     const needsAgeVerification = appConfig.needAgeVideoVerification;
 
     return {
       needsAgeVerification,
     };
-  })(Video),
-);
+  };
+
+export default Video;

@@ -1,7 +1,7 @@
-import { memo, useEffect } from '../../lib/teact/teact';
+import { createEffect } from 'frameact';
 import { getActions, getGlobal, withGlobal } from '../../global';
 
-import type { TabState } from '../../global/types';
+import type { GlobalState, TabState } from '../../global/types';
 import { ApiMediaFormat } from '../../api/types';
 
 import { selectTabState } from '../../global/selectors';
@@ -10,7 +10,6 @@ import download from '../../util/download';
 import generateUniqueId from '../../util/generateUniqueId';
 import * as mediaLoader from '../../util/mediaLoader';
 
-import useLastCallback from '../../hooks/useLastCallback';
 import useRunDebounced from '../../hooks/useRunDebounced';
 
 type StateProps = {
@@ -22,12 +21,13 @@ const GLOBAL_UPDATE_DEBOUNCE = 1000;
 const processedHashes = new Set<string>();
 const downloadedHashes = new Set<string>();
 
-const DownloadManager = ({ activeDownloads }: StateProps) => {
+const DownloadManager = () => {
+  const props = withGlobal({}, mapStateToProps);
   const { cancelMediaHashDownloads, showNotification } = getActions();
 
   const runDebounced = useRunDebounced(GLOBAL_UPDATE_DEBOUNCE, true);
 
-  const handleMediaDownloaded = useLastCallback((hash: string) => {
+  const handleMediaDownloaded = (hash: string) => {
     downloadedHashes.add(hash);
     runDebounced(() => {
       if (downloadedHashes.size) {
@@ -35,15 +35,15 @@ const DownloadManager = ({ activeDownloads }: StateProps) => {
         downloadedHashes.clear();
       }
     });
-  });
+  };
 
-  useEffect(() => {
-    if (!Object.keys(activeDownloads).length) {
+  createEffect(() => props.activeDownloads, (activeDownloads2) => {
+    if (!Object.keys(activeDownloads2).length) {
       processedHashes.clear();
       return;
     }
 
-    Object.entries(activeDownloads).forEach(([mediaHash, metadata]) => {
+    Object.entries(activeDownloads2).forEach(([mediaHash, metadata]) => {
       if (processedHashes.has(mediaHash)) {
         return;
       }
@@ -96,17 +96,17 @@ const DownloadManager = ({ activeDownloads }: StateProps) => {
         handleMediaDownloaded(mediaHash);
       });
     });
-  }, [activeDownloads]);
+  });
 
   return undefined;
 };
 
-export default memo(
-  withGlobal((global): Complete<StateProps> => {
+const mapStateToProps = (global: GlobalState): Complete<StateProps> => {
     const activeDownloads = selectTabState(global).activeDownloads;
 
     return {
       activeDownloads,
     };
-  })(DownloadManager),
-);
+  };
+
+export default DownloadManager;
