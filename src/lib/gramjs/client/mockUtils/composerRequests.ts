@@ -9,14 +9,21 @@ import getIdFromInputPeer from './getIdFromInputPeer';
 
 export const PASS = 'pass';
 
+/** A message that contains this marker is answered after `SLOW_SEND_DELAY_MS`: the sending status stays visible. */
+export const SLOW_SEND_MARKER = '[slow]';
+const SLOW_SEND_DELAY_MS = 2200;
+
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
 function getReplyToMsgId(replyTo?: Api.TypeInputReplyTo) {
   return replyTo instanceof Api.InputReplyToMessage ? replyTo.replyToMsgId : undefined;
 }
 
-export default function handleComposerRequest<A, R>(mockClient: TelegramClient, request: Api.Request<A, R>) {
+export default async function handleComposerRequest<A, R>(mockClient: TelegramClient, request: Api.Request<A, R>) {
   if (request instanceof Api.messages.SendMessage) {
+    if (request.message.includes(SLOW_SEND_MARKER)) {
+      await new Promise((resolve) => setTimeout(resolve, SLOW_SEND_DELAY_MS));
+    }
     const peerId = getIdFromInputPeer(request.peer);
     const list = (mockClient.mockData.messages[peerId] ||= []);
     const id = Math.max(0, ...list.map((message) => message.id)) + 1;

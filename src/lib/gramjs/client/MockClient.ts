@@ -7,6 +7,7 @@ import { toJSNumber } from '../../../util/numbers';
 import { Logger } from '../extensions';
 import { UpdateConnectionState } from '../network';
 import Api from '../tl/api';
+import handleComposerRequest, { PASS } from './mockUtils/composerRequests';
 import createMockedAvailableReaction from './mockUtils/createMockedAvailableReaction';
 import createMockedChannel from './mockUtils/createMockedChannel';
 import createMockedChat from './mockUtils/createMockedChat';
@@ -19,7 +20,6 @@ import createMockedTypePeer from './mockUtils/createMockedTypePeer';
 import createMockedUser from './mockUtils/createMockedUser';
 import getDocumentIdFromLocation from './mockUtils/getDocumentIdFromLocation';
 import getIdFromInputPeer from './mockUtils/getIdFromInputPeer';
-import handleComposerRequest, { PASS } from './mockUtils/composerRequests';
 import { downloadFile } from './downloadFile';
 
 import MockSender from './MockSender';
@@ -125,7 +125,7 @@ class TelegramClient {
     }
 
     // Deviation: the composer's requests (send, edit, draft, typing); tt's mock answers none of them
-    const composerResult = handleComposerRequest(this, request);
+    const composerResult = await handleComposerRequest(this, request);
     if (composerResult !== PASS) {
       return composerResult;
     }

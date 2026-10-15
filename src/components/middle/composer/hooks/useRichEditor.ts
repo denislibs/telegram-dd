@@ -1,5 +1,6 @@
 import type { Editor, JSONContent as TiptapJsonContent } from '@tiptap/core';
 import { createEffect, createSignal, onDestroy } from 'frameact';
+import { forceMeasure } from 'frameact/stricterdom';
 
 import type { ApiInputRichMessage } from '../../../../api/types';
 import type { RichEditorMediaAttrs, RichEditorMediaItem } from '../../../../util/tiptap/richMedia';
@@ -194,7 +195,8 @@ export default function useRichEditor(
     },
     deleteCharacterBeforeSelection: () => deleteEditorCharacterBeforeSelection(editorRef),
     focus: () => {
-      editorRef?.commands.focus();
+      // Deviation: `focus()` is a layout read and the callers (effects of the composer hooks) run in the mutate phase
+      forceMeasure(() => editorRef?.commands.focus());
     },
     getAsFormatted: () => {
       const valueToFormat = editorRef ? buildRichMessage(editorRef.getJSON(), metadataRef) : valueRef;
@@ -228,7 +230,8 @@ export default function useRichEditor(
       setCurrentValue(nextValue);
       const json = buildTiptapJsonFromRichMessage(nextValue);
       setHasUnresolvedMedia(checkHasUnresolvedMedia(json));
-      editorRef?.chain().setContent(json, { emitUpdate: false }).focus('end').run();
+      // Deviation: see `focus` above
+      forceMeasure(() => editorRef?.chain().setContent(json, { emitUpdate: false }).focus('end').run());
     },
     replaceRange: (range, content) => {
       replaceEditorRange(editorRef, range, content);

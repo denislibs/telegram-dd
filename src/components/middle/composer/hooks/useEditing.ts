@@ -1,4 +1,5 @@
 import { type Accessor, createEffect, createSignal, requestMeasure, requestNextMutation } from 'frameact';
+import { forceMeasure } from 'frameact/stricterdom';
 import { getActions } from '../../../../global';
 
 import type { ApiDraft, ApiInputRichMessage, ApiMessage } from '../../../../api/types';
@@ -72,7 +73,8 @@ const useEditing = (
       requestNextMutation(() => {
         const messageInput = document.querySelector<HTMLDivElement>(EDITABLE_INPUT_CSS_SELECTOR);
         if (messageInput) {
-          focusEditableElement(messageInput, true);
+          // Deviation: `focus()` is a layout read; the next mutation is a mutate-phase task
+          forceMeasure(() => focusEditableElement(messageInput, true));
         }
       });
     },
@@ -172,7 +174,8 @@ const useEditing = (
       requestNextMutation(() => {
         const messageInput = document.querySelector<HTMLDivElement>(EDITABLE_INPUT_CSS_SELECTOR);
         if (messageInput) {
-          focusEditableElement(messageInput, true);
+          // Deviation: `focus()` is a layout read; the next mutation is a mutate-phase task
+          forceMeasure(() => focusEditableElement(messageInput, true));
         }
       });
     });

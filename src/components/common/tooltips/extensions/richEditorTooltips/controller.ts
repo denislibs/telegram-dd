@@ -2,6 +2,7 @@ import { type Editor, posToDOMRect, type Range as TiptapRange } from '@tiptap/co
 import { TextSelection } from '@tiptap/pm/state';
 import { exitSuggestion } from '@tiptap/suggestion';
 import { requestMeasure, requestMutation } from 'frameact';
+import { forceMutation } from 'frameact/stricterdom';
 
 import type { OwnProps as RichEditorTooltipContainerProps } from '../../RichEditorTooltipContainer';
 import type {
@@ -79,7 +80,9 @@ export class RichEditorTooltipsController {
     });
     const tooltipBoundary = config.getTooltipBoundary?.() || editor.view.dom.parentElement!;
     this.renderer.element.classList.add('rich-editor-tooltips-host');
-    tooltipBoundary.append(this.renderer.element);
+    // Deviation: the boundary (the Composer root) is a frameact-owned element and the editor creates this controller
+    // outside a frame phase: the append is declared to stricterdom.
+    forceMutation(() => tooltipBoundary.append(this.renderer.element), tooltipBoundary);
     window.addEventListener('resize', this.handleFormatterViewportChange);
     document.addEventListener('scroll', this.handleFormatterViewportChange, true);
     document.addEventListener('pointerdown', this.handleDocumentPointerDown, true);

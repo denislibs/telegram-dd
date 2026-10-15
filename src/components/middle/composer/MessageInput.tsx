@@ -152,9 +152,12 @@ const MessageInput = (ownProps: OwnProps) => {
   const isMobileDevice = () => isMobile() && (IS_IOS || IS_ANDROID);
   const richValue = createMemo(() => props.richEditor.value);
   const isRichEditorReady = createMemo(() => props.richEditor.isReady);
-  const isInputEmpty = createMemo(() =>
-    isRichEditorReady() ? props.richEditor.isEmpty() : !richValue().blocks.length,
-  );
+  // Deviation: `isEmpty()` reads the editor state and tracks nothing; tt re-ran it on every render, here the value signal
+  // (set by every editor update) is the dependency.
+  const isInputEmpty = createMemo(() => {
+    const value = richValue();
+    return isRichEditorReady() ? props.richEditor.isEmpty() : !value.blocks.length;
+  });
 
   // Effects that need the element run after the component is mounted (the element exists once the JSX is created, after
   // the effects of the body were created; a mutation effect applies synchronously at creation).

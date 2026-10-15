@@ -31,6 +31,7 @@ import { Plugin, TextSelection, type Transaction } from '@tiptap/pm/state';
 import type { DecorationSet, EditorView } from '@tiptap/pm/view';
 import StarterKitExtension from '@tiptap/starter-kit';
 import { requestMutation } from 'frameact';
+import { suppressStrict } from 'frameact/stricterdom';
 
 import type { CustomEmojiNodeOptions } from '../../../../util/tiptap/extensions/customEmoji';
 import type { RichEditorDateClickTarget } from '../../../../util/tiptap/extensions/date';
@@ -251,8 +252,28 @@ export function __createRichEditor({
   );
 
   setEditorContentWithoutHistory(richEditor, content);
+  muteStrictForProseMirror(richEditor);
 
   return richEditor;
+}
+
+// Deviation: ProseMirror is third-party code that owns the input's DOM. It reads layout (`scrollToSelection`) from its own
+// observers and updates, whatever phase the frame is in, and a DOM change in the editor wakes its MutationObserver right
+// after a mutate phase: stricterdom reports each of those reads. The entry points are muted, as the porting guide asks for
+// third-party DOM writers (`suppressStrict`); nothing of ours runs inside them.
+function muteStrictForProseMirror(editor: Editor) {
+  const view = editor.view as EditorView & {
+    domObserver: { flush: () => void };
+    scrollToSelection: () => void;
+  };
+  const flush = view.domObserver.flush.bind(view.domObserver);
+  view.domObserver.flush = () => suppressStrict(flush);
+
+  const updateState = view.updateState.bind(view);
+  view.updateState = (state) => suppressStrict(() => updateState(state));
+
+  const scrollToSelection = view.scrollToSelection.bind(view);
+  view.scrollToSelection = () => suppressStrict(scrollToSelection);
 }
 
 function getRestrictedMediaCounts(

@@ -12,6 +12,7 @@ import {
 } from 'frameact';
 import { Show } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
+import { forceMeasure } from 'frameact/stricterdom';
 import { getActions, getGlobal, withGlobal } from '../../global';
 
 import type {
@@ -2016,7 +2017,8 @@ const Composer = (ownProps: OwnProps) => {
 
         requestNextMutation(() => {
           const messageInput = document.getElementById(editableInputId2)!;
-          focusEditableElement(messageInput, true);
+          // Deviation: `focus()` is a layout read; the next mutation is a mutate-phase task
+          forceMeasure(() => focusEditableElement(messageInput, true));
         });
       }
     },

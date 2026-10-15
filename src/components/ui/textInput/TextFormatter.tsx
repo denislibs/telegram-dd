@@ -96,13 +96,17 @@ const TextFormatter = (props: OwnProps) => {
 
   const getSelectedEditorTextStateResult = createMemo(() => {
     editorVersion();
-    return getSelectedEditorTextState(props.editor, props.range, Boolean(props.isRichInputExpanded));
+    return getSelectedEditorTextState(
+      props.editor,
+      clampRangeToDocument(props.editor, props.range),
+      Boolean(props.isRichInputExpanded),
+    );
   });
   const selectedTextFormats = () => getSelectedEditorTextStateResult().formats;
   const hasSelectedTextFormatting = () => getSelectedEditorTextStateResult().hasFormatting;
   const selectedLinkHref = createMemo(() => {
     editorVersion();
-    return getSelectedLinkHref(props.editor, props.range);
+    return getSelectedLinkHref(props.editor, clampRangeToDocument(props.editor, props.range));
   });
 
   createEffect(
@@ -436,6 +440,14 @@ function roundDateToMinute(date: Date) {
   nextDate.setSeconds(0);
   nextDate.setMilliseconds(0);
   return nextDate;
+}
+
+// Deviation: the memos above re-run on every editor transaction, tt's render ran only when the tooltip controller handed
+// over new props. A transaction can shorten the document (sending clears it) before the controller closes the formatter,
+// and ProseMirror throws on a position past the end.
+function clampRangeToDocument(editor: Editor, range: EditorRange): EditorRange {
+  const size = editor.state.doc.content.size;
+  return { from: Math.min(range.from, size), to: Math.min(range.to, size) };
 }
 
 function getSelectedLinkHref(editor: Editor, range: EditorRange) {
