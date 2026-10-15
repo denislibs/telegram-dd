@@ -27,7 +27,10 @@ async function openChat(page: Page, name: string) {
 // chat list gates': opening a chat pushes browser history entries (`useHistoryBack`, tt does too), which Chrome keeps up to 50
 // (about 25 cycles), the first open of a chat loads its history, and V8 compiles the hot paths of the column (the heap diff of the
 // chat list report: code and feedback vectors) during the first ~60 cycles; a retained list would still grow linearly after that.
-const LEAK = { runs: 50, maxGrowthKb: 512, warmupRuns: 70 } as const;
+// The heap is measured after 1.5 s of idle (`settleMs`): right after a cycle the state of the open chat (a debounced scroll
+// offset, pending observer reports, ripples) is still settling and is worth about 2 MB, so a measurement could catch the
+// baseline and the final heap in different states (a flake of 1 run in 3 under load, with no growth in between).
+const LEAK = { runs: 50, maxGrowthKb: 512, warmupRuns: 70, settleMs: 1500 } as const;
 
 test.describe('message list: leaks', () => {
   test.describe.configure({ timeout: 400_000 });

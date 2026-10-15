@@ -7,6 +7,13 @@ export interface LeakOptions {
   maxGrowthKb?: number;
   /** Unmeasured runs before the baseline, so lazy caches / JIT / first-use allocations do not count (default 5). */
   warmupRuns?: number;
+  /**
+   * Idle time before each heap measurement, ms (default 0). An action that leaves timers pending (debounced cleanups, ripples,
+   * scroll-offset saves, observers) is measured in a different state depending on how long ago it ended: the message list's
+   * state of a chat is worth about 2 MB, which looks like a leak when the baseline and the final measurement catch it in
+   * different states. Waiting the longest of those timers out makes the measurement a steady-state one.
+   */
+  settleMs?: number;
 }
 
 export interface LeakResult {
@@ -18,7 +25,8 @@ export interface LeakResult {
   secondHalfGrowthKb: number;
 }
 
-async function usedHeapKb(cdp: CDPSession): Promise<number> {
+async function usedHeapKb(cdp: CDPSession, settleMs: number): Promise<number> {
+  if (settleMs > 0) await new Promise((resolve) => setTimeout(resolve, settleMs));
   // Two passes: the first GC may only schedule finalizers (FinalizationRegistry / weak refs), the second frees what they release.
   await cdp.send('HeapProfiler.collectGarbage');
   await cdp.send('HeapProfiler.collectGarbage');
@@ -35,19 +43,19 @@ async function usedHeapKb(cdp: CDPSession): Promise<number> {
 export async function expectNoLeak(
   page: Page,
   action: (run: number) => Promise<void>,
-  { runs = 50, maxGrowthKb = 512, warmupRuns = 5 }: LeakOptions = {},
+  { runs = 50, maxGrowthKb = 512, warmupRuns = 5, settleMs = 0 }: LeakOptions = {},
 ): Promise<LeakResult> {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('HeapProfiler.enable');
   try {
     for (let i = 0; i < warmupRuns; i++) await action(-1 - i);
 
-    const baselineKb = await usedHeapKb(cdp);
+    const baselineKb = await usedHeapKb(cdp, settleMs);
     const half = Math.floor(runs / 2);
     for (let i = 0; i < half; i++) await action(i);
-    const midKb = await usedHeapKb(cdp);
+    const midKb = await usedHeapKb(cdp, settleMs);
     for (let i = half; i < runs; i++) await action(i);
-    const finalKb = await usedHeapKb(cdp);
+    const finalKb = await usedHeapKb(cdp, settleMs);
 
     const growthKb = finalKb - baselineKb;
     const secondHalfGrowthKb = finalKb - midKb;

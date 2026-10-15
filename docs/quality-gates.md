@@ -339,7 +339,10 @@ The message list gates (`tests/perf/messages.perf.spec.ts`, messages slice): two
 chats) at the documented 512 KB over 50 runs with a **70-run warm-up**: opening a chat pushes browser history entries (`useHistoryBack`, tt
 too), which Chrome keeps up to 50 (about 25 cycles), the first open loads the history, and V8 compiles the column's hot paths for about 60
 cycles (measured: 15-25 KB per cycle on both apps up to cycle ~60, none after; telegram-tt grows by 43 KB per cycle against this app's 25 in
-the same cycle on dev builds). A long task gate: opening the 300-message chat and scrolling its history to the first message under 4x CPU
+the same cycle on dev builds). The heap is read after **1.5 s of idle** (`settleMs` of `expectNoLeak`): right after a cycle the open chat is
+still settling (debounced scroll offset, observer reports, ripples) and the state is worth ~2 MB, so without the idle a measurement that caught
+the baseline and the final heap in different states failed about one run in three under load with no growth in between (idle: 184-190 KB and
+313-333 KB over 50 cycles, 3 runs of each). A long task gate: opening the 300-message chat and scrolling its history to the first message under 4x CPU
 throttling, capped at telegram-tt's worst task of `perf:compare --scenario open-chat` plus 3% (204 ms). The production build has no mock
 request middleware (a `@vite-ignore` dynamic import is not bundled), so these runs get the whole chat for every history request.
 
