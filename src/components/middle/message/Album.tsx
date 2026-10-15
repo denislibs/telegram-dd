@@ -1,18 +1,40 @@
-// FOUNDATION STUB: Album (telegram-tt src/components/middle/message/Album.tsx) is ported with a later slice. It keeps tt's props so that
-// the callers compile; it renders an inert, sized placeholder (tt's outer element and classes, nothing loaded).
-import { createMemo } from 'frameact';
+import { memo, useMemo } from '../../../lib/teact/teact';
+import { getActions, getGlobal, withGlobal } from '../../../global';
 
-import type { ApiMediaExtendedPreview, ApiPhoto, ApiVideo } from '../../../api/types';
+import type { ApiMediaExtendedPreview, ApiMessage, ApiPhoto, ApiVideo } from '../../../api/types';
+import type { GlobalState, TabState } from '../../../global/types';
 import type { ObserveFn } from '../../../hooks/useIntersectionObserver';
-import type { IAlbum } from '../../../types';
+import type { IAlbum, ThemeKey } from '../../../types';
 
-import { getMediaDimensions, getMessageContent, getMessagePhoto } from '../../../global/helpers';
-import { getMediaPlaceholderSize, PLACEHOLDER_SURFACE } from '../../common/helpers/placeholder';
-import { calculateAlbumLayout } from './helpers/calculateAlbumLayout';
+import {
+  getIsDownloading,
+  getMediaDimensions,
+  getMessageContent,
+  getMessageHtmlId,
+  getMessagePhoto,
+} from '../../../global/helpers';
+import {
+  selectActiveDownloads,
+  selectCanAutoLoadMedia,
+  selectCanAutoPlayMedia,
+  selectTheme,
+} from '../../../global/selectors';
+import { getMessageKey } from '../../../util/keys/messageKey';
+import { AlbumRectPart, calculateAlbumLayout } from './helpers/calculateAlbumLayout';
+import withSelectControl from './hocs/withSelectControl';
+
+import useLastCallback from '../../../hooks/useLastCallback';
+
+import AlbumItem from './AlbumItem';
+import Photo from './Photo';
+import Video from './Video';
 
 import './Album.scss';
 
-export type OwnProps = {
+const PhotoWithSelect = withSelectControl(Photo);
+const VideoWithSelect = withSelectControl(Video);
+
+type OwnProps = {
   album: IAlbum;
   observeIntersection: ObserveFn;
   hasCustomAppendix?: boolean;
@@ -21,8 +43,138 @@ export type OwnProps = {
   onMediaClick: (messageId: number, index?: number) => void;
 };
 
-// Telegram allows 10 items in an album: the layout of a longer (hostile) list is not computed.
-const MAX_ALBUM_ITEMS = 10;
+type StateProps = {
+  theme: ThemeKey;
+  uploadsByKey: GlobalState['fileUploads']['byMessageKey'];
+  activeDownloads: TabState['activeDownloads'];
+};
+
+const Album = ({
+  album,
+  observeIntersection,
+  hasCustomAppendix,
+  isOwn,
+  isProtected,
+  onMediaClick,
+  uploadsByKey,
+  activeDownloads,
+  theme,
+}: OwnProps & StateProps) => {
+  const { cancelUploadMedia } = getActions();
+
+  const {
+    content: { paidMedia },
+  } = album.mainMessage;
+
+  const mediaCount = album.isPaidMedia ? paidMedia!.extendedMedia.length : album.messages.length;
+
+  const handlePaidMediaClick = useLastCallback((index: number) => {
+    onMediaClick(album.mainMessage.id, index);
+  });
+
+  const handleAlbumMessageClick = useLastCallback((messageId: number) => {
+    onMediaClick(messageId);
+  });
+
+  const handleCancelUpload = useLastCallback((messageId: number) => {
+    cancelUploadMedia({ chatId: album.mainMessage.chatId, messageId });
+  });
+
+  const messages = useMemo(() => {
+    if (album.isPaidMedia) {
+      return album.mainMessage.content.paidMedia!.extendedMedia.map(() => album.mainMessage);
+    }
+
+    return album.messages;
+  }, [album]);
+
+  const albumLayout = useMemo(() => {
+    const ratios = getAlbumMedia(album).map((media) => {
+      const { width, height } = getMediaDimensions(media);
+      return width / height;
+    });
+
+    return calculateAlbumLayout(ratios);
+  }, [album]);
+
+  function renderAlbumMessage(message: ApiMessage, index: number) {
+    const renderingPaidMedia = album.isPaidMedia ? message.content.paidMedia?.extendedMedia[index] : undefined;
+    const paidPhotoOrPreview =
+      renderingPaidMedia && 'mediaType' in renderingPaidMedia ? renderingPaidMedia : renderingPaidMedia?.photo;
+    const paidVideoOrPreview =
+      renderingPaidMedia && 'mediaType' in renderingPaidMedia ? renderingPaidMedia : renderingPaidMedia?.video;
+    const photo = paidPhotoOrPreview || getMessagePhoto(message);
+    const video = paidVideoOrPreview || getMessageContent(message).video;
+
+    const fileUpload = uploadsByKey[getMessageKey(message)];
+    const uploadProgress = fileUpload?.progress;
+    const layoutItem = albumLayout.items[index];
+    const { sides } = layoutItem;
+
+    // Ignoring global updates is a known drawback here
+    const canAutoLoad = selectCanAutoLoadMedia(getGlobal(), message);
+    const canAutoPlay = selectCanAutoPlayMedia(getGlobal(), message);
+    let mediaElement;
+
+    if (photo) {
+      const shouldAffectAppendix =
+        hasCustomAppendix &&
+        (isOwn ? index === mediaCount - 1 : Boolean(sides & AlbumRectPart.Left && sides & AlbumRectPart.Bottom));
+
+      mediaElement = (
+        <PhotoWithSelect
+          id={`album-media-${getMessageHtmlId(message.id, album.isPaidMedia ? index : undefined)}`}
+          photo={photo}
+          isOwn={isOwn}
+          observeIntersection={observeIntersection}
+          canAutoLoad={canAutoLoad}
+          shouldAffectAppendix={shouldAffectAppendix}
+          uploadProgress={uploadProgress}
+          layout="fill"
+          isProtected={isProtected}
+          clickArg={album.isPaidMedia ? index : message.id}
+          onClick={album.isPaidMedia ? handlePaidMediaClick : handleAlbumMessageClick}
+          onCancelUpload={handleCancelUpload}
+          isDownloading={photo.mediaType !== 'extendedMediaPreview' && getIsDownloading(activeDownloads, photo)}
+          theme={theme}
+          noSelectControls={album.isPaidMedia}
+        />
+      );
+    } else if (video) {
+      mediaElement = (
+        <VideoWithSelect
+          id={`album-media-${getMessageHtmlId(message.id, album.isPaidMedia ? index : undefined)}`}
+          video={video}
+          observeIntersectionForLoading={observeIntersection}
+          canAutoLoad={canAutoLoad}
+          canAutoPlay={canAutoPlay}
+          uploadProgress={uploadProgress}
+          layout="fill"
+          isProtected={isProtected}
+          clickArg={album.isPaidMedia ? index : message.id}
+          onClick={album.isPaidMedia ? handlePaidMediaClick : handleAlbumMessageClick}
+          onCancelUpload={handleCancelUpload}
+          isDownloading={video.mediaType !== 'extendedMediaPreview' && getIsDownloading(activeDownloads, video)}
+          noSelectControls={album.isPaidMedia}
+        />
+      );
+    }
+
+    if (!mediaElement) return undefined;
+
+    return (
+      <AlbumItem key={album.isPaidMedia ? index : message.id} item={layoutItem} className="album-item">
+        {mediaElement}
+      </AlbumItem>
+    );
+  }
+
+  return (
+    <div className="Album" style={`--album-aspect-ratio: ${albumLayout.aspectRatio}`}>
+      {messages.map(renderAlbumMessage)}
+    </div>
+  );
+};
 
 type AlbumMedia = ApiPhoto | ApiVideo | ApiMediaExtendedPreview;
 
@@ -33,25 +185,18 @@ function getAlbumMedia(album: IAlbum) {
       )
     : album.messages.map((message) => getMessagePhoto(message) || getMessageContent(message).video);
 
-  return media.filter((item): item is AlbumMedia => Boolean(item)).slice(0, MAX_ALBUM_ITEMS);
+  return media.filter((item): item is AlbumMedia => Boolean(item));
 }
 
-// TODO(port): the real Album (the items with Photo / Video, selection, uploads, downloads).
-const Album = (props: OwnProps) => {
-  const albumLayout = createMemo(() =>
-    calculateAlbumLayout(
-      getAlbumMedia(props.album).map((media) => getMediaPlaceholderSize(getMediaDimensions(media)).aspectRatio),
-    ),
-  );
+export default memo(
+  withGlobal<OwnProps>((global): Complete<StateProps> => {
+    const theme = selectTheme(global);
+    const activeDownloads = selectActiveDownloads(global);
 
-  return (
-    <div
-      role="img"
-      aria-label="Album, not supported yet"
-      class="Album"
-      style={`--album-aspect-ratio: ${albumLayout().aspectRatio}; ${PLACEHOLDER_SURFACE}`}
-    />
-  );
-};
-
-export default Album;
+    return {
+      theme,
+      uploadsByKey: global.fileUploads.byMessageKey,
+      activeDownloads,
+    };
+  })(Album),
+);
