@@ -1,20 +1,18 @@
 import {
   createEffect,
-  createMeasureEffect,
   createMemo,
   createMutationEffect,
   createSignal,
   currentOrPrev,
-  onMount,
+  onDestroy,
   previous,
   requestMeasure,
   requestMutation,
   requestNextMutation,
 } from 'frameact';
+import { Show } from 'frameact/dom';
 import type { JSX } from 'frameact/jsx-runtime';
 import { getActions, getGlobal, withGlobal } from '../../global';
-import { depsOf } from '../../util/effectDeps';
-import { createShowTransition } from '../../lib/kit';
 
 import type {
   ApiAttachment,
@@ -70,6 +68,7 @@ import {
   STARS_CURRENCY_CODE,
   VIDEO_RECORDING_FILENAME,
 } from '../../config';
+import { createShowTransition } from '../../lib/kit';
 import {
   canEditMedia,
   getAllowedAttachmentOptions,
@@ -151,6 +150,7 @@ import captureEscKeyListener from '../../util/captureEscKeyListener';
 import { formatCountdown, formatMediaDuration } from '../../util/dates/oldDateFormat';
 import { processDeepLink } from '../../util/deeplink';
 import { tryParseDeepLink } from '../../util/deepLinkParser';
+import { depsOf } from '../../util/effectDeps';
 import calcTextLineHeightAndCount from '../../util/element/calcTextLineHeightAndCount';
 import { isUserId } from '../../util/entities/ids';
 import { fetchBlob } from '../../util/files';
@@ -162,7 +162,6 @@ import { getServerTime } from '../../util/serverTime';
 import stopEvent from '../../util/stopEvent';
 import { getUtf8Length } from '../../util/textFormat';
 import { EMPTY_RICH_MEDIA_CAPTION } from '../../util/tiptap/richMedia';
-import windowSize from '../../util/windowSize';
 import applyIosAutoCapitalizationFix from '../middle/composer/helpers/applyIosAutoCapitalizationFix';
 import buildAttachment, {
   buildGifAttachment,
@@ -183,14 +182,13 @@ import useInterval from '../../hooks/schedulers/useInterval';
 import useTimeout from '../../hooks/schedulers/useTimeout';
 import useContextMenuHandlers from '../../hooks/useContextMenuHandlers';
 import useFlag from '../../hooks/useFlag';
-import useForceUpdate from '../../hooks/useForceUpdate';
 import useLang from '../../hooks/useLang';
 import useOldLang from '../../hooks/useOldLang';
 import usePeerColor from '../../hooks/usePeerColor';
 import useResizeObserver from '../../hooks/useResizeObserver';
 import useSchedule from '../../hooks/useSchedule';
 import useSendMessageAction from '../../hooks/useSendMessageAction';
-import { useStateRef } from '../../hooks/useStateRef';
+import useWindowSize from '../../hooks/window/useWindowSize';
 import useAttachmentModal from '../middle/composer/hooks/useAttachmentModal';
 import useClipboardPaste from '../middle/composer/hooks/useClipboardPaste';
 import useDraft from '../middle/composer/hooks/useDraft';
@@ -394,6 +392,19 @@ const MOUNT_ANIMATION_DURATION = 430;
 const PAID_STARS_CLOSE_DURATION = 300;
 const APPROXIMATE_RICH_INPUT_FORMAT_OPTIONS = { isApproximate: true };
 const MIN_COMPOSER_LINES = 3;
+const MAX_TRACKED_RECORD_DEPTH = 4;
+
+// Original helper (not in telegram-tt). An id-less record of the tab state (`aiMessageEditorPendingResult`,
+// `contentToBeScheduled`, `requestedRichInputMedia`) is the store's own copy, merged key by key: the prop keeps its
+// identity when a new request replaces the previous one, and a change inside it does not change the prop. tt's effects
+// ran on each new object; a computation calls this to subscribe to every field (and to the id-less records under it)
+// and then reads the committed global (`getGlobal()`, tt's immutable objects) for the identity.
+function trackRecord(value: unknown, depth = MAX_TRACKED_RECORD_DEPTH) {
+  if (depth <= 0 || !value || typeof value !== 'object' || Array.isArray(value) || 'id' in value) return;
+  Object.keys(value).forEach((key) => {
+    trackRecord((value as AnyLiteral)[key], depth - 1);
+  });
+}
 
 const Composer = (ownProps: OwnProps) => {
   const props = withGlobal(ownProps, mapStateToProps);
@@ -441,18 +452,21 @@ const Composer = (ownProps: OwnProps) => {
   const lang = useLang();
   const isEditingMedia = createMemo(() => Boolean(props.editingMessage && hasMessageMedia(props.editingMessage)));
 
-  let inputRef!: HTMLDivElement;
+  let inputRef: HTMLDivElement | undefined;
   let composerRef!: HTMLDivElement;
-  let counterRef!: HTMLSpanElement;
 
-  let storyReactionRef!: HTMLButtonElement;
+  let storyReactionRef: HTMLButtonElement | undefined;
 
   const [isMounted, setIsMounted] = createSignal(false);
   let lastMessageSendTimeSecondsRef: number | undefined;
   const prevDropAreaState = previous(() => props.dropAreaState);
-  const { width: windowWidth } = windowSize.get();
-  // TODO(codemod): useForceUpdate: a component runs once; make the changing value a signal and delete the force update
-  const forceUpdate = useForceUpdate();
+  // Deviation: tt read `windowSize.get()` on each render; the width is a signal here (`useWindowSize`), so the
+  // placeholder and the rich-input button follow a resize.
+  const windowSizeState = useWindowSize();
+  const windowWidth = () => windowSizeState().width;
+  // Deviation: tt re-rendered with `useForceUpdate` when a placeholder timer ended; the placeholder memo reads this tick.
+  const [placeholderTick, setPlaceholderTick] = createSignal(0);
+  const forceUpdate = () => setPlaceholderTick((tick) => tick + 1);
 
   const isInMessageList = createMemo(() => props.type === 'messageList');
   const isRichInputExpansionActive = createMemo(() => Boolean(isInMessageList() && props.isRichInputExpanded));
@@ -473,10 +487,10 @@ const Composer = (ownProps: OwnProps) => {
   const canMediaBeReplaced = createMemo(() => isEditingMedia() && canEditMedia(props.editingMessage!));
 
   const isMonoforum = createMemo(() => props.chat?.isMonoforum);
-  const source = createMemo(() => props.chatFullInfo || {});
-  const emojiSet = () => source().emojiSet;
-  const groupChatMembers = () => source().members;
-  const chatBotCommands = () => source().botCommands;
+  const chatFullInfoOrEmpty = createMemo(() => props.chatFullInfo || {});
+  const emojiSet = () => chatFullInfoOrEmpty().emojiSet;
+  const groupChatMembers = () => chatFullInfoOrEmpty().members;
+  const chatBotCommands = () => chatFullInfoOrEmpty().botCommands;
   const chatEmojiSetId = createMemo(() => emojiSet()?.id);
 
   const isEphemeralReply = createMemo(() => props.draft?.replyInfo?.type === 'ephemeral');
@@ -582,51 +596,63 @@ const Composer = (ownProps: OwnProps) => {
     },
   );
 
-  let shouldAnimateSendAsButtonRef = false;
-  // TODO(codemod): useSyncEffect ran synchronously during render: createMemo for derived state, createMeasureEffect for a snapshot before the DOM update
+  // Deviation: tt's `useSyncEffect` computed the flag during the render; here an effect keeps it in a signal, at tick
+  // end (before the frame that renders the button), from the previous `[chatId, sendAsPeerIds]`.
+  const [shouldAnimateSendAsButtonRef, setShouldAnimateSendAsButton] = createSignal(false);
   createEffect(
-    depsOf(() => [props.chatId, sendAsPeerIds()]),
-    (_deps, prev) => {
+    depsOf(() => [props.chatId, sendAsPeerIds()] as const),
+    ([chatId2, sendAsPeerIds2], prev) => {
       const [prevChatId, prevSendAsPeerIds] = prev ?? [];
       // We only animate send-as button if `sendAsPeerIds` was missing when opening the chat
-      shouldAnimateSendAsButtonRef = Boolean(props.chatId === prevChatId && sendAsPeerIds() && !prevSendAsPeerIds);
+      setShouldAnimateSendAsButton(Boolean(chatId2 === prevChatId && sendAsPeerIds2 && !prevSendAsPeerIds));
     },
   );
 
   const [attachments, setAttachments] = createSignal<ApiAttachment[]>([]);
-  const richMediaResult = createMemo(() =>
-    useRichMedia({
-      richEditor,
-      chat: () => props.chat,
-      chatId: () => props.chatId,
-      threadId: () => props.threadId,
-      fileSizeLimit: () => props.fileSizeLimit,
-      canSendPhotos: () => canSendPhotos() && !isEditingMedia(),
-      canSendVideos: () => canSendVideos() && !isEditingMedia(),
-      canSendDocuments: () => canSendDocuments() && !isEditingMedia(),
-      canSendAudios: () => canSendAudios() && !isEditingMedia(),
-      shouldSendInHighQuality: () => props.attachmentSettings.shouldSendInHighQuality,
-    }),
-  );
-  const handleRichMediaFiles = () => richMediaResult().handleFiles;
-  const handleRichMediaEdit = () => richMediaResult().handleEditMedia;
-  const handleCloseRichMediaEditor = () => richMediaResult().handleCloseMediaEditor;
-  const handleSaveRichMediaEdit = () => richMediaResult().handleSaveMediaEdit;
-  const editingRichMediaAttachment = () => richMediaResult().editingAttachment;
-  const hasRichMediaBlocking = () => richMediaResult().hasBlockingMedia;
+  // TODO(port): `useRichMedia` is a stub returning plain values; the real hook returns getters/accessors. The state
+  // fields are read through the result object so that the call sites stay reactive when it lands.
+  const richMediaResult = useRichMedia({
+    richEditor,
+    chat: () => props.chat,
+    chatId: () => props.chatId,
+    threadId: () => props.threadId,
+    fileSizeLimit: () => props.fileSizeLimit,
+    canSendPhotos: () => Boolean(canSendPhotos() && !isEditingMedia()),
+    canSendVideos: () => Boolean(canSendVideos() && !isEditingMedia()),
+    canSendDocuments: () => Boolean(canSendDocuments() && !isEditingMedia()),
+    canSendAudios: () => Boolean(canSendAudios() && !isEditingMedia()),
+    shouldSendInHighQuality: () => props.attachmentSettings.shouldSendInHighQuality,
+  });
+  const {
+    handleFiles: handleRichMediaFiles,
+    handleEditMedia: handleRichMediaEdit,
+    handleCloseMediaEditor: handleCloseRichMediaEditor,
+    handleSaveMediaEdit: handleSaveRichMediaEdit,
+  } = richMediaResult;
+  const editingRichMediaAttachment = () => richMediaResult.editingAttachment;
+  const hasRichMediaBlocking = () => richMediaResult.hasBlockingMedia;
   const hasAttachments = createMemo(() => Boolean(attachments().length));
   const handleRichMediaSelect = (files: File[], shouldSendAsFile?: boolean) => {
-    handleRichMediaFiles()(files, undefined, undefined, shouldSendAsFile);
+    handleRichMediaFiles(files, undefined, undefined, shouldSendAsFile);
   };
-  const richMessage = richEditor.value;
-  const richMessageAsFormatted = richMessage ? getRichInputAsFormatted(richMessage) : undefined;
-  const hasInputContent = richEditor.isReady ? !richEditor.isEmpty() : false;
-  const isOverRegularMessageLimit = createMemo(() =>
-    Boolean(richMessageAsFormatted && getUtf8Length(richMessageAsFormatted.text) > props.maxMessageLength),
-  );
+  const richMessage = () => richEditor.value;
+  const richMessageAsFormatted = createMemo(() => {
+    const richMessage2 = richMessage();
+    return richMessage2 ? getRichInputAsFormatted(richMessage2) : undefined;
+  });
+  // `isEmpty()` asks the editor and is not reactive: the value is read so that this re-runs on each document change
+  // (tt re-rendered on each one).
+  const hasInputContent = createMemo(() => {
+    richMessage();
+    return richEditor.isReady ? !richEditor.isEmpty() : false;
+  });
+  const isOverRegularMessageLimit = createMemo(() => {
+    const formatted = richMessageAsFormatted();
+    return Boolean(formatted && getUtf8Length(formatted.text) > props.maxMessageLength);
+  });
   const hasRichOnlyContent = createMemo(() =>
     Boolean(
-      hasInputContent && (!richMessageAsFormatted || (props.isCurrentUserPremium && isOverRegularMessageLimit())),
+      hasInputContent() && (!richMessageAsFormatted() || (props.isCurrentUserPremium && isOverRegularMessageLimit())),
     ),
   );
 
@@ -660,6 +686,8 @@ const Composer = (ownProps: OwnProps) => {
   };
 
   const updateRichMessage = (value?: ApiInputRichMessage, shouldKeepHistory?: boolean) => {
+    syncComposerWithChat();
+
     if (value && !props.isCurrentUserPremium && !props.isChatWithSelf) {
       const formattedValue = getRichInputAsFormatted(value);
       if (formattedValue && containsCustomEmoji(formattedValue)) {
@@ -752,7 +780,7 @@ const Composer = (ownProps: OwnProps) => {
 
   const messagesCount = createMemo(() => {
     if (hasAttachments()) return attachments().length;
-    const messagesInInput = hasInputContent ? 1 : 0;
+    const messagesInInput = hasInputContent() ? 1 : 0;
     if (!props.isForwarding || !props.forwardedMessagesCount) return messagesInInput || 1;
     return props.forwardedMessagesCount + messagesInInput;
   });
@@ -763,19 +791,18 @@ const Composer = (ownProps: OwnProps) => {
     props.paidMessagesStars ? messagesCount() * props.paidMessagesStars : 0,
   );
 
-  const paidMessageConfirmationResult = createMemo(() =>
-    usePaidMessageConfirmation(
-      () => paymentDialogKey(),
-      () => starsForAllMessages(),
-      () => props.isStarsBalanceModalOpen,
-      () => props.starsBalance,
-    ),
+  const {
+    closeConfirmDialog: closeConfirmModalPayForMessage,
+    dialogHandler: paymentMessageConfirmDialogHandler,
+    shouldAutoApprove: shouldPaidMessageAutoApprove,
+    setAutoApprove: setShouldPaidMessageAutoApprove,
+    handleWithConfirmation: handleActionWithPaymentConfirmation,
+  } = usePaidMessageConfirmation(
+    paymentDialogKey,
+    starsForAllMessages,
+    () => props.isStarsBalanceModalOpen,
+    () => props.starsBalance,
   );
-  const closeConfirmModalPayForMessage = () => paidMessageConfirmationResult().closeConfirmDialog;
-  const paymentMessageConfirmDialogHandler = () => paidMessageConfirmationResult().dialogHandler;
-  const shouldPaidMessageAutoApprove = () => paidMessageConfirmationResult().shouldAutoApprove;
-  const setShouldPaidMessageAutoApprove = () => paidMessageConfirmationResult().setAutoApprove;
-  const handleActionWithPaymentConfirmation = () => paidMessageConfirmationResult().handleWithConfirmation;
 
   const isPaidSendDeferred = createMemo(() => starsForAllMessages() > 0 && !shouldPaidMessageAutoApprove());
 
@@ -821,33 +848,31 @@ const Composer = (ownProps: OwnProps) => {
     richEditor.insertContent({ type: 'customEmoji', emoji });
   };
 
-  const attachmentModalResult = createMemo(() =>
-    useAttachmentModal({
-      attachments: () => attachments(),
-      setAttachments,
-      fileSizeLimit: () => props.fileSizeLimit,
-      chatId: () => props.chatId,
-      canAttachFiles: () => !hasRichOnlyContent(),
-      canSendAudios: () => canSendAudios(),
-      canSendVideos: () => canSendVideos(),
-      canSendPhotos: () => canSendPhotos(),
-      canSendDocuments: () => canSendDocuments(),
-      editedMessage: () => props.editingMessage,
-      shouldSendInHighQuality: () => props.attachmentSettings.shouldSendInHighQuality,
-    }),
-  );
-  const shouldForceCompression = () => attachmentModalResult().shouldForceCompression;
-  const shouldForceAsFile = () => attachmentModalResult().shouldForceAsFile;
-  const handleAppendFiles = () => attachmentModalResult().handleAppendFiles;
-  const handleFileSelect = () => attachmentModalResult().handleFileSelect;
-  const handleClearAttachments = () => attachmentModalResult().handleClearAttachments;
-  const handleSetAttachments = () => attachmentModalResult().handleSetAttachments;
+  // TODO(port): `useAttachmentModal` is a stub returning plain values; the real hook returns getters/accessors. The
+  // state fields are read through the result object so that the call sites stay reactive when it lands.
+  const attachmentModalResult = useAttachmentModal({
+    attachments,
+    setAttachments,
+    fileSizeLimit: () => props.fileSizeLimit,
+    chatId: () => props.chatId,
+    canAttachFiles: () => !hasRichOnlyContent(),
+    canSendAudios,
+    canSendVideos,
+    canSendPhotos,
+    canSendDocuments,
+    editedMessage: () => props.editingMessage,
+    shouldSendInHighQuality: () => props.attachmentSettings.shouldSendInHighQuality,
+  });
+  const shouldForceCompression = () => attachmentModalResult.shouldForceCompression;
+  const shouldForceAsFile = () => attachmentModalResult.shouldForceAsFile;
+  const { handleAppendFiles, handleFileSelect, handleClearAttachments, handleSetAttachments } = attachmentModalResult;
 
   let mediaEditRequestRef: number | undefined;
   createEffect(
-    depsOf(() => [props.mediaEditorMessage, handleSetAttachments()] as const),
+    depsOf(() => [props.mediaEditorMessage, handleSetAttachments] as const),
     ([mediaEditorMessage2, handleSetAttachments2]) => {
       if (!mediaEditorMessage2) return;
+      syncComposerWithChat();
       const media = getMessagePhoto(mediaEditorMessage2) || getMessageDocumentPhoto(mediaEditorMessage2);
       if (!media) return;
       const mediaHash = getMediaHash(media, 'full');
@@ -869,6 +894,10 @@ const Composer = (ownProps: OwnProps) => {
   const [isSendAsMenuOpen, openSendAsMenu, closeSendAsMenu] = useFlag();
   const [isHoverDisabled, disableHover, enableHover] = useFlag();
 
+  // TODO(port): `useVoiceRecording` / `useVideoRecording` are stubs returning plain values; the real hooks return
+  // getters/accessors. The state fields are read through the result objects (accessors below) so that the call sites
+  // stay reactive when they land; the functions are destructured as in tt.
+  const voiceRecording = useVoiceRecording();
   const {
     startRecordingVoice,
     stopRecordingVoice,
@@ -877,13 +906,18 @@ const Composer = (ownProps: OwnProps) => {
     resumeRecordingVoice,
     toggleViewOnceEnabled,
     subscribeToRecordingPeaks,
-    activeVoiceRecording,
-    isRecordingPaused,
     recordButtonRef: mainButtonRef,
-    isViewOnceEnabled,
     setIsViewOnceEnabled,
-  } = useVoiceRecording();
+  } = voiceRecording;
+  const activeVoiceRecording = () => voiceRecording.activeVoiceRecording;
+  const isRecordingPaused = () => voiceRecording.isRecordingPaused;
+  const isViewOnceEnabled = () => voiceRecording.isViewOnceEnabled;
+  // The main button element: `mainButtonRef` is the stub's ref object (tt's `ElementRef`), kept in sync for the
+  // recording hook; the context menu hooks read the element through an accessor.
+  // TODO(port): the real `useVoiceRecording` returns a callback ref; pass it to the button then.
+  let mainButtonEl: HTMLButtonElement | undefined;
 
+  const videoRecording = useVideoRecording();
   const {
     startRecordingVideo,
     stopRecordingVideo,
@@ -891,23 +925,23 @@ const Composer = (ownProps: OwnProps) => {
     discardRecordingVideo,
     pauseRecordingVideo,
     resumeRecordingVideo,
-    activeVideoRecording,
-    previewStream,
-    isVideoRecordingStarting,
-    isVideoRecordingReady,
-    isVideoRecordingPaused,
-    isRecordingFinished,
     getProgress,
     subscribeToVideoRecordingPeaks,
-  } = useVideoRecording();
+  } = videoRecording;
+  const activeVideoRecording = () => videoRecording.activeVideoRecording;
+  const previewStream = () => videoRecording.previewStream;
+  const isVideoRecordingStarting = () => videoRecording.isVideoRecordingStarting;
+  const isVideoRecordingReady = () => videoRecording.isVideoRecordingReady;
+  const isVideoRecordingPaused = () => videoRecording.isVideoRecordingPaused;
+  const isRecordingFinished = () => videoRecording.isRecordingFinished;
 
-  const activeRecording = activeVoiceRecording || activeVideoRecording;
+  const activeRecording = createMemo(() => activeVoiceRecording() || activeVideoRecording());
   const [isEmbeddedMessageOpen, setIsEmbeddedMessageOpen] = createSignal(false);
 
   createEffect(
-    depsOf(() => [activeRecording, props.editableInputId] as const),
-    ([, editableInputId2]) => {
-      if (!activeRecording) return;
+    depsOf(() => [activeRecording(), props.editableInputId] as const),
+    ([activeRecording2, editableInputId2]) => {
+      if (!activeRecording2) return;
       const input = document.getElementById(editableInputId2);
       if (input && document.activeElement === input) {
         input.blur();
@@ -920,29 +954,29 @@ const Composer = (ownProps: OwnProps) => {
     () => {
       sendMessageAction({ type: 'recordAudio' });
     },
-    () => (shouldSendRecordingStatus() ? activeVoiceRecording && SEND_MESSAGE_ACTION_INTERVAL : undefined),
+    () => (shouldSendRecordingStatus() ? activeVoiceRecording() && SEND_MESSAGE_ACTION_INTERVAL : undefined),
   );
   useInterval(
     () => {
       sendMessageAction({ type: 'recordRound' });
     },
-    () => (shouldSendRecordingStatus() ? activeVideoRecording && SEND_MESSAGE_ACTION_INTERVAL : undefined),
+    () => (shouldSendRecordingStatus() ? activeVideoRecording() && SEND_MESSAGE_ACTION_INTERVAL : undefined),
   );
 
   createEffect(
     depsOf(
       () =>
         [
-          activeVoiceRecording,
-          activeVideoRecording,
+          activeVoiceRecording(),
+          activeVideoRecording(),
           props.isForCurrentMessageList,
           isInStoryViewer(),
           sendMessageAction,
         ] as const,
     ),
-    ([, , isForCurrentMessageList2, isInStoryViewer2]) => {
+    ([activeVoiceRecording2, activeVideoRecording2, isForCurrentMessageList2, isInStoryViewer2]) => {
       if (!isForCurrentMessageList2 || isInStoryViewer2) return;
-      if (!activeVoiceRecording && !activeVideoRecording) {
+      if (!activeVoiceRecording2 && !activeVideoRecording2) {
         sendMessageAction({ type: 'cancel' });
       }
     },
@@ -963,14 +997,14 @@ const Composer = (ownProps: OwnProps) => {
       !isInStoryViewer() &&
       !isRichInputExpansionActive() &&
       !hasRichOnlyContent() &&
-      hasInputContent &&
+      hasInputContent() &&
       !props.editingMessage,
   );
   createEffect(
-    depsOf(() => [richMessage, canSendTyping(), sendMessageAction]),
-    (_deps, prev) => {
+    depsOf(() => [richMessage(), canSendTyping(), sendMessageAction] as const),
+    ([richMessage2, canSendTyping2], prev) => {
       const [prevRichMessage] = prev ?? [];
-      if (canSendTyping() && richMessage !== prevRichMessage) {
+      if (canSendTyping2 && richMessage2 !== prevRichMessage) {
         sendMessageAction({ type: 'typing' });
       }
     },
@@ -1004,6 +1038,7 @@ const Composer = (ownProps: OwnProps) => {
     depsOf(() => [props.insertingPeerIdMention, insertMention] as const),
     ([insertingPeerIdMention2]) => {
       if (!insertingPeerIdMention2) return;
+      syncComposerWithChat();
       const peer = selectPeer(getGlobal(), insertingPeerIdMention2);
       if (peer) {
         insertMention(peer, true);
@@ -1013,20 +1048,15 @@ const Composer = (ownProps: OwnProps) => {
   );
 
   let aiMessageToSendRef: ApiInputRichMessage | undefined;
-  // TODO(codemod): dependency on a container (aiMessageEditorPendingResult) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)
+  // Deviation: the store keeps its own copy of this id-less record (see `trackRecord`): the effects key on the committed
+  // (tt's) object, a new one per result, and subscribe to the fields of the record.
+  const aiMessageEditorPendingResult = () => {
+    trackRecord(props.aiMessageEditorPendingResult);
+    return selectTabState(getGlobal()).aiMessageEditorPendingResult;
+  };
   createEffect(
-    depsOf(
-      () =>
-        [
-          isInMessageList(),
-          props.aiMessageEditorPendingResult,
-          props.chatId,
-          clearAiMessageEditorPendingResult,
-          props.threadId,
-          updateRichMessage,
-        ] as const,
-    ),
-    ([isInMessageList2, aiMessageEditorPendingResult2, chatId2, , threadId2]) => {
+    depsOf(() => [isInMessageList(), aiMessageEditorPendingResult(), props.chatId, props.threadId] as const),
+    ([isInMessageList2, aiMessageEditorPendingResult2, chatId2, threadId2]) => {
       if (!isInMessageList2 || !aiMessageEditorPendingResult2) return;
 
       const {
@@ -1190,21 +1220,32 @@ const Composer = (ownProps: OwnProps) => {
   );
 
   // Handle chat change (should be placed after `useDraft` and `useEditing`)
-  // TODO(codemod): useStateRef: a handler reads the current value through the accessor; replace ref.current with the accessor call
-  const resetComposerRef = useStateRef(resetComposer);
-  // TODO(codemod): useStateRef: a handler reads the current value through the accessor; replace ref.current with the accessor call
-  const cancelRecordingVoiceRef = useStateRef(cancelRecordingVoice);
-  createMutationEffect(
-    depsOf(() => [props.chatId, props.threadId, resetComposerRef, cancelRecordingVoiceRef] as const),
-    ([chatId2, threadId2]) => {
-      return () => {
-        // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps
-        cancelRecordingVoiceRef.current();
-        // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps
-        resetComposerRef.current(false, true);
-      };
+  // Deviation: tt reset the composer for the chat being left in the cleanup of a layout effect (`useStateRef` kept the
+  // callbacks current). On a chat change every layout cleanup ran before every effect, so the reset came before
+  // `useDraft` / `useEditing` restored the content of the new chat and before the requested draft, AI result, mention
+  // and media effects below inserted theirs. frameact runs an effect's cleanup right before its own next apply, in the
+  // order the effects were reached from the change, so that order is not guaranteed here: the composer remembers the
+  // chat its content belongs to, and the reset runs at the first of this effect or a write of new content
+  // (`updateRichMessage`, which `useDraft` / `useEditing` call, and the effects below), whichever comes first.
+  let composerChatKey = `${props.chatId}_${props.threadId}`;
+  const syncComposerWithChat = () => {
+    const chatKey = `${props.chatId}_${props.threadId}`;
+    if (chatKey === composerChatKey) return;
+
+    composerChatKey = chatKey;
+    cancelRecordingVoice();
+    resetComposer(false, true);
+  };
+  createEffect(
+    depsOf(() => [props.chatId, props.threadId] as const),
+    () => {
+      syncComposerWithChat();
     },
   );
+  onDestroy(() => {
+    cancelRecordingVoice();
+    resetComposer(false, true);
+  });
 
   const areAllGiftsDisallowed = createMemo(() => {
     if (!props.disallowedGifts) {
@@ -1258,17 +1299,17 @@ const Composer = (ownProps: OwnProps) => {
       isBotKeyboardOpen() ||
       isSendAsMenuOpen() ||
       isStoryReactionPickerOpen() ||
-      Boolean(activeRecording) ||
+      Boolean(activeRecording()) ||
       attachments().length > 0,
   );
   const isComposerActive = createMemo(() => isComposerEngaged() || isAttachMenuOpen());
 
   const mainButtonState = createMemo(() => {
-    if (!isComposerEngaged() && props.onForward && !(hasInputContent && !hasAttachments())) {
+    if (!isComposerEngaged() && props.onForward && !(hasInputContent() && !hasAttachments())) {
       return MainButtonState.Forward;
     }
 
-    if (props.editingMessage && shouldForceShowEditing) {
+    if (props.editingMessage && shouldForceShowEditing()) {
       return MainButtonState.Edit;
     }
 
@@ -1278,19 +1319,19 @@ const Composer = (ownProps: OwnProps) => {
       !props.editingMessage &&
       !props.isInScheduledList &&
       !props.isForwarding &&
-      !activeVoiceRecording &&
-      !activeVideoRecording
+      !activeVoiceRecording() &&
+      !activeVideoRecording()
     ) {
       return MainButtonState.Stop;
     }
 
     if (
       (IS_VOICE_RECORDING_SUPPORTED || IS_VIDEO_RECORDING_SUPPORTED) &&
-      !activeVoiceRecording &&
-      !activeVideoRecording &&
+      !activeVoiceRecording() &&
+      !activeVideoRecording() &&
       !props.isForwarding &&
       !isRichInputExpansionActive() &&
-      !(hasInputContent && !hasAttachments())
+      !(hasInputContent() && !hasAttachments())
     ) {
       return MainButtonState.Record;
     }
@@ -1303,60 +1344,48 @@ const Composer = (ownProps: OwnProps) => {
   });
   const canShowCustomSendMenu = createMemo(() => !props.isInScheduledList);
 
-  const contextMenuHandlersResult = createMemo(() =>
-    useContextMenuHandlers(
-      mainButtonRef,
-      () => !(mainButtonState() === MainButtonState.Send && canShowCustomSendMenu()),
-    ),
+  const {
+    isContextMenuOpen: isCustomSendMenuOpen,
+    handleContextMenu,
+    handleContextMenuClose,
+    handleContextMenuHide,
+  } = useContextMenuHandlers(
+    () => mainButtonEl,
+    () => !(mainButtonState() === MainButtonState.Send && canShowCustomSendMenu()),
   );
-  const isCustomSendMenuOpen = () => contextMenuHandlersResult().isContextMenuOpen;
-  const handleContextMenu = () => contextMenuHandlersResult().handleContextMenu;
-  const handleContextMenuClose = () => contextMenuHandlersResult().handleContextMenuClose;
-  const handleContextMenuHide = () => contextMenuHandlersResult().handleContextMenuHide;
 
   const canSwitchRecordMode = createMemo(
     () => CAN_SWITCH_RECORD_MODE && props.canSendVoiceByPrivacy && canSendVoices() && canSendRoundVideos(),
   );
 
-  const contextMenuHandlersResult2 = createMemo(() =>
-    useContextMenuHandlers(
-      mainButtonRef,
-      () => !(mainButtonState() === MainButtonState.Record && canSwitchRecordMode()),
-    ),
+  const {
+    isContextMenuOpen: isRecordModeMenuOpen,
+    handleContextMenu: handleRecordModeContextMenu,
+    handleContextMenuClose: handleRecordModeMenuClose,
+    handleContextMenuHide: handleRecordModeMenuHide,
+  } = useContextMenuHandlers(
+    () => mainButtonEl,
+    () => !(mainButtonState() === MainButtonState.Record && canSwitchRecordMode()),
   );
-  const isRecordModeMenuOpen = () => contextMenuHandlersResult2().isContextMenuOpen;
-  const handleRecordModeContextMenu = () => contextMenuHandlersResult2().handleContextMenu;
-  const handleRecordModeMenuClose = () => contextMenuHandlersResult2().handleContextMenuClose;
-  const handleRecordModeMenuHide = () => contextMenuHandlersResult2().handleContextMenuHide;
 
   const handleSelectRecordMode = (mode: RecordMode) => {
     setSettingOption({ lastRecordMessageMode: mode });
-    handleRecordModeMenuClose()();
+    handleRecordModeMenuClose();
   };
 
-  const contextMenuHandlersResult3 = createMemo(() =>
-    useContextMenuHandlers(
-      () => storyReactionRef,
-      () => !isInStoryViewer(),
-    ),
+  const {
+    contextMenuAnchor: storyReactionPickerAnchor,
+    handleContextMenu: handleStoryPickerContextMenu,
+    handleBeforeContextMenu: handleBeforeStoryPickerContextMenu,
+    handleContextMenuHide: handleStoryPickerContextMenuHide,
+  } = useContextMenuHandlers(
+    () => storyReactionRef,
+    () => !isInStoryViewer(),
   );
-  const storyReactionPickerAnchor = () => contextMenuHandlersResult3().contextMenuAnchor;
-  const handleStoryPickerContextMenu = () => contextMenuHandlersResult3().handleContextMenu;
-  const handleBeforeStoryPickerContextMenu = () => contextMenuHandlersResult3().handleBeforeContextMenu;
-  const handleStoryPickerContextMenuHide = () => contextMenuHandlersResult3().handleContextMenuHide;
 
   createEffect(
-    depsOf(
-      () =>
-        [
-          props.chatId,
-          handleStoryPickerContextMenuHide(),
-          props.isReactionPickerOpen,
-          props.storyId,
-          storyReactionPickerAnchor(),
-        ] as const,
-    ),
-    ([chatId2, handleStoryPickerContextMenuHide2, isReactionPickerOpen2, storyId2, storyReactionPickerAnchor2]) => {
+    depsOf(() => [props.chatId, props.isReactionPickerOpen, props.storyId, storyReactionPickerAnchor()] as const),
+    ([chatId2, isReactionPickerOpen2, storyId2, storyReactionPickerAnchor2]) => {
       if (isReactionPickerOpen2) return;
 
       if (storyReactionPickerAnchor2) {
@@ -1365,19 +1394,17 @@ const Composer = (ownProps: OwnProps) => {
           storyId: storyId2!,
           position: storyReactionPickerAnchor2,
         });
-        handleStoryPickerContextMenuHide2();
+        handleStoryPickerContextMenuHide();
       }
     },
   );
 
-  const peerColorResult = createMemo(() =>
-    usePeerColor({
-      peer: () => props.sendAsPeer || props.currentUser,
-      theme: () => props.theme,
-    }),
-  );
-  const peerColorClass = () => peerColorResult().className;
-  const peerColorStyle = () => peerColorResult().style;
+  const peerColor = usePeerColor({
+    peer: () => props.sendAsPeer || props.currentUser,
+    theme: () => props.theme,
+  });
+  const peerColorClass = () => peerColor().className;
+  const peerColorStyle = () => peerColor().style;
 
   const hasGifFromPicker = createMemo(() => attachments().some((a) => a.gif));
 
@@ -1396,14 +1423,14 @@ const Composer = (ownProps: OwnProps) => {
   const getRichMediaPastePosition = () => richEditor.editor?.state.selection.from;
 
   useClipboardPaste(
-    () => props.isForCurrentMessageList || isInStoryViewer(),
+    () => Boolean(props.isForCurrentMessageList || isInStoryViewer()),
     insertFormattedTextAndUpdateCursor,
-    () => handleSetAttachments(),
+    handleSetAttachments,
     () => props.editingMessage,
     resolveFilePasteTarget,
-    !attachments().length,
-    hasGifFromPicker(),
-    () => handleRichMediaFiles(),
+    () => !attachments().length,
+    hasGifFromPicker,
+    handleRichMediaFiles,
     getRichMediaPastePosition,
   );
 
@@ -1568,7 +1595,7 @@ const Composer = (ownProps: OwnProps) => {
         return;
       }
 
-      handleActionWithPaymentConfirmation()(sendAttachments, {
+      handleActionWithPaymentConfirmation(sendAttachments, {
         attachments: attachments(),
         sendCompressed,
         sendGrouped,
@@ -1634,8 +1661,9 @@ const Composer = (ownProps: OwnProps) => {
       if (!checkSlowMode()) return;
 
       const effectId = props.effect?.id;
-      if (props.areEffectsSupported)
+      if (props.areEffectsSupported) {
         saveEffectInDraft({ chatId: props.chatId, threadId: props.threadId, effectId: undefined });
+      }
 
       if (props.editingMessage) {
         editMessage({
@@ -1687,8 +1715,9 @@ const Composer = (ownProps: OwnProps) => {
       const shouldUseWebPagePreview = hasWebPagePreview() && !shouldSkipWebPagePreview;
       const isInvertedMedia = shouldUseWebPagePreview ? props.attachmentSettings.isInvertedMedia : undefined;
 
-      if (props.areEffectsSupported)
+      if (props.areEffectsSupported) {
         saveEffectInDraft({ chatId: props.chatId, threadId: props.threadId, effectId: undefined });
+      }
 
       sendMessage({
         messageList: props.currentMessageList,
@@ -1701,7 +1730,7 @@ const Composer = (ownProps: OwnProps) => {
         isInvertedMedia,
         effectId,
         webPageMediaSize: shouldSkipWebPagePreview ? undefined : props.attachmentSettings.webPageMediaSize,
-        webPageUrl: shouldUseWebPagePreview ? props.webPagePreview.url : undefined,
+        webPageUrl: shouldUseWebPagePreview ? props.webPagePreview!.url : undefined,
       });
     }
 
@@ -1735,13 +1764,13 @@ const Composer = (ownProps: OwnProps) => {
       return;
     }
 
-    isSilent = isSilent || props.isSilentPosting;
+    isSilent = isSilent || Boolean(props.isSilentPosting);
 
     let currentAttachments = attachments();
 
-    if (activeVoiceRecording) {
+    if (activeVoiceRecording()) {
       const record = await stopRecordingVoice();
-      const ttlSeconds = isViewOnceEnabled ? ONE_TIME_MEDIA_TTL_SECONDS : undefined;
+      const ttlSeconds = isViewOnceEnabled() ? ONE_TIME_MEDIA_TTL_SECONDS : undefined;
       if (record) {
         const { blob, duration, waveform } = record;
         currentAttachments = [
@@ -1750,9 +1779,9 @@ const Composer = (ownProps: OwnProps) => {
       }
     }
 
-    if (activeVideoRecording) {
+    if (activeVideoRecording()) {
       const record = await stopRecordingVideo();
-      const ttlSeconds = isViewOnceEnabled ? ONE_TIME_MEDIA_TTL_SECONDS : undefined;
+      const ttlSeconds = isViewOnceEnabled() ? ONE_TIME_MEDIA_TTL_SECONDS : undefined;
       if (record && record.durationMs >= MIN_ROUND_VIDEO_RECORDING_TIME) {
         const { blob, duration } = record;
         currentAttachments = [
@@ -1780,7 +1809,7 @@ const Composer = (ownProps: OwnProps) => {
       return;
     }
 
-    handleActionWithPaymentConfirmation()(
+    handleActionWithPaymentConfirmation(
       handleSend,
       isSilent,
       scheduledAt,
@@ -1789,31 +1818,37 @@ const Composer = (ownProps: OwnProps) => {
     );
   };
 
-  // TODO(codemod): dependency on a container (aiMessageEditorPendingResult) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)
   createEffect(
     depsOf(
       () =>
         [
           isInMessageList(),
-          props.aiMessageEditorPendingResult,
-          richMessage,
+          aiMessageEditorPendingResult(),
+          richMessage(),
           props.chatId,
           props.threadId,
           props.editingMessage,
           isComposerBlocked(),
-          clearAiMessageEditorPendingResult,
-          handleSendWithConfirmation,
         ] as const,
     ),
-    ([isInMessageList2, aiMessageEditorPendingResult2, , chatId2, threadId2, editingMessage2, isComposerBlocked2]) => {
+    ([
+      isInMessageList2,
+      aiMessageEditorPendingResult2,
+      richMessage2,
+      chatId2,
+      threadId2,
+      editingMessage2,
+      isComposerBlocked2,
+    ]) => {
       if (
         !isInMessageList2 ||
         !aiMessageEditorPendingResult2?.shouldSend ||
-        richMessage !== aiMessageToSendRef ||
+        richMessage2 !== aiMessageToSendRef ||
         aiMessageEditorPendingResult2.chatId !== chatId2 ||
         aiMessageEditorPendingResult2.threadId !== threadId2
-      )
+      ) {
         return;
+      }
 
       const { isSilent, scheduledAt, scheduleRepeatPeriod } = aiMessageEditorPendingResult2;
       clearAiMessageEditorPendingResult();
@@ -1939,22 +1974,22 @@ const Composer = (ownProps: OwnProps) => {
     }
   };
 
-  // TODO(codemod): dependency on a container (contentToBeScheduled) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)
+  // Deviation: keyed on the committed (tt's) record, a new object per request (see `trackRecord`).
+  const contentToBeScheduled = () => {
+    trackRecord(props.contentToBeScheduled);
+    return selectTabState(getGlobal()).contentToBeScheduled;
+  };
   createEffect(
-    depsOf(() => [props.contentToBeScheduled, props.currentMessageList, handleMessageSchedule, requestMessageSchedule]),
-    (_deps, prev) => {
+    depsOf(() => [contentToBeScheduled(), props.currentMessageList] as const),
+    ([contentToBeScheduled2, currentMessageList2], prev) => {
       const [prevContentToBeScheduled] = prev ?? [];
-      if (
-        props.currentMessageList &&
-        props.contentToBeScheduled &&
-        props.contentToBeScheduled !== prevContentToBeScheduled
-      ) {
+      if (currentMessageList2 && contentToBeScheduled2 && contentToBeScheduled2 !== prevContentToBeScheduled) {
         requestMessageSchedule((scheduledAt, scheduleRepeatPeriod) => {
           handleMessageSchedule(
-            props.contentToBeScheduled,
+            contentToBeScheduled2,
             scheduledAt,
             scheduleRepeatPeriod,
-            props.currentMessageList,
+            currentMessageList2,
             undefined,
           );
         });
@@ -1988,9 +2023,10 @@ const Composer = (ownProps: OwnProps) => {
   );
 
   createEffect(
-    depsOf(() => [handleFileSelect(), props.requestedDraftFiles, resetOpenChatWithDraft] as const),
+    depsOf(() => [handleFileSelect, props.requestedDraftFiles, resetOpenChatWithDraft] as const),
     ([handleFileSelect2, requestedDraftFiles2]) => {
       if (requestedDraftFiles2?.length) {
+        syncComposerWithChat();
         void handleFileSelect2(requestedDraftFiles2);
         resetOpenChatWithDraft();
       }
@@ -2002,8 +2038,9 @@ const Composer = (ownProps: OwnProps) => {
       request.chatId !== props.chatId ||
       request.threadId !== props.threadId ||
       request.messageListType !== props.messageListType
-    )
+    ) {
       return;
+    }
     if (!isRichInputExpansionActive() || !richEditor.editor) return;
 
     if (request.files) {
@@ -2021,11 +2058,15 @@ const Composer = (ownProps: OwnProps) => {
     }
   };
 
-  // TODO(codemod): dependency on a container (requestedRichInputMedia) keeps its identity while its content changes: track the fields the effect reads instead (store contract §12.7)
+  // Deviation: keyed on the committed (tt's) record, a new object per request (see `trackRecord`).
   createEffect(
-    depsOf(() => [applyRichInputMediaRequest, props.requestedRichInputMedia, resetRichInputMediaRequest] as const),
-    ([, requestedRichInputMedia2]) => {
+    () => {
+      trackRecord(props.requestedRichInputMedia);
+      return isInMessageList() ? selectTabState(getGlobal()).requestedRichInputMedia : undefined;
+    },
+    (requestedRichInputMedia2) => {
       if (!requestedRichInputMedia2) return;
+      syncComposerWithChat();
 
       resetRichInputMediaRequest();
       applyRichInputMediaRequest(requestedRichInputMedia2);
@@ -2074,7 +2115,7 @@ const Composer = (ownProps: OwnProps) => {
       forceShowSymbolMenu();
       requestMessageSchedule((scheduledAt, scheduleRepeatPeriod) => {
         cancelForceShowSymbolMenu();
-        handleActionWithPaymentConfirmation()(
+        handleActionWithPaymentConfirmation(
           handleMessageSchedule,
           { gif, isSilent },
           scheduledAt,
@@ -2086,7 +2127,7 @@ const Composer = (ownProps: OwnProps) => {
         });
       });
     } else {
-      handleActionWithPaymentConfirmation()(sendMessage, { messageList: props.currentMessageList, gif, isSilent });
+      handleActionWithPaymentConfirmation(sendMessage, { messageList: props.currentMessageList, gif, isSilent });
       requestMeasure(() => {
         resetComposer(true);
       });
@@ -2096,7 +2137,7 @@ const Composer = (ownProps: OwnProps) => {
   };
 
   const handleGifAddCaption = (gif: ApiVideo) => {
-    handleSetAttachments()([buildGifAttachment(gif)]);
+    handleSetAttachments([buildGifAttachment(gif)]);
     closeSymbolMenu();
   };
 
@@ -2119,7 +2160,7 @@ const Composer = (ownProps: OwnProps) => {
       forceShowSymbolMenu();
       requestMessageSchedule((scheduledAt, scheduleRepeatPeriod) => {
         cancelForceShowSymbolMenu();
-        handleActionWithPaymentConfirmation()(
+        handleActionWithPaymentConfirmation(
           handleMessageSchedule,
           { sticker, isSilent },
           scheduledAt,
@@ -2131,7 +2172,7 @@ const Composer = (ownProps: OwnProps) => {
         });
       });
     } else {
-      handleActionWithPaymentConfirmation()(sendMessage, {
+      handleActionWithPaymentConfirmation(sendMessage, {
         messageList: props.currentMessageList,
         sticker,
         isSilent,
@@ -2161,7 +2202,7 @@ const Composer = (ownProps: OwnProps) => {
 
     if (props.isInScheduledList || isScheduleRequested) {
       requestMessageSchedule((scheduledAt, scheduleRepeatPeriod) => {
-        handleActionWithPaymentConfirmation()(
+        handleActionWithPaymentConfirmation(
           handleMessageSchedule,
           {
             id: inlineResult.id,
@@ -2174,7 +2215,7 @@ const Composer = (ownProps: OwnProps) => {
         );
       });
     } else {
-      handleActionWithPaymentConfirmation()(sendInlineBotResult, {
+      handleActionWithPaymentConfirmation(sendInlineBotResult, {
         id: inlineResult.id,
         queryId: inlineResult.queryId,
         threadId: props.threadId,
@@ -2306,7 +2347,8 @@ const Composer = (ownProps: OwnProps) => {
   const handleToDoListSend = (todo: ApiNewMediaTodo) => {
     if (!validateEphemeralReply()) return;
 
-    if (!props.currentMessageList) {
+    const currentMessageList = props.currentMessageList;
+    if (!currentMessageList) {
       return;
     }
 
@@ -2316,19 +2358,19 @@ const Composer = (ownProps: OwnProps) => {
 
     if (props.isInScheduledList) {
       requestMessageSchedule((scheduledAt, scheduleRepeatPeriod) => {
-        handleActionWithPaymentConfirmation()(
+        handleActionWithPaymentConfirmation(
           scheduleTodoList,
           { todo },
           scheduledAt,
           scheduleRepeatPeriod,
-          props.currentMessageList,
+          currentMessageList,
           convertedSource,
         );
       });
     } else {
-      handleActionWithPaymentConfirmation()(
+      handleActionWithPaymentConfirmation(
         sendTodoList,
-        { messageList: props.currentMessageList, todo, isSilent: props.isSilentPosting },
+        { messageList: currentMessageList, todo, isSilent: props.isSilentPosting },
         convertedSource,
       );
     }
@@ -2491,7 +2533,7 @@ const Composer = (ownProps: OwnProps) => {
 
     requestMeasure(() => {
       const input = inputRef;
-      if (!input || (!hasInputContent && !input.textContent)) {
+      if (!input || (!hasInputContent() && !input.textContent)) {
         setShouldShowRichInputButton(false);
         return;
       }
@@ -2500,10 +2542,13 @@ const Composer = (ownProps: OwnProps) => {
     });
   };
 
-  onMount(() => {
-    updateShouldShowRichInputButton();
-  });
-  useResizeObserver(() => inputRef, updateShouldShowRichInputButton, hasAttachments());
+  createEffect(
+    depsOf(() => [richMessage(), hasAttachments(), hasInputContent(), windowWidth()] as const),
+    () => {
+      updateShouldShowRichInputButton();
+    },
+  );
+  useResizeObserver(() => inputRef, updateShouldShowRichInputButton, hasAttachments);
 
   const withBotMenuButton = createMemo(
     () =>
@@ -2512,7 +2557,7 @@ const Composer = (ownProps: OwnProps) => {
       !props.editingMessage &&
       props.messageListType === 'thread',
   );
-  const isBotMenuButtonOpen = createMemo(() => withBotMenuButton() && !hasInputContent && !activeRecording);
+  const isBotMenuButtonOpen = createMemo(() => withBotMenuButton() && !hasInputContent() && !activeRecording());
 
   const isComposerHasFocus = createMemo(
     () => isComposerActive() || isBotCommandMenuOpen() || isBotMenuButtonOpen() || isCustomSendMenuOpen(),
@@ -2524,8 +2569,8 @@ const Composer = (ownProps: OwnProps) => {
       isInStoryViewer() &&
       !isAttachMenuOpen() &&
       !isSymbolMenuOpen() &&
-      !activeRecording &&
-      !hasInputContent,
+      !activeRecording() &&
+      !hasInputContent(),
   );
 
   createEffect(
@@ -2569,6 +2614,7 @@ const Composer = (ownProps: OwnProps) => {
 
   const slowModePlaceholder = createMemo(() =>
     (() => {
+      placeholderTick();
       if (!props.slowMode?.nextSendDate || props.slowMode.nextSendDate < getServerTime()) return undefined;
 
       return lang(
@@ -2582,7 +2628,8 @@ const Composer = (ownProps: OwnProps) => {
   );
 
   const placeholder = createMemo(() => {
-    if (activeRecording && windowWidth <= SCREEN_WIDTH_TO_HIDE_PLACEHOLDER) {
+    placeholderTick();
+    if (activeRecording() && windowWidth() <= SCREEN_WIDTH_TO_HIDE_PLACEHOLDER) {
       return '';
     }
 
@@ -2659,9 +2706,22 @@ const Composer = (ownProps: OwnProps) => {
     },
   );
 
-  const { shouldRender: shouldRenderReactionSelector, transitionClassNames: reactionSelectorTransitonClassNames } =
-    // TODO(codemod): useShowTransitionDeprecated returned class names: apply the result through ref={t.ref} on the element (transitionClassNames/hasOpenClass are gone)
-    createShowTransition({ isOpen: () => isReactionSelectorOpen() });
+  // Deviation: `ReactionSelector` takes the transition classes as `className` (tt's `useShowTransitionDeprecated`):
+  // they are built from the kit transition's state with the class names of tt's hook.
+  const { shouldRender: shouldRenderReactionSelector, state: reactionSelectorTransitionState } = createShowTransition({
+    isOpen: isReactionSelectorOpen,
+    className: false,
+  });
+  const reactionSelectorTransitonClassNames = createMemo(() => {
+    const state = reactionSelectorTransitionState();
+    return buildClassName(
+      'opacity-transition',
+      'fast',
+      state === 'open' ? 'open' : 'not-open',
+      state !== 'closed' ? 'shown' : 'not-shown',
+      state === 'closing' && 'closing',
+    );
+  });
   const shouldForceVoiceMode = createMemo(
     () => IS_VOICE_RECORDING_SUPPORTED && !canSendRoundVideos() && canSendVoices(),
   );
@@ -2725,52 +2785,58 @@ const Composer = (ownProps: OwnProps) => {
           handleEditComplete();
         }
         break;
-      case MainButtonState.Schedule:
+      case MainButtonState.Schedule: {
         if (!checkCanSendRichContent()) {
           break;
         }
-        if (activeVoiceRecording) {
+        if (activeVoiceRecording()) {
           pauseRecordingVoice();
         }
-        if (activeVideoRecording) {
+        if (activeVideoRecording()) {
           finishRecordingVideo();
         }
-        if (!props.currentMessageList) {
+        const currentMessageList = props.currentMessageList;
+        if (!currentMessageList) {
           return;
         }
         requestMessageSchedule((scheduledAt, scheduleRepeatPeriod) => {
-          handleMessageSchedule({}, scheduledAt, scheduleRepeatPeriod, props.currentMessageList, props.effect?.id);
+          handleMessageSchedule({}, scheduledAt, scheduleRepeatPeriod, currentMessageList, props.effect?.id);
         });
         break;
+      }
       default:
         break;
     }
   };
 
-  let mainButtonContextMenuHandler: typeof handleContextMenu | undefined;
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  if (mainButtonState() === MainButtonState.Send && canShowCustomSendMenu()) {
-    mainButtonContextMenuHandler = handleContextMenu();
-  } else if (mainButtonState() === MainButtonState.Record) {
-    mainButtonContextMenuHandler = canSwitchRecordMode() ? handleRecordModeContextMenu() : stopEvent;
-  }
+  const mainButtonContextMenuHandler = createMemo(() => {
+    let mainButtonContextMenuHandler2: typeof handleContextMenu | undefined;
+    if (mainButtonState() === MainButtonState.Send && canShowCustomSendMenu()) {
+      mainButtonContextMenuHandler2 = handleContextMenu;
+    } else if (mainButtonState() === MainButtonState.Record) {
+      mainButtonContextMenuHandler2 = canSwitchRecordMode() ? handleRecordModeContextMenu : stopEvent;
+    }
+    return mainButtonContextMenuHandler2;
+  });
 
-  let sendButtonAriaLabel = 'SendMessage';
-  // TODO(codemod): this statement reads reactive values but runs once (teact re-ran it every render): move it into an effect or a memo
-  switch (mainButtonState()) {
-    case MainButtonState.Forward:
-      sendButtonAriaLabel = 'Forward';
-      break;
-    case MainButtonState.Edit:
-      sendButtonAriaLabel = 'Save edited message';
-      break;
-    case MainButtonState.Record:
-      if (!canAttachMedia()) {
-        sendButtonAriaLabel = 'Conversation.DefaultRestrictedMedia';
-      } else {
-        sendButtonAriaLabel = isRecordingVideoMode() ? 'AccDescrVideoMessage' : 'AccDescrVoiceMessage';
-      }
-  }
+  const sendButtonAriaLabel = createMemo(() => {
+    let sendButtonAriaLabel2 = 'SendMessage';
+    switch (mainButtonState()) {
+      case MainButtonState.Forward:
+        sendButtonAriaLabel2 = 'Forward';
+        break;
+      case MainButtonState.Edit:
+        sendButtonAriaLabel2 = 'Save edited message';
+        break;
+      case MainButtonState.Record:
+        if (!canAttachMedia()) {
+          sendButtonAriaLabel2 = 'Conversation.DefaultRestrictedMedia';
+        } else {
+          sendButtonAriaLabel2 = isRecordingVideoMode() ? 'AccDescrVideoMessage' : 'AccDescrVoiceMessage';
+        }
+    }
+    return sendButtonAriaLabel2;
+  });
 
   const fullClassName = createMemo(() =>
     buildClassName(
@@ -2816,7 +2882,7 @@ const Composer = (ownProps: OwnProps) => {
         : undefined;
     }
 
-    handleActionWithPaymentConfirmation()(sendMessage, { text, entities, isReaction: true });
+    handleActionWithPaymentConfirmation(sendMessage, { text, entities, isReaction: true });
     closeReactionPicker();
   };
 
@@ -2864,11 +2930,11 @@ const Composer = (ownProps: OwnProps) => {
       return;
     }
 
-    handleActionWithPaymentConfirmation()(sendSilent);
+    handleActionWithPaymentConfirmation(sendSilent);
   };
 
   const sendWhenOnline = () => {
-    handleActionWithPaymentConfirmation()(
+    handleActionWithPaymentConfirmation(
       handleMessageSchedule,
       {},
       SCHEDULED_WHEN_ONLINE,
@@ -2894,7 +2960,7 @@ const Composer = (ownProps: OwnProps) => {
     scheduleRepeatPeriod?: number,
   ) => {
     if (scheduledAt) {
-      handleActionWithPaymentConfirmation()(
+      handleActionWithPaymentConfirmation(
         handleMessageSchedule,
         { sendCompressed, sendGrouped, isInvertedMedia },
         scheduledAt,
@@ -2904,7 +2970,7 @@ const Composer = (ownProps: OwnProps) => {
       );
     } else {
       requestMessageSchedule((calendarScheduledAt, calendarRepeatPeriod) => {
-        handleActionWithPaymentConfirmation()(
+        handleActionWithPaymentConfirmation(
           handleMessageSchedule,
           { sendCompressed, sendGrouped, isInvertedMedia },
           calendarScheduledAt,
@@ -2917,7 +2983,7 @@ const Composer = (ownProps: OwnProps) => {
   };
 
   const handleSendSilentAttachments = (sendCompressed: boolean, sendGrouped: boolean, isInvertedMedia?: true) => {
-    handleActionWithPaymentConfirmation()(sendSilent, { sendCompressed, sendGrouped, isInvertedMedia });
+    handleActionWithPaymentConfirmation(sendSilent, { sendCompressed, sendGrouped, isInvertedMedia });
   };
 
   const handleRemoveEffect = () => {
@@ -2945,7 +3011,7 @@ const Composer = (ownProps: OwnProps) => {
       props.botMenuButton?.type === 'commands' &&
       !props.editingMessage &&
       props.botCommands !== false &&
-      !activeRecording,
+      !activeRecording(),
   );
 
   const effectEmoji = createMemo(() => props.areEffectsSupported && props.effect?.emoticon);
@@ -2964,24 +3030,24 @@ const Composer = (ownProps: OwnProps) => {
   const canToggleRichInput = createMemo(() => canOpenRichInput() || canCloseRichInput());
   const shouldShowAiButton = createMemo(
     () =>
-      (isRichInputExpansionActive() || (shouldShowRichInputButton() && hasInputContent)) &&
+      (isRichInputExpansionActive() || (shouldShowRichInputButton() && hasInputContent())) &&
       !isInStoryViewer() &&
       !hasAttachments() &&
       !isComposerBlocked() &&
-      !activeRecording &&
+      !activeRecording() &&
       !hasRichMediaBlocking(),
   );
   const { ref: voiceRecordBarRef, shouldRender: shouldRenderVoiceRecordBar } = createShowTransition({
-    isOpen: () => Boolean(activeRecording),
+    isOpen: () => Boolean(activeRecording()),
   });
-  const renderedRecording = currentOrPrev(() => activeRecording);
+  const renderedRecording = currentOrPrev(() => activeRecording());
 
   const { ref: roundVideoRecorderRef, shouldRender: shouldRenderRoundVideoRecorder } = createShowTransition({
-    isOpen: () => isVideoRecordingStarting || Boolean(activeVideoRecording && previewStream),
+    isOpen: () => isVideoRecordingStarting() || Boolean(activeVideoRecording() && previewStream()),
     className: false,
   });
-  const renderedVideoRecording = currentOrPrev(() => activeVideoRecording);
-  const renderedPreviewStream = currentOrPrev(() => previewStream);
+  const renderedVideoRecording = currentOrPrev(() => activeVideoRecording());
+  const renderedPreviewStream = currentOrPrev(() => previewStream());
 
   const isPaidSend = createMemo(() => Boolean(props.paidMessagesStars && mainButtonState() === MainButtonState.Send));
   const { ref: paidStarsRef, shouldRender: shouldRenderPaidStars } = createShowTransition({
@@ -2990,15 +3056,20 @@ const Composer = (ownProps: OwnProps) => {
     closeDuration: PAID_STARS_CLOSE_DURATION,
   });
 
-  createMeasureEffect(
-    depsOf(() => [shouldRenderPaidStars(), starsForAllMessages(), paidStarsRef, mainButtonRef] as const),
-    ([shouldRenderPaidStars2, starsForAllMessages2]) => {
-      // TODO(codemod): paidStarsRef is a callback ref now: keep the element in a let assigned from ref={(el) => { paidStarsRef(el); element = el; }}
-      const starsEl = paidStarsRef.current;
-      const buttonEl = mainButtonRef.current;
-      if (!starsEl || !buttonEl) return;
+  let paidStarsEl: HTMLDivElement | undefined;
+  // Deviation: tt's passive effect ran after the commit that rendered the stars. Here a mutation effect runs in the
+  // mutate phase that inserts them and books the measurement for the next frame (`requestMeasure` from the mutate phase),
+  // when the element is attached and laid out.
+  createMutationEffect(
+    depsOf(() => [shouldRenderPaidStars(), starsForAllMessages()] as const),
+    ([shouldRenderPaidStars2]) => {
+      if (!shouldRenderPaidStars2) return;
 
       requestMeasure(() => {
+        const starsEl = paidStarsEl;
+        const buttonEl = mainButtonEl;
+        if (!starsEl?.isConnected || !buttonEl) return;
+
         const width = starsEl.scrollWidth + 1;
         requestMutation(() => {
           buttonEl.style.setProperty('--paid-stars-width', `${width}px`);
@@ -3009,22 +3080,24 @@ const Composer = (ownProps: OwnProps) => {
 
   return (
     <div ref={composerRef} class={fullClassName()}>
-      {isInMessageList() &&
-        canAttachMedia() &&
-        !hasRichOnlyContent() &&
-        props.isReady &&
-        !isRichInputExpansionActive() && (
-          <DropArea
-            isOpen={props.dropAreaState !== DropAreaState.None}
-            withQuick={
-              props.dropAreaState === DropAreaState.QuickFile || prevDropAreaState() === DropAreaState.QuickFile
-            }
-            editingMessage={props.editingMessage}
-            onHide={props.onDropHide!}
-            onFileSelect={handleFileSelect()}
-          />
-        )}
-      {shouldRenderReactionSelector() && !isNeedPremium() && (
+      <Show
+        when={
+          isInMessageList() &&
+          canAttachMedia() &&
+          !hasRichOnlyContent() &&
+          props.isReady &&
+          !isRichInputExpansionActive()
+        }
+      >
+        <DropArea
+          isOpen={props.dropAreaState !== DropAreaState.None}
+          withQuick={props.dropAreaState === DropAreaState.QuickFile || prevDropAreaState() === DropAreaState.QuickFile}
+          editingMessage={props.editingMessage}
+          onHide={() => props.onDropHide?.()}
+          onFileSelect={handleFileSelect}
+        />
+      </Show>
+      <Show when={shouldRenderReactionSelector() && !isNeedPremium()}>
         <ReactionSelector
           topReactions={props.topReactions}
           allAvailableReactions={props.availableReactions}
@@ -3037,9 +3110,9 @@ const Composer = (ownProps: OwnProps) => {
           isInStoryViewer={isInStoryViewer()}
           canPlayAnimatedEmojis={props.canPlayAnimatedEmojis}
           onShowMore={handleReactionPickerOpen}
-          className={reactionSelectorTransitonClassNames}
+          className={reactionSelectorTransitonClassNames()}
         />
-      )}
+      </Show>
       <AttachmentModal
         chatId={props.chatId}
         threadId={props.threadId}
@@ -3057,12 +3130,12 @@ const Composer = (ownProps: OwnProps) => {
         onSendSilent={handleSendSilentAttachments}
         onSend={handleSendAttachmentsFromModal}
         onSendScheduled={handleSendScheduledAttachments}
-        onFileAppend={handleAppendFiles()}
-        onClear={handleClearAttachments()}
-        onAttachmentsUpdate={handleSetAttachments()}
+        onFileAppend={handleAppendFiles}
+        onClear={handleClearAttachments}
+        onAttachmentsUpdate={handleSetAttachments}
         editingMessage={props.editingMessage}
         onSendWhenOnline={sendWhenOnline}
-        canScheduleUntilOnline={canSchedule() && props.canScheduleUntilOnline && !isViewOnceEnabled}
+        canScheduleUntilOnline={canSchedule() && props.canScheduleUntilOnline && !isViewOnceEnabled()}
         paidMessagesStars={props.paidMessagesStars}
       />
       <MediaEditor
@@ -3070,12 +3143,12 @@ const Composer = (ownProps: OwnProps) => {
         imageUrl={editingRichMediaAttachment()?.blobUrl}
         mimeType={editingRichMediaAttachment()?.mimeType}
         filename={editingRichMediaAttachment()?.filename}
-        onClose={handleCloseRichMediaEditor()}
-        onSave={handleSaveRichMediaEdit()}
+        onClose={handleCloseRichMediaEditor}
+        onSave={handleSaveRichMediaEdit}
       />
-      {props.isForCurrentMessageList && (
+      <Show when={props.isForCurrentMessageList}>
         <ToDoListModal modal={props.todoListModal} onClear={closeTodoListModal} onSend={handleToDoListSend} />
-      )}
+      </Show>
       <SendAsMenu
         isOpen={isSendAsMenuOpen()}
         onClose={closeSendAsMenu}
@@ -3084,83 +3157,79 @@ const Composer = (ownProps: OwnProps) => {
         sendAsPeerIds={sendAsPeerIds()}
         isCurrentUserPremium={props.isCurrentUserPremium}
       />
-      {isInMessageList() && (
-        <>
-          <ComposerEmbeddedMessage
-            onClear={handleEmbeddedClear}
-            onIsOpenChange={setIsEmbeddedMessageOpen}
-            shouldForceShowEditing={Boolean(shouldForceShowEditing && props.editingMessage)}
-            isHidden={isRichInputExpansionActive()}
+      <Show when={isInMessageList()}>
+        <ComposerEmbeddedMessage
+          onClear={handleEmbeddedClear}
+          onIsOpenChange={setIsEmbeddedMessageOpen}
+          shouldForceShowEditing={Boolean(shouldForceShowEditing() && props.editingMessage)}
+          isHidden={isRichInputExpansionActive()}
+          chatId={props.chatId}
+          threadId={props.threadId}
+          messageListType={props.messageListType}
+        />
+        <Show when={!isRichInputExpansionActive()}>
+          <WebPagePreview
             chatId={props.chatId}
             threadId={props.threadId}
-            messageListType={props.messageListType}
+            isDisabled={!canAttachEmbedLinks() || hasAttachments() || hasRichOnlyContent() || !hasInputContent()}
+            isEditing={Boolean(props.editingMessage)}
           />
-          {!isRichInputExpansionActive() && (
-            <WebPagePreview
-              chatId={props.chatId}
-              threadId={props.threadId}
-              isDisabled={!canAttachEmbedLinks() || hasAttachments() || hasRichOnlyContent() || !hasInputContent}
-              isEditing={Boolean(props.editingMessage)}
-            />
-          )}
-        </>
-      )}
+        </Show>
+      </Show>
       <div class={buildClassName('composer-wrapper', isRichInputExpansionActive() && 'rich-input-expanded')}>
         <div
-          class={buildClassName('message-input-wrapper', peerColorClass(), activeRecording && 'is-voice-recording')}
+          class={buildClassName('message-input-wrapper', peerColorClass(), activeRecording() && 'is-voice-recording')}
           style={peerColorStyle()}
         >
-          {isInMessageList() && !isRichInputExpansionActive() && (
-            <>
-              {withBotMenuButton() && (
-                <BotMenuButton
-                  isOpen={isBotMenuButtonOpen()}
-                  text={props.botMenuButton.text}
-                  isDisabled={Boolean(activeRecording)}
-                  onClick={handleClickBotMenu}
-                />
-              )}
-              {withBotCommands() && (
-                <ResponsiveHoverButton
-                  className={buildClassName(
-                    'bot-commands',
-                    'composer-action-button',
-                    isBotCommandMenuOpen() && 'activated',
-                  )}
-                  round
-                  disabled={props.botCommands === undefined}
-                  color="translucent"
-                  onActivate={handleActivateBotCommandMenu}
-                  ariaLabel="Open bot command keyboard"
-                >
-                  <Icon name="hamburger" />
-                </ResponsiveHoverButton>
-              )}
-              {canShowSendAs() && props.sendAsPeer && (
-                <Button
-                  round
-                  color="translucent"
-                  onClick={isSendAsMenuOpen() ? closeSendAsMenu : handleSendAsMenuOpen}
-                  ariaLabel={oldLang('SendMessageAsTitle')}
-                  className={buildClassName(
-                    'send-as-button',
-                    'composer-action-button',
-                    shouldAnimateSendAsButtonRef && 'appear-animation',
-                  )}
-                >
-                  <Avatar peer={props.sendAsPeer} size="tiny" />
-                </Button>
-              )}
-            </>
-          )}
-          {!isNeedPremium() && (
+          <Show when={isInMessageList() && !isRichInputExpansionActive()}>
+            <Show when={withBotMenuButton()}>
+              <BotMenuButton
+                isOpen={isBotMenuButtonOpen()}
+                text={props.botMenuButton?.type === 'webApp' ? props.botMenuButton.text : ''}
+                isDisabled={Boolean(activeRecording())}
+                onClick={handleClickBotMenu}
+              />
+            </Show>
+            <Show when={withBotCommands()}>
+              <ResponsiveHoverButton
+                className={buildClassName(
+                  'bot-commands',
+                  'composer-action-button',
+                  isBotCommandMenuOpen() && 'activated',
+                )}
+                round
+                disabled={props.botCommands === undefined}
+                color="translucent"
+                onActivate={handleActivateBotCommandMenu}
+                ariaLabel="Open bot command keyboard"
+              >
+                <Icon name="hamburger" />
+              </ResponsiveHoverButton>
+            </Show>
+            <Show when={canShowSendAs() && props.sendAsPeer}>
+              <Button
+                round
+                color="translucent"
+                onClick={isSendAsMenuOpen() ? closeSendAsMenu : handleSendAsMenuOpen}
+                ariaLabel={oldLang('SendMessageAsTitle')}
+                className={buildClassName(
+                  'send-as-button',
+                  'composer-action-button',
+                  shouldAnimateSendAsButtonRef() && 'appear-animation',
+                )}
+              >
+                <Avatar peer={props.sendAsPeer} size="tiny" />
+              </Button>
+            </Show>
+          </Show>
+          <Show when={!isNeedPremium()}>
             <AttachMenu
               chatId={props.chatId}
               threadId={props.threadId}
               editingMessage={props.editingMessage}
               canEditMedia={canMediaBeReplaced()}
               isRichInputExpanded={isRichInputExpansionActive()}
-              isButtonVisible={!activeRecording}
+              isButtonVisible={!activeRecording()}
               canAttachMedia={canAttachMedia()}
               canAttachFiles={isRichInputExpansionActive() || !hasRichOnlyContent()}
               canAttachPolls={canAttachPolls()}
@@ -3170,7 +3239,7 @@ const Composer = (ownProps: OwnProps) => {
               canSendDocuments={canSendDocuments()}
               canSendAudios={canSendAudios()}
               canInsertDate={!isComposerBlocked()}
-              onFileSelect={isRichInputExpansionActive() ? handleRichMediaSelect : handleFileSelect()}
+              onFileSelect={isRichInputExpansionActive() ? handleRichMediaSelect : handleFileSelect}
               onDateInsert={handleFormattedDateInsert}
               onTodoListCreate={handleTodoListCreate}
               isScheduled={props.isInScheduledList}
@@ -3187,7 +3256,7 @@ const Composer = (ownProps: OwnProps) => {
               menuPositionX={isInMessageList() ? 'left' : 'right'}
               onRichInputExpand={handleOpenRichInput}
             />
-          )}
+          </Show>
           <div
             class={buildClassName('rich-editor-history', isRichInputExpansionActive() && 'rich-editor-history-open')}
             aria-hidden={!isRichInputExpansionActive()}
@@ -3241,7 +3310,9 @@ const Composer = (ownProps: OwnProps) => {
             onClick={handleOpenAiEditor}
           />
           <MessageInput
-            ref={inputRef}
+            ref={(el) => {
+              inputRef = el;
+            }}
             id={props.inputId}
             editableInputId={props.editableInputId}
             richEditor={richEditor}
@@ -3254,7 +3325,9 @@ const Composer = (ownProps: OwnProps) => {
             isActive={!hasAttachments()}
             placeholder={placeholder()}
             forcedPlaceholder={inlineBotHelp()}
-            canAutoFocus={props.isReady && props.isForCurrentMessageList && !hasAttachments() && isInMessageList()}
+            canAutoFocus={Boolean(
+              props.isReady && props.isForCurrentMessageList && !hasAttachments() && isInMessageList(),
+            )}
             noFocusInterception={hasAttachments()}
             shouldSuppressFocus={props.isMobile && isSymbolMenuOpen()}
             onRichInputCollapse={collapseRichInput}
@@ -3262,8 +3335,8 @@ const Composer = (ownProps: OwnProps) => {
             onOpenAiEditor={shouldShowAiButton() ? handleOpenAiEditor : undefined}
             onSend={onSend()}
             onSuppressedFocus={closeSymbolMenu}
-            onMediaEdit={handleRichMediaEdit()}
-            onMediaFiles={handleRichMediaFiles()}
+            onMediaEdit={handleRichMediaEdit}
+            onMediaFiles={handleRichMediaFiles}
             onFocus={markInputHasFocus}
             onBlur={unmarkInputHasFocus}
             isNeedPremium={isNeedPremium()}
@@ -3273,26 +3346,29 @@ const Composer = (ownProps: OwnProps) => {
               props.isCurrentUserPremium || hasRichOnlyContent() ? props.richMessageLengthLimit : props.maxMessageLength
             }
           />
-          {isInMessageList() && !isRichInputExpansionActive() && (
-            <>
-              {props.isInlineBotLoading && <Spinner color="gray" />}
-              {/* TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6) */}
-              <Transition
-                className="composer-action-buttons-container"
-                slideClassName="composer-action-buttons"
-                activeKey={Number(hasInputContent)}
-                direction="inverse"
-                name="slideFadeAndroid"
-              >
-                {!hasInputContent && (
-                  <>
-                    {props.isChannel && (
-                      // TODO(codemod): <Transition> children: use the render function and render by slide.key (framework guide §6)
-                      <Transition
-                        className="composer-action-button"
-                        name="reveal"
-                        activeKey={Number(props.isSilentPosting)}
-                      >
+          <Show when={isInMessageList() && !isRichInputExpansionActive()}>
+            <Show when={props.isInlineBotLoading}>
+              <Spinner color="gray" />
+            </Show>
+            {/* Deviation: the slides render by key (tt passed the JSX of the current render and teact kept the
+            children of the outgoing slide): key 0 (no input content) holds the action buttons, key 1 is empty; the
+            silent-posting button renders its icon and label from its own slide key. */}
+            <Transition
+              className="composer-action-buttons-container"
+              slideClassName="composer-action-buttons"
+              activeKey={Number(hasInputContent())}
+              direction="inverse"
+              name="slideFadeAndroid"
+            >
+              {(slide) => (
+                <Show when={!slide.key}>
+                  <Show when={props.isChannel}>
+                    <Transition
+                      className="composer-action-button"
+                      name="reveal"
+                      activeKey={Number(props.isSilentPosting)}
+                    >
+                      {(silentSlide) => (
                         <Button
                           round
                           faded
@@ -3300,193 +3376,198 @@ const Composer = (ownProps: OwnProps) => {
                           color="translucent"
                           onClick={handleToggleSilentPosting}
                           ariaLabel={lang(
-                            props.isSilentPosting
-                              ? 'AriaComposerSilentPostingDisable'
-                              : 'AriaComposerSilentPostingEnable',
+                            silentSlide.key ? 'AriaComposerSilentPostingDisable' : 'AriaComposerSilentPostingEnable',
                           )}
-                          iconName={props.isSilentPosting ? 'mute' : 'unmute'}
+                          iconName={silentSlide.key ? 'mute' : 'unmute'}
                         />
-                      </Transition>
-                    )}
-                    {props.withScheduledButton && (
-                      <Button
-                        round
-                        faded
-                        className="composer-action-button scheduled-button"
-                        color="translucent"
-                        onClick={handleAllScheduledClick}
-                        ariaLabel={lang('AriaComposerOpenScheduled')}
-                        iconName="schedule"
+                      )}
+                    </Transition>
+                  </Show>
+                  <Show when={props.withScheduledButton}>
+                    <Button
+                      round
+                      faded
+                      className="composer-action-button scheduled-button"
+                      color="translucent"
+                      onClick={handleAllScheduledClick}
+                      ariaLabel={lang('AriaComposerOpenScheduled')}
+                      iconName="schedule"
+                    />
+                  </Show>
+                  <Show when={Boolean(props.autoDeletePeriod)}>
+                    <Button
+                      round
+                      faded
+                      className="composer-action-button"
+                      color="translucent"
+                      onClick={handleAutoDeleteClick}
+                      ariaLabel={lang('AutoDeleteSetInfo', { time: formatCountdown(lang, props.autoDeletePeriod!) })}
+                    >
+                      <AutoDeleteOutlinedIcon period={props.autoDeletePeriod!} />
+                    </Button>
+                  </Show>
+                  <Show when={shouldShowGiftButton()}>
+                    <Button
+                      round
+                      faded
+                      className="composer-action-button"
+                      color="translucent"
+                      onClick={handleGiftClick}
+                      iconName="gift"
+                    />
+                  </Show>
+                  <Show when={shouldShowSuggestedPostButton()}>
+                    <Button
+                      round
+                      faded
+                      className="composer-action-button"
+                      color="translucent"
+                      onClick={handleSuggestPostClick}
+                      iconName="cash-circle"
+                    />
+                  </Show>
+                  <Show when={Boolean(props.botKeyboardMessageId) && !activeRecording() && !props.editingMessage}>
+                    <ResponsiveHoverButton
+                      className={buildClassName('composer-action-button', isBotKeyboardOpen() && 'activated')}
+                      round
+                      color="translucent"
+                      noClickActivation
+                      onActivate={openBotKeyboard}
+                      ariaLabel={lang('AriaComposerBotKeyboard')}
+                    >
+                      <Icon name="bot-command" />
+                    </ResponsiveHoverButton>
+                    <Show when={!props.isMobile}>
+                      <BotKeyboardMenu
+                        messageId={props.botKeyboardMessageId!}
+                        threadId={props.threadId}
+                        isOpen={isBotKeyboardOpen()}
+                        onClose={closeBotKeyboard}
                       />
-                    )}
-                    {Boolean(props.autoDeletePeriod) && (
-                      <Button
-                        round
-                        faded
-                        className="composer-action-button"
-                        color="translucent"
-                        onClick={handleAutoDeleteClick}
-                        ariaLabel={lang('AutoDeleteSetInfo', { time: formatCountdown(lang, props.autoDeletePeriod) })}
-                      >
-                        <AutoDeleteOutlinedIcon period={props.autoDeletePeriod} />
-                      </Button>
-                    )}
-                    {shouldShowGiftButton() && (
-                      <Button
-                        round
-                        faded
-                        className="composer-action-button"
-                        color="translucent"
-                        onClick={handleGiftClick}
-                        iconName="gift"
-                      />
-                    )}
-                    {shouldShowSuggestedPostButton() && (
-                      <Button
-                        round
-                        faded
-                        className="composer-action-button"
-                        color="translucent"
-                        onClick={handleSuggestPostClick}
-                        iconName="cash-circle"
-                      />
-                    )}
-                    {Boolean(props.botKeyboardMessageId) && !activeRecording && !props.editingMessage && (
-                      <>
-                        <ResponsiveHoverButton
-                          className={buildClassName('composer-action-button', isBotKeyboardOpen() && 'activated')}
-                          round
-                          color="translucent"
-                          noClickActivation
-                          onActivate={openBotKeyboard}
-                          ariaLabel={lang('AriaComposerBotKeyboard')}
-                        >
-                          <Icon name="bot-command" />
-                        </ResponsiveHoverButton>
-                        {!props.isMobile && (
-                          <BotKeyboardMenu
-                            messageId={props.botKeyboardMessageId}
-                            threadId={props.threadId}
-                            isOpen={isBotKeyboardOpen()}
-                            onClose={closeBotKeyboard}
-                          />
-                        )}
-                      </>
-                    )}
-                  </>
-                )}
-              </Transition>
-            </>
-          )}
-          {shouldRenderVoiceRecordBar() && renderedRecording() && (
+                    </Show>
+                  </Show>
+                </Show>
+              )}
+            </Transition>
+          </Show>
+          <Show when={shouldRenderVoiceRecordBar() && renderedRecording()}>
             <VoiceRecordBar
               ref={voiceRecordBarRef}
-              recording={renderedRecording()}
-              isVideo={Boolean(activeVideoRecording)}
-              isPaused={activeVideoRecording ? isVideoRecordingPaused || isRecordingFinished : isRecordingPaused}
+              recording={renderedRecording()!}
+              isVideo={Boolean(activeVideoRecording())}
+              isPaused={
+                activeVideoRecording() ? isVideoRecordingPaused() || isRecordingFinished() : isRecordingPaused()
+              }
               canSendOneTimeMedia={props.canSendOneTimeMedia}
-              isViewOnceEnabled={isViewOnceEnabled}
-              onPause={activeVideoRecording ? pauseRecordingVideo : pauseRecordingVoice}
-              onResume={activeVideoRecording ? resumeRecordingVideo : resumeRecordingVoice}
-              onCancel={activeVideoRecording ? discardRecordingVideo : cancelRecordingVoice}
+              isViewOnceEnabled={isViewOnceEnabled()}
+              onPause={activeVideoRecording() ? pauseRecordingVideo : pauseRecordingVoice}
+              onResume={activeVideoRecording() ? resumeRecordingVideo : resumeRecordingVoice}
+              onCancel={activeVideoRecording() ? discardRecordingVideo : cancelRecordingVoice}
               onToggleViewOnce={toggleViewOnceEnabled}
-              subscribeToPeaks={activeVideoRecording ? subscribeToVideoRecordingPeaks : subscribeToRecordingPeaks}
+              subscribeToPeaks={activeVideoRecording() ? subscribeToVideoRecordingPeaks : subscribeToRecordingPeaks}
             />
-          )}
-          {shouldRenderRoundVideoRecorder() && (
+          </Show>
+          <Show when={shouldRenderRoundVideoRecorder()}>
             <RoundVideoRecorder
               ref={roundVideoRecorderRef}
               previewStream={renderedPreviewStream()}
-              isReady={isVideoRecordingReady}
-              isPaused={isVideoRecordingPaused}
-              isFrozen={isRecordingFinished}
+              isReady={isVideoRecordingReady()}
+              isPaused={isVideoRecordingPaused()}
+              isFrozen={isRecordingFinished()}
               getProgress={getProgress}
               getPlaybackEl={renderedVideoRecording()?.getPlaybackEl}
             />
-          )}
-          {(!isComposerBlocked() || canSendGifs() || canSendStickers()) &&
-            !isNeedPremium() &&
-            !props.isAccountFrozen && (
-              <SymbolMenuButton
-                chatId={props.chatId}
-                threadId={props.threadId}
-                isMobile={props.isMobile}
-                isReady={props.isReady}
-                isSymbolMenuOpen={isSymbolMenuOpen()}
-                openSymbolMenu={openSymbolMenu}
-                closeSymbolMenu={closeSymbolMenu}
-                canSendStickers={canSendStickers()}
-                canSendGifs={canSendGifs()}
-                isMessageComposer={isInMessageList()}
-                onGifSelect={handleGifSelect}
-                onGifAddCaption={hasRichOnlyContent() ? undefined : handleGifAddCaption}
-                onStickerSelect={handleStickerSelect}
-                onCustomEmojiSelect={handleCustomEmojiSelect}
-                onRemoveSymbol={removeSymbol}
-                onEmojiSelect={insertTextAndUpdateCursor}
-                closeBotCommandMenu={closeBotCommandMenu}
-                closeSendAsMenu={closeSendAsMenu}
-                isSymbolMenuForced={isSymbolMenuForced()}
-                canSendPlainText={!isComposerBlocked()}
-                inputCssSelector={props.editableInputCssSelector}
-                idPrefix={props.type}
-                forceDarkTheme={isInStoryViewer()}
-              />
-            )}
-          {isInStoryViewer() && !activeRecording && (
+          </Show>
+          <Show
+            when={
+              (!isComposerBlocked() || canSendGifs() || canSendStickers()) && !isNeedPremium() && !props.isAccountFrozen
+            }
+          >
+            <SymbolMenuButton
+              chatId={props.chatId}
+              threadId={props.threadId}
+              isMobile={props.isMobile}
+              isReady={props.isReady}
+              isSymbolMenuOpen={isSymbolMenuOpen()}
+              openSymbolMenu={openSymbolMenu}
+              closeSymbolMenu={closeSymbolMenu}
+              canSendStickers={canSendStickers()}
+              canSendGifs={canSendGifs()}
+              isMessageComposer={isInMessageList()}
+              onGifSelect={handleGifSelect}
+              onGifAddCaption={hasRichOnlyContent() ? undefined : handleGifAddCaption}
+              onStickerSelect={handleStickerSelect}
+              onCustomEmojiSelect={handleCustomEmojiSelect}
+              onRemoveSymbol={removeSymbol}
+              onEmojiSelect={insertTextAndUpdateCursor}
+              closeBotCommandMenu={closeBotCommandMenu}
+              closeSendAsMenu={closeSendAsMenu}
+              isSymbolMenuForced={isSymbolMenuForced()}
+              canSendPlainText={!isComposerBlocked()}
+              inputCssSelector={props.editableInputCssSelector}
+              idPrefix={props.type}
+              forceDarkTheme={isInStoryViewer()}
+            />
+          </Show>
+          <Show when={isInStoryViewer() && !activeRecording()}>
             <Button
               round
               className="composer-action-button story-reaction-button"
               color="translucent"
               onClick={handleLikeStory}
-              onContextMenu={handleStoryPickerContextMenu()}
-              onMouseDown={handleBeforeStoryPickerContextMenu()}
+              onContextMenu={handleStoryPickerContextMenu}
+              onMouseDown={handleBeforeStoryPickerContextMenu}
               ariaLabel={oldLang('AccDescrLike')}
-              ref={storyReactionRef}
+              ref={(el) => {
+                storyReactionRef = el as HTMLButtonElement;
+              }}
             >
-              {props.sentStoryReaction && (
-                // TODO(codemod): key= on a single element remounted it: wrap in <Show when={key} keyed>{(key) => …}</Show> (the callback MUST take an argument, a zero-argument child is a plain child and never remounts; a falsy key such as 0 renders nothing: use when={{ id: key }})
-                <ReactionAnimatedEmoji
-                  key={getReactionKey(props.sentStoryReaction)}
-                  containerId={getStoryKey(props.chatId, props.storyId!)}
-                  reaction={props.sentStoryReaction}
-                  withEffectOnly={isSentStoryReactionHeart()}
-                />
-              )}
-              {(!props.sentStoryReaction || isSentStoryReactionHeart()) && (
+              <Show when={props.sentStoryReaction && getReactionKey(props.sentStoryReaction)} keyed>
+                {(_reactionKey) => (
+                  <ReactionAnimatedEmoji
+                    containerId={getStoryKey(props.chatId, props.storyId!)}
+                    reaction={props.sentStoryReaction!}
+                    withEffectOnly={isSentStoryReactionHeart()}
+                  />
+                )}
+              </Show>
+              <Show when={!props.sentStoryReaction || isSentStoryReactionHeart()}>
                 <Icon
                   name={isSentStoryReactionHeart() ? 'heart' : 'heart-outline'}
                   className={buildClassName(isSentStoryReactionHeart() && 'story-reaction-heart')}
                 />
-              )}
+              </Show>
             </Button>
-          )}
-          {props.isMobile && isInMessageList() && Boolean(props.botKeyboardMessageId) && (
+          </Show>
+          <Show when={props.isMobile && isInMessageList() && Boolean(props.botKeyboardMessageId)}>
             <BotKeyboardMenu
-              messageId={props.botKeyboardMessageId}
+              messageId={props.botKeyboardMessageId!}
               threadId={props.threadId}
               isOpen={isBotKeyboardOpen()}
               onClose={closeBotKeyboard}
             />
-          )}
-          {isInMessageList() && props.botCommands && (
+          </Show>
+          <Show when={isInMessageList() && props.botCommands}>
             <BotCommandMenu
               isOpen={isBotCommandMenuOpen()}
-              botCommands={props.botCommands}
+              botCommands={props.botCommands || []}
               onClose={closeBotCommandMenu}
             />
-          )}
+          </Show>
         </div>
       </div>
       <Button
-        ref={mainButtonRef}
+        ref={(el) => {
+          mainButtonEl = el as HTMLButtonElement;
+          mainButtonRef.current = mainButtonEl;
+        }}
         round
         color={isInStoryViewer() ? 'translucent' : 'secondary'}
         className={buildClassName(
           mainButtonState(),
           'main-button',
           !props.isReady && 'not-ready',
-          activeRecording && 'recording',
+          activeRecording() && 'recording',
           isRecordingVideoMode() && 'record-video',
           Boolean(props.paidMessagesStars) && 'has-paid-stars',
           isPaidSend() && 'paid',
@@ -3494,46 +3575,58 @@ const Composer = (ownProps: OwnProps) => {
         disabled={areRecordingsNotAllowed() || hasRichMediaBlocking()}
         allowDisabledClick
         noFastClick
-        ariaLabel={mainButtonState() === MainButtonState.Stop ? lang('BotDraftStop') : oldLang(sendButtonAriaLabel)}
+        ariaLabel={mainButtonState() === MainButtonState.Stop ? lang('BotDraftStop') : oldLang(sendButtonAriaLabel())}
         onClick={mainButtonHandler}
-        onContextMenu={mainButtonContextMenuHandler}
+        onContextMenu={mainButtonContextMenuHandler()}
       >
         <Icon name="new-send" className="main-button-state-icon" />
-        {isInMessageList() && <Icon name="stop-square" className="main-button-state-icon" />}
+        <Show when={isInMessageList()}>
+          <Icon name="stop-square" className="main-button-state-icon" />
+        </Show>
         <Icon
           name={isInStoryViewer() ? 'microphone-outline' : 'microphone'}
           className="main-button-state-icon main-button-microphone"
         />
         <Icon name="round-video" className="main-button-state-icon" />
-        {props.onForward && <Icon name="forward" className="main-button-state-icon" />}
-        {isInMessageList() && <Icon name="schedule" className="main-button-state-icon" />}
-        {isInMessageList() && <Icon name="check" className="main-button-state-icon" />}
-        {shouldRenderPaidStars() && (
-          <div ref={paidStarsRef} class="paidStars">
+        <Show when={props.onForward}>
+          <Icon name="forward" className="main-button-state-icon" />
+        </Show>
+        <Show when={isInMessageList()}>
+          <Icon name="schedule" className="main-button-state-icon" />
+          <Icon name="check" className="main-button-state-icon" />
+        </Show>
+        <Show when={shouldRenderPaidStars()}>
+          <div
+            ref={(el) => {
+              paidStarsRef(el);
+              paidStarsEl = el;
+            }}
+            class="paidStars"
+          >
             <Icon name="star" />
-            <AnimatedCounter ref={counterRef} text={lang.number(starsForAllMessages())} />
+            <AnimatedCounter text={lang.number(starsForAllMessages())} />
           </div>
-        )}
+        </Show>
       </Button>
-      {effectEmoji() && (
+      <Show when={effectEmoji()}>
         <span class="effect-icon" onClick={handleRemoveEffect}>
-          {renderText(effectEmoji())}
+          {renderText(effectEmoji() || '')}
         </span>
-      )}
-      {props.effect && props.canPlayEffect && (
-        <MessageEffect shouldPlay={props.shouldPlayEffect} effect={props.effect} onStop={handleStopEffect} />
-      )}
-      {canShowCustomSendMenu() && (
+      </Show>
+      <Show when={props.effect && props.canPlayEffect}>
+        <MessageEffect shouldPlay={props.shouldPlayEffect} effect={props.effect!} onStop={handleStopEffect} />
+      </Show>
+      <Show when={canShowCustomSendMenu()}>
         <CustomSendMenu
           isOpen={isCustomSendMenuOpen()}
-          canSchedule={canSchedule() && isInMessageList() && !isViewOnceEnabled}
-          canScheduleUntilOnline={canSchedule() && props.canScheduleUntilOnline && !isViewOnceEnabled}
+          canSchedule={canSchedule() && isInMessageList() && !isViewOnceEnabled()}
+          canScheduleUntilOnline={canSchedule() && props.canScheduleUntilOnline && !isViewOnceEnabled()}
           onSendSilent={!props.isChatWithSelf ? handleSendSilent : undefined}
           onSendSchedule={!props.isInScheduledList ? handleSendScheduled : undefined}
           onSendWhenOnline={handleSendWhenOnline}
           onRemoveEffect={handleRemoveEffect}
-          onClose={handleContextMenuClose()}
-          onCloseAnimationEnd={handleContextMenuHide()}
+          onClose={handleContextMenuClose}
+          onCloseAnimationEnd={handleContextMenuHide}
           isSavedMessages={props.isChatWithSelf}
           chatId={props.chatId}
           withEffects={props.areEffectsSupported}
@@ -3546,27 +3639,27 @@ const Composer = (ownProps: OwnProps) => {
           isInStoryViewer={isInStoryViewer()}
           canPlayAnimatedEmojis={props.canPlayAnimatedEmojis}
         />
-      )}
-      {canSwitchRecordMode() && (
+      </Show>
+      <Show when={canSwitchRecordMode()}>
         <RecordModeMenu
           isOpen={isRecordModeMenuOpen()}
           onSelectMode={handleSelectRecordMode}
-          onClose={handleRecordModeMenuClose()}
-          onCloseAnimationEnd={handleRecordModeMenuHide()}
+          onClose={handleRecordModeMenuClose}
+          onCloseAnimationEnd={handleRecordModeMenuHide}
         />
-      )}
+      </Show>
       {calendar}
       <PaymentMessageConfirmDialog
         isOpen={props.paymentMessageConfirmDialogKey === paymentDialogKey() && Boolean(props.paidMessagesStars)}
-        onClose={closeConfirmModalPayForMessage()}
+        onClose={closeConfirmModalPayForMessage}
         userName={props.chat ? getPeerTitle(lang, props.chat) : undefined}
         messagePriceInStars={props.paidMessagesStars || 0}
         messagesCount={messagesCount()}
         shouldAutoApprove={shouldPaidMessageAutoApprove()}
-        setAutoApprove={setShouldPaidMessageAutoApprove()}
-        confirmHandler={paymentMessageConfirmDialogHandler()}
+        setAutoApprove={setShouldPaidMessageAutoApprove}
+        confirmHandler={paymentMessageConfirmDialogHandler}
       />
-      {isInMessageList() && (
+      <Show when={isInMessageList()}>
         <RemoveFormattingModal
           isOpen={isRemoveFormattingModalOpen()}
           onClose={handleCloseRemoveFormattingModal}
@@ -3574,7 +3667,7 @@ const Composer = (ownProps: OwnProps) => {
           onRemoveFormatting={handleRemoveFormatting}
           onSubscribeToPremium={handleSubscribeToPremium}
         />
-      )}
+      </Show>
     </div>
   );
 };
@@ -3582,7 +3675,7 @@ const Composer = (ownProps: OwnProps) => {
 const mapStateToProps = (
   global: GlobalState,
   { chatId, threadId, storyId, messageListType, isMobile, type }: OwnProps,
-): Complete<StateProps> => {
+): StateProps => {
   const chat = selectChat(global, chatId);
   const chatBot = !isSystemBot(chatId) ? selectBot(global, chatId) : undefined;
   const isChatWithBot = Boolean(chatBot);
