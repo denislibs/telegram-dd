@@ -47,7 +47,7 @@ function parse(json: string, scripts: Map<string, string>, lines: Map<string, st
   const lo = lf.indexOf('object_index');
   const ls = lf.indexOf('script_id');
   const ll = lf.indexOf('line');
-  if (process.env.DEBUG_LOC) process.stderr.write(`location_fields ${lf} first ${L.slice(0, 12)}\n`);
+  if (process.env.DEBUG_LOC) process.stderr.write(`location_fields ${String(lf)} first ${L.slice(0, 12).join(',')}\n`);
   for (let i = 0; i < L.length; i += LS) {
     const url = scripts.get(String(L[i + ls])) ?? `script${L[i + ls]}`;
     const file = url.replace(/^.*\//, '');
@@ -92,7 +92,7 @@ function parse(json: string, scripts: Map<string, string>, lines: Map<string, st
 }
 
 async function main() {
-  const server = await serveDir(args.dir!);
+  const server = await serveDir(args.dir);
   const browser = await chromium.launch();
   try {
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
@@ -107,7 +107,7 @@ async function main() {
     await pc(page, 'waitForCount', CHAT_LIST_ROW, 1, 60_000);
     await pc(page, 'sleep', 2500);
     const lines = new Map<string, string[]>();
-    const assets = join(args.dir!, 'assets');
+    const assets = join(args.dir, 'assets');
     for (const url of scripts.values()) {
       const file = url.replace(/^.*\//, '');
       try {

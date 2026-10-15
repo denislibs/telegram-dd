@@ -1,7 +1,7 @@
 // `pnpm exec tsx tests/perfcmp/msgcount.ts --dd-dir DIR [--tt-dir DIR] [--heap]`: the open-chat scenario at CPU x4 with
 // counters: message elements created / removed (unique elements), the message count per page-in, long tasks, and
 // optionally (--heap) frameact node counts from heap snapshots (Computation / Effect / SignalNode / Scope) at three points.
-import { chromium, type CDPSession } from '@playwright/test';
+import { type CDPSession, chromium } from '@playwright/test';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -181,7 +181,7 @@ async function main() {
     const server = await serveDir(dir);
     try {
       for (let i = 0; i < Number(args.runs); i++) {
-        const r = await once(server.url + SCENARIO_HASH, args.heap!);
+        const r = await once(server.url + SCENARIO_HASH, args.heap);
         process.stdout.write(`== ${app} run ${i + 1}\n${JSON.stringify(r, undefined, 1)}\n`);
       }
     } finally {
