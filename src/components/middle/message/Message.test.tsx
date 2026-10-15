@@ -494,4 +494,56 @@ describe('Message (text)', () => {
       expect(el.querySelector('.Spoiler')).not.toBe(spoiler);
     });
   });
+
+  describe('the blocks of special content are created when the message gets that content (lazy)', () => {
+    it('a text message has none of them, and a photo / a document that arrives later appears (and goes with the content)', async () => {
+      seed([message(PEER_ID, 400, 'plain text')], [privateChat(PEER_ID)]);
+      const el = await mount(PEER_ID, 400);
+      expect(el.querySelector('.media-inner')).toBeNull();
+      expect(el.querySelector('.Document')).toBeNull();
+
+      setGlobal(
+        updateChatMessage(getGlobal(), PEER_ID, 400, {
+          content: {
+            text: { text: 'now with a photo' },
+            photo: { mediaType: 'photo', id: '1', date: 1, sizes: [{ width: 200, height: 100, type: 'x' }] },
+          },
+        } as unknown as Partial<ApiMessage>),
+      );
+      await frames();
+      expect(el.querySelector('.media-inner')).not.toBeNull();
+      expect(el.querySelector('.text-content')!.textContent).toContain('now with a photo');
+
+      setGlobal(
+        updateChatMessage(getGlobal(), PEER_ID, 400, {
+          content: {
+            document: { mediaType: 'document', id: '2', fileName: 'a.txt', mimeType: 'text/plain', size: 10 },
+          },
+        } as unknown as Partial<ApiMessage>),
+      );
+      await frames();
+      expect(el.querySelector('.media-inner')).toBeNull();
+      expect(el.querySelector('.Document')).not.toBeNull();
+
+      setGlobal(updateChatMessage(getGlobal(), PEER_ID, 400, { content: { text: { text: 'text again' } } }));
+      await frames();
+      expect(el.querySelector('.Document')).toBeNull();
+      expect(el.querySelector('.text-content')!.textContent).toContain('text again');
+    });
+
+    it('a message that starts with a document shows it at once', async () => {
+      seed(
+        [
+          message(PEER_ID, 401, '', {
+            content: {
+              document: { mediaType: 'document', id: '3', fileName: 'b.txt', mimeType: 'text/plain', size: 10 },
+            },
+          } as unknown as Partial<ApiMessage>),
+        ],
+        [privateChat(PEER_ID)],
+      );
+      const el = await mount(PEER_ID, 401);
+      expect(el.querySelector('.Document')).not.toBeNull();
+    });
+  });
 });
