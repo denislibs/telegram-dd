@@ -95,6 +95,9 @@ importers:
       frameact:
         specifier: workspace:*
         version: link:src/vendor/frameact
+      highlight.js:
+        specifier: ^11.11.2
+        version: 11.11.2
       idb-keyval:
         specifier: ^6.3.0
         version: 6.3.0

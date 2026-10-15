@@ -15,12 +15,10 @@ import {
 import { addExtraClass, removeExtraClass, Show } from 'frameact/dom';
 import { forceMeasure, forceMutation } from 'frameact/stricterdom';
 import { getActions, getGlobal, withGlobal } from '../../global';
-import { depsOf } from '../../util/effectDeps';
-
-import type { GlobalState } from '../../global/types';
-import type { OnIntersectPinnedMessage } from './hooks/usePinnedMessage';
 
 import type { ApiChatFullInfo, ApiMessage, ApiRestrictionReason, ApiTopic } from '../../api/types';
+import type { GlobalState } from '../../global/types';
+import type { OnIntersectPinnedMessage } from './hooks/usePinnedMessage';
 import { MAIN_THREAD_ID } from '../../api/types';
 import { LoadMoreDirection, type MessageListType, type ThreadId } from '../../types';
 
@@ -80,11 +78,12 @@ import {
 import animateScroll, { isAnimatingScroll, restartCurrentScrollAnimation } from '../../util/animateScroll';
 import { IS_FIREFOX } from '../../util/browser/windowEnvironment';
 import buildClassName from '../../util/buildClassName';
+import { depsOf } from '../../util/effectDeps';
 import { isUserId } from '../../util/entities/ids';
 import { buildCollectionByKey } from '../../util/iteratees';
 import { isLocalMessageId } from '../../util/keys/messageKey';
 import resetScroll from '../../util/resetScroll';
-import { debounce, onTickEnd } from '../../util/schedulers';
+import { debounce } from '../../util/schedulers';
 import { getServerTime } from '../../util/serverTime';
 import getOffsetToContainer from '../../util/visibility/getOffsetToContainer';
 import { REM } from '../common/helpers/mediaDimensions';
@@ -617,11 +616,13 @@ const MessageList = (ownProps: OwnProps) => {
       props.type === 'scheduled' ||
       props.isAccountFrozen ||
       !props.isActive
-    )
+    ) {
       return;
+    }
     if (!props.isChannelChat && !props.isGroupChat) return;
-    if (props.reactionPollingPause?.chatId === props.chatId && props.reactionPollingPause.until > getServerTime())
+    if (props.reactionPollingPause?.chatId === props.chatId && props.reactionPollingPause.until > getServerTime()) {
       return;
+    }
 
     const messagesById = props.messagesById;
     const ids = props.messageIds.filter((id) => {
@@ -898,7 +899,7 @@ const MessageList = (ownProps: OwnProps) => {
         return;
       }
 
-      const container = containerRef!;
+      const container = containerRef;
 
       if (
         !messageIds2 ||
@@ -1000,7 +1001,7 @@ const MessageList = (ownProps: OwnProps) => {
         return;
       }
 
-      const container = containerRef!;
+      const container = containerRef;
       const listItemElements = Array.from(container.querySelectorAll<HTMLDivElement>('.message-list-item'));
       listItemElementsRef = listItemElements;
       const lastItemElement = listItemElements[listItemElements.length - 1];

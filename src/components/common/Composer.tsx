@@ -1,6 +1,7 @@
 // FOUNDATION STUB: Composer (telegram-tt src/components/common/Composer.tsx) is ported with a later slice. It keeps tt's props so that
 // the callers compile; it renders nothing.
 import type { JSX } from 'frameact/jsx-runtime';
+
 import type { MessageListType, ThreadId } from '../../types';
 
 export type OwnProps = {
@@ -28,6 +29,8 @@ export type ComposerType = 'messageList' | 'story';
 // the space under its messages from the height of the footer), so that the layout of the list is tt's until the composer is
 // ported. It is blank and inert (no input, no buttons).
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const Composer = (_props: OwnProps) => <div class="Composer" style="height: 3rem; margin-bottom: 1rem" aria-hidden="true" />;
+const Composer = (_props: OwnProps) => (
+  <div class="Composer" style="height: 3rem; margin-bottom: 1rem" aria-hidden="true" />
+);
 
 export default Composer;

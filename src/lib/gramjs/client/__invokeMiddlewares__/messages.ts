@@ -8,6 +8,49 @@ import Api from '../../tl/api';
 import createMockedMessage from '../mockUtils/createMockedMessage';
 import getIdFromInputPeer from '../mockUtils/getIdFromInputPeer';
 
+// The text entities of chat 8: a mock message is built from JSON, which cannot hold the entity classes.
+function entitiesOf(message: Api.Message) {
+  const at = (word: string) => {
+    const offset = message.message.indexOf(word);
+    return { offset, length: word.length };
+  };
+  switch (message.id) {
+    case 3001:
+      return [
+        new Api.MessageEntityBold(at('Bold')),
+        new Api.MessageEntityItalic(at('italic')),
+        new Api.MessageEntityUnderline(at('underline')),
+        new Api.MessageEntityStrike(at('strike')),
+        new Api.MessageEntityCode(at('monospace')),
+      ];
+    case 3002:
+      return [
+        new Api.MessageEntityTextUrl({ ...at('label'), url: 'https://example.org/label' }),
+        new Api.MessageEntityUrl(at('https://example.com/path')),
+        new Api.MessageEntityHashtag(at('#hashtag')),
+        new Api.MessageEntityCashtag(at('$CASH')),
+        new Api.MessageEntityBotCommand(at('/command')),
+        new Api.MessageEntityEmail(at('user@example.com')),
+        new Api.MessageEntityPhone(at('+1 555 0100')),
+      ];
+    case 3003:
+      return [
+        new Api.MessageEntitySpoiler(at('secret words')),
+        new Api.MessageEntityBlockquote(at('first line of the quote\nsecond line of the quote')),
+        new Api.MessageEntityPre({ ...at('const a = 1;'), language: '' }),
+      ];
+    default:
+      return undefined;
+  }
+}
+
+function createMessage(mockClient: TelegramClient, peerId: string, id: number) {
+  const message = createMockedMessage(peerId, id, mockClient.mockData);
+  const entities = peerId === '8' ? entitiesOf(message) : undefined;
+  if (entities) message.entities = entities;
+  return message;
+}
+
 export default function<A, R>(mockClient: TelegramClient, request: Api.Request<A, R>) {
   if (request instanceof Api.messages.GetDialogs) {
     if (request.folderId || !(request.offsetPeer instanceof Api.InputPeerEmpty)) {
@@ -18,7 +61,7 @@ export default function<A, R>(mockClient: TelegramClient, request: Api.Request<A
     return new Api.messages.Dialogs({
       dialogs,
       messages: mockClient.mockData.dialogs.active.map(({ id, topMessage }) => (
-        createMockedMessage(id, topMessage!, mockClient.mockData)
+        createMessage(mockClient, id, topMessage!)
       )),
       chats: [],
       users: mockClient.mockData.users.map(({ id }) => mockClient.getUser(id)),
@@ -39,7 +82,7 @@ export default function<A, R>(mockClient: TelegramClient, request: Api.Request<A
     const page = ids.slice(start, start + request.limit);
 
     return new Api.messages.MessagesSlice({
-      messages: page.map((id) => createMockedMessage(peerId, id, mockClient.mockData)),
+      messages: page.map((id) => createMessage(mockClient, peerId, id)),
       count: all.length,
       chats: [],
       users: [],

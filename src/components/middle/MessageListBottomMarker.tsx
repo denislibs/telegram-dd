@@ -1,4 +1,3 @@
-
 import buildClassName from '../../util/buildClassName';
 
 import useFocusMessageListElement from './message/hooks/useFocusMessageListElement';

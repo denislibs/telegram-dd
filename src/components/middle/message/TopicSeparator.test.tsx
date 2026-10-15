@@ -5,7 +5,7 @@ import { render } from 'frameact/dom';
 import { afterEach, describe, expect, it } from 'vitest';
 import { getGlobal, setGlobal } from '../../../global';
 
-import type { ApiChat, ApiTopic } from '../../../api/types';
+import type { ApiTopic } from '../../../api/types';
 import type { GlobalState, TabState } from '../../../global/types';
 
 import { container, useDomHarness } from '../../../lib/kit/testing/dom';
@@ -26,7 +26,7 @@ const topic = (title: string) =>
 function seed(topicTitle?: string) {
   const tab: TabState = { ...cloneDeep(INITIAL_TAB_STATE), id: tabId };
   let global: GlobalState = { ...cloneDeep(INITIAL_GLOBAL_STATE), byTabId: { [tabId]: tab } };
-  global = addChats(global, { [CHAT_ID]: { id: CHAT_ID, title: 'Forum chat', type: 'chatTypeSuperGroup' } as ApiChat });
+  global = addChats(global, { [CHAT_ID]: { id: CHAT_ID, title: 'Forum chat', type: 'chatTypeSuperGroup' } });
   global = updateTopicsInfo(global, CHAT_ID, { listedTopicIds: [5], isCache: false });
   if (topicTitle) global = updateTopic(global, CHAT_ID, 5, topic(topicTitle));
   setGlobal(global, { forceOutdated: true });

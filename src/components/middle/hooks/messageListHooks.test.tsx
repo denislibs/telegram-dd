@@ -4,12 +4,13 @@ import { render } from 'frameact/dom';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { setGlobal } from '../../../global';
 
-import { INITIAL_GLOBAL_STATE } from '../../../global/initialState';
-import { useDebouncedSignal, useThrottledSignal } from '../../../hooks/useAsyncResolvers';
 import { container, useDomHarness } from '../../../lib/kit/testing/dom';
 import { flushMicrotasks } from '../../../lib/kit/testing/micro';
+import { INITIAL_GLOBAL_STATE } from '../../../global/initialState';
 import { cloneDeep } from '../../../util/iteratees';
 import usePinnedMessage from './usePinnedMessage';
+
+import { useDebouncedSignal, useThrottledSignal } from '../../../hooks/useAsyncResolvers';
 
 useDomHarness();
 

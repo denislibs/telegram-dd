@@ -6,6 +6,8 @@
 //                          33 of them are incoming: that is the unread count, as the server counts it)
 //   chat 6 "Bob Reader":   60 short messages, all read (the second chat: "switching chats keeps the scroll position")
 //   chat 7 "Carol Short":  3 messages, all read (fits the viewport: no scrolling, no history to load)
+//   chat 8 "Dave Entities": 4 messages with text entities (their text is here, the entities are added by the middleware: the
+//                          JSON of a mock cannot hold the entity classes), all read
 //
 // The mock's GetHistory ignores offsets; `__invokeMiddlewares__/messages.ts` pages it like the server does.
 import { writeFileSync } from 'node:fs';
@@ -47,17 +49,33 @@ const messages: Record<string, unknown[]> = {
   ],
 };
 
+const ENTITY_TEXTS = [
+  'Bold, italic, underline, strike and monospace text',
+  'Links: label, https://example.com/path, #hashtag, $CASH, /command, user@example.com, +1 555 0100',
+  'Spoiler: secret words\nQuote: first line of the quote\nsecond line of the quote\ncode:\nconst a = 1;',
+  `A long paragraph, so that the bubble wraps: ${LOREM} ${LOREM} ${LOREM}`,
+];
+messages['8'] = ENTITY_TEXTS.map((message, i) => ({
+  id: 3001 + i,
+  date: BASE_DATE + 42 * DAY + i * 60,
+  message,
+  out: i === 3,
+  entities: [],
+}));
+
 const json = {
   users: [
     { id: '1', self: true, firstName: 'Me', lastName: 'Myself' },
     { id: '5', firstName: 'Alice', lastName: 'Tester' },
     { id: '6', firstName: 'Bob', lastName: 'Reader' },
     { id: '7', firstName: 'Carol', lastName: 'Short' },
+    { id: '8', firstName: 'Dave', lastName: 'Entities' },
   ],
   chats: [],
   channels: [],
   dialogs: {
     active: [
+      { id: '8', topMessage: 3004, readInboxMaxId: 3004, unreadCount: 0 },
       { id: '7', topMessage: 2003, readInboxMaxId: 2003, unreadCount: 0 },
       { id: '6', topMessage: 1060, readInboxMaxId: 1060, unreadCount: 0 },
       { id: '5', topMessage: 300, readInboxMaxId: 250, unreadCount: 33 },

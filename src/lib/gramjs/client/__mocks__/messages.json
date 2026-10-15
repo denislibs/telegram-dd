@@ -20,12 +20,23 @@
       "id": "7",
       "firstName": "Carol",
       "lastName": "Short"
+    },
+    {
+      "id": "8",
+      "firstName": "Dave",
+      "lastName": "Entities"
     }
   ],
   "chats": [],
   "channels": [],
   "dialogs": {
     "active": [
+      {
+        "id": "8",
+        "topMessage": 3004,
+        "readInboxMaxId": 3004,
+        "unreadCount": 0
+      },
       {
         "id": "7",
         "topMessage": 2003,
@@ -2590,6 +2601,36 @@
         "id": 2003,
         "date": 1703542520,
         "message": "Carol three",
+        "entities": []
+      }
+    ],
+    "8": [
+      {
+        "id": 3001,
+        "date": 1703628800,
+        "message": "Bold, italic, underline, strike and monospace text",
+        "out": false,
+        "entities": []
+      },
+      {
+        "id": 3002,
+        "date": 1703628860,
+        "message": "Links: label, https://example.com/path, #hashtag, $CASH, /command, user@example.com, +1 555 0100",
+        "out": false,
+        "entities": []
+      },
+      {
+        "id": 3003,
+        "date": 1703628920,
+        "message": "Spoiler: secret words\nQuote: first line of the quote\nsecond line of the quote\ncode:\nconst a = 1;",
+        "out": false,
+        "entities": []
+      },
+      {
+        "id": 3004,
+        "date": 1703628980,
+        "message": "A long paragraph, so that the bubble wraps: lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore",
+        "out": true,
         "entities": []
       }
     ]

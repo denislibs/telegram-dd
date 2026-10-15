@@ -24,7 +24,7 @@ export function useThrottledResolver<T>(
 // Deviation: tt's `Signal` (`useDerivedSignal` with an async resolver) is an accessor of a frameact signal that follows
 // `getValue` through the throttled resolver.
 export function useThrottledSignal<T>(getValue: Accessor<T>, ms: number, noFirst = false): Accessor<T> {
-  const [value, setValue] = createSignal<T>(untrack(getValue) as T);
+  const [value, setValue] = createSignal<T>(untrack(getValue));
   const throttledResolver = useThrottledResolver(() => getValue(), [getValue], ms, noFirst);
 
   createEffect(
@@ -50,7 +50,7 @@ export function useDebouncedResolver<T>(resolver: () => T, deps: any[], ms: numb
 // Deviation: see `useThrottledSignal`. The value is available at once (tt's derived signal was filled by its sync effect
 // at the first render).
 export function useDebouncedSignal<T>(getValue: Accessor<T>, ms: number, noFirst = false, noLast = false): Accessor<T> {
-  const [value, setValue] = createSignal<T>(untrack(getValue) as T);
+  const [value, setValue] = createSignal<T>(untrack(getValue));
   const debouncedResolver = useDebouncedResolver(() => getValue(), [getValue], ms, noFirst, noLast);
 
   createEffect(

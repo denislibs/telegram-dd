@@ -3,8 +3,8 @@ import { createEffect } from 'frameact';
 import type { MessageListType, ThreadId } from '../types';
 import type { MessageCopyRequest } from '../types/messageCopy';
 
-import { captureMessageCopyRequest } from '../components/middle/message/helpers/getSelectionAsFormattedText';
 import { type MaybeAccessor, read } from '../util/accessors';
+import { captureMessageCopyRequest } from '../components/middle/message/helpers/getSelectionAsFormattedText';
 
 // Deviation: the reactive parameters are `MaybeAccessor`s; the copy handler reads them when the event happens.
 const useNativeCopySelectedMessages = (

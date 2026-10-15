@@ -1,15 +1,15 @@
 import { createEffect, createMemo } from 'frameact';
 import { For } from 'frameact/dom';
 import { getActions, withGlobal } from '../../global';
-import { depsOf } from '../../util/effectDeps';
-import type { GlobalState } from '../../global/types';
 
+import type { GlobalState } from '../../global/types';
 import type { MessageListType, ThreadId, ThreadReadState } from '../../types';
 import type { IconName } from '../../types/icons';
 
 import { selectChat, selectCurrentMessageList, selectCurrentMiddleSearch } from '../../global/selectors';
 import { selectThreadReadState } from '../../global/selectors/threads';
 import buildClassName from '../../util/buildClassName';
+import { depsOf } from '../../util/effectDeps';
 
 import ScrollDownButton from './ScrollDownButton';
 

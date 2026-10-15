@@ -252,11 +252,15 @@ class TelegramClient {
     }
 
     if (request instanceof Api.messages.GetDialogFilters) {
-      return [
-        new Api.DialogFilterDefault(),
-        ...this.mockData.dialogFilters
-          .map((dialogFilter) => createMockedDialogFilter(dialogFilter.id, this.mockData)),
-      ];
+      // Deviation: tt's mock returns the bare array, but `fetchChatFolders()` reads `messages.DialogFilters` (same fix as
+      // `scripts/visual/tt-patches.mjs` applies to the tt copy; the folder tabs never appeared otherwise).
+      return new Api.messages.DialogFilters({
+        filters: [
+          new Api.DialogFilterDefault(),
+          ...this.mockData.dialogFilters
+            .map((dialogFilter) => createMockedDialogFilter(dialogFilter.id, this.mockData)),
+        ],
+      });
     }
 
     if (request instanceof Api.messages.GetPinnedDialogs) {
@@ -434,7 +438,8 @@ class TelegramClient {
   public releaseExportedSender() {}
 
   private getMessagesFrom(chatId: string) {
-    return this.mockData.messages[chatId].map((message) => createMockedMessage(chatId, message.id, this.mockData));
+    // Deviation: a chat that the scenario has no messages for (one that a test played with `apiUpdate`) has an empty history
+    return (this.mockData.messages[chatId] || []).map((message) => createMockedMessage(chatId, message.id, this.mockData));
   }
 
   private getAllMessages() {

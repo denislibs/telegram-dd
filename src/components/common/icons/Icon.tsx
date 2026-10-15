@@ -42,7 +42,9 @@ function renderIcon(props: OwnProps, hasPremiumBadge?: () => boolean) {
       ref={props.ref}
       class={buildClassName(`icon icon-${props.name}`, props.className, hasPremiumBadge?.() && styles.hasPremiumBadge)}
       style={props.style}
-      aria-hidden={!props.ariaLabel}
+      // Deviation: frameact writes a boolean attribute value `true` as an empty string (`aria-hidden=""`, which ARIA does not read
+      // as hidden); React wrote "true" / "false".
+      aria-hidden={props.ariaLabel ? 'false' : 'true'}
       aria-label={props.ariaLabel}
       data-char={props.character}
       role={props.role}

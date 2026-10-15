@@ -12,8 +12,8 @@ import { getActions } from '../../../global';
 import type { MessageListType } from '../../../types';
 import { LoadMoreDirection } from '../../../types';
 
-import { MESSAGE_LIST_SENSITIVE_AREA } from '../../../util/browser/windowEnvironment';
 import { type MaybeAccessor, read } from '../../../util/accessors';
+import { MESSAGE_LIST_SENSITIVE_AREA } from '../../../util/browser/windowEnvironment';
 import { depsOf } from '../../../util/effectDeps';
 import { debounce } from '../../../util/schedulers';
 

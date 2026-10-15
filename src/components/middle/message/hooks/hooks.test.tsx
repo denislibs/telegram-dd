@@ -8,13 +8,14 @@ import type { ChatTranslatedMessages } from '../../../../types';
 
 import { container, useDomHarness } from '../../../../lib/kit/testing/dom';
 import { flushMicrotasks } from '../../../../lib/kit/testing/micro';
-import useTextLanguage from '../../../../hooks/useTextLanguage';
 import useDetectChatLanguage from './useDetectChatLanguage';
 import useFluidBackgroundFilter from './useFluidBackgroundFilter';
 import useInnerHandlers from './useInnerHandlers';
 import useMessageTranslation from './useMessageTranslation';
 import useOuterHandlers from './useOuterHandlers';
 import useOverlayPosition from './useOverlayPosition';
+
+import useTextLanguage from '../../../../hooks/useTextLanguage';
 
 const actions = vi.hoisted(() => ({}) as Record<string, ReturnType<typeof vi.fn>>);
 const detectLanguage = vi.hoisted(() => vi.fn());
@@ -27,8 +28,14 @@ vi.mock('../../../../util/languageDetection', () => ({ detectLanguage }));
 const harness = useDomHarness();
 const callsOf = (name: string) => actions[name]?.mock.calls.length ?? 0;
 
-const message = (id: number, text: string, extra: Partial<ApiMessage> = {}) =>
-  ({ id, chatId: '1', date: 1, isOutgoing: false, content: { text: { text } }, ...extra }) as ApiMessage;
+const message = (id: number, text: string, extra: Partial<ApiMessage> = {}) => ({
+  id,
+  chatId: '1',
+  date: 1,
+  isOutgoing: false,
+  content: { text: { text } },
+  ...extra,
+});
 
 function mountHook(setup: () => void) {
   const dispose = render(() => {
@@ -101,7 +108,7 @@ describe('useTextLanguage', () => {
 });
 
 describe('useDetectChatLanguage', () => {
-  it('reports the most frequent language of a chat once enough messages are processed, and waits for the list', async () => {
+  it('reports the most frequent language of a chat once enough messages are processed, and waits for the list', () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
     const [isReady, setIsReady] = createSignal(false);
     const disposers: Array<() => void> = [];
@@ -126,7 +133,7 @@ describe('useDetectChatLanguage', () => {
 });
 
 describe('useMessageTranslation', () => {
-  it('requests the translation of a message, then follows the translation in the chat state', async () => {
+  it('requests the translation of a message, then follows the translation in the chat state', () => {
     const [translations, setTranslations] = createSignal<ChatTranslatedMessages | undefined>(undefined);
     let result!: ReturnType<typeof useMessageTranslation>;
     const dispose = mountHook(() => {
@@ -139,13 +146,15 @@ describe('useMessageTranslation', () => {
       toLanguageCode: 'de',
       tone: undefined,
     });
-    expect(actions.translateMessages).toHaveBeenCalledWith(expect.objectContaining({ chatId: '1', toLanguageCode: 'de' }));
+    expect(actions.translateMessages).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: '1', toLanguageCode: 'de' }),
+    );
     expect(result.translatedText()).toBeUndefined();
     expect(result.isPending()).toBeUndefined();
 
     setTranslations({
       byLangCode: { de_neutral: { 7: { isPending: false, text: { text: 'Hallo' } } } },
-    } as unknown as ChatTranslatedMessages);
+    });
     flushSync();
     expect(result.translatedText()).toEqual({ text: 'Hallo' });
     expect(result.isPending()).toBe(false);
@@ -223,9 +232,7 @@ describe('useInnerHandlers', () => {
 
     setCurrent(message(6, 'b', { replyInfo: { type: 'message', replyToMsgId: 3 } as ApiMessage['replyInfo'] }));
     handlers.handleReplyClick();
-    expect(actions.focusMessage).toHaveBeenLastCalledWith(
-      expect.objectContaining({ messageId: 3, replyMessageId: 6 }),
-    );
+    expect(actions.focusMessage).toHaveBeenLastCalledWith(expect.objectContaining({ messageId: 3, replyMessageId: 6 }));
 
     handlers.handleForward();
     expect(actions.openForwardMenu).toHaveBeenLastCalledWith({ fromChatId: '1', messageIds: [6] });
@@ -253,7 +260,11 @@ describe('useInnerHandlers', () => {
 });
 
 describe('useOuterHandlers', () => {
-  function mountOuter(options: { isInSelectMode?: () => boolean; isProtected?: () => boolean; canReply?: () => boolean }) {
+  function mountOuter(options: {
+    isInSelectMode?: () => boolean;
+    isProtected?: () => boolean;
+    canReply?: () => boolean;
+  }) {
     const selectMessage = vi.fn();
     const onContextMenu = vi.fn();
     let handlers!: ReturnType<typeof useOuterHandlers>;
@@ -302,7 +313,7 @@ describe('useOuterHandlers', () => {
 
     setIsInSelectMode(true);
     const stopped = new MouseEvent('contextmenu', { cancelable: true });
-    handlers.handleContextMenu(stopped as never);
+    handlers.handleContextMenu(stopped);
     expect(onContextMenu).toHaveBeenCalledTimes(1);
     expect(stopped.defaultPrevented).toBe(true);
     dispose();
@@ -310,14 +321,15 @@ describe('useOuterHandlers', () => {
 
   it('sends the default reaction of the message', () => {
     const { handlers, dispose } = mountOuter({});
-    handlers.handleSendQuickReaction({ stopPropagation: vi.fn() } as never);
+    handlers.handleSendQuickReaction({ stopPropagation: vi.fn() });
     expect(actions.sendDefaultReaction).toHaveBeenCalledWith({ chatId: '1', messageId: 9 });
     dispose();
   });
 });
 
 describe('useOverlayPosition', () => {
-  const rect = (values: Partial<DOMRect>) => () => ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, ...values }) as DOMRect;
+  const rect = (values: Partial<DOMRect>) => () =>
+    ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, ...values }) as DOMRect;
 
   it('places the overlay next to the anchor in the mutate phase, mirrored or not, and does nothing while disabled', async () => {
     const list = container();

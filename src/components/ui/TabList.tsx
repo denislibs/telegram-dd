@@ -197,7 +197,7 @@ const TabList = (props: OwnProps) => {
           props.indicatorClassName,
         )}
         style={clipPath() ? `clip-path: ${clipPath()}` : undefined}
-        aria-hidden
+        aria-hidden="true"
       >
         <For each={props.tabs} keyed={getTabKey}>
           {renderTab}

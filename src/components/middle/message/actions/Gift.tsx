@@ -1,6 +1,10 @@
 // FOUNDATION STUB: Gift (telegram-tt src/components/middle/message/actions/Gift.tsx) is ported with a later slice. It keeps tt's props so that
 // the callers compile; it renders nothing.
-import type { ApiMessageActionGiftPremium, ApiMessageActionGiftStars, ApiMessageActionGiftTon } from '../../../../api/types/messageActions';
+import type {
+  ApiMessageActionGiftPremium,
+  ApiMessageActionGiftStars,
+  ApiMessageActionGiftTon,
+} from '../../../../api/types/messageActions';
 import type { ObserveFn } from '../../../../hooks/useIntersectionObserver';
 
 export type OwnProps = {

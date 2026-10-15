@@ -30,7 +30,7 @@ test.use({
 
 async function openMessages(page: Page) {
   await openApp(page, '/#?mockScenario=messages');
-  await expect(page.locator(ROW)).toHaveCount(3);
+  await expect(page.locator(ROW)).toHaveCount(4);
 }
 
 async function openChat(page: Page, name: string) {
@@ -145,7 +145,7 @@ test.describe('message list', () => {
     await openChat(page, 'Carol Short');
 
     await expect(page.locator(`#MiddleColumn .MiddleHeader`)).toContainText('Carol Short');
-    await expect(page.locator(ITEM)).toHaveCount(3);
+    await expect(page.locator(ITEM)).toHaveCount(4);
     await expect(page.locator(`${LIST} .sticky-date`)).toHaveCount(1);
     await expect(page.locator(`${LIST} .sticky-date`)).toContainText('December 26, 2023');
     // own and other bubbles, time and the outgoing status
@@ -495,7 +495,7 @@ test.describe('message list', () => {
     const hrefs = await content.locator('a').evaluateAll((anchors) => anchors.map((a) => a.getAttribute('href') ?? ''));
     for (const href of hrefs) {
       // strip what a URL parser strips (tab, newline, leading control characters and spaces) before looking at the scheme
-      const scheme = href.replace(/[\u0000-\u0020]/g, '').toLowerCase();
+      const scheme = href.replace(/[\s\p{Cc}]/gu, '').toLowerCase();
       expect(scheme, `href ${JSON.stringify(href)}`).not.toMatch(/^(javascript|data|vbscript):/);
       expect(scheme).toMatch(/^https:\/\//);
     }
