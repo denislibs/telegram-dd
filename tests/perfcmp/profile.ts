@@ -328,9 +328,9 @@ function merge(target: Map<string, number>, source: Map<string, number>) {
 }
 
 async function main() {
-  const out = args.out!;
+  const out = args.out;
   mkdirSync(out, { recursive: true });
-  const apps = args.app!.split(',');
+  const apps = args.app.split(',');
   const dirs: Record<string, string> = {
     dd: args['dd-dir'] ?? join(out, 'dist-dd'),
     tt: join(TT_COPY, 'dist-prof'),
@@ -347,7 +347,7 @@ async function main() {
   }
   const runs = Number(args.runs);
   const top = Number(args.top);
-  for (const scenarioId of args.scenario!.split(',')) {
+  for (const scenarioId of args.scenario.split(',')) {
     for (const app of apps) {
       const server = await serveDir(dirs[app]);
       const self = new Map<string, number>();
