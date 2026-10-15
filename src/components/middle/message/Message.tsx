@@ -1324,6 +1324,28 @@ const Message = (ownProps: OwnProps) => {
   );
 
   function renderContent() {
+    const hasSpecialContent = createMemo(() =>
+      Boolean(
+        sticker() ||
+        hasAnimatedEmoji() ||
+        (props.withAnimatedEffects && props.effect) ||
+        phoneCall() ||
+        isRoundVideo() ||
+        audio() ||
+        voice() ||
+        withVoiceTranscription() ||
+        document() ||
+        storyData() ||
+        contact() ||
+        props.poll?.summary.id ||
+        todo() ||
+        giveaway() ||
+        giveawayResults() ||
+        game() ||
+        dice() ||
+        invoice()?.extendedMedia,
+      ),
+    );
     const className = createMemo(() =>
       buildClassName(
         'content-inner',
@@ -1416,159 +1438,165 @@ const Message = (ownProps: OwnProps) => {
             )}
           </div>
         )}
-        {sticker() && props.observeIntersectionForLoading && props.observeIntersectionForPlaying && (
-          <Sticker
-            message={props.message}
-            observeIntersection={props.observeIntersectionForLoading}
-            observeIntersectionForPlaying={props.observeIntersectionForPlaying}
-            shouldLoop={props.shouldLoopStickers}
-            shouldPlayEffect={shouldPlayEffect()}
-            withEffect={props.withAnimatedEffects}
-            isMediaNsfw={props.isMediaNsfw}
-            onStopEffect={hideEffect}
-          />
-        )}
-        {hasAnimatedEmoji() && props.animatedCustomEmoji && (
-          <AnimatedCustomEmoji
-            customEmojiId={props.animatedCustomEmoji}
-            withEffects={props.withAnimatedEffects && props.isChatWithUser && !props.effect}
-            isOwn={isOwn()}
-            observeIntersection={props.observeIntersectionForLoading}
-            forceLoadPreview={isLocal()}
-            messageId={messageId()}
-            chatId={chatId()}
-            activeEmojiInteractions={props.activeEmojiInteractions}
-          />
-        )}
-        {hasAnimatedEmoji() && props.animatedEmoji && (
-          <AnimatedEmoji
-            emoji={props.animatedEmoji}
-            withEffects={props.withAnimatedEffects && props.isChatWithUser && !props.effect}
-            isOwn={isOwn()}
-            observeIntersection={props.observeIntersectionForLoading}
-            forceLoadPreview={isLocal()}
-            messageId={messageId()}
-            chatId={chatId()}
-            activeEmojiInteractions={props.activeEmojiInteractions}
-          />
-        )}
-        {props.withAnimatedEffects && props.effect && !isLocal() && (
-          <MessageEffect
-            shouldPlay={shouldPlayEffect()}
-            messageId={props.message.id}
-            isMirrored={!props.message.isOutgoing}
-            effect={props.effect}
-            observeIntersectionForLoading={props.observeIntersectionForLoading}
-            observeIntersectionForPlaying={props.observeIntersectionForPlaying}
-            onStop={hideEffect}
-          />
-        )}
-        {phoneCall() && <MessagePhoneCall message={props.message} phoneCall={phoneCall()!} chatId={chatId()} />}
-        {!isAlbum() && isRoundVideo() && !withVoiceTranscription() && (
-          <RoundVideo
-            message={props.message}
-            observeIntersection={props.observeIntersectionForLoading}
-            canAutoLoad={props.canAutoLoadMedia}
-            isDownloading={props.isDownloading}
-            onReadMedia={shouldReadMedia() ? handleReadMedia : undefined}
-            onHideTranscription={setIsTranscriptionHidden}
-            isTranscriptionError={isTranscriptionError()}
-            isTranscribed={Boolean(props.transcribedText)}
-            canTranscribe={props.canTranscribeVoice && !hasTtl()}
-            isTranscriptionHidden={isTranscriptionHidden()}
-            isTranscribing={props.isTranscribing}
-          />
-        )}
-        {(audio() || voice() || withVoiceTranscription()) && (
-          <Audio
-            theme={props.theme}
-            message={props.message}
-            variant="inline"
-            threadId={props.threadId}
-            noPlaylist={isScheduled()}
-            uploadProgress={props.uploadProgress}
-            isSelectable={props.isInDocumentGroup}
-            isSelected={props.isSelected}
-            noAvatars={props.noAvatars}
-            onPlay={handleAudioPlay}
-            onReadMedia={voice() && shouldReadMedia() ? handleReadMedia : undefined}
-            onCancelUpload={handleCancelUpload}
-            isDownloading={props.isDownloading}
-            isTranscribing={props.isTranscribing}
-            isTranscriptionHidden={isTranscriptionHidden()}
-            isTranscribed={Boolean(props.transcribedText)}
-            isTranscriptionError={isTranscriptionError()}
-            canDownload={!props.isProtected}
-            onHideTranscription={setIsTranscriptionHidden}
-            canTranscribe={props.canTranscribeVoice && !hasTtl()}
-          />
-        )}
-        {document() && (
-          <Document
-            document={document()!}
-            message={props.message}
-            observeIntersection={props.observeIntersectionForLoading}
-            canAutoLoad={props.canAutoLoadMedia}
-            autoLoadFileMaxSizeMb={props.autoLoadFileMaxSizeMb}
-            uploadProgress={props.uploadProgress}
-            isSelectable={props.isInDocumentGroup}
-            isSelected={props.isSelected}
-            onMediaClick={handleDocumentClick}
-            onCancelUpload={handleCancelUpload}
-            isDownloading={props.isDownloading}
-            shouldWarnAboutFiles={props.shouldWarnAboutFiles}
-          />
-        )}
-        {storyData() && !isStoryMention() && <Story message={props.message} isProtected={props.isProtected} />}
-        {isStoryMention() && <StoryMention message={props.message} />}
-        {contact() && <Contact contact={contact()!} noUserColors={isOwn()} />}
-        {/* Deviation: tt's `key={poll.summary.id}` remounts the poll when its id changes. */}
-        <Show when={props.poll?.summary.id} keyed>
-          {(_pollId) => (
-            <Poll
-              chatId={chatId()}
-              messageId={messageId()}
-              poll={props.poll!}
-              messageText={text()}
-              theme={props.theme}
-              isInScheduled={isScheduled()}
-              observeIntersectionForLoading={props.observeIntersectionForLoading}
+        {/* Perf (not in tt): the blocks below are created only for a message that has one of them (a text message would
+            create ~17 conditional bindings, all false). The condition is the OR of their first terms: a superset. */}
+        <Show when={hasSpecialContent()}>
+          {sticker() && props.observeIntersectionForLoading && props.observeIntersectionForPlaying && (
+            <Sticker
+              message={props.message}
+              observeIntersection={props.observeIntersectionForLoading}
               observeIntersectionForPlaying={props.observeIntersectionForPlaying}
+              shouldLoop={props.shouldLoopStickers}
+              shouldPlayEffect={shouldPlayEffect()}
+              withEffect={props.withAnimatedEffects}
+              isMediaNsfw={props.isMediaNsfw}
+              onStopEffect={hideEffect}
             />
           )}
-        </Show>
-        {todo() && <TodoList message={props.message} todoList={todo()!} />}
-        {(giveaway() || giveawayResults()) && <Giveaway message={props.message} />}
-        {game() && <Game message={props.message} threadId={props.threadId} canAutoLoadMedia={props.canAutoLoadMedia} />}
-        {dice() && (
-          <DiceWrapper
-            canSendDice={props.canSendStickers}
-            isLocal={isLocal()}
-            dice={dice()!}
-            isOutgoing={isOwn()}
-            canPlayWinEffect={shouldPlayDiceEffect()}
-            onEffectPlayed={hideDiceEffect}
-          />
-        )}
-        {invoice()?.extendedMedia && <InvoiceMediaPreview message={props.message} isConnected={props.isConnected} />}
+          {hasAnimatedEmoji() && props.animatedCustomEmoji && (
+            <AnimatedCustomEmoji
+              customEmojiId={props.animatedCustomEmoji}
+              withEffects={props.withAnimatedEffects && props.isChatWithUser && !props.effect}
+              isOwn={isOwn()}
+              observeIntersection={props.observeIntersectionForLoading}
+              forceLoadPreview={isLocal()}
+              messageId={messageId()}
+              chatId={chatId()}
+              activeEmojiInteractions={props.activeEmojiInteractions}
+            />
+          )}
+          {hasAnimatedEmoji() && props.animatedEmoji && (
+            <AnimatedEmoji
+              emoji={props.animatedEmoji}
+              withEffects={props.withAnimatedEffects && props.isChatWithUser && !props.effect}
+              isOwn={isOwn()}
+              observeIntersection={props.observeIntersectionForLoading}
+              forceLoadPreview={isLocal()}
+              messageId={messageId()}
+              chatId={chatId()}
+              activeEmojiInteractions={props.activeEmojiInteractions}
+            />
+          )}
+          {props.withAnimatedEffects && props.effect && !isLocal() && (
+            <MessageEffect
+              shouldPlay={shouldPlayEffect()}
+              messageId={props.message.id}
+              isMirrored={!props.message.isOutgoing}
+              effect={props.effect}
+              observeIntersectionForLoading={props.observeIntersectionForLoading}
+              observeIntersectionForPlaying={props.observeIntersectionForPlaying}
+              onStop={hideEffect}
+            />
+          )}
+          {phoneCall() && <MessagePhoneCall message={props.message} phoneCall={phoneCall()!} chatId={chatId()} />}
+          {!isAlbum() && isRoundVideo() && !withVoiceTranscription() && (
+            <RoundVideo
+              message={props.message}
+              observeIntersection={props.observeIntersectionForLoading}
+              canAutoLoad={props.canAutoLoadMedia}
+              isDownloading={props.isDownloading}
+              onReadMedia={shouldReadMedia() ? handleReadMedia : undefined}
+              onHideTranscription={setIsTranscriptionHidden}
+              isTranscriptionError={isTranscriptionError()}
+              isTranscribed={Boolean(props.transcribedText)}
+              canTranscribe={props.canTranscribeVoice && !hasTtl()}
+              isTranscriptionHidden={isTranscriptionHidden()}
+              isTranscribing={props.isTranscribing}
+            />
+          )}
+          {(audio() || voice() || withVoiceTranscription()) && (
+            <Audio
+              theme={props.theme}
+              message={props.message}
+              variant="inline"
+              threadId={props.threadId}
+              noPlaylist={isScheduled()}
+              uploadProgress={props.uploadProgress}
+              isSelectable={props.isInDocumentGroup}
+              isSelected={props.isSelected}
+              noAvatars={props.noAvatars}
+              onPlay={handleAudioPlay}
+              onReadMedia={voice() && shouldReadMedia() ? handleReadMedia : undefined}
+              onCancelUpload={handleCancelUpload}
+              isDownloading={props.isDownloading}
+              isTranscribing={props.isTranscribing}
+              isTranscriptionHidden={isTranscriptionHidden()}
+              isTranscribed={Boolean(props.transcribedText)}
+              isTranscriptionError={isTranscriptionError()}
+              canDownload={!props.isProtected}
+              onHideTranscription={setIsTranscriptionHidden}
+              canTranscribe={props.canTranscribeVoice && !hasTtl()}
+            />
+          )}
+          {document() && (
+            <Document
+              document={document()!}
+              message={props.message}
+              observeIntersection={props.observeIntersectionForLoading}
+              canAutoLoad={props.canAutoLoadMedia}
+              autoLoadFileMaxSizeMb={props.autoLoadFileMaxSizeMb}
+              uploadProgress={props.uploadProgress}
+              isSelectable={props.isInDocumentGroup}
+              isSelected={props.isSelected}
+              onMediaClick={handleDocumentClick}
+              onCancelUpload={handleCancelUpload}
+              isDownloading={props.isDownloading}
+              shouldWarnAboutFiles={props.shouldWarnAboutFiles}
+            />
+          )}
+          {storyData() && !isStoryMention() && <Story message={props.message} isProtected={props.isProtected} />}
+          {isStoryMention() && <StoryMention message={props.message} />}
+          {contact() && <Contact contact={contact()!} noUserColors={isOwn()} />}
+          {/* Deviation: tt's `key={poll.summary.id}` remounts the poll when its id changes. */}
+          <Show when={props.poll?.summary.id} keyed>
+            {(_pollId) => (
+              <Poll
+                chatId={chatId()}
+                messageId={messageId()}
+                poll={props.poll!}
+                messageText={text()}
+                theme={props.theme}
+                isInScheduled={isScheduled()}
+                observeIntersectionForLoading={props.observeIntersectionForLoading}
+                observeIntersectionForPlaying={props.observeIntersectionForPlaying}
+              />
+            )}
+          </Show>
+          {todo() && <TodoList message={props.message} todoList={todo()!} />}
+          {(giveaway() || giveawayResults()) && <Giveaway message={props.message} />}
+          {game() && (
+            <Game message={props.message} threadId={props.threadId} canAutoLoadMedia={props.canAutoLoadMedia} />
+          )}
+          {dice() && (
+            <DiceWrapper
+              canSendDice={props.canSendStickers}
+              isLocal={isLocal()}
+              dice={dice()!}
+              isOutgoing={isOwn()}
+              canPlayWinEffect={shouldPlayDiceEffect()}
+              onEffectPlayed={hideDiceEffect}
+            />
+          )}
+          {invoice()?.extendedMedia && <InvoiceMediaPreview message={props.message} isConnected={props.isConnected} />}
 
-        {withVoiceTranscription() && (
-          <p
-            class={buildClassName(
-              'transcription',
-              !isTranscriptionHidden() && isTranscriptionError() && 'transcription-error',
-            )}
-            dir="auto"
-          >
-            {isTranscriptionError() ? (
-              oldLang('NoWordsRecognized')
-            ) : props.isTranscribing && props.transcribedText ? (
-              <DotAnimation content={props.transcribedText} />
-            ) : (
-              props.transcribedText
-            )}
-          </p>
-        )}
+          {withVoiceTranscription() && (
+            <p
+              class={buildClassName(
+                'transcription',
+                !isTranscriptionHidden() && isTranscriptionError() && 'transcription-error',
+              )}
+              dir="auto"
+            >
+              {isTranscriptionError() ? (
+                oldLang('NoWordsRecognized')
+              ) : props.isTranscribing && props.transcribedText ? (
+                <DotAnimation content={props.transcribedText} />
+              ) : (
+                props.transcribedText
+              )}
+            </p>
+          )}
+        </Show>
 
         <Show when={isInvertedMedia()}>{renderInvertedMediaContent(hasCustomAppendix)}</Show>
 
@@ -1729,11 +1757,14 @@ const Message = (ownProps: OwnProps) => {
       </>
     );
 
+    // Perf (not in tt): nothing is created for a message without media (a superset of the conditions below).
     return (
-      <Show when={paidMedia()} fallback={renderMedia()}>
-        <PaidMediaOverlay chatId={chatId()} messageId={messageId()} paidMedia={paidMedia()!} isOutgoing={isOwn()}>
-          {renderMedia()}
-        </PaidMediaOverlay>
+      <Show when={Boolean(paidMedia() || isAlbum() || photo() || video())}>
+        <Show when={paidMedia()} fallback={renderMedia()}>
+          <PaidMediaOverlay chatId={chatId()} messageId={messageId()} paidMedia={paidMedia()!} isOutgoing={isOwn()}>
+            {renderMedia()}
+          </PaidMediaOverlay>
+        </Show>
       </Show>
     );
   }
