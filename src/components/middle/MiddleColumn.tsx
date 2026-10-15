@@ -704,6 +704,9 @@ function MiddleColumn(ownProps: OwnProps) {
     const pinnedMessagesCount = frozen(() => props.pinnedMessagesCount);
     const canShowOpenChatButton = frozen(() => props.canShowOpenChatButton);
     const isSelectModeActive = frozen(() => props.isSelectModeActive);
+    // Deviation: the text of the restriction bar is held like the rest of the slide while it slides out (it reads the live
+    // chat, the rights and the flags of the new list)
+    const slideRestrictionMessage = frozen(renderComposerRestrictionMessage);
     const isSeenByModalOpen = frozen(() => props.isSeenByModalOpen);
     const isPrivacySettingsNoticeModalOpen = frozen(() => props.isPrivacySettingsNoticeModalOpen);
     const isReactorListModalOpen = frozen(() => props.isReactorListModalOpen);
@@ -753,7 +756,7 @@ function MiddleColumn(ownProps: OwnProps) {
           <Show when={slideIsMessagingDisabled()}>
             <div class={slideMessagingDisabledClassName()}>
               <div class="messaging-disabled-inner">
-                <span>{renderComposerRestrictionMessage()}</span>
+                <span>{slideRestrictionMessage()}</span>
               </div>
             </div>
           </Show>

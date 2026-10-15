@@ -167,4 +167,52 @@ describe('MiddleColumn', () => {
     expect(getGlobal().byTabId[tabId].messageLists).toHaveLength(0);
     expect(el.querySelector('.MessageList')).toBeNull();
   });
+
+  it('keeps the restriction text of the slide that slides out (it must not follow the new list)', async () => {
+    const GROUP_ID = '-1005000';
+    seed();
+    // a group where the current user cannot write; Bob's chat is a private chat
+    let global = addChats(getGlobal(), {
+      [GROUP_ID]: {
+        id: GROUP_ID,
+        title: 'Group',
+        type: 'chatTypeSuperGroup',
+        unreadCount: 0,
+        currentUserBannedRights: { sendMessages: true },
+      } as unknown as ApiChat,
+    });
+    global = addMessages(global, [{ ...textMessage(GROUP_ID, 1, 'Hello group'), senderId: ANN_ID }]);
+    global = updateThreadInfo(global, { chatId: GROUP_ID, threadId: MAIN_THREAD_ID });
+    global = updateTabState(
+      global,
+      { messageLists: [{ chatId: GROUP_ID, threadId: MAIN_THREAD_ID, type: 'thread' }] },
+      tabId,
+    );
+    setGlobal(global);
+    const el = await mount();
+    const restriction = 'Channel.Persmission.Denied.SendMessages.Forever';
+    expect(el.querySelector('.messaging-disabled')!.textContent).toContain(restriction);
+
+    // a second list (another chat) slides in over the first one
+    setGlobal(
+      updateTabState(
+        getGlobal(),
+        {
+          messageLists: [
+            { chatId: GROUP_ID, threadId: MAIN_THREAD_ID, type: 'thread' },
+            { chatId: BOB_ID, threadId: MAIN_THREAD_ID, type: 'thread' },
+          ],
+        },
+        tabId,
+      ),
+    );
+    await frames();
+
+    const slides = Array.from(el.querySelectorAll('.messages-layout > .Transition > .Transition_slide'));
+    expect(slides.length).toBe(2);
+    // the first slide (the group's) is leaving: its bar still says what it said
+    expect(slides[0].querySelector('.messaging-disabled')!.textContent).toContain(restriction);
+    // the new slide is Bob's: no restriction
+    expect(slides[1].querySelector('.messaging-disabled')).toBeNull();
+  });
 });

@@ -1,4 +1,4 @@
-import { createEffect, createMeasureEffect, createMemo, onDestroy } from 'frameact';
+import { createEffect, createMeasureEffect, createMemo, createSignal, onDestroy } from 'frameact';
 import { Show } from 'frameact/dom';
 import { getActions, withGlobal } from '../../../global';
 
@@ -178,9 +178,32 @@ const ActionMessage = (ownProps: OwnProps) => {
     Boolean(props.message.areReactionsPossible && props.message?.reactions?.results?.length),
   );
 
-  // Deviation: `getServerTime()` is not reactive, so the expiry is read when the action or the message changes (as in tt,
-  // which evaluated it on each render).
+  // Deviation: tt evaluated the expiry on every render, so any update of the message hid the buttons that had expired. Here the
+  // memos read the message (an update re-evaluates them) and a counter that a timer bumps when the buttons expire, so that
+  // they also go without an update (`getServerTime()` is not reactive).
+  const [expiryTick, setExpiryTick] = createSignal(0);
+  createEffect(
+    () => {
+      const currentAction = action();
+      if (currentAction.type === 'starGiftPurchaseOffer') return currentAction.expiresAt;
+      if (currentAction.type === 'noForwardsRequest') return props.message.date + props.noForwardsRequestExpirePeriod;
+      return undefined;
+    },
+    (expiresAt) => {
+      if (!expiresAt) return undefined;
+
+      const delay = (expiresAt - getServerTime()) * 1000;
+      if (delay <= 0) return undefined;
+
+      // (a timeout over 2^31 ms does not fit the timer: the buttons are then re-checked at the next update)
+      const timer = setTimeout(() => setExpiryTick((tick) => tick + 1), Math.min(delay + 20, 2 ** 31 - 1));
+      return () => clearTimeout(timer);
+    },
+  );
+
   const hasGiftOfferExpired = createMemo(() => {
+    void expiryTick();
+    void props.message;
     const currentAction = action();
     return currentAction.type === 'starGiftPurchaseOffer' && currentAction.expiresAt <= getServerTime();
   });
@@ -195,11 +218,13 @@ const ActionMessage = (ownProps: OwnProps) => {
     );
   });
 
-  const hasNoForwardsRequestExpired = createMemo(
-    () =>
+  const hasNoForwardsRequestExpired = createMemo(() => {
+    void expiryTick();
+    return (
       action().type === 'noForwardsRequest' &&
-      props.message.date + props.noForwardsRequestExpirePeriod <= getServerTime(),
-  );
+      props.message.date + props.noForwardsRequestExpirePeriod <= getServerTime()
+    );
+  });
   const shouldRenderNoForwardsButtons = createMemo(() => {
     const currentAction = action();
     return (
