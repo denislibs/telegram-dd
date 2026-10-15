@@ -585,4 +585,96 @@ test.describe('chat list', () => {
       )
       .toBe('1002');
   });
+
+  // A gap above or below the rows (a viewport that shows empty space where rows should be) after the window slid.
+  const gapOf = (page: Page) =>
+    page.evaluate((selector) => {
+      const list = document.querySelector('#LeftColumn .Transition_slide-active > .chat-list') as HTMLElement;
+      const box = list.getBoundingClientRect();
+      const rects = [...document.querySelectorAll<HTMLElement>(selector)].map((row) => row.getBoundingClientRect());
+      const firstTop = Math.min(...rects.map((rect) => rect.top));
+      const lastBottom = Math.max(...rects.map((rect) => rect.bottom));
+      return {
+        scrollTop: Math.round(list.scrollTop),
+        scrollHeight: list.scrollHeight,
+        // positive: empty pixels at the top / bottom of the viewport
+        above: Math.max(0, Math.round(firstTop - box.top)),
+        below: Math.max(0, Math.round(box.bottom - lastBottom)),
+        rows: rects.length,
+      };
+    }, ACTIVE_ROW);
+  const expectNoGap = async (page: Page, what: string) => {
+    // the loader answers within a frame or two of the scroll event
+    await expect
+      .poll(
+        async () => {
+          const { above, below } = await gapOf(page);
+          return above + below;
+        },
+        { message: what, timeout: 5000 },
+      )
+      .toBe(0);
+  };
+
+  test('no gap above the rows after the window slid down and the list is scrolled back up (real account bug)', async ({
+    page,
+  }) => {
+    await openApp(page);
+    await addContacts(page, 400);
+    await expect.poll(() => visualOrder(page).then((titles) => titles[0])).toBe('Contact 400');
+    await page.mouse.move(150, 400);
+
+    // down, several pages past the first window shifts
+    for (let i = 0; i < 40; i++) {
+      await page.mouse.wheel(0, 500);
+      await page.waitForTimeout(120);
+      if (i % 5 === 4) await expectNoGap(page, `down, step ${i}`);
+    }
+    const deep = await gapOf(page);
+    expect(deep.scrollTop).toBeGreaterThan(6000); // well past the first shifts
+    expect((await visualOrder(page)).includes('Contact 400')).toBe(false);
+
+    // and back up, in steps
+    for (let i = 0; i < 38; i++) {
+      await page.mouse.wheel(0, -500);
+      await page.waitForTimeout(120);
+      if (i % 4 === 3) await expectNoGap(page, `up, step ${i}`);
+    }
+    await expect.poll(() => visualOrder(page).then((titles) => titles[0])).toBe('Contact 400');
+    await expectNoGap(page, 'back at the top');
+  });
+
+  test('no gap after a jump by scrollTop assignment (down, then up) once the user scrolls on', async ({ page }) => {
+    await openApp(page);
+    await addContacts(page, 400);
+    await expect.poll(() => visualOrder(page).then((titles) => titles[0])).toBe('Contact 400');
+    await page.mouse.move(150, 400);
+    for (let i = 0; i < 40; i++) {
+      await page.mouse.wheel(0, 500);
+      await page.waitForTimeout(120);
+    }
+    await expectNoGap(page, 'deep');
+
+    // a fast jump back up by about three windows (30 rows * 72 px each), then the scroll goes on in small steps
+    await page.evaluate(() => {
+      const list = document.querySelector('#LeftColumn .Transition_slide-active > .chat-list') as HTMLElement;
+      list.scrollTop -= 3 * 30 * 72;
+    });
+    for (let i = 0; i < 30; i++) {
+      await page.mouse.wheel(0, -100);
+      await page.waitForTimeout(150);
+    }
+    await expectNoGap(page, 'after the jump up');
+
+    // and a jump down
+    await page.evaluate(() => {
+      const list = document.querySelector('#LeftColumn .Transition_slide-active > .chat-list') as HTMLElement;
+      list.scrollTop += 2 * 30 * 72;
+    });
+    for (let i = 0; i < 30; i++) {
+      await page.mouse.wheel(0, 100);
+      await page.waitForTimeout(150);
+    }
+    await expectNoGap(page, 'after the jump down');
+  });
 });

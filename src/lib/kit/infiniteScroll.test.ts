@@ -245,6 +245,72 @@ async function frames(count: number) {
   for (let i = 0; i < count; i++) await frame();
 }
 
+/** Rows at `(offset + i) * 72` px like the chat list (absolutely positioned: the container's own edges are far from them). */
+function mountAbsolute(offset: number, count: number, scrollHeight: number) {
+  const m = mount({ noScrollRestore: true, sensitiveArea: 800 }, ids(offset, offset + count));
+  const rows = Array.from(m.el.querySelectorAll<HTMLElement>('.ListItem'));
+  rows.forEach((rowEl, i) => {
+    Object.defineProperty(rowEl, 'offsetTop', { configurable: true, get: () => (offset + i) * 72 });
+    Object.defineProperty(rowEl, 'offsetHeight', { configurable: true, get: () => 72 });
+  });
+  Object.defineProperty(m.el, 'scrollHeight', { configurable: true, get: () => scrollHeight });
+  Object.defineProperty(m.el, 'clientHeight', { configurable: true, get: () => 662 });
+  Object.defineProperty(m.el, 'offsetHeight', { configurable: true, get: () => 662 });
+  return m;
+}
+
+describe('<InfiniteScroll> near-edge loads use the first and the last RENDERED item (tt), not the container edges', () => {
+  it('after the window slid down, scrolling up asks forwards while the container top is still far (6018 px)', async () => {
+    const { el, loads } = mountAbsolute(90, 58, 12000);
+    await frames(2);
+    loads.length = 0;
+    el.scrollTop = 6200;
+    el.dispatchEvent(new Event('scroll')); // the first event only records the position
+    el.scrollTop = 6018;
+    el.dispatchEvent(new Event('scroll'));
+    expect(loads).toEqual([{ direction: 'forwards' }]);
+  });
+
+  it('a jump upwards that lands far above the rows asks forwards; moving down inside the gap does not', async () => {
+    const { el, loads } = mountAbsolute(90, 58, 12000);
+    await frames(2);
+    loads.length = 0;
+    el.scrollTop = 7000;
+    el.dispatchEvent(new Event('scroll'));
+    el.scrollTop = 3000; // 3480 px above the first row (6480): the container top (3000 px away) is no reason to stay quiet
+    el.dispatchEvent(new Event('scroll'));
+    expect(loads).toEqual([{ direction: 'forwards' }]);
+
+    vi.advanceTimersByTime(1100);
+    loads.length = 0;
+    el.scrollTop = 5800; // moving down towards the rows: nothing to ask
+    el.dispatchEvent(new Event('scroll'));
+    expect(loads).toEqual([]);
+  });
+
+  it('scrolling down asks backwards near the last rendered row, not near the container bottom', async () => {
+    const { el, loads } = mountAbsolute(0, 58, 12000); // rows end at 4176
+    await frames(2);
+    loads.length = 0;
+    el.scrollTop = 2000;
+    el.dispatchEvent(new Event('scroll'));
+    el.scrollTop = 3000; // 4176 - (3000 + 662) = 514 <= 800; the container bottom is 8000 px away
+    el.dispatchEvent(new Event('scroll'));
+    expect(loads).toEqual([{ direction: 'backwards', noScroll: false }]);
+  });
+
+  it('does not ask while the rows are far from both edges of the viewport', async () => {
+    const { el, loads } = mountAbsolute(0, 58, 12000);
+    await frames(2);
+    loads.length = 0;
+    el.scrollTop = 1000;
+    el.dispatchEvent(new Event('scroll'));
+    el.scrollTop = 1200; // moving down, 4176 - 1862 = 2314 > 800
+    el.dispatchEvent(new Event('scroll'));
+    expect(loads).toEqual([]);
+  });
+});
+
 describe('<InfiniteScroll> preload guards', () => {
   it('a list without a box (display: none: clientHeight 0) is not "short": it does not slide its window', async () => {
     const { el, setItems, loads } = mount({ preloadBackwards: 0 }, ids(0, 50));
