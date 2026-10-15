@@ -287,6 +287,10 @@ items of the review (cheaper conditionals / `Show`, a lower per-node cost) or pa
 Gates after the round: `pnpm check`, `pnpm test`, `pnpm gates` green; `pnpm test:e2e` 64 / 64, and `chatlist.spec.ts` + `messages.spec.ts` 3x: 87 / 87; `pnpm test:a11y` 17; `pnpm test:perf` 16
 (leak gates 222 KB and 309 KB, 0 nodes, 0 listeners); `pnpm test:visual` 15, 0 px on all messages screens.
 
+After merging `origin/main` (chat-list PR #16, fix rounds 3 and 4): no merge conflicts. The message-list gates and the profiler tools use the calibrated CPU
+throttling (`expectNoLongTasks` already did; `msgcount.ts` and `profile.ts` now calibrate, `--cpu N` forces a rate). The long-task cap of the open-chat gate (204 ms) held in three
+full perf runs (16 / 16 each).
+
 ## Risks to review
 
 - `renderTextWithEntities.tsx` (URL handling, entity caps, Braille concealment, code highlighting): read it against tt's file;
