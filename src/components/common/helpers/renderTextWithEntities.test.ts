@@ -297,10 +297,14 @@ describe('the DOM of the entity types', () => {
   it('highlights the code of a known language into spans, with the source text kept', async () => {
     const source = 'const answer = 42;';
     const el = await mount({ text: source, entities: [entity(T.Pre, source, source, { language: 'javascript' })] });
-    await vi.waitFor(async () => {
-      await harness.frame();
-      expect(el.querySelector('pre code.hljs')).not.toBeNull();
-    });
+    // (the grammar is a dynamic import: more than a second when the machine is busy)
+    await vi.waitFor(
+      async () => {
+        await harness.frame();
+        expect(el.querySelector('pre code.hljs')).not.toBeNull();
+      },
+      { timeout: 10_000 },
+    );
 
     const code = el.querySelector('pre code.hljs')!;
     expect(code.textContent).toBe(source);
