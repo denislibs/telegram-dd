@@ -378,6 +378,30 @@ const MessageListContent = (props: OwnProps) => {
   );
 
   // The entries of the list (see the note above): the loops of tt's `calculateSenderGroups` and of the render body.
+  // Perf (not in tt): the entries of the previous run by path, so that an entry whose fields did not change keeps its
+  // object and `<For>` does not wake its row (a row reads its props through its entry: a new entry object re-runs every
+  // prop-reading memo, effect and the mapper of the row, for every row, on every change of the list).
+  let entryCache = new Map<string, Entry | DateGroupEntry>();
+  const isSameEntry = (prev: AnyLiteral, next: AnyLiteral) => {
+    for (const key in next) {
+      if (key === 'children' || key === 'path') continue;
+      if (key === 'dateGroup') {
+        if (
+          prev.dateGroup.datetime !== next.dateGroup.datetime ||
+          prev.dateGroup.originalDate !== next.dateGroup.originalDate
+        ) {
+          return false;
+        }
+        continue;
+      }
+      if (prev[key] !== next[key]) return false;
+    }
+    for (const key in prev) {
+      if (key !== 'path' && !(key in next)) return false;
+    }
+    return true;
+  };
+
   const model = createMemo(() => {
     const messageGroups = props.messageGroups;
     const liveTailStartOriginalId = props.liveTailStartOriginalId;
@@ -409,7 +433,7 @@ const MessageListContent = (props: OwnProps) => {
               type: 'action-message',
               key: getMessageOriginalId(message),
               message,
-              appearanceOrder: messageCount - ++appearanceIndex,
+              appearanceOrder: Math.max(0, messageCount - ++appearanceIndex),
               isJustAdded: addedIds?.has(message.id),
               isLastInList,
             } satisfies ActionMessageEntry,
@@ -467,7 +491,7 @@ const MessageListContent = (props: OwnProps) => {
                   withSenderName: position.isFirstInGroup && (props.withUsers || shouldShowGuestAvatar) && !isOwn,
                   noComments: shouldHideComments(),
                   noReplies: !shouldHideComments() || props.threadId !== MAIN_THREAD_ID || props.type === 'scheduled',
-                  appearanceOrder: messageCount - ++appearanceIndex,
+                  appearanceOrder: Math.max(0, messageCount - ++appearanceIndex),
                   isJustAdded,
                   isThreadTop: isThreadTopMessage,
                   isFirstInGroup: position.isFirstInGroup,
@@ -552,7 +576,7 @@ const MessageListContent = (props: OwnProps) => {
             ? lastItem.messages[lastItem.messages.length - 1]
             : lastItem;
         const lastMessageId = getMessageOriginalId(lastMessage);
-        const lastAppearanceOrder = messageCount - appearanceIndex;
+        const lastAppearanceOrder = Math.max(0, messageCount - appearanceIndex);
 
         const isOwn = isOwnMessage(lastMessage);
 
@@ -706,6 +730,27 @@ const MessageListContent = (props: OwnProps) => {
     // its row. A row of the outer list gets its entry after the outer list has been mapped, so an inner list that reads
     // it is dirty again when an effect of an inner row runs: frameact then reports a "potential infinite loop" (engine gap
     // #7 of the messages report). The paths are the keys of the ancestors, so they are as stable as the rows.
+    const nextCache = new Map<string, Entry | DateGroupEntry>();
+    const reuseEntries = (parentPath: string, list: (Entry | DateGroupEntry)[]) => {
+      for (let i = 0; i < list.length; i++) {
+        const next = list[i];
+        const cacheKey = `${parentPath}/${next.key}`;
+        const prev = entryCache.get(cacheKey);
+        let kept = next;
+        if (prev && prev !== next && isSameEntry(prev, next)) {
+          // the children are read from `childrenByPath`, never from the row's entry
+          if ('children' in next) (prev as { children: Entry[] }).children = next.children;
+          kept = prev;
+          list[i] = prev;
+        }
+        nextCache.set(cacheKey, kept);
+        if ('children' in kept) reuseEntries(cacheKey, kept.children);
+      }
+    };
+    reuseEntries('', dateGroups);
+    reuseEntries('~live-tail', liveTailDateGroups);
+    entryCache = nextCache;
+
     const childrenByPath = new Map<string, Entry[]>();
     const register = (parentPath: string, entries: Entry[]) => {
       for (const entry of entries) {
