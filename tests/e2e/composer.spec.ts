@@ -21,7 +21,14 @@ const SEND = '.Composer .main-button';
 test.use({
   // The known noise of the mocked client: no full user info / folders / language pack (see tests/e2e/strictMonitor.ts)
   strictOptions: {
-    ignoreConsole: [/GetFullUser|buildApiUserFullInfo|reading 'id'/, /action "loadFullUser" failed/],
+    ignoreConsole: [
+      /GetFullUser|buildApiUserFullInfo|reading 'id'/,
+      /action "loadFullUser" failed/,
+      // frameact's timing hint, a frame of delay and nothing else: the tooltip controller (tt's code) updates the props of its
+      // rendered container from a mutate task, and the measure effect of `useHorizontalScroll` reads them (engine gap 12 of
+      // docs/reports/slice-composer.md); it appears when an inserted emoji makes the custom emoji tooltip open
+      /measure effect .*CustomEmojiTooltip.* was dirtied during the mutate phase/,
+    ],
   },
 });
 
