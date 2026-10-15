@@ -86,13 +86,21 @@ test.describe('media chats: leaks', () => {
 
     const cycle = async () => {
       await openChat(page, 'Vic Videos');
-      await page.evaluate(() => {
-        (document.querySelector('#MiddleColumn .MessageList') as HTMLElement).scrollTop = 0;
-      });
-      await page.locator(`${LIST} video`).first().waitFor();
+      // the videos are the oldest messages: wheel up until the history has paged them in (a scrollTop set before the observers
+      // are ready would not trigger the page-in and the cycle would wait for ever)
+      await page.mouse.move(800, 400);
+      await expect
+        .poll(
+          async () => {
+            await page.mouse.wheel(0, -1500);
+            return page.locator(`${LIST} video`).count();
+          },
+          { timeout: 20_000, intervals: [150] },
+        )
+        .toBeGreaterThan(0);
       await page.waitForTimeout(250);
       await page.keyboard.press('Escape');
-      await page.locator(LIST).waitFor({ state: 'detached' });
+      await page.locator(LIST).waitFor({ state: 'detached', timeout: 20_000 });
       // the <video> elements are released with the list (the cleanup of the player empties `src`), none is retained
       await expect.poll(() => page.locator('video').count()).toBe(0);
       await page.waitForTimeout(150);
@@ -114,12 +122,14 @@ test.describe('media chats: leaks', () => {
     const cycle = async () => {
       for (const name of ['Mia Photos', 'Vic Videos']) {
         await openChat(page, name);
-        await page.evaluate(() => {
-          (document.querySelector('#MiddleColumn .MessageList') as HTMLElement).scrollTop = 0;
-        });
+        await page.mouse.move(800, 400);
+        for (let i = 0; i < 6; i++) {
+          await page.mouse.wheel(0, -1500);
+          await page.waitForTimeout(100);
+        }
         await page.waitForTimeout(600);
         await page.keyboard.press('Escape');
-        await page.locator(LIST).waitFor({ state: 'detached' });
+        await page.locator(LIST).waitFor({ state: 'detached', timeout: 20_000 });
       }
     };
 
