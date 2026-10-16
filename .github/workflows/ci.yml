@@ -43,12 +43,12 @@ jobs:
         continue-on-error: true
         run: pnpm gates:upstream --remote
 
-  # Browser gates against our app: strict e2e (console / page errors / failed requests / stricterdom), a11y (axe),
-  # perf (leaks + long tasks under 4x CPU throttling on a production build). See docs/quality-gates.md.
+  # Browser gates against our app: strict e2e (console / page errors / failed requests / stricterdom) and a11y (axe).
+  # See docs/quality-gates.md.
   browser:
-    name: browser gates (e2e, a11y, perf)
+    name: browser gates (e2e, a11y)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
         with:
@@ -64,11 +64,39 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
       - run: pnpm test:a11y
-      - run: pnpm test:perf
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: playwright-browser-gates
+          path: |
+            test-results/
+            playwright-report*/
+          retention-days: 7
+
+  # Perf gates (leaks + long tasks under calibrated CPU throttling on a production build), in their own job: with the
+  # composer and media slices they outgrew the time left after e2e and a11y in one 20-minute job.
+  perf:
+    name: perf gates (leaks, long tasks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:perf
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-perf-gates
           path: |
             test-results/
             playwright-report*/
