@@ -158,7 +158,7 @@ const ImageCropper = (props: OwnProps) => {
               src={image().src}
               class={styles.backgroundImage}
               style={backgroundImageStyle()}
-              draggable={false}
+              draggable="false"
               onMouseDown={startDrag}
               onTouchStart={startDrag}
               alt=""
@@ -170,7 +170,7 @@ const ImageCropper = (props: OwnProps) => {
                 src={image().src}
                 class={styles.foregroundImage}
                 style={foregroundImageStyle()}
-                draggable={false}
+                draggable="false"
                 alt=""
                 role="presentation"
               />

@@ -216,7 +216,11 @@ const Marquee = (rawProps: OwnProps) => {
         {props.children}
       </span>
       {isOverflowing() && (
-        <span ref={copyRef} class={buildClassName(styles.content, styles.copy, props.contentClassName)} aria-hidden>
+        <span
+          ref={copyRef}
+          class={buildClassName(styles.content, styles.copy, props.contentClassName)}
+          aria-hidden="true"
+        >
           {props.children}
         </span>
       )}

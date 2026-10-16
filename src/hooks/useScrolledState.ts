@@ -6,7 +6,8 @@ export default function useScrolledState(threshold = THRESHOLD) {
   const [isAtBeginning, setIsAtBeginning] = createSignal(true);
   const [isAtEnd, setIsAtEnd] = createSignal(true);
 
-  const handleScroll = (e: React.UIEvent<HTMLElement>) => {
+  // Deviation: a native `Event` (frameact delivers native events; `onScroll` handlers are typed with `Event`).
+  const handleScroll = (e: Event) => {
     const { scrollHeight, scrollTop, clientHeight } = e.target as HTMLElement;
 
     setIsAtBeginning(scrollTop < threshold);

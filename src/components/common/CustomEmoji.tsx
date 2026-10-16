@@ -124,11 +124,11 @@ const CustomEmoji = (rawProps: OwnProps) => {
           alt={customEmoji()?.emoji}
           data-entity-type={ApiMessageEntityTypes.CustomEmoji}
           data-document-id={props.documentId}
-          draggable={false}
+          draggable="false"
         />
       )}
       {!customEmoji() ? (
-        !props.noPlaceholder && <div class={buildClassName(styles.placeholder)} draggable={false} />
+        !props.noPlaceholder && <div class={buildClassName(styles.placeholder)} draggable="false" />
       ) : (
         <StickerView
           containerRef={() => containerRef}

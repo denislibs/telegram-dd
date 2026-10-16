@@ -49,7 +49,7 @@ const AttachBotIcon = (props: OwnProps) => {
         src={iconSvg()}
         alt=""
         class={buildClassName(styles.image, !isTouchScreen() && styles.compact)}
-        draggable={false}
+        draggable="false"
       />
     </i>
   );

@@ -245,8 +245,8 @@
      * Scenario 7. Opens the chat at the top of the list (the one with the long history) through the app's own action and
      * resolves when its first message is rendered; false when the app shows no message list.
      */
-    async openFirstChat() {
-      actions().openChat({ id: listedChatIds()[0] });
+    async openFirstChat(rank = 0) {
+      actions().openChat({ id: listedChatIds()[rank] });
       return pc.waitForCount('#MiddleColumn .MessageList .message-list-item', 1, 20000);
     },
 
@@ -275,6 +275,39 @@
       }
       const all = ids();
       return { frames: frameCount, messages: all.length, firstId: Math.min(...all) };
+    },
+
+    /**
+     * Scenario 8. Types `charsPerMessage` characters into the open composer and sends the message, `messages` times. A
+     * character is a keydown, an `insertText` (the browser fires beforeinput / input, as for a typed key) and a keyup; its
+     * input latency is the time until the frame after the one that applied it has started, i.e. until that update is on screen.
+     * The send is a click on the main button.
+     */
+    async typeAndSend(charsPerMessage, messages, restMs) {
+      const input = document.querySelector('#editable-message-text');
+      const button = () => document.querySelector('.Composer .main-button');
+      if (!input || !button()) return { latencies: [], sent: 0 };
+      input.focus();
+      const latencies = [];
+      let sent = 0;
+      const typingStart = pc.mark('pc:typing');
+      for (let message = 0; message < messages; message++) {
+        for (let char = 0; char < charsPerMessage; char++) {
+          const start = performance.now();
+          input.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'x', code: 'KeyX', bubbles: true, cancelable: true }),
+          );
+          document.execCommand('insertText', false, 'x');
+          input.dispatchEvent(new KeyboardEvent('keyup', { key: 'x', code: 'KeyX', bubbles: true }));
+          await nextFrame();
+          await nextFrame();
+          latencies.push(performance.now() - start);
+        }
+        button().click();
+        sent++;
+        await sleep(restMs);
+      }
+      return { latencies, sent, typingStart };
     },
 
     folderTabs: () => document.querySelectorAll('.ChatFolders .TabList > [data-file-hover-open]'),

@@ -69,7 +69,7 @@ function AnimatedIconWithPreview(props: OwnProps) {
       style={buildStyle(props.size !== undefined && `width: ${props.size}px; height: ${props.size}px;`)}
     >
       {props.thumbDataUri && !isAnimationReady() && (
-        <img ref={thumbTransition.ref} src={props.thumbDataUri} class={styles.preview} draggable={false} />
+        <img ref={thumbTransition.ref} src={props.thumbDataUri} class={styles.preview} draggable="false" />
       )}
       {props.previewUrl &&
         !isAnimationReady() &&
@@ -85,7 +85,7 @@ function AnimatedIconWithPreview(props: OwnProps) {
             }}
             src={props.previewUrl}
             class={styles.preview}
-            draggable={false}
+            draggable="false"
             onLoad={handlePreviewLoad}
           />
         ))}

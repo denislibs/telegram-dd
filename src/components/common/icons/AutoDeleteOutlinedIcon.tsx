@@ -21,7 +21,7 @@ function AutoDeleteOutlinedIcon(props: OwnProps) {
   const iconName = createMemo(() => (periodText() === undefined ? 'auto-delete-clock' : 'auto-delete-empty'));
 
   return (
-    <i class={buildClassName('icon', `icon-${iconName()}`, styles.root, props.className)} aria-hidden>
+    <i class={buildClassName('icon', `icon-${iconName()}`, styles.root, props.className)} aria-hidden="true">
       {periodText() !== undefined && (
         <span class={styles.label} dir="ltr">
           {periodText()}

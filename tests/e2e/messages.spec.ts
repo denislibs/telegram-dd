@@ -223,6 +223,7 @@ test.describe('message list', () => {
   });
 
   test('scrolling up loads older messages with no jump and no gap (steps)', async ({ page }) => {
+    test.setTimeout(90_000); // up to 60 steps over 400 messages; ~22 s alone, 32 s on the CI runner
     await openMessages(page);
     await openChat(page, 'Alice Tester');
 

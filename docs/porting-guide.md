@@ -404,7 +404,7 @@ Each step ends with `pnpm check` green and a dev run with a clean stricterdom co
 6. **Message list**: `src/components/middle/MessageList*`, `message/*`, the text entity renderer, the header. Done on
    `port/messages` ([`reports/slice-messages.md`](reports/slice-messages.md)): the scroll anchoring of tt's `MessageList` is a measure
    effect + a forced-reflow effect with tt's body, not the kit's `createScrollAnchor`; the media components are placeholders.
-7. **Composer**: `src/components/middle/composer/*`, `util/tiptap`, controlled inputs (`use:value`), voice recording.
+7. **Composer**: `src/components/common/Composer.tsx`, `middle/composer/*` (message input, the tiptap editor stack, drafts, edit/reply bar, symbol menu and emoji picker), `util/tiptap`, the tooltips (mention / emoji / command). Done on `port/composer` ([`reports/slice-composer.md`](reports/slice-composer.md)); attachments, recording, stickers/GIFs, bots, send menus, the AI editor, to-do lists and web-page previews stay FOUNDATION STUBs.
 8. **Right column**: `src/components/right/*` (Profile and its `teactFastList` lists → `ManualFor`).
 9. **Settings**: `src/components/left/settings/*`, including the License/About TODO below.
 

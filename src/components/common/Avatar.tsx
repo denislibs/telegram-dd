@@ -226,7 +226,7 @@ const Avatar = (rawProps: OwnProps) => {
             class={buildClassName(cn.media, 'avatar-media', videoBlobUrl() && 'poster')}
             alt={author()}
             decoding="async"
-            draggable={false}
+            draggable="false"
             onLoad={() => props.onLoad?.()}
           />
           {shouldPlayVideo() && (
@@ -239,7 +239,7 @@ const Avatar = (rawProps: OwnProps) => {
               autoplay
               disablepictureinpicture
               playsinline
-              draggable={false}
+              draggable="false"
               onEnded={handleVideoEnded}
             />
           )}

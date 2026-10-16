@@ -70,7 +70,7 @@ const AvatarEditable = (props: OwnProps) => {
       >
         <input type="file" onInput={handleSelectFile} accept="image/png, image/jpeg" />
         <Icon name="camera-add" />
-        {croppedBlobUrl() && <img src={croppedBlobUrl()} draggable={false} alt="" />}
+        {croppedBlobUrl() && <img src={croppedBlobUrl()} draggable="false" alt="" />}
       </label>
       <CropModal file={selectedFile()} onClose={handleModalClose} onChange={handleAvatarCrop} />
     </div>

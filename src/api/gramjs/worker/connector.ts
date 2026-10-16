@@ -1,3 +1,5 @@
+import { unwrap } from 'frameact/store';
+
 import type { Api } from '../../../lib/gramjs';
 import type { TypedBroadcastChannel } from '../../../util/browser/multitab';
 import type { ApiError, ApiInitialArgs, ApiOnProgress, OnApiUpdate } from '../../types';
@@ -63,6 +65,20 @@ export function initApiOnMasterTab(initialArgs: ApiInitialArgs) {
     token: getCurrentTabId(),
     initialArgs,
   });
+}
+
+
+// Deviation (porting guide section 6): a component hands store proxies to actions (`sendMessage({ messageList })` with a
+// value read through the tracked global), and `postMessage` cannot clone a proxy. Every argument, and every value of a
+// plain-object argument, is unwrapped to the raw object.
+function unwrapArgs<T extends unknown[]>(args: T): T {
+  return args.map((arg) => {
+    const raw = unwrap(arg);
+    if (raw && typeof raw === 'object' && Object.getPrototypeOf(raw) === Object.prototype) {
+      return Object.fromEntries(Object.entries(raw).map(([key, value]) => [key, unwrap(value)]));
+    }
+    return raw;
+  }) as T;
 }
 
 let updateCallback: OnApiUpdate;
@@ -217,6 +233,7 @@ export function setShouldEnableDebugLog(value: boolean) {
 export function callApiLocal<T extends keyof Methods>(
   fnName: T, ...args: MethodArgs<T>
 ): EnsurePromise<MethodResponse<T>> {
+  args = unwrapArgs(args);
   if (!isInited) {
     if (NO_QUEUE_BEFORE_INIT.has(fnName)) {
       return Promise.resolve(undefined) as EnsurePromise<MethodResponse<T>>;
@@ -261,6 +278,7 @@ export function callApiLocal<T extends keyof Methods>(
 }
 
 export function callApi<T extends keyof Methods>(fnName: T, ...args: MethodArgs<T>): EnsurePromise<MethodResponse<T>> {
+  args = unwrapArgs(args);
   if (!isInited && isMasterTab) {
     if (NO_QUEUE_BEFORE_INIT.has(fnName)) {
       return Promise.resolve(undefined) as EnsurePromise<MethodResponse<T>>;

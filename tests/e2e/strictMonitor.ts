@@ -29,6 +29,11 @@ export const DEFAULT_IGNORED_REQUESTS = [/\/__invokeMiddlewares__\//];
 export interface StrictOptions {
   /** Console messages (error / warning) that are allowed in this test. */
   ignoreConsole: (string | RegExp)[];
+  /**
+   * Console messages that are allowed only when they come from a given place: `text` is matched against the message,
+   * `location` against `url:line` of the source location Chromium attaches to it. Narrower than `ignoreConsole`.
+   */
+  ignoreConsoleAt?: { text: RegExp; location: RegExp }[];
   /** Failed or >= 400 requests to the app origin that are allowed (matched against `METHOD url`). */
   ignoreRequests: (string | RegExp)[];
 }
@@ -69,6 +74,8 @@ export function createStrictMonitor(page: Page, appOrigin: string, options: Part
     if (text.includes('[frameact/stricterdom]') || text.includes('StrictViolationError')) return;
     if (matches(text, ignoreConsole)) return;
     const { url, lineNumber } = message.location();
+    const location = `${url}:${lineNumber}`;
+    if (options.ignoreConsoleAt?.some((rule) => rule.text.test(text) && rule.location.test(location))) return;
     problems.push(`console.${type === 'warning' ? 'warn' : 'error'}: ${text}${url ? ` (${url}:${lineNumber})` : ''}`);
   });
 
