@@ -3,7 +3,10 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { extraFiles } from '../../scripts/visual/tt-patches.mjs';
+import { mediaExtraFiles } from '../../scripts/visual/tt-media-files.mjs';
+import { extraFiles as patchExtraFiles } from '../../scripts/visual/tt-patches.mjs';
+
+const extraFiles = [...patchExtraFiles, ...mediaExtraFiles];
 
 // Both apps must serve the same deterministic data: our MockClient scenarios are a verbatim port of tt's.
 // If this fails, a scenario was edited in one place only and every screen diff is suspect.

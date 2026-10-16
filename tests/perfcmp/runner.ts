@@ -57,6 +57,10 @@ async function open(config: RunConfig, initScripts: string[] = []): Promise<Open
     timezoneId: 'UTC',
     serviceWorkers: 'block',
   });
+  // Both apps: no `navigator.serviceWorker`, so no `./progressive/` URL is requested (decision D1, docs/quality-gates.md).
+  await context.addInitScript(() => {
+    delete (Navigator.prototype as { serviceWorker?: unknown }).serviceWorker;
+  });
   const page = await context.newPage();
   const pageErrors: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(String(error).slice(0, 300)));

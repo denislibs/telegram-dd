@@ -743,6 +743,46 @@
     "src/components/common/MessageOutgoingStatus.tsx": {
       "reason": "Perf (not in tt): a plain icon in the DOM of a Transition until the status changes, then the real Transition; props getters.",
       "maxRatio": 0.72
+    },
+    "src/components/common/AnimatedFileSize.tsx": {
+      "reason": "accessor model: `useState`/`useEffect`/timer become signals and an effect, the two renders of tt become one `Show` (porting guide §4)",
+      "maxRatio": 0.55
+    },
+    "src/components/middle/message/Album.tsx": {
+      "reason": "component model rewrite: one memo of parts (stable keys), a keyed `For`, the layout memoised by the ratio list, the D5 cap of 10 parts and the clamped ratios of untrusted dimensions, per-row getters instead of re-rendered props",
+      "maxRatio": 0.85
+    },
+    "src/components/middle/message/Photo.tsx": {
+      "reason": "component model rewrite (signals instead of hooks, `createMediaTransition` / `createShowTransition` per element, lazy blocks, one appendix effect with a stale-result token) plus the clamps of untrusted dimensions and progress",
+      "maxRatio": 0.72
+    },
+    "src/components/middle/message/RoundVideo.tsx": {
+      "reason": "component model rewrite: reactive ring attribute instead of a layout effect with a ref, stable media handlers, `onDestroy` cleanup of the single-player state, lazy blocks, finite ring and badge numbers",
+      "maxRatio": 0.65
+    },
+    "src/components/middle/message/Video.tsx": {
+      "reason": "component model rewrite: sticky intersection memo, element signal for `useUnsupportedMedia` and the duration, a `Show` per lazy block (spinner, play button, spoiler, badges, nsfw modal), clamped dimensions, durations and progress",
+      "maxRatio": 0.78
+    },
+    "src/components/middle/message/hocs/withSelectControl.tsx": {
+      "reason": "a HOC rewritten as a wrapper component with `splitProps` / `mergeProps` getters (porting guide §4.2), `withGlobal` for the select state",
+      "maxRatio": 0.65
+    },
+    "src/components/middle/message/hooks/useBlurredMediaThumbRef.ts": {
+      "reason": "accessor parameters and a callback ref instead of a ref object (hook files rule, porting guide §4.2); tiny file",
+      "maxRatio": 0.85
+    },
+    "src/hooks/useMediaWithLoadProgress.ts": {
+      "reason": "accessor model: parameters are `MaybeAccessor`s, the returns are accessors, `useForceUpdate` is a version signal read by the data memo, effects are `createEffect` over `depsOf` tuples",
+      "maxRatio": 0.72
+    },
+    "src/hooks/useOffscreenCanvasBlur.ts": {
+      "reason": "callback ref + element signal instead of a ref object, `depsOf` effect, a rejected `preloadImage` is handled (untrusted thumbnail)",
+      "maxRatio": 0.68
+    },
+    "src/serviceWorker/service.worker.ts": {
+      "reason": "push, share and asset-cache handlers removed until the PWA milestone (decision D1 of docs/plans/2026-10-15-media.md): the worker only streams ./progressive and ./download",
+      "maxRatio": 0.5
     }
   }
 }

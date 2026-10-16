@@ -2,6 +2,7 @@
 import { getPendingWebLogin } from './util/routing';
 import { webLoginHandoffPromise } from './util/webLoginHandoff';
 import './util/handleError';
+import './util/setupServiceWorker';
 // Evaluated before enableStrict(), as in telegram-tt: this module probes emoji support by briefly appending an element
 // to <body> at load time, which stricterdom would flag as a mutation outside an effect.
 import './util/browser/windowEnvironment';

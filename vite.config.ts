@@ -6,6 +6,7 @@ import { defineConfig, loadEnv, normalizePath, type UserConfig } from 'vite';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
 import buildGitInfoPlugin from './plugins/gitInfo.ts';
+import mockClientAssetsPlugin from './plugins/mockClientAssets.ts';
 import packageJson from './package.json' with { type: 'json' };
 
 // Ported from telegram-tt's vite.config.ts. Dropped: webpack/babel-react leftovers, bundle-stats/visualizer reports,
@@ -114,6 +115,9 @@ export default defineConfig(({ mode }): UserConfig => {
       assetsInlineLimit: (filePath) => (IMAGE_ASSET_RE.test(filePath) ? false : undefined),
     },
     worker: {
+      // The MockClient runs in the API worker, whose bundle is built with these plugins, not with the main ones: the `media`
+      // scenario must be bundled there (plugins/mockClientAssets.ts).
+      plugins: () => (appMockedClient === '1' ? [mockClientAssetsPlugin()] : []),
       // The GramJS API worker is a module worker (`new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })`).
       format: 'es',
       rolldownOptions: {
@@ -125,6 +129,8 @@ export default defineConfig(({ mode }): UserConfig => {
     plugins: [
       // frameact() must stay first: it owns the JSX transform.
       frameact(),
+      // The `media` scenario of the mocked client is bundled in production builds too (perf gates, `pnpm perf:compare`).
+      ...(appMockedClient === '1' ? [mockClientAssetsPlugin()] : []),
       buildGitInfoPlugin({
         appEnv,
         head,

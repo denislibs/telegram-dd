@@ -10,10 +10,11 @@
 // state and the scenario is chosen with `#?mockScenario=<name>`. Our src/lib/gramjs/client is a port of the same
 // files, so both apps get the same data. See docs/quality-gates.md.
 import { spawn, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { mediaExtraFiles, mediaPatches, mediaTtPatches } from './tt-media-files.mjs';
 import { extraFiles, patches } from './tt-patches.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -42,7 +43,13 @@ function referenceSha() {
 
 function patchesHash() {
   // the extra files are part of the stamp: a changed scenario recopies the tree
-  return JSON.stringify([patches, extraFiles.map((file) => readFileSync(join(ROOT, file), 'utf8'))]);
+  // (the media slice's files are binary: hashed as bytes)
+  return JSON.stringify([
+    patches,
+    mediaPatches,
+    mediaTtPatches,
+    [...extraFiles, ...mediaExtraFiles].map((file) => readFileSync(join(ROOT, file)).toString('base64')),
+  ]);
 }
 
 function prepare() {
@@ -65,7 +72,7 @@ function prepare() {
     filter: (source) => !SKIP.has(source.slice(REFERENCE.length + 1).split('/')[0]),
   });
 
-  for (const patch of patches) {
+  for (const patch of [...patches, ...mediaPatches, ...mediaTtPatches]) {
     const file = join(COPY, patch.file);
     const original = readFileSync(file, 'utf8');
     if (!original.includes(patch.find)) {
@@ -75,9 +82,9 @@ function prepare() {
     log(`patched ${patch.file} (${patch.name})`);
   }
 
-  for (const file of extraFiles) {
+  for (const file of [...extraFiles, ...mediaExtraFiles]) {
     mkdirSync(dirname(join(COPY, file)), { recursive: true });
-    writeFileSync(join(COPY, file), readFileSync(join(ROOT, file), 'utf8'));
+    copyFileSync(join(ROOT, file), join(COPY, file));
     log(`added ${file}`);
   }
 

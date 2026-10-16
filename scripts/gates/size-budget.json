@@ -231,6 +231,17 @@
         "brotli": 228982,
         "gzip": 281382
       }
+    },
+    "service.worker.js": {
+      "kind": "worker",
+      "baseline": {
+        "brotli": 2459,
+        "gzip": 2795
+      },
+      "budget": {
+        "brotli": 2705,
+        "gzip": 3075
+      }
     }
   },
   "totals": {

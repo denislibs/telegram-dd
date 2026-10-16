@@ -285,7 +285,11 @@ export class RichEditorTooltipsController {
     this.fadeTimeouts.forEach((timeout) => window.clearTimeout(timeout));
     this.fadeTimeouts.clear();
     this.renderer.destroy();
-    this.renderer.element.remove();
+    // Deviation: the editor is destroyed from the composer's cleanup, which can run in the measure phase (leaving a chat);
+    // the container leaves its boundary as a declared mutation, as it was appended (`forceMutation` in the mount above).
+    const { element } = this.renderer;
+    const boundary = element.parentElement;
+    if (boundary) forceMutation(() => element.remove(), boundary);
   }
 
   private render(shouldKeepFormatterVisible = false) {

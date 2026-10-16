@@ -197,7 +197,11 @@ async function main() {
           let outcome: RunResult | undefined;
           for (let attempt = 0; attempt < 2 && !outcome; attempt++) {
             try {
-              outcome = await runScenario(side.url + SCENARIO_HASH, scenario, config);
+              outcome = await runScenario(
+                side.url + (scenario.mockScenario ? `#?mockScenario=${scenario.mockScenario}` : SCENARIO_HASH),
+                scenario,
+                config,
+              );
             } catch (error) {
               const text = error instanceof Error ? error.message.split('\n')[0] : String(error);
               (result.failures[side.label] ??= []).push(text);

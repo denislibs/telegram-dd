@@ -9,6 +9,9 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import { __createRichEditor as createRichEditor } from './middle/composer/helpers/richEditor';
 
+// The lazy chunk behind `MessageInput.async` is loaded here, while jsdom is up: imported lazily from a test, its modules (the
+// editor bundle, `CodeOverlay`'s event delegation) finished evaluating after the environment was torn down (`window is not defined`).
+import './middle/composer/MessageInput';
 import MessageInputAsync from './middle/composer/MessageInput.async';
 import Button from './ui/Button';
 import ListItem from './ui/ListItem';

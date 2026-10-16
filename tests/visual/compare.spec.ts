@@ -3,6 +3,7 @@ import { expect, type Page, test } from '@playwright/test';
 import { DEV_URL, TT_URL } from '../config';
 import { deterministicContextOptions, freezeClock, makeDeterministic, settle } from './determinism';
 import { diffScreenshots } from './diff';
+import { mediaScreens } from './mediaScreens';
 import { DEFAULT_SCENARIO, DEFAULT_VIEWPORT, screens, type VisualScreen, type VisualTarget } from './screens';
 
 const ORIGINS = { tt: TT_URL, ours: DEV_URL };
@@ -27,7 +28,7 @@ async function capture(page: Page, screen: VisualScreen, target: VisualTarget) {
   return subject.screenshot({ animations: 'disabled', caret: 'hide', mask, maskColor: '#ff00ff' });
 }
 
-for (const screen of screens) {
+for (const screen of [...screens, ...mediaScreens]) {
   const run = screen.ported ? test : test.skip;
 
   run(`${screen.name} (${screen.reference.app} vs ${screen.candidate.app})`, async ({ browser }, testInfo) => {

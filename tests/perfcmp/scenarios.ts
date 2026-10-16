@@ -38,6 +38,8 @@ export interface Scenario {
   /** What is measured, for the report. */
   description: string;
   needs: Need[];
+  /** The mock scenario to boot instead of the large one (`#?mockScenario=<name>`). */
+  mockScenario?: string;
   /**
    * Cold start: the window starts with the navigation and the CPU throttle is on from the first byte. Otherwise the app
    * boots unthrottled, rests, and the window covers only `run`.
@@ -207,6 +209,48 @@ export const SCENARIOS: Scenario[] = [
           inputLatencyP50Ms: at(0.5),
           inputLatencyP95Ms: at(0.95),
           inputLatencyMaxMs: sorted[sorted.length - 1] ?? 0,
+        },
+      };
+    },
+  },
+  {
+    id: 'open-media-chat',
+    title: '9. Open a chat of photos and scroll its history',
+    description:
+      'The `media` scenario (src/lib/gramjs/client/__mocks__/media.json: 24 photos in 22 messages, two albums, a spoiler, clamped sizes; the same blobs ' +
+      'come from the mocked client in both apps, `navigator.serviceWorker` is removed in both) boots instead of the large one. "Mia Photos" is opened ' +
+      'through the `openChat` action; once its first message is rendered, the list is scrolled up, 400 px per frame, to the first message.',
+    needs: ['chatList', 'inject'],
+    mockScenario: 'media',
+    async run({ page }) {
+      await sleep(page, 300);
+      await page.evaluate(() =>
+        (window as unknown as { getActions: () => { openChat: (o: object) => void } })
+          .getActions()
+          .openChat({ id: '21' }),
+      );
+      const opened = await pc<boolean>(page, 'waitForCount', '#MiddleColumn .MessageList .message-list-item', 1, 20000);
+      await sleep(page, 1500);
+      const scrolled = await pc<{ frames: number; messages: number; firstId: number }>(
+        page,
+        'scrollHistoryUp',
+        400,
+        60_000,
+      );
+      await sleep(page, 1000);
+      const loaded = await page.evaluate(
+        () =>
+          [...document.querySelectorAll<HTMLImageElement>('#MiddleColumn .MessageList img.full-media')].filter(
+            (img) => img.complete && img.naturalWidth > 0,
+          ).length,
+      );
+      return {
+        extra: {
+          chatOpened: opened ? 1 : 0,
+          scrollFrames: scrolled.frames,
+          messagesRendered: scrolled.messages,
+          firstMessageId: scrolled.firstId,
+          photosLoaded: loaded,
         },
       };
     },

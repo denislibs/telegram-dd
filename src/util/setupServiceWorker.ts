@@ -1,0 +1,97 @@
+import { getActions } from '../global';
+
+import { DEBUG, DEBUG_MORE, IS_TEST } from '../config';
+// eslint-disable-next-line import-x/default
+import serviceWorkerUrl from '../serviceWorker/service.worker.ts?worker&url';
+import { IS_ANDROID, IS_IOS, IS_SERVICE_WORKER_SUPPORTED } from './browser/windowEnvironment';
+
+type WorkerAction = {
+  type: string;
+  payload: Record<string, any>;
+};
+
+const IGNORE_WORKER_PATH = '/k/';
+const SERVICE_WORKER_OPTIONS: RegistrationOptions = import.meta.env.DEV
+  ? { scope: './', type: 'module' }
+  : { type: 'module' };
+
+function handleWorkerMessage(e: MessageEvent) {
+  const action: WorkerAction = e.data;
+  if (DEBUG_MORE) {
+    // eslint-disable-next-line no-console
+    console.log('[SW] Message from worker', action);
+  }
+  if (!action.type) return;
+  const dispatch = getActions();
+  const payload = action.payload;
+  switch (action.type) {
+    case 'focusMessage':
+      dispatch.focusMessage?.(payload as any);
+      break;
+    // Deviation: the 'playNotificationSound' and 'share' messages come from the push and share handlers of tt's service
+    // worker, which are not ported (PWA milestone). TODO(port): restore them with `pushNotification.ts` / `share.ts`.
+  }
+}
+
+function subscribeToWorker() {
+  navigator.serviceWorker.removeEventListener('message', handleWorkerMessage);
+  navigator.serviceWorker.addEventListener('message', handleWorkerMessage);
+  // TODO(port): `notifyClientReady()` (PWA milestone: the push handler waits for it)
+}
+
+if (IS_SERVICE_WORKER_SUPPORTED) {
+  window.addEventListener('load', async () => {
+    try {
+      const controller = navigator.serviceWorker.controller;
+      if (!controller || controller.scriptURL.includes(IGNORE_WORKER_PATH)) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        const ourRegistrations = registrations.filter((r) => !r.scope.includes(IGNORE_WORKER_PATH));
+        if (ourRegistrations.length) {
+          if (DEBUG) {
+            // eslint-disable-next-line no-console
+            console.log('[SW] Hard reload detected, re-enabling Service Worker');
+          }
+          await Promise.all(ourRegistrations.map((r) => r.unregister()));
+        }
+      }
+
+      await navigator.serviceWorker.register(serviceWorkerUrl, SERVICE_WORKER_OPTIONS);
+
+      if (DEBUG) {
+        // eslint-disable-next-line no-console
+        console.log('[SW] ServiceWorker registered');
+      }
+
+      await navigator.serviceWorker.ready;
+
+      // Wait for registration to be available
+      await navigator.serviceWorker.getRegistration();
+
+      if (navigator.serviceWorker.controller) {
+        if (DEBUG) {
+          // eslint-disable-next-line no-console
+          console.log('[SW] ServiceWorker ready');
+        }
+        subscribeToWorker();
+      } else {
+        if (DEBUG) {
+          // eslint-disable-next-line no-console
+          console.error('[SW] ServiceWorker not available');
+        }
+
+        if (!IS_IOS && !IS_ANDROID && !IS_TEST) {
+          getActions().showDialog?.({ data: { type: 'error', message: 'SERVICE_WORKER_DISABLED', hasErrorKey: true } });
+        }
+      }
+    } catch (err) {
+      if (DEBUG) {
+        // eslint-disable-next-line no-console
+        console.error('[SW] ServiceWorker registration failed: ', err);
+      }
+    }
+  });
+  window.addEventListener('focus', async () => {
+    await navigator.serviceWorker.ready;
+    subscribeToWorker();
+  });
+}

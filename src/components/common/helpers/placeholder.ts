@@ -31,6 +31,13 @@ export function getMediaPlaceholderSize(dimensions?: Partial<ApiDimensions>) {
   return { width, height, aspectRatio };
 }
 
+/**
+ * The shared clamp of untrusted media dimensions (Photo, Video, Album, the web page preview, the viewer): finite, at least
+ * 1 px, at most `PLACEHOLDER_MAX_MEDIA_PX`, aspect ratio within `PLACEHOLDER_MIN/MAX_ASPECT_RATIO`. A legitimate size is
+ * returned unchanged, so a box is the same as tt's.
+ */
+export const clampMediaDimensions = getMediaPlaceholderSize;
+
 /** The custom properties tt's `media.module.scss` `.frame` reads. */
 export function buildMediaFrameStyle(size: { width: number; aspectRatio: number }) {
   return buildStyle(
