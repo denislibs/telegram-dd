@@ -1,4 +1,4 @@
-// `tsx tests/perfcmp/leakcheck.ts --dir <unminified build> --mode cycle|type|switch|codeblock [--runs 20] [--warmup 30]`:
+// `tsx tests/perfcmp/leakcheck.ts --dir <unminified build> --mode cycle|type|switch|codeblock|pending [--runs 20] [--warmup 30]`:
 // heap snapshots around the composer leak-gate cycles, counted by constructor name. Three snapshots: after the warm-up (A),
 // after `runs` cycles (B), after `runs` more (C). Prints the per-cycle growth by name (count / self size) between A-B and
 // B-C, and the live count of the composer's objects (tiptap Editor, EditorView, Marked, MarkdownManager, TeactNodeView,
@@ -123,6 +123,16 @@ async function main() {
         await page.keyboard.type('hi');
         await page.keyboard.press('Enter');
         await page.waitForTimeout(150);
+        await page.keyboard.press('Escape');
+        await page.locator(LIST).waitFor({ state: 'detached' });
+        await page.waitForTimeout(150);
+      };
+    } else if (args.mode === 'pending') {
+      // the composer.perf.spec cycle "closing a chat with a draft that is still waiting for its debounce"
+      cycle = async () => {
+        await open('Carol Short');
+        await page.locator(INPUT).click();
+        await page.keyboard.type('a draft, closed at once');
         await page.keyboard.press('Escape');
         await page.locator(LIST).waitFor({ state: 'detached' });
         await page.waitForTimeout(150);
