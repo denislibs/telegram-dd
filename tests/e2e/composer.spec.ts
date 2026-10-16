@@ -51,6 +51,39 @@ async function typeText(page: Page, text: string) {
 
 const lastItem = (page: Page) => page.locator(ITEM).last();
 
+/**
+ * The text a user sees in an element: text nodes plus the `alt` of emoji images. tt (and the port) render emoji as
+ * native text only on macOS / iOS (`IS_EMOJI_SUPPORTED`); elsewhere (the Linux CI runner) an emoji is an `<img alt>`.
+ */
+function visibleText(page: Page, selector: string) {
+  return page
+    .locator(selector)
+    .first()
+    .evaluate((root) => {
+      let text = '';
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (node.nodeType === Node.TEXT_NODE) text += node.textContent;
+        else if ((node as Element).tagName === 'IMG') text += (node as HTMLImageElement).alt;
+      }
+      return text;
+    });
+}
+
+/** Both emoji renderings: native text (macOS) and `<img alt>` (any other platform), whatever the host OS is. */
+const EMOJI_PLATFORMS = [
+  { name: 'native emoji (macOS)', platform: 'MacIntel' },
+  { name: 'emoji images (Linux)', platform: 'Linux x86_64' },
+] as const;
+
+function usePlatform(platform: string) {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript((value) => {
+      Object.defineProperty(Navigator.prototype, 'platform', { get: () => value, configurable: true });
+    }, platform);
+  });
+}
+
 /** The text of the last message of the chat, with its entities, as the global holds it. */
 async function lastMessageOf(page: Page, chatId: string) {
   return page.evaluate((id) => {
@@ -452,31 +485,34 @@ test.describe('paste with the CSP on', () => {
   });
 });
 
-test('the emoji picker inserts the emoji at the caret', async ({ page }) => {
-  await openMessages(page);
-  await openChat(page, 'Carol Short');
+for (const { name, platform } of EMOJI_PLATFORMS) {
+  test.describe(name, () => {
+    usePlatform(platform);
 
-  await typeText(page, 'ab');
-  await page.keyboard.press('ArrowLeft');
-  await page.locator('.Composer .symbol-menu-button').click();
-  const menu = page.locator('.SymbolMenu');
-  await expect(menu).toBeVisible();
-  const emoji = menu.locator('.EmojiButton').first();
-  await expect(emoji).toBeVisible();
-  const title = await emoji.getAttribute('title');
-  expect(title).toMatch(/^:.+:$/);
-  await emoji.dispatchEvent('mousedown');
-  // the emoji is between "a" and "b"
-  await expect(page.locator(`${INPUT} p`)).toHaveText(/^a\S+b$/u);
-  const text = (await page.locator(`${INPUT} p`).textContent())!;
-  expect(text.length).toBeGreaterThan(2);
-  expect(text.startsWith('a')).toBe(true);
-  expect(text.endsWith('b')).toBe(true);
+    test('the emoji picker inserts the emoji at the caret', async ({ page }) => {
+      await openMessages(page);
+      await openChat(page, 'Carol Short');
 
-  // sent with the emoji in place
-  await page.keyboard.press('Enter');
-  await expect.poll(async () => (await lastMessageOf(page, CAROL)).text).toBe(text);
-});
+      await typeText(page, 'ab');
+      await page.keyboard.press('ArrowLeft');
+      await page.locator('.Composer .symbol-menu-button').click();
+      const menu = page.locator('.SymbolMenu');
+      await expect(menu).toBeVisible();
+      const emoji = menu.locator('.EmojiButton').first();
+      await expect(emoji).toBeVisible();
+      const title = await emoji.getAttribute('title');
+      expect(title).toMatch(/^:.+:$/);
+      await emoji.dispatchEvent('mousedown');
+      // the emoji is between "a" and "b"
+      await expect.poll(() => visibleText(page, `${INPUT} p`)).toMatch(/^a\S+b$/u);
+      const text = await visibleText(page, `${INPUT} p`);
+
+      // sent with the emoji in place
+      await page.keyboard.press('Enter');
+      await expect.poll(async () => (await lastMessageOf(page, CAROL)).text).toBe(text);
+    });
+  });
+}
 
 test.describe('copy', () => {
   test.use({ permissions: ['clipboard-read', 'clipboard-write'] });
@@ -662,24 +698,32 @@ test.describe('autocomplete', () => {
     await expect(page.locator(ITEM)).toHaveCount(before);
   });
 
-  test('the : emoji tooltip: an arrow selects an emoji, Enter inserts it in place of the query', async ({ page }) => {
-    await openMessages(page);
-    await openChat(page, 'Carol Short');
+  for (const { name, platform } of EMOJI_PLATFORMS) {
+    test.describe(name, () => {
+      usePlatform(platform);
 
-    await typeText(page, 'so :smile');
-    const tooltip = page.locator('.composer-tooltip');
-    await expect(tooltip.locator('xpath=..')).toHaveClass(/open/);
-    const first = tooltip.locator('.EmojiButton').first();
-    await expect(first).toBeVisible();
-    const emoji = (await first.getAttribute('title')) ? await first.innerText() : '';
-    // the emoji list is horizontal and nothing is selected until an arrow key
-    await page.keyboard.press('ArrowRight');
-    await expect(first).toHaveClass(/\bfocus\b/);
-    await page.keyboard.press('Enter');
-    await expect(page.locator(`${INPUT} p`)).not.toContainText(':smile');
-    if (emoji) await expect(page.locator(INPUT)).toContainText(`so ${emoji}`);
-    await expect(page.locator(`${INPUT} p`)).not.toHaveText('so ');
-  });
+      test('the : emoji tooltip: an arrow selects an emoji, Enter inserts it in place of the query', async ({
+        page,
+      }) => {
+        await openMessages(page);
+        await openChat(page, 'Carol Short');
+
+        await typeText(page, 'so :smile');
+        const tooltip = page.locator('.composer-tooltip');
+        await expect(tooltip.locator('xpath=..')).toHaveClass(/open/);
+        const first = tooltip.locator('.EmojiButton').first();
+        await expect(first).toBeVisible();
+        const emoji = await visibleText(page, '.composer-tooltip .EmojiButton');
+        expect(emoji).not.toBe('');
+        // the emoji list is horizontal and nothing is selected until an arrow key
+        await page.keyboard.press('ArrowRight');
+        await expect(first).toHaveClass(/\bfocus\b/);
+        await page.keyboard.press('Enter');
+        await expect.poll(() => visibleText(page, `${INPUT} p`)).not.toContain(':smile');
+        await expect.poll(() => visibleText(page, `${INPUT} p`)).toBe(`so ${emoji}`);
+      });
+    });
+  }
 });
 
 test('IME: Enter during a composition does not send, Enter after it does', async ({ page }) => {
