@@ -81,13 +81,13 @@ const ReactionStaticEmoji = (props: OwnProps) => {
           class={buildClassName('ReactionStaticEmoji', props.className)}
           style={props.size ? `width: ${props.size}px; height: ${props.size}px` : undefined}
         >
-          <img ref={thumbRef} class="thumb" src={thumbDataUri()} alt="" draggable={false} />
+          <img ref={thumbRef} class="thumb" src={thumbDataUri()} alt="" draggable="false" />
           <img
             ref={mediaRef}
             class={buildClassName('media', shouldApplySizeFix() && 'with-unicorn-fix')}
             src={mediaData() || blankUrl}
             alt={availableReaction()?.title}
-            draggable={false}
+            draggable="false"
           />
         </div>
       </Show>

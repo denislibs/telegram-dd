@@ -39,7 +39,7 @@ const GramIcon = (props: OwnProps) => {
       <img
         src={props.isAppIcon ? GramAppLogo : GramLogo}
         alt=""
-        draggable={false}
+        draggable="false"
         class={buildClassName(styles.root, props.isAppIcon && styles.appIcon, props.className)}
         style={props.style}
         onClick={() => props.onClick?.()}

@@ -65,7 +65,7 @@ const CustomEmojiEffect = (props: OwnProps) => {
                 alt=""
                 class={styles.particle}
                 style={style}
-                draggable={false}
+                draggable="false"
                 onAnimationEnd={i() === 0 ? props.onEnded : undefined}
               />
             );

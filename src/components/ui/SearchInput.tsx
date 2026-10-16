@@ -176,7 +176,7 @@ const SearchInput = (rawProps: OwnProps) => {
         use:value={() => props.value ?? ''}
         disabled={props.disabled}
         autocomplete={props.autoComplete}
-        spellcheck={IS_TAURI ? false : undefined}
+        spellcheck={IS_TAURI ? 'false' : undefined}
         onInput={handleChange}
         onFocus={handleFocus}
         onBlur={handleBlur}

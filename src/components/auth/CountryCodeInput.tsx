@@ -108,7 +108,7 @@ const CountryCodeInput = (ownProps: OwnProps) => {
           id={props.id}
           use:value={inputValue}
           autocomplete="off"
-          spellcheck={IS_TAURI ? false : undefined}
+          spellcheck={IS_TAURI ? 'false' : undefined}
           onClick={handleTrigger}
           onFocus={handleTrigger}
           onInput={handleCodeInput}

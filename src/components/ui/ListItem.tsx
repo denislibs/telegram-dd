@@ -223,7 +223,7 @@ const ListItem = (props: OwnProps) => {
             handleContextMenu(e);
           }
         }}
-        aria-disabled={props.disabled || undefined}
+        aria-disabled={props.disabled ? 'true' : undefined}
       >
         {!props.disabled && !props.inactive && props.ripple && <RippleEffect />}
         {props.leftElement}

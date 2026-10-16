@@ -2,6 +2,7 @@ import { getActions, getGlobal } from '../../global';
 
 import { selectCustomEmoji } from '../../global/selectors';
 import { throttle } from '../schedulers';
+import isValidDocumentId from './isValidDocumentId';
 
 let LOAD_QUEUE = new Set<string>();
 const RENDER_HISTORY = new Set<string>();
@@ -40,7 +41,9 @@ function notifyCustomEmojiRender(emojiId: string) {
 }
 
 export default function ensureCustomEmoji(id?: string) {
-  if (!id) return;
+  // Deviation (security): `loadCustomEmojis` maps the whole batch (up to 100 ids) through `BigInt`, so one id that is
+  // not a number (a pasted `data-document-id`) failed the loading of every other emoji queued with it
+  if (!isValidDocumentId(id)) return;
   notifyCustomEmojiRender(id);
 
   if (selectCustomEmoji(getGlobal(), id)) {

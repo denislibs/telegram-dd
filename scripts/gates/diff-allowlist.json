@@ -9,7 +9,7 @@
       "maxRatio": 0.85
     },
     "src/components/middle/MessageListHistoryHandler.tsx": {
-      "reason": "55-line component: the component-model change (withGlobal in the body, <For>, props getters) is 20 lines (store-architecture.md §5, the tab-specific example).",
+      "reason": "55-line component: the component-model change (withGlobal in the body, <For>, props getters) is 20 lines (store-architecture.md \u00a75, the tab-specific example).",
       "maxRatio": 0.55
     },
     "src/hooks/useFolderManager.ts": {
@@ -535,6 +535,202 @@
     "src/hooks/useTextLanguage.ts": {
       "reason": "Hook ported with accessor parameters and accessor results (porting guide 4.2): a component runs once, so refs / signals / effects take their frameact forms.",
       "maxRatio": 0.58
+    },
+    "src/components/common/Composer.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.55
+    },
+    "src/components/common/EmojiSearchResults.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.55
+    },
+    "src/components/common/InlineStickerSetView.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.7
+    },
+    "src/components/common/PaymentMessageConfirmDialog.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.55
+    },
+    "src/components/common/RemoveFormattingModal.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.6
+    },
+    "src/components/common/StickerButton.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.55
+    },
+    "src/components/common/StickerSet.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.65
+    },
+    "src/components/common/reactions/ReactionEmoji.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.75
+    },
+    "src/components/common/tooltips/ChatCommandTooltip.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.7
+    },
+    "src/components/common/tooltips/CustomEmojiTooltip.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.6
+    },
+    "src/components/common/tooltips/EmojiTooltip.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.65
+    },
+    "src/components/common/tooltips/MentionTooltip.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.65
+    },
+    "src/components/common/tooltips/RichEditorTooltipContainer.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.75
+    },
+    "src/components/gili/layout/Interactive.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.6
+    },
+    "src/components/gili/layout/Island.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.6
+    },
+    "src/components/gili/layout/Surface.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.65
+    },
+    "src/components/gili/modal/Modal.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.6
+    },
+    "src/components/gili/primitives/Checkbox.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.75
+    },
+    "src/components/middle/composer/ChatCommand.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.6
+    },
+    "src/components/middle/composer/ComposerEmbeddedMessage.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.55
+    },
+    "src/components/middle/composer/EmojiButton.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.55
+    },
+    "src/components/middle/composer/EmojiCategory.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.65
+    },
+    "src/components/middle/composer/EmojiCategoryPill.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.55
+    },
+    "src/components/middle/composer/EmojiPicker.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.6
+    },
+    "src/components/middle/composer/EmojiSearch.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.55
+    },
+    "src/components/middle/composer/MessageInput.async.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.7
+    },
+    "src/components/middle/composer/MessageInput.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.6
+    },
+    "src/components/middle/composer/RichEditorLinkModal.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.6
+    },
+    "src/components/middle/composer/StickerSetCover.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.8
+    },
+    "src/components/middle/composer/SymbolMenu.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.65
+    },
+    "src/components/middle/composer/SymbolMenuButton.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.6
+    },
+    "src/components/middle/composer/hooks/useDraft.ts": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; the chat change has one owner in Composer (saveFor/restoreFor, no chat-keyed effects, a draft flushed on destroy); see the Deviation comments in the file.",
+      "maxRatio": 0.75
+    },
+    "src/components/middle/composer/hooks/useEditing.ts": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; the chat change has one owner in Composer (saveFor); see the Deviation comments in the file.",
+      "maxRatio": 0.65
+    },
+    "src/components/middle/composer/hooks/useEmojiSearch.ts": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.55
+    },
+    "src/components/middle/composer/hooks/useLoadLinkPreview.ts": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.65
+    },
+    "src/components/middle/composer/hooks/usePaidMessageConfirmation.ts": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.65
+    },
+    "src/components/middle/composer/richInput/EditableCodeBlock.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.5
+    },
+    "src/components/middle/composer/richInput/EditableListItem.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.55
+    },
+    "src/components/right/hooks/useAsyncRendering.ts": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.95
+    },
+    "src/components/ui/ResponsiveHoverButton.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.55
+    },
+    "src/components/ui/TextTimer.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.85
+    },
+    "src/components/ui/textInput/TextFormatterInput.tsx": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.6
+    },
+    "src/hooks/animations/useTransitionActiveKey.ts": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.9
+    },
+    "src/hooks/useClickable.ts": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.65
+    },
+    "src/hooks/useContentWidth.ts": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.55
+    },
+    "src/hooks/useMouseInside.ts": {
+      "reason": "Component-model change (porting guide 4.3-4.5, docs/codemod.md): props getters, accessors and effects split by phase; see the Deviation comments in the file.",
+      "maxRatio": 0.65
+    },
+    "src/components/middle/composer/hooks/useRichEditor.ts": {
+      "reason": "Component-model change (a hook that runs once, signals for the editor state, reactive accessors) plus the editor creation in a task of its own (perf review F3); see the Deviation comments in the file.",
+      "maxRatio": 0.5
+    },
+    "src/util/tiptap/messageCopy.ts": {
+      "reason": "Security deviations of the copy path (link addresses of the markdown output are percent-encoded, links are validated like the link modal, S3/S6 of the security review); see the Deviation (security) comments in the file.",
+      "maxRatio": 0.6
+    },
+    "src/util/tiptap/TeactRenderer.ts": {
+      "reason": "The bridge between ProseMirror node views and frameact: tt re-rendered a teact component with new props, here the props are getters over one signal and the root is a frameact render() (porting guide 4.2, tiptap node views).",
+      "maxRatio": 0.7
     },
     "src/components/middle/footer/FooterActionBar.tsx": {
       "reason": "Component-model rewrite (props getters, memos for the main button and the side slots, a keyed Show for tt's `key={mainButton.key}`); the markup, the classes and the logic are tt's.",

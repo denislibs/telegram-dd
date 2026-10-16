@@ -18,7 +18,8 @@ export function renderMessageSummaryHtml(
 
   const statefulContent = getMessageStatefulContent(global, message);
 
-  const description = getMessageSummaryDescription(lang, message, statefulContent, text, isExtended) as string;
+  // Deviation (security): HTML mode, so the server strings of the description are escaped (`messageSummary.ts`)
+  const description = getMessageSummaryDescription(lang, message, statefulContent, text, isExtended, true) as string;
 
   return `${emojiWithSpace}${description}`;
 }

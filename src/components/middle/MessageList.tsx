@@ -985,6 +985,12 @@ const MessageList = (ownProps: OwnProps) => {
       }
 
       const container = containerRef;
+      // Deviation: tt's layout effect runs synchronously with the render, so the list is always attached. Here the effect is
+      // a forced-reflow task that a heavy animation can hold back until the chat was left and the list was removed: bail
+      // out when the container is detached (the same condition as the scroll handler's `!container.parentElement`).
+      if (!container?.parentElement) {
+        return;
+      }
       const listItemElements = Array.from(container.querySelectorAll<HTMLDivElement>('.message-list-item'));
       listItemElementsRef = listItemElements;
       const lastItemElement = listItemElements[listItemElements.length - 1];
@@ -1032,7 +1038,7 @@ const MessageList = (ownProps: OwnProps) => {
         (wasMessageAdded || isFirstLoadWithSend) &&
         isSendCollapsePhaseActive(container);
 
-      const messageListParent = container.parentElement!;
+      const messageListParent = container.parentElement;
       const hasForcedMessagesScroll = messageListParent.classList.contains(FORCE_MESSAGES_SCROLL_CLASS);
       // Add extra height when few messages to allow scroll animation
       if (

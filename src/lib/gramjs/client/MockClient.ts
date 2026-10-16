@@ -7,6 +7,7 @@ import { toJSNumber } from '../../../util/numbers';
 import { Logger } from '../extensions';
 import { UpdateConnectionState } from '../network';
 import Api from '../tl/api';
+import handleComposerRequest, { PASS } from './mockUtils/composerRequests';
 import createMockedAvailableReaction from './mockUtils/createMockedAvailableReaction';
 import createMockedChannel from './mockUtils/createMockedChannel';
 import createMockedChat from './mockUtils/createMockedChat';
@@ -121,6 +122,12 @@ class TelegramClient {
       if (a !== 'pass') {
         return a;
       }
+    }
+
+    // Deviation: the composer's requests (send, edit, draft, typing); tt's mock answers none of them
+    const composerResult = await handleComposerRequest(this, request);
+    if (composerResult !== PASS) {
+      return composerResult;
     }
 
     if (this.mockData.appConfig && request instanceof Api.help.GetAppConfig) {

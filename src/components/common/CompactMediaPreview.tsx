@@ -159,7 +159,7 @@ const CompactMediaPreview = (props: OwnProps) => {
           src={resolvedPreviewUrl()}
           alt=""
           class={buildClassName('full-media', styles.media)}
-          draggable={false}
+          draggable="false"
         />
       )}
       {!shouldShowSpoiler() && resolvedPreviewVideoUrl() && (
