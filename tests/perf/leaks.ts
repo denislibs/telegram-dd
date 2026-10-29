@@ -1,5 +1,15 @@
 import { type CDPSession, expect, type Page } from '@playwright/test';
 
+/**
+ * Chromium flags for a leak gate that measures only what the app retains: V8 runs the interpreter alone (no Sparkplug, Maglev or
+ * Turbofan) and keeps bytecode. With the tiers on, `Runtime.getHeapUsage` also counts the code V8 keeps compiling: in the composer
+ * cycles 1.7 MB of `InstructionStream` / `TrustedByteArray` / `Code` was still added between the 60th and the 200th run (a heap
+ * snapshot diff), later on a slower CI runner, and that tier-up landed in the measured runs as a "growth that does not settle". On the
+ * interpreter the same cycles stay within 0.3 KB per run after 40 warm-up runs. Not for long-task gates: they measure the real JIT.
+ * Use it as `test.use({ launchOptions: { args: INTERPRETER_ONLY } })` in a leak `describe`.
+ */
+export const INTERPRETER_ONLY = ['--js-flags=--no-opt --no-maglev --no-sparkplug --no-flush-bytecode'];
+
 export interface LeakOptions {
   /** How many times the action runs between the two heap measurements (default 50). */
   runs?: number;
