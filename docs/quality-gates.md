@@ -307,7 +307,8 @@ numbers. The action must be a full cycle (open and close a modal, mount and unmo
 change legitimately grows the heap, and a cycle that only toggles kept-alive views disposes nothing (the kit's `Transition` keeps a
 slide per key: remount the screen to test disposal). Main thread only (workers are not measured). Run on the production build.
 `Runtime.getHeapUsage` counts V8's compiled code: a screen with hot paths needs a longer warm-up (the chat list tests use 25 runs;
-`docs/reports/slice-chatlist.md` has the heap snapshot diff that told code growth from a retained object). Pick `maxGrowthKb` as ~2x
+`docs/reports/slice-chatlist.md` has the heap snapshot diff that told code growth from a retained object), or a spec file that runs on
+the interpreter alone (`test.use({ launchOptions: { args: INTERPRETER_ONLY } })`, the composer gates), where compiled code does not grow. Pick `maxGrowthKb` as ~2x
 the growth you see on a clean run and keep it at the default unless a snapshot diff says why: a real leak is proportional to `runs`.
 `perf.spec.ts` shows the usage and proves detection with a deliberate leak.
 
@@ -399,10 +400,14 @@ counter fails where a generous heap limit does not. A long task gate: opening th
 throttling, capped at telegram-tt's worst task of `perf:compare --scenario open-chat` plus 3% (204 ms). The production build has no mock
 request middleware (a `@vite-ignore` dynamic import is not bundled), so these runs get the whole chat for every history request.
 
-The composer gates (`tests/perf/composer.perf.spec.ts`, composer slice): open a chat, type, send, close it (limit 512 KB + 256 KB: the cycle sends a message, which is
-data that stays, and the editor's code is still being tiered up after 130 warm-up cycles; the leak this gate found was 1366 KB per run, 100x over, see
-`docs/reports/slice-composer.md`), type and clear in an open chat (1024 KB: Chromium keeps a native undo step per typed run of the contenteditable, a heap
-snapshot diff shows nothing else growing), and a long-task gate: 200 characters typed and 10 messages sent under the calibrated CPU throttling stay under 120 ms (the throttling rate is the calibrated one, "4x on the reference machine").
+The composer gates (composer slice). `tests/perf/composer.leaks.perf.spec.ts`: open a chat, type, send, close it; close a chat with a draft
+still waiting for its debounce; type and clear in an open chat; all at the documented 512 KB over 50 runs (30 for the draft) after 40 warm-up
+runs, on **V8's interpreter alone** (`INTERPRETER_ONLY` from `tests/perf/leaks.ts`, launch flags Playwright sets per file). With the
+optimizing tiers on, the editor's code kept being compiled after 130 warm-up cycles (a heap snapshot diff between the 60th and the 200th
+cycle: 1.7 MB of `InstructionStream` / `TrustedByteArray` / `Code`, no app objects), and on a CI runner that tier-up failed the second-half
+check now and then; on the interpreter the cycles add under 0.3 KB per run, the sent message included. The leak this gate found was 1366 KB
+per run, 100x over, see `docs/reports/slice-composer.md`. `tests/perf/composer.perf.spec.ts`: 200 characters typed and 10 messages sent under
+the calibrated CPU throttling stay under 120 ms (the throttling rate is the calibrated one, "4x on the reference machine").
 
 ### Thresholds at a glance
 
