@@ -375,8 +375,9 @@ shrinks). `A11Y_UPDATE_BASELINE=1 pnpm test:a11y` rewrites the entries from the 
 ### CI
 
 `.github/workflows/ci.yml`: `check` (submodules, `pnpm check`, `pnpm test`), `browser` (Chromium via
-`npx playwright install --with-deps chromium`, then `test:e2e`, `test:a11y`, `test:perf`; traces and reports are
-uploaded on failure) and `visual-vs-tt`, which is **optional** (`continue-on-error`): it clones telegram-tt at the
+`npx playwright install --with-deps chromium`, then `test:e2e` and `test:a11y`), `perf` (the same setup, then `test:perf`
+in a job of its own with a 45 min limit: the serial leak cycles do not fit in the 20 min of `browser`; traces and reports
+of both are uploaded on failure) and `visual-vs-tt`, which is **optional** (`continue-on-error`): it clones telegram-tt at the
 baseline commit from the porting guide into `reference/telegram-tt` and runs `pnpm test:visual`; diffs are uploaded.
 
 The message list gates (`tests/perf/messages.perf.spec.ts`, messages slice): two leak cycles (open and close a chat; switch between two
