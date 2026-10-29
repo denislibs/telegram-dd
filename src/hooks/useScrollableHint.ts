@@ -1,4 +1,4 @@
-import { createMutationEffect, createSignal, onMount, requestMeasure, requestMutation } from 'frameact';
+import { createMutationEffect, createSignal, onCleanup, onMount, requestMeasure, requestMutation } from 'frameact';
 import { addExtraClass, removeExtraClass, setExtraStyles } from 'frameact/dom';
 
 import { type MaybeAccessor, read } from '../util/accessors';
@@ -37,10 +37,20 @@ export default function useScrollableHint(
     setIsMounted(true);
   });
 
+  // Deviation: the throttle's trailing call fires up to 100 ms after the last one, so it can outlive the component (tt has the
+  // same timer): it skips the work once the owner is disposed (it used to schedule a frame for a removed element, and after a
+  // test's environment was torn down that threw on the missing `requestAnimationFrame`).
+  let isDisposed = false;
+  onCleanup(() => {
+    isDisposed = true;
+  });
+
   const getThreshold = () => read(threshold) ?? DEFAULT_THRESHOLD;
 
   const applyScrollableHintThrottled = useThrottledCallback(
     (element: HTMLElement) => {
+      if (isDisposed) return;
+
       requestMeasure(() => {
         const state = measureScrollableHint(element, getThreshold(), read(shouldSkipOverflowCheck));
 
